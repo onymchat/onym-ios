@@ -5,8 +5,7 @@ import SwiftUI
 /// presents `RecoveryPhraseBackupView` as a sheet. More sections land
 /// as the app grows (preferences, advanced, about).
 struct SettingsView: View {
-    let repository: IdentityRepository
-    let authenticator: BiometricAuthenticator
+    let makeBackupFlow: @MainActor () -> RecoveryPhraseBackupFlow
 
     @State private var showRecoveryPhrase = false
 
@@ -31,10 +30,7 @@ struct SettingsView: View {
         }
         .navigationTitle("Settings")
         .sheet(isPresented: $showRecoveryPhrase) {
-            RecoveryPhraseBackupView(
-                repository: repository,
-                authenticator: authenticator
-            )
+            RecoveryPhraseBackupView(flow: makeBackupFlow())
         }
     }
 
