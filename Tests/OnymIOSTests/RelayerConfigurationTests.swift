@@ -124,10 +124,46 @@ final class RelayerConfigurationTests: XCTestCase {
         let config = RelayerConfiguration(
             endpoints: [a, b, c],
             primaryURL: b.url,
-            strategy: .random
+            strategy: .random,
+            hasUserInteracted: true
         )
         let json = try JSONEncoder().encode(config)
         let decoded = try JSONDecoder().decode(RelayerConfiguration.self, from: json)
         XCTAssertEqual(decoded, config)
+    }
+
+    // MARK: - defaults
+
+    func test_empty_strategy_isRandom() {
+        XCTAssertEqual(RelayerConfiguration.empty.strategy, .random,
+                       "default strategy is .random so a freshly-installed user gets load-balanced across the auto-populated relayer list out of the box")
+    }
+
+    func test_empty_hasUserInteracted_isFalse() {
+        XCTAssertFalse(RelayerConfiguration.empty.hasUserInteracted,
+                       ".empty represents a never-touched configuration so the auto-populate path can detect it")
+    }
+
+    // MARK: - backward compat
+
+    func test_codable_decodesPR20WireShape_treatsMissingFlagAsInteracted() throws {
+        // PR #20's wire format had no `hasUserInteracted` field. Existing
+        // users with a saved configuration must NOT be treated as
+        // never-interacted on app launch — that would let the auto-populate
+        // path overwrite their custom URLs / explicit selections.
+        let pr20JSON = """
+        {
+            "endpoints": [
+                { "name": "Existing", "url": "https://existing.example", "network": "testnet" }
+            ],
+            "primaryURL": "https://existing.example",
+            "strategy": "primary"
+        }
+        """
+        let decoded = try JSONDecoder().decode(RelayerConfiguration.self, from: Data(pr20JSON.utf8))
+        XCTAssertTrue(decoded.hasUserInteracted,
+                      "absent flag must default to true so existing users aren't reset")
+        XCTAssertEqual(decoded.endpoints.count, 1)
+        XCTAssertEqual(decoded.strategy, .primary)
     }
 }

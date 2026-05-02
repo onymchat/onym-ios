@@ -225,6 +225,103 @@ final class RelayerRepositoryTests: XCTestCase {
         XCTAssertEqual(knownList, [])
     }
 
+    // MARK: - first-launch auto-populate
+
+    func test_refresh_onEmptyConfig_autoPopulatesAndSwitchesToRandom() async throws {
+        let store = InMemoryRelayerSelectionStore()  // .empty config; hasUserInteracted = false
+        let fetcher = FakeKnownRelayersFetcher(mode: .succeeds([a, b, c]))
+        let repo = RelayerRepository(fetcher: fetcher, store: store)
+
+        try await repo.refresh()
+
+        let state = await repo.currentState()
+        XCTAssertEqual(state.configuration.endpoints, [a, b, c],
+                       "auto-populate must add every fetched endpoint to the configured list")
+        XCTAssertEqual(state.configuration.strategy, .random,
+                       "auto-populate must set strategy to .random")
+        XCTAssertNil(state.configuration.primaryURL,
+                     "auto-populate doesn't pre-pick a primary; .random doesn't need one")
+        XCTAssertTrue(state.configuration.hasUserInteracted,
+                      "auto-populate flips the flag so the next refresh doesn't re-populate")
+        XCTAssertEqual(store.loadConfiguration().endpoints, [a, b, c],
+                       "auto-populated configuration is persisted")
+    }
+
+    func test_refresh_onAlreadyInteractedConfig_doesNotAutoPopulate() async throws {
+        let store = InMemoryRelayerSelectionStore(
+            configuration: RelayerConfiguration(
+                endpoints: [a],
+                primaryURL: a.url,
+                strategy: .primary,
+                hasUserInteracted: true
+            )
+        )
+        let fetcher = FakeKnownRelayersFetcher(mode: .succeeds([a, b, c]))
+        let repo = RelayerRepository(fetcher: fetcher, store: store)
+
+        try await repo.refresh()
+
+        let state = await repo.currentState()
+        XCTAssertEqual(state.configuration.endpoints, [a],
+                       "subsequent refresh must NOT clobber an already-touched configuration")
+        XCTAssertEqual(state.configuration.strategy, .primary)
+        XCTAssertEqual(state.configuration.primaryURL, a.url)
+    }
+
+    func test_refresh_onEmptyConfig_emptyFetchedList_leavesEverythingEmpty() async throws {
+        let store = InMemoryRelayerSelectionStore()
+        let fetcher = FakeKnownRelayersFetcher(mode: .succeeds([]))
+        let repo = RelayerRepository(fetcher: fetcher, store: store)
+
+        try await repo.refresh()
+
+        let state = await repo.currentState()
+        XCTAssertTrue(state.configuration.endpoints.isEmpty)
+        XCTAssertFalse(state.configuration.hasUserInteracted,
+                       "no fetched relayers means no auto-populate; flag stays false so a later non-empty fetch can still populate")
+    }
+
+    func test_refresh_userClearedThenRefresh_doesNotRepopulate() async throws {
+        // User clears all entries (configuration is empty + interacted).
+        // A subsequent refresh must NOT re-add the relayers the user
+        // explicitly removed.
+        let store = InMemoryRelayerSelectionStore(
+            configuration: RelayerConfiguration(
+                endpoints: [],
+                primaryURL: nil,
+                strategy: .random,
+                hasUserInteracted: true
+            )
+        )
+        let fetcher = FakeKnownRelayersFetcher(mode: .succeeds([a, b]))
+        let repo = RelayerRepository(fetcher: fetcher, store: store)
+
+        try await repo.refresh()
+
+        let state = await repo.currentState()
+        XCTAssertTrue(state.configuration.endpoints.isEmpty,
+                      "user explicitly cleared the list; refresh must respect that")
+        XCTAssertEqual(state.knownList, [a, b],
+                       "the known-list cache still updates so the picker can offer them via Add From Published List")
+    }
+
+    func test_addEndpoint_promotesHasUserInteracted() async {
+        let store = InMemoryRelayerSelectionStore()  // .empty / not interacted
+        let repo = makeRepo(store: store)
+
+        await repo.addEndpoint(a)
+        XCTAssertTrue(store.loadConfiguration().hasUserInteracted,
+                      "any mutator must promote hasUserInteracted so a later refresh doesn't clobber the user's adds")
+    }
+
+    func test_setStrategy_promotesHasUserInteracted() async {
+        let store = InMemoryRelayerSelectionStore()
+        let repo = makeRepo(store: store)
+
+        await repo.setStrategy(.primary)
+        XCTAssertTrue(store.loadConfiguration().hasUserInteracted)
+    }
+
     // MARK: - helpers
 
     private func makeRepo(
