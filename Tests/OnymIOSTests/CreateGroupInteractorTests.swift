@@ -1,0 +1,385 @@
+import Foundation
+import XCTest
+@testable import OnymIOS
+
+/// End-to-end tests for the `CreateGroupInteractor` pipeline. Real
+/// `IdentityRepository` (Keychain-isolated per test), real
+/// `RelayerRepository` + `ContractsRepository` seeded with in-memory
+/// fakes, real `SwiftDataGroupStore.inMemory()`. Proof generation and
+/// chain transport are stubbed so the suite finishes in <1s — the full
+/// real-proof path is exercised by `GroupProofGeneratorTests`
+/// already.
+@MainActor
+final class CreateGroupInteractorTests: XCTestCase {
+
+    // MARK: - Happy path
+
+    func test_create_withNoInvitees_savesGroupAndAnchorsOnChain() async throws {
+        let env = await makeTestEnv()
+        let interactor = env.makeInteractor()
+
+        let group = try await interactor.create(name: "My Group", invitees: [])
+
+        XCTAssertEqual(group.name, "My Group")
+        XCTAssertTrue(group.isPublishedOnChain)
+        XCTAssertEqual(group.groupType, .tyranny)
+        XCTAssertEqual(group.tier, .small)
+        XCTAssertEqual(group.epoch, 0)
+        XCTAssertEqual(group.members.count, 1, "creator-only roster at create")
+
+        // Group landed in the repository.
+        let stored = await env.groups.snapshots.first { _ in true }
+        XCTAssertEqual(stored?.first?.id, group.id)
+
+        // No invitations sent.
+        let sends = await env.inboxTransport.sends
+        XCTAssertTrue(sends.isEmpty)
+
+        // Chain anchor was POSTed exactly once.
+        let invocations = env.contractTransport.invocations
+        XCTAssertEqual(invocations.count, 1)
+        XCTAssertEqual(invocations.first?.function, "create_group_v2")
+    }
+
+    func test_create_withTwoInvitees_sendsOneInvitationPerInvitee() async throws {
+        let env = await makeTestEnv()
+        let interactor = env.makeInteractor()
+
+        // Two valid 32-byte X25519 raw pubkeys (random bytes — IdentityRepository.sealInvitation
+        // doesn't actually require valid curve points; CryptoKit only checks length).
+        let invitee1 = Data(repeating: 0xAA, count: 32)
+        let invitee2 = Data(repeating: 0xBB, count: 32)
+
+        let group = try await interactor.create(
+            name: "Friends",
+            invitees: [invitee1, invitee2]
+        )
+
+        XCTAssertTrue(group.isPublishedOnChain)
+        let sends = await env.inboxTransport.sends
+        XCTAssertEqual(sends.count, 2, "one invitation per invitee")
+        XCTAssertEqual(Set(sends.map(\.inbox.rawValue)).count, 2,
+                       "each invitee gets a distinct inbox tag")
+    }
+
+    // MARK: - Validation
+
+    func test_create_emptyName_throwsInvalidName() async throws {
+        let env = await makeTestEnv()
+        await assertThrows(
+            try await env.makeInteractor().create(name: "   ", invitees: []),
+            CreateGroupError.invalidName
+        )
+    }
+
+    func test_create_inviteeWrongLength_throwsInvalidInviteeKey() async throws {
+        let env = await makeTestEnv()
+        await assertThrows(
+            try await env.makeInteractor().create(
+                name: "G",
+                invitees: [Data(repeating: 0x01, count: 16)]  // 16 ≠ 32
+            ),
+            CreateGroupError.invalidInviteeKey(index: 0)
+        )
+    }
+
+    // MARK: - Resolution failures
+
+    func test_create_noActiveRelayer_throws() async throws {
+        let env = await makeTestEnv(addRelayer: false)
+        await assertThrows(
+            try await env.makeInteractor().create(name: "G", invitees: []),
+            CreateGroupError.noActiveRelayer
+        )
+    }
+
+    func test_create_noContractBinding_throws() async throws {
+        let env = await makeTestEnv(includeTyrannyContract: false)
+        await assertThrows(
+            try await env.makeInteractor().create(name: "G", invitees: []),
+            CreateGroupError.noContractBinding(.tyranny)
+        )
+    }
+
+    // MARK: - Chain failures
+
+    func test_create_anchorTransportError_throws() async throws {
+        let env = await makeTestEnv()
+        env.contractTransport.behavior = .throws(SEPError.invalidResponse(statusCode: 502, body: "bad gateway"))
+        do {
+            _ = try await env.makeInteractor().create(name: "G", invitees: [])
+            XCTFail("expected anchorTransport error")
+        } catch CreateGroupError.anchorTransport(let msg) {
+            XCTAssertTrue(msg.contains("502"), "error message should mention status code")
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+    }
+
+    func test_create_anchorRejected_throws() async throws {
+        let env = await makeTestEnv()
+        env.contractTransport.behavior = .response(SEPSubmissionResponse(
+            accepted: false,
+            transactionHash: nil,
+            message: "duplicate group ID"
+        ))
+        await assertThrows(
+            try await env.makeInteractor().create(name: "G", invitees: []),
+            CreateGroupError.anchorRejected(message: "duplicate group ID")
+        )
+    }
+
+    func test_create_invitationSendNotAccepted_throws() async throws {
+        let env = await makeTestEnv()
+        await env.inboxTransport.setReceiptAcceptedBy(0)
+
+        do {
+            _ = try await env.makeInteractor().create(
+                name: "G",
+                invitees: [Data(repeating: 0xAA, count: 32)]
+            )
+            XCTFail("expected invitationSendFailed")
+        } catch CreateGroupError.invitationSendFailed(let index, _) {
+            XCTAssertEqual(index, 0)
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func assertThrows<T: Sendable>(
+        _ expression: @autoclosure () async throws -> T,
+        _ expected: CreateGroupError,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        do {
+            _ = try await expression()
+            XCTFail("expected to throw \(expected), got success", file: file, line: line)
+        } catch let error as CreateGroupError {
+            XCTAssertEqual(error, expected, file: file, line: line)
+        } catch {
+            XCTFail("expected \(expected), got \(error)", file: file, line: line)
+        }
+    }
+
+    private func makeTestEnv(
+        addRelayer: Bool = true,
+        includeTyrannyContract: Bool = true
+    ) async -> CreateGroupTestEnv {
+        let env = await CreateGroupTestEnv.make(
+            addRelayer: addRelayer,
+            includeTyrannyContract: includeTyrannyContract
+        )
+        return env
+    }
+}
+
+// MARK: - Test environment
+
+/// Holds every dependency `CreateGroupInteractor` needs, pre-seeded
+/// for the happy path. Each test can mutate `contractTransport.behavior`
+/// or the inbox transport's receipt count to exercise specific
+/// failures without rebuilding the whole graph.
+@MainActor
+private final class CreateGroupTestEnv {
+    let identity: IdentityRepository
+    let relayers: RelayerRepository
+    let contracts: ContractsRepository
+    let groups: GroupRepository
+    let inboxTransport: ConfigurableInboxTransport
+    let contractTransport: ConfigurableContractTransport
+    let proofGenerator: StubGroupProofGenerator
+    private let keychain: KeychainStore
+
+    static func make(addRelayer: Bool, includeTyrannyContract: Bool) async -> CreateGroupTestEnv {
+        let keychain = KeychainStore(
+            service: "chat.onym.ios.identity.tests.create-group.\(UUID().uuidString)",
+            account: "current"
+        )
+        let identity = IdentityRepository(keychain: keychain)
+        // Use a real BIP39 vector so we get real BLS keys + StrKey AccountID.
+        _ = try? await identity.restore(
+            mnemonic: "legal winner thank year wave sausage worth useful legal winner thank yellow"
+        )
+
+        let relayerStore = InMemoryRelayerSelectionStore()
+        let relayers = RelayerRepository(
+            fetcher: FakeKnownRelayersFetcher(mode: .succeeds([])),
+            store: relayerStore
+        )
+        if addRelayer {
+            _ = await relayers.addEndpoint(RelayerEndpoint(
+                name: "test",
+                url: URL(string: "https://relayer.test.example")!,
+                networks: ["testnet"]
+            ))
+            await relayers.setStrategy(.primary)
+            await relayers.setPrimary(url: URL(string: "https://relayer.test.example")!)
+        }
+
+        let contractEntries: [ContractEntry] = includeTyrannyContract
+            ? [ContractEntry(network: .testnet, type: .tyranny, id: "CTYRANNYTEST00000000000000000000000000000000000000000000")]
+            : []
+        let manifest = ContractsManifest(
+            version: 1,
+            releases: [
+                ContractRelease(
+                    release: "v0.0.3",
+                    publishedAt: Date(timeIntervalSince1970: 1_700_000_000),
+                    contracts: contractEntries
+                )
+            ]
+        )
+        let contractsStore = InMemoryAnchorSelectionStore()
+        let contracts = ContractsRepository(
+            fetcher: FakeContractsManifestFetcher(mode: .succeeds(manifest)),
+            store: contractsStore
+        )
+        try? await contracts.refresh()
+
+        return CreateGroupTestEnv(
+            identity: identity,
+            relayers: relayers,
+            contracts: contracts,
+            groups: GroupRepository(store: SwiftDataGroupStore.inMemory()),
+            inboxTransport: ConfigurableInboxTransport(),
+            contractTransport: ConfigurableContractTransport(),
+            proofGenerator: StubGroupProofGenerator(),
+            keychain: keychain
+        )
+    }
+
+    private init(
+        identity: IdentityRepository,
+        relayers: RelayerRepository,
+        contracts: ContractsRepository,
+        groups: GroupRepository,
+        inboxTransport: ConfigurableInboxTransport,
+        contractTransport: ConfigurableContractTransport,
+        proofGenerator: StubGroupProofGenerator,
+        keychain: KeychainStore
+    ) {
+        self.identity = identity
+        self.relayers = relayers
+        self.contracts = contracts
+        self.groups = groups
+        self.inboxTransport = inboxTransport
+        self.contractTransport = contractTransport
+        self.proofGenerator = proofGenerator
+        self.keychain = keychain
+    }
+
+    deinit { try? keychain.wipe() }
+
+    func makeInteractor() -> CreateGroupInteractor {
+        CreateGroupInteractor(
+            identity: identity,
+            relayers: relayers,
+            contracts: contracts,
+            groups: groups,
+            proofGenerator: proofGenerator,
+            inboxTransport: inboxTransport,
+            makeContractTransport: { [contractTransport] _ in contractTransport }
+        )
+    }
+}
+
+// MARK: - Stubs
+
+/// Returns a deterministic 1568-byte "proof" without actually proving.
+/// Skips the ~3.5s real prover so the test suite stays fast.
+private struct StubGroupProofGenerator: GroupProofGenerator {
+    func proveCreate(_ input: GroupProofCreateInput) throws -> GroupCreateProof {
+        guard input.groupType == .tyranny else {
+            throw GroupProofGeneratorError.notYetSupported(input.groupType)
+        }
+        return GroupCreateProof(
+            proof: Data(repeating: 0xAB, count: 1568),
+            publicInputs: SEPPublicInputs(
+                commitment: Data(repeating: 0xCD, count: 32),
+                epoch: 0
+            )
+        )
+    }
+}
+
+/// Recording inbox transport with a configurable acceptedBy count.
+/// Different from the existing `FakeInboxTransport` (which forces
+/// acceptedBy=1) so we can exercise the "no relay accepted" path.
+private actor ConfigurableInboxTransport: InboxTransport {
+    struct Send: Sendable {
+        let payload: Data
+        let inbox: TransportInboxID
+    }
+
+    private(set) var sends: [Send] = []
+    private var receiptAcceptedBy: Int = 1
+
+    func setReceiptAcceptedBy(_ count: Int) { receiptAcceptedBy = count }
+
+    func connect(to endpoints: [TransportEndpoint]) async {}
+    func disconnect() async {}
+
+    func send(_ payload: Data, to inbox: TransportInboxID) async throws -> PublishReceipt {
+        sends.append(Send(payload: payload, inbox: inbox))
+        return PublishReceipt(messageID: "fake-\(UUID().uuidString)", acceptedBy: receiptAcceptedBy)
+    }
+
+    nonisolated func subscribe(inbox: TransportInboxID) -> AsyncStream<InboundInbox> {
+        AsyncStream { _ in }
+    }
+
+    func unsubscribe(inbox: TransportInboxID) async {}
+}
+
+/// Recording contract transport. `behavior` controls whether the next
+/// invocation throws or returns a canned response.
+private final class ConfigurableContractTransport: SEPContractTransport, @unchecked Sendable {
+    enum Behavior: Sendable {
+        case response(SEPSubmissionResponse)
+        case `throws`(Error)
+    }
+
+    struct Invocation: @unchecked Sendable {
+        let function: String
+        let payload: Data
+    }
+
+    private let lock = NSLock()
+    private var _behavior: Behavior = .response(SEPSubmissionResponse(
+        accepted: true,
+        transactionHash: "0xstub",
+        message: nil
+    ))
+    private var _invocations: [Invocation] = []
+
+    var behavior: Behavior {
+        get { lock.withLock { _behavior } }
+        set { lock.withLock { _behavior = newValue } }
+    }
+
+    var invocations: [Invocation] {
+        lock.withLock { _invocations }
+    }
+
+    func invoke<Payload: Encodable & Sendable, Response: Decodable & Sendable>(
+        _ invocation: SEPContractInvocation<Payload>,
+        responseType: Response.Type
+    ) async throws -> Response {
+        let encoded = try JSONEncoder().encode(invocation)
+        let body = (try? JSONSerialization.jsonObject(with: encoded)) as? [String: Any]
+        let function = (body?["function"] as? String) ?? "?"
+        lock.withLock {
+            _invocations.append(Invocation(function: function, payload: encoded))
+        }
+        switch behavior {
+        case .response(let stub):
+            let data = try JSONEncoder().encode(stub)
+            return try JSONDecoder().decode(Response.self, from: data)
+        case .throws(let error):
+            throw error
+        }
+    }
+}

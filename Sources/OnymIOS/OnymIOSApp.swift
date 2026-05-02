@@ -5,6 +5,7 @@ struct OnymIOSApp: App {
     private let dependencies: AppDependencies
     private let relayerRepository: RelayerRepository
     private let contractsRepository: ContractsRepository
+    private let groupRepository: GroupRepository
 
     init() {
         let args = ProcessInfo.processInfo.arguments
@@ -59,6 +60,24 @@ struct OnymIOSApp: App {
         self.relayerRepository = relayerRepository
         self.contractsRepository = contractsRepository
 
+        // Group repository — falls back to in-memory if the on-disk
+        // store can't open (rare; FileProtection / sandbox issues).
+        // Failure here is non-fatal for the create-group flow, just
+        // means newly-created groups don't survive a relaunch.
+        let groupRepository: GroupRepository
+        if let store = try? SwiftDataGroupStore() {
+            groupRepository = GroupRepository(store: store)
+        } else {
+            groupRepository = GroupRepository(store: SwiftDataGroupStore.inMemory())
+        }
+        self.groupRepository = groupRepository
+
+        // Inbox transport for invitation send. Connects on first use
+        // via `RootView.task`.
+        let inboxTransport = NostrInboxTransport(
+            signerProvider: OnymNostrSignerProvider()
+        )
+
         self.dependencies = AppDependencies(
             makeRecoveryPhraseBackupFlow: { @MainActor in
                 RecoveryPhraseBackupFlow(
@@ -71,6 +90,15 @@ struct OnymIOSApp: App {
             },
             makeAnchorsPickerFlow: { @MainActor in
                 AnchorsPickerFlow(repository: contractsRepository)
+            },
+            makeCreateGroupFlow: { @MainActor in
+                CreateGroupFlow(interactor: CreateGroupInteractor(
+                    identity: repository,
+                    relayers: relayerRepository,
+                    contracts: contractsRepository,
+                    groups: groupRepository,
+                    inboxTransport: inboxTransport
+                ))
             }
         )
     }
@@ -85,6 +113,8 @@ struct OnymIOSApp: App {
                     // contract from whatever was cached on the previous run.
                     await relayerRepository.start()
                     await contractsRepository.start()
+                    // Replay groups for the in-memory snapshot stream.
+                    await groupRepository.reload()
                 }
         }
     }

@@ -6,6 +6,7 @@ enum IdentityError: Error, Equatable {
     case keychainDelete(OSStatus)
     case storedSnapshotInvalid(reason: String)
     case invalidMnemonic
+    case identityNotLoaded
     case sdkFailure(String)
 }
 
@@ -22,6 +23,8 @@ extension IdentityError: LocalizedError {
             return "Stored identity is invalid: \(reason)"
         case .invalidMnemonic:
             return "Invalid recovery phrase"
+        case .identityNotLoaded:
+            return "No identity is loaded — bootstrap or restore first"
         case let .sdkFailure(message):
             return "OnymSDK call failed: \(message)"
         }

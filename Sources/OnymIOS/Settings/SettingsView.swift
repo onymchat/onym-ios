@@ -8,11 +8,30 @@ struct SettingsView: View {
     let makeBackupFlow: @MainActor () -> RecoveryPhraseBackupFlow
     let makeRelayerSettingsFlow: @MainActor () -> RelayerSettingsFlow
     let makeAnchorsPickerFlow: @MainActor () -> AnchorsPickerFlow
+    let makeCreateGroupFlow: @MainActor () -> CreateGroupFlow
 
     @State private var showRecoveryPhrase = false
+    @State private var showCreateGroup = false
 
     var body: some View {
         Form {
+            Section {
+                Button {
+                    showCreateGroup = true
+                } label: {
+                    row(
+                        icon: SettingsIconBox(systemImage: "person.3.fill", background: .green),
+                        title: "Create Group"
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("settings.create_group_row")
+            } header: {
+                Text("Groups")
+            } footer: {
+                Text("Create an end-to-end encrypted group anchored on Stellar testnet. Only Tyranny is available right now.")
+            }
+
             Section {
                 Button {
                     showRecoveryPhrase = true
@@ -60,6 +79,12 @@ struct SettingsView: View {
         .sheet(isPresented: $showRecoveryPhrase) {
             RecoveryPhraseBackupView(flow: makeBackupFlow())
         }
+        .fullScreenCover(isPresented: $showCreateGroup) {
+            CreateGroupViewHost(
+                makeFlow: makeCreateGroupFlow,
+                onClose: { showCreateGroup = false }
+            )
+        }
     }
 
     @ViewBuilder
@@ -72,6 +97,34 @@ struct SettingsView: View {
             Image(systemName: "chevron.right")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.tertiary)
+        }
+    }
+}
+
+/// Host view that constructs the `CreateGroupFlow` exactly once on
+/// first render and wires its `onClose` callback to the parent's
+/// dismiss state. Inlining this construction inside `.fullScreenCover`
+/// would re-make the flow on every state mutation.
+private struct CreateGroupViewHost: View {
+    let makeFlow: @MainActor () -> CreateGroupFlow
+    let onClose: () -> Void
+
+    @State private var flow: CreateGroupFlow?
+
+    var body: some View {
+        Group {
+            if let flow {
+                CreateGroupView(flow: flow)
+            } else {
+                Color.black.ignoresSafeArea()
+            }
+        }
+        .onAppear {
+            if flow == nil {
+                let f = makeFlow()
+                f.onClose = onClose
+                flow = f
+            }
         }
     }
 }

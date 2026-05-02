@@ -79,6 +79,18 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
     /// wiped. Reading this does not trigger a Keychain load.
     func currentIdentity() -> Identity? { current }
 
+    /// One-shot accessor for the device's 32-byte BLS Fr scalar. Used
+    /// by the chain layer (`OnymGroupProofGenerator`) to call
+    /// `Tyranny.proveCreate` etc. Loads from the Keychain on every
+    /// call (no in-memory cache); callers MUST NOT retain the
+    /// returned bytes beyond the immediate proof-generation hop.
+    func blsSecretKey() throws -> Data {
+        guard let snapshot = try keychain.load() else {
+            throw IdentityError.identityNotLoaded
+        }
+        return snapshot.blsSecretKey
+    }
+
     /// Stream of identity snapshots — current value on subscribe, then one
     /// new value per successful mutation.
     nonisolated var snapshots: AsyncStream<Identity?> {
