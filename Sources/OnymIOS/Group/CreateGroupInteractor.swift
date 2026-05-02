@@ -383,6 +383,8 @@ extension GroupProofGeneratorError: LocalizedError {
             return "\(type) is not supported yet — only Tyranny ships in this release"
         case let .adminIndexOutOfRange(index, count):
             return "Admin index \(index) is out of range for \(count) members"
+        case .missingPeerSecret:
+            return "1-on-1 dialog is missing the peer's BLS secret"
         case let .sdkFailure(message):
             return "Proof generation failed: \(message)"
         }

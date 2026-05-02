@@ -95,6 +95,10 @@ struct SEPContractClient: Sendable {
         try await invoke("update_commitment", payload: payload, responseType: SEPSubmissionResponse.self)
     }
 
+    func createGroupOneOnOne(_ payload: OneOnOneCreateGroupPayload) async throws -> SEPSubmissionResponse {
+        try await invoke("create_group", payload: payload, responseType: SEPSubmissionResponse.self)
+    }
+
     func getCommitment(groupID: Data) async throws -> SEPCommitmentEntry {
         try await invoke(
             "get_commitment",

@@ -55,13 +55,32 @@ final class GroupProofGeneratorTests: XCTestCase {
         }
     }
 
-    func test_proveCreate_oneOnOne_throwsNotYetSupported() {
-        let input = stubInput(groupType: .oneOnOne)
+    func test_proveCreate_oneOnOne_returnsRawProofAnd2ElementPI() throws {
+        // Two distinct BLS Fr scalars (the SDK rejects equal secrets).
+        let input = GroupProofCreateInput(
+            groupType: .oneOnOne,
+            tier: .small,                     // ignored for oneOnOne
+            members: [],                      // ignored for oneOnOne
+            adminBlsSecretKey: fr(1),
+            adminIndex: 0,                    // ignored for oneOnOne
+            groupID: Data(repeating: 0, count: 32),
+            salt: Data(repeating: 0xEE, count: 32),
+            peerBlsSecretKey: fr(2)
+        )
+        let result = try OnymGroupProofGenerator().proveCreate(input)
+        XCTAssertEqual(result.proof.count, 1601,
+                       "OneOnOne returns the same raw 1601-byte plonk proof as Tyranny")
+        XCTAssertEqual(result.publicInputs.count, 2,
+                       "OneOnOne PI = [commitment, Fr(0)] — 2 entries")
+        XCTAssertEqual(result.publicInputs[0].count, 32)
+        XCTAssertEqual(result.publicInputs[1], Data(repeating: 0, count: 32),
+                       "Fr(0) tail must be 32 zero bytes")
+    }
+
+    func test_proveCreate_oneOnOne_missingPeerSecret_throws() {
+        let input = stubInput(groupType: .oneOnOne)   // no peerBlsSecretKey
         XCTAssertThrowsError(try OnymGroupProofGenerator().proveCreate(input)) { error in
-            XCTAssertEqual(
-                error as? GroupProofGeneratorError,
-                .notYetSupported(.oneOnOne)
-            )
+            XCTAssertEqual(error as? GroupProofGeneratorError, .missingPeerSecret)
         }
     }
 
