@@ -498,15 +498,37 @@ script and naming the reason in the PR.
    secret reads. Hard fail.
 2. **Create release** (ubuntu) — generates notes from `git log
    <prev-tag>..HEAD` and opens an empty GitHub Release at the tag.
-3. **Test** (self-hosted macOS ARM64) — `xcodebuild test` against an
-   iPhone simulator.
-4. **Build** (self-hosted macOS ARM64; needs all three above) —
+3. **Unit tests** (self-hosted macOS ARM64) — `xcodebuild test` with
+   `-only-testing:OnymIOSTests`. Fast (~10–20 s on a warm runner).
+4. **UI tests** (self-hosted macOS ARM64) — `xcodebuild test` with
+   `-only-testing:OnymIOSUITests`. Pre-boots the iPhone simulator so
+   the suite doesn't race the cold-boot. Slower (~90 s).
+5. **Build** (self-hosted macOS ARM64; needs **all four** above) —
    `bundle exec fastlane ios release` runs match (adhoc, readonly,
    git storage) → gym → produces a signed `OnymIOS-<version>.ipa`,
    which is uploaded to the release as an asset.
 
-Lint, create-release, and test run in parallel; build only starts
-when all three succeed. If lint fails the IPA never builds.
+```
+   workflow_dispatch -f tag=vX.Y.Z
+        │
+        ├─► lint           (ubuntu)              ─┐
+        ├─► create-release (ubuntu)              ─┤
+        ├─► unit-tests     (self-hosted macOS)   ─┤  all four
+        └─► ui-tests       (self-hosted macOS)   ─┘  must succeed
+                                                       │
+                                                       ▼
+                                                  build (self-hosted)
+                                                  fastlane match adhoc + gym
+                                                       │
+                                                       ▼
+                                                  upload IPA to GH Release
+```
+
+All four gate jobs run in parallel; build only starts when every
+one succeeds. If any test job fails its `.xcresult` bundle is
+uploaded as a build artifact (named `unit-tests-xcresult` /
+`ui-tests-xcresult`, retained 7 days) so the failure can be
+inspected without re-running the workflow.
 
 The structure was lifted from
 `stellar-mls/.github/workflows/release.yml` — minus TestFlight

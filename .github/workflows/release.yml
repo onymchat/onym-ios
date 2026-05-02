@@ -68,7 +68,8 @@ jobs:
           target_commitish: ${{ github.sha }}
           body_path: release_notes.md
 
-  test:
+  unit-tests:
+    name: Unit tests (OnymIOSTests)
     runs-on: [self-hosted, macOS, ARM64]
     steps:
       - uses: actions/checkout@v4
@@ -101,7 +102,7 @@ jobs:
           echo "Using simulator: $NAME"
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
 
-      - name: xcodebuild test
+      - name: xcodebuild test (unit)
         # NOTE: do NOT pass CODE_SIGNING_ALLOWED=NO — without the synthesised
         # `application-identifier` entitlement, every Keychain call in the
         # IdentityRepository tests fails with errSecMissingEntitlement (-34018).
@@ -110,11 +111,86 @@ jobs:
             -project OnymIOS.xcodeproj \
             -scheme OnymIOS \
             -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }},OS=latest" \
-            -derivedDataPath /tmp/onym-ios-release-test
+            -derivedDataPath /tmp/onym-ios-release-unit \
+            -resultBundlePath /tmp/onym-ios-unit.xcresult \
+            -only-testing:OnymIOSTests
+
+      - name: Upload unit test xcresult on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-tests-xcresult
+          path: /tmp/onym-ios-unit.xcresult
+          retention-days: 7
+
+  ui-tests:
+    name: UI tests (OnymIOSUITests)
+    runs-on: [self-hosted, macOS, ARM64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 26
+        run: sudo xcode-select -s /Applications/Xcode_26.app
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: ./generate-xcodeproj.sh
+
+      - name: Pick + pre-boot iOS Simulator destination
+        id: sim
+        run: |
+          # UI tests benefit from a warm simulator — `xcodebuild test` will
+          # auto-boot if needed but the cold-boot adds ~10s and can race the
+          # first test's first interaction. Pre-boot here so the runner is
+          # ready before xcodebuild even looks at it.
+          UDID=$(xcrun simctl list devices available --json \
+            | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; \
+                         devs=[dev for runtime,ds in d.items() \
+                                if 'iOS' in runtime \
+                                for dev in ds if 'iPhone' in dev['name']]; \
+                         print(devs[-1]['udid'] if devs else '', end='')")
+          NAME=$(xcrun simctl list devices available --json \
+            | python3 -c "import json,sys,os; d=json.load(sys.stdin)['devices']; \
+                         devs=[dev for runtime,ds in d.items() \
+                                if 'iOS' in runtime \
+                                for dev in ds if 'iPhone' in dev['name']]; \
+                         print(devs[-1]['name'] if devs else '', end='')")
+          if [ -z "$UDID" ]; then
+            echo "No iPhone simulator device available on runner" >&2
+            xcrun simctl list devices available >&2
+            exit 1
+          fi
+          xcrun simctl boot "$UDID" 2>/dev/null || true   # idempotent
+          xcrun simctl bootstatus "$UDID" -b
+          echo "Using simulator: $NAME ($UDID)"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+
+      - name: xcodebuild test (UI)
+        # Same Keychain-entitlement note as the unit job — keep CODE_SIGNING
+        # at the default so XCUIApplication can use the test-isolated
+        # keychain service from the App's --ui-testing branch.
+        run: |
+          xcodebuild test \
+            -project OnymIOS.xcodeproj \
+            -scheme OnymIOS \
+            -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }},OS=latest" \
+            -derivedDataPath /tmp/onym-ios-release-ui \
+            -resultBundlePath /tmp/onym-ios-ui.xcresult \
+            -only-testing:OnymIOSUITests
+
+      - name: Upload UI test xcresult on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-tests-xcresult
+          path: /tmp/onym-ios-ui.xcresult
+          retention-days: 7
 
   build:
     runs-on: [self-hosted, macOS, ARM64]
-    needs: [lint, create-release, test]
+    needs: [lint, create-release, unit-tests, ui-tests]
     steps:
       - uses: actions/checkout@v4
 
