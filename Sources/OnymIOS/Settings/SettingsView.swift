@@ -6,7 +6,7 @@ import SwiftUI
 /// as the app grows (preferences, advanced, about).
 struct SettingsView: View {
     let makeBackupFlow: @MainActor () -> RecoveryPhraseBackupFlow
-    let makeRelayerPickerFlow: @MainActor () -> RelayerPickerFlow
+    let makeRelayerSettingsFlow: @MainActor () -> RelayerSettingsFlow
     let makeAnchorsPickerFlow: @MainActor () -> AnchorsPickerFlow
 
     @State private var showRecoveryPhrase = false
@@ -32,7 +32,7 @@ struct SettingsView: View {
 
             Section {
                 NavigationLink {
-                    RelayerPickerView(flow: makeRelayerPickerFlow())
+                    RelayerSettingsView(flow: makeRelayerSettingsFlow())
                 } label: {
                     row(
                         icon: SettingsIconBox(systemImage: "antenna.radiowaves.left.and.right", background: .blue),

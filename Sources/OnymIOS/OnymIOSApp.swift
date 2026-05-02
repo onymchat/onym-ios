@@ -43,8 +43,8 @@ struct OnymIOSApp: App {
                     authenticator: authenticator
                 )
             },
-            makeRelayerPickerFlow: { @MainActor in
-                RelayerPickerFlow(repository: relayerRepository)
+            makeRelayerSettingsFlow: { @MainActor in
+                RelayerSettingsFlow(repository: relayerRepository)
             },
             makeAnchorsPickerFlow: { @MainActor in
                 AnchorsPickerFlow(repository: contractsRepository)
