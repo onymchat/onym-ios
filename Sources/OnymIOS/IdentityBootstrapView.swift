@@ -52,6 +52,10 @@ struct IdentityBootstrapView: View {
         labelled("Inbox tag (Nostr filter)") {
             Text(identity.inboxTag)
         }
+        // onym:allow-secret-read: dev bootstrap screen displays the freshly
+        // generated mnemonic so chunk-2 wiring is verifiable end-to-end.
+        // Production recovery-reveal UI lands in a later chunk and will own
+        // its own gated suppression (biometric + screenshot block).
         if let phrase = identity.recoveryPhrase {
             labelled("Recovery phrase (BIP39)") {
                 Text(phrase)

@@ -32,6 +32,9 @@ Three rules, enforced by file layout and access modifiers:
   mutable state across views.
 - **OnymSDK is internal-only** — repositories wrap it; views never
   call it directly.
+- **Secret material stays inside its owning repository** — outside
+  callers must not read mnemonic / private-key fields off any value
+  type that exposes them. Statically enforced — see *Static checks*.
 
 The first repository — `IdentityRepository` — is an `actor` that
 publishes identity snapshots via `AsyncStream<Identity?>`. Views
@@ -45,6 +48,8 @@ Keychain.
 .
 ├── project.yml                              ← xcodegen source of truth
 ├── generate-xcodeproj.sh                    ← regenerates OnymIOS.xcodeproj
+├── scripts/
+│   └── lint-secrets.py                      ← static check: no off-repo secret reads
 ├── Sources/OnymIOS/
 │   ├── OnymIOSApp.swift                     ← @main, holds the repo
 │   ├── IdentityBootstrapView.swift          ← drains snapshots into @State
@@ -206,6 +211,38 @@ The actor's executor serialises mutation; Keychain reads/writes,
 PBKDF2, HKDF, and OnymSDK FFI all run off the main thread by
 construction. Subscribers receive the current value immediately on
 subscribe, then a fresh value after every successful mutation.
+
+## Static checks
+
+`scripts/lint-secrets.py` is a default-deny static check that fails
+the build on any read of identity secrets — `.nostrSecretKey`,
+`.blsSecretKey`, `.recoveryPhrase`, `.entropy` — outside the
+allowlisted files (the repository, its persistence layer, the
+identity value type, and its tests). The goal: catch accidental
+secret leaks at the diff level, not after they've shipped to logs /
+crash reports / screenshots.
+
+Run before pushing:
+
+```sh
+python3 scripts/lint-secrets.py
+```
+
+To intentionally read a secret (e.g. a future biometric-gated
+recovery-phrase reveal), annotate with `// onym:allow-secret-read`
+on the line itself or anywhere in the contiguous `//`-comment block
+directly above. Each suppression should justify itself in code review:
+
+```swift
+// Rendered behind biometric on the recovery-phrase backup screen —
+// production reveal UI gates this and disables screenshots.
+// onym:allow-secret-read
+let phrase = identity.recoveryPhrase
+```
+
+The check is not part of `xcodebuild` (yet) — wire into a pre-commit
+hook or CI step as a follow-up. Adding a new file to the allowlist
+requires editing the script and naming the reason in the PR.
 
 ## Versioning
 
