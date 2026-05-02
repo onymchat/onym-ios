@@ -6,6 +6,7 @@ import SwiftUI
 /// as the app grows (preferences, advanced, about).
 struct SettingsView: View {
     let makeBackupFlow: @MainActor () -> RecoveryPhraseBackupFlow
+    let makeRelayerPickerFlow: @MainActor () -> RelayerPickerFlow
 
     @State private var showRecoveryPhrase = false
 
@@ -26,6 +27,22 @@ struct SettingsView: View {
                 Text("Security")
             } footer: {
                 Text("View your 12-word recovery phrase. You will need it to restore your identity on a new device.")
+            }
+
+            Section {
+                NavigationLink {
+                    RelayerPickerView(flow: makeRelayerPickerFlow())
+                } label: {
+                    row(
+                        icon: SettingsIconBox(systemImage: "antenna.radiowaves.left.and.right", background: .blue),
+                        title: "Relayer"
+                    )
+                }
+                .accessibilityIdentifier("settings.relayer_row")
+            } header: {
+                Text("Network")
+            } footer: {
+                Text("Choose the relayer used to anchor on-chain group state. Pick one from the published list or enter a custom URL.")
             }
         }
         .navigationTitle("Settings")

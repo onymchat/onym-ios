@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct OnymIOSApp: App {
     private let dependencies: AppDependencies
+    private let relayerRepository: RelayerRepository
 
     init() {
         let args = ProcessInfo.processInfo.arguments
@@ -22,12 +23,21 @@ struct OnymIOSApp: App {
         _ = args  // silence unused warning in Release
         #endif
 
+        let relayerRepository = RelayerRepository(
+            fetcher: GitHubReleasesKnownRelayersFetcher(),
+            store: UserDefaultsRelayerSelectionStore()
+        )
+        self.relayerRepository = relayerRepository
+
         self.dependencies = AppDependencies(
             makeRecoveryPhraseBackupFlow: { @MainActor in
                 RecoveryPhraseBackupFlow(
                     repository: repository,
                     authenticator: authenticator
                 )
+            },
+            makeRelayerPickerFlow: { @MainActor in
+                RelayerPickerFlow(repository: relayerRepository)
             }
         )
     }
@@ -35,6 +45,12 @@ struct OnymIOSApp: App {
     var body: some Scene {
         WindowGroup {
             RootView(dependencies: dependencies)
+                .task {
+                    // Kick off the GitHub Releases fetch as soon as the
+                    // app is on screen. Failures are silent; the user
+                    // can always enter a custom URL.
+                    await relayerRepository.start()
+                }
         }
     }
 }
