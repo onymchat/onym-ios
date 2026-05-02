@@ -15,7 +15,7 @@ options:
 packages:
   OnymSDK:
     url: https://github.com/onymchat/onym-sdk-swift.git
-    from: 0.0.1
+    from: 0.0.2
 
 targets:
   OnymIOS:
