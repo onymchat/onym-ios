@@ -41,7 +41,7 @@ final class RelayerSelectionStoreTests: XCTestCase {
         let endpoint = RelayerEndpoint(
             name: "Test",
             url: URL(string: "https://relayer-test.example")!,
-            network: "testnet"
+            networks: ["testnet"]
         )
         let config = RelayerConfiguration(
             endpoints: [endpoint],
@@ -53,8 +53,8 @@ final class RelayerSelectionStoreTests: XCTestCase {
     }
 
     func test_saveConfiguration_overwrites() {
-        let a = RelayerEndpoint(name: "A", url: URL(string: "https://a.example")!, network: "testnet")
-        let b = RelayerEndpoint(name: "B", url: URL(string: "https://b.example")!, network: "public")
+        let a = RelayerEndpoint(name: "A", url: URL(string: "https://a.example")!, networks: ["testnet"])
+        let b = RelayerEndpoint(name: "B", url: URL(string: "https://b.example")!, networks: ["public"])
         store.saveConfiguration(RelayerConfiguration(endpoints: [a], primaryURL: a.url, strategy: .primary))
         store.saveConfiguration(RelayerConfiguration(endpoints: [a, b], primaryURL: b.url, strategy: .random))
 
@@ -72,8 +72,8 @@ final class RelayerSelectionStoreTests: XCTestCase {
 
     func test_saveCachedKnownList_thenLoad_roundtripsList() {
         let list = [
-            RelayerEndpoint(name: "A", url: URL(string: "https://a.com")!, network: "testnet"),
-            RelayerEndpoint(name: "B", url: URL(string: "https://b.com")!, network: "public"),
+            RelayerEndpoint(name: "A", url: URL(string: "https://a.com")!, networks: ["testnet"]),
+            RelayerEndpoint(name: "B", url: URL(string: "https://b.com")!, networks: ["public"]),
         ]
         store.saveCachedKnownList(list)
         XCTAssertEqual(store.loadCachedKnownList(), list)
@@ -87,7 +87,7 @@ final class RelayerSelectionStoreTests: XCTestCase {
         let endpoint = RelayerEndpoint(
             name: "Legacy",
             url: URL(string: "https://legacy.example")!,
-            network: "testnet"
+            networks: ["testnet"]
         )
         let legacyJSON = #"{ "known": { "name": "Legacy", "url": "https://legacy.example", "network": "testnet" } }"#
         defaults.set(Data(legacyJSON.utf8), forKey: "chat.onym.ios.relayer.selection")
@@ -106,7 +106,7 @@ final class RelayerSelectionStoreTests: XCTestCase {
         let migrated = store.loadConfiguration()
         XCTAssertEqual(migrated.endpoints.count, 1)
         XCTAssertEqual(migrated.endpoints.first?.url, URL(string: "https://custom.example"))
-        XCTAssertEqual(migrated.endpoints.first?.network, RelayerEndpoint.customNetwork)
+        XCTAssertEqual(migrated.endpoints.first?.networks, [RelayerEndpoint.customNetwork])
         XCTAssertEqual(migrated.primaryURL, URL(string: "https://custom.example"))
         XCTAssertEqual(migrated.strategy, .primary)
     }

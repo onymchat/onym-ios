@@ -84,6 +84,13 @@ final class RelayerSettingsFlow {
         Task { await repository.setStrategy(strategy) }
     }
 
+    /// Retry button on a `.failed` fetch state. Kicks off another
+    /// fetch; the repository sets `.fetching` immediately and the
+    /// view re-renders accordingly.
+    func tappedRetryFetch() {
+        Task { try? await repository.refresh() }
+    }
+
     // MARK: - Read helpers
 
     /// Configured endpoints that aren't already in the user's list —

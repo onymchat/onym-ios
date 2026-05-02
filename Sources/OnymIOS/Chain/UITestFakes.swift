@@ -21,12 +21,12 @@ struct UITestKnownRelayersFetcher: KnownRelayersFetcher {
     static let testnet = RelayerEndpoint(
         name: "UITest Testnet Relayer",
         url: URL(string: "https://uitest-testnet-relayer.example")!,
-        network: "testnet"
+        networks: ["testnet"]
     )
     static let publicNet = RelayerEndpoint(
         name: "UITest Mainnet Relayer",
         url: URL(string: "https://uitest-mainnet-relayer.example")!,
-        network: "public"
+        networks: ["public"]
     )
 
     func fetchLatest() async throws -> [RelayerEndpoint] {

@@ -12,7 +12,7 @@ final class RelayerSettingsFlowTests: XCTestCase {
     private let testEndpoint = RelayerEndpoint(
         name: "Test",
         url: URL(string: "https://relayer-test.example")!,
-        network: "testnet"
+        networks: ["testnet"]
     )
 
     private func makeFlow(
@@ -60,7 +60,7 @@ final class RelayerSettingsFlowTests: XCTestCase {
         try await waitFor { !store.loadConfiguration().endpoints.isEmpty }
         let endpoint = store.loadConfiguration().endpoints.first
         XCTAssertEqual(endpoint?.url, URL(string: "https://my-relayer.dev"))
-        XCTAssertEqual(endpoint?.network, RelayerEndpoint.customNetwork)
+        XCTAssertEqual(endpoint?.networks, [RelayerEndpoint.customNetwork])
         XCTAssertEqual(endpoint?.name, "my-relayer.dev",
                        "custom endpoint name defaults to the URL host")
         XCTAssertEqual(flow.state.customDraft, "",
@@ -119,7 +119,7 @@ final class RelayerSettingsFlowTests: XCTestCase {
     }
 
     func test_tappedSetPrimary_marksViaRepository() async throws {
-        let other = RelayerEndpoint(name: "Other", url: URL(string: "https://other.example")!, network: "testnet")
+        let other = RelayerEndpoint(name: "Other", url: URL(string: "https://other.example")!, networks: ["testnet"])
         let store = InMemoryRelayerSelectionStore(
             configuration: RelayerConfiguration(endpoints: [testEndpoint, other], primaryURL: testEndpoint.url, strategy: .primary)
         )
@@ -148,7 +148,7 @@ final class RelayerSettingsFlowTests: XCTestCase {
     func test_unconfiguredKnownList_hidesAlreadyConfiguredURLs() async throws {
         let known = [
             testEndpoint,
-            RelayerEndpoint(name: "Other", url: URL(string: "https://other.example")!, network: "public")
+            RelayerEndpoint(name: "Other", url: URL(string: "https://other.example")!, networks: ["public"])
         ]
         let store = InMemoryRelayerSelectionStore(
             configuration: RelayerConfiguration(endpoints: [testEndpoint], primaryURL: nil, strategy: .primary),

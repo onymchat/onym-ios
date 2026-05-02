@@ -43,8 +43,8 @@ final class KnownRelayersFetcherTests: XCTestCase {
         XCTAssertEqual(list.count, 2)
         XCTAssertEqual(list[0].name, "Onym Testnet")
         XCTAssertEqual(list[0].url, URL(string: "https://relayer-testnet.onym.chat"))
-        XCTAssertEqual(list[0].network, "testnet")
-        XCTAssertEqual(list[1].network, "public")
+        XCTAssertEqual(list[0].networks, ["testnet"])
+        XCTAssertEqual(list[1].networks, ["public"])
     }
 
     func test_fetchLatest_acceptsEmptyRelayersArray() async throws {
