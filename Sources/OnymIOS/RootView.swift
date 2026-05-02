@@ -23,7 +23,10 @@ struct RootView: View {
         TabView(selection: $selectedTab) {
             Tab("Settings", systemImage: "gearshape", value: .settings) {
                 NavigationStack {
-                    SettingsView(makeBackupFlow: dependencies.makeRecoveryPhraseBackupFlow)
+                    SettingsView(
+                        makeBackupFlow: dependencies.makeRecoveryPhraseBackupFlow,
+                        makeRelayerPickerFlow: dependencies.makeRelayerPickerFlow
+                    )
                 }
             }
 
