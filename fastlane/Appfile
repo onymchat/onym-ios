@@ -1,0 +1,2 @@
+app_identifier("chat.onym.ios")
+team_id(ENV['MATCH_TEAM_ID'])

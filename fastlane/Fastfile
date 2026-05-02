@@ -1,0 +1,42 @@
+default_platform(:ios)
+
+platform :ios do
+  desc "Ad-hoc IPA for GitHub Release"
+  lane :release do
+    setup_ci(force: true)
+
+    match(
+      type: "adhoc",
+      app_identifier: ["chat.onym.ios"],
+      readonly: true
+    )
+
+    update_code_signing_settings(
+      use_automatic_signing: false,
+      path: "OnymIOS.xcodeproj",
+      team_id: ENV['MATCH_TEAM_ID'],
+      code_sign_identity: "Apple Distribution",
+      targets: ["OnymIOS"],
+      profile_name: "match AdHoc chat.onym.ios"
+    )
+
+    gym(
+      project: "OnymIOS.xcodeproj",
+      scheme: "OnymIOS",
+      configuration: "Release",
+      destination: "generic/platform=iOS",
+      export_method: "ad-hoc",
+      archive_path: "build/ios/adhoc/OnymIOS.xcarchive",
+      export_options: {
+        signingStyle: "manual",
+        teamID: ENV['MATCH_TEAM_ID'],
+        provisioningProfiles: {
+          "chat.onym.ios" => "match AdHoc chat.onym.ios"
+        }
+      },
+      xcargs: "COMPILER_INDEX_STORE_ENABLE=NO DEVELOPMENT_TEAM='#{ENV['MATCH_TEAM_ID']}'",
+      output_directory: "build/ios/adhoc",
+      output_name: "OnymIOS.ipa"
+    )
+  end
+end
