@@ -170,7 +170,7 @@ final class RecoveryPhraseBackupFlow {
     func authenticate() async {
         do {
             try await authenticator.authenticate(
-                reason: "Authenticate to reveal your recovery phrase"
+                reason: String(localized: "Authenticate to reveal your recovery phrase")
             )
         } catch {
             let message = (error as? LocalizedError)?.errorDescription
@@ -184,7 +184,7 @@ final class RecoveryPhraseBackupFlow {
         // (Face ID / passcode)-gated authenticator above.
         guard let phrase = currentIdentity?.recoveryPhrase else {
             step = .authFailed(
-                reason: "Recovery phrase unavailable. Your identity may not be BIP39-backed."
+                reason: String(localized: "Recovery phrase unavailable. Your identity may not be BIP39-backed.")
             )
             return
         }

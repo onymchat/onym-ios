@@ -75,7 +75,7 @@ struct RecoveryPhraseBackupView: View {
         }
     }
 
-    private var navigationTitle: String {
+    private var navigationTitle: LocalizedStringKey {
         switch flow.step {
         case .intro, .authFailed: return "Back up keys"
         case .reveal: return "Recovery phrase"
@@ -546,7 +546,8 @@ private struct DoneScreen: View {
     private var footer: String {
         let df = DateFormatter()
         df.dateStyle = .medium
-        return "Backed up \(df.string(from: Date())) · BIP-39 English"
+        let date = df.string(from: Date())
+        return String(localized: "Backed up \(date) · BIP-39 English")
     }
 }
 

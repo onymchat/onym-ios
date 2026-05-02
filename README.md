@@ -48,6 +48,8 @@ Keychain.
 .
 ├── project.yml                              ← xcodegen source of truth
 ├── generate-xcodeproj.sh                    ← regenerates OnymIOS.xcodeproj
+├── Resources/
+│   └── Localizable.xcstrings                ← single-file String Catalog (en + ru)
 ├── Gemfile                                  ← fastlane gem
 ├── fastlane/
 │   ├── Fastfile                             ← `release` lane: match adhoc + gym
@@ -297,6 +299,63 @@ auto-clear, wrong-pick retry, in-flight advance idempotency). Real
 `IdentityRepository` per test (unique Keychain service for
 isolation), seeded with a known mnemonic via `restore(mnemonic:)` so
 the recovery phrase is deterministic.
+
+## Localization
+
+Strings live in a single Xcode 15+ **String Catalog** at
+`Resources/Localizable.xcstrings` (sourceLanguage `en`). Currently
+shipped languages:
+
+- `en` — English (development language, source of truth)
+- `ru` — Russian (full coverage)
+
+The catalog is one JSON file holding every locale, so a translator
+gets exactly one artifact to work with — no `.strings` per language,
+no merge conflicts when two PRs touch different locales. Xcode
+compiles each entry into per-locale `.strings` (or `.stringsdict`
+for plural variants) inside the app bundle at build time.
+
+**How to use a string in code:**
+
+```swift
+// Inside SwiftUI — automatic; the LocalizedStringKey initializer picks
+// up the catalog entry by key.
+Text("Back up keys")
+Button("I've written it down") { ... }
+.navigationTitle("Recovery phrase")     // returns LocalizedStringKey
+
+// Outside SwiftUI (passing to LAContext, a String? property, etc.) —
+// explicit String(localized:):
+let reason = String(localized: "Authenticate to reveal your recovery phrase")
+let footer = String(localized: "Backed up \(date) · BIP-39 English")
+```
+
+Xcode auto-extracts string literals passed to `Text`,
+`LocalizedStringKey`, `String(localized:)`, etc. from source on every
+build and adds them to the catalog with a `new` state. Translators
+then provide the localized value in the Xcode editor (or by hand-
+editing the JSON).
+
+**Plurals (Russian-style):** `Localizable.xcstrings` supports CLDR
+plural variations natively (`one` / `few` / `many` / `other` etc.).
+The "Write down these %lld words" entry has `one`/`few`/`other`
+forms in Russian so 1 word → "слово", 2-4 → "слова", 5+/12/24 →
+"слов". English needs only `one`/`other`.
+
+**Adding a new language:**
+
+1. Open `Resources/Localizable.xcstrings` in Xcode.
+2. Click `+` in the language sidebar, pick the new locale.
+3. Translate each entry (Xcode shows source-language value as the
+   reference; mark each unit `state: translated` when done).
+4. Re-run `./generate-xcodeproj.sh` only if `project.yml` changed
+   (it doesn't for new languages).
+
+**Catching missing translations** — Xcode shows untranslated entries
+as a warning in the catalog editor. CI doesn't currently fail on
+missing translations; if/when we want that gate, run a script that
+parses the catalog JSON and asserts every entry has a `translated`
+state for every shipped language.
 
 ## Static checks
 
