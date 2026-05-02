@@ -138,7 +138,11 @@ struct AnchorsVersionView: View {
                 }
             }
         }
-        .navigationTitle("\(key.network.displayName) · \(key.type.displayName)")
+        // Both halves are already localised inside `displayName`. Use
+        // `Text(verbatim:)` to compose them with the " · " separator
+        // without the navigationTitle initialiser treating the entire
+        // interpolated string as a (missing) localization key.
+        .navigationTitle(Text(verbatim: "\(key.network.displayName) · \(key.type.displayName)"))
         .navigationBarTitleDisplayMode(.inline)
     }
 

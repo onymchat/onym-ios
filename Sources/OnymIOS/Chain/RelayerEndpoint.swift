@@ -53,10 +53,13 @@ enum RelayerStrategy: String, Codable, CaseIterable, Hashable, Sendable {
     /// configured endpoints; useful when running redundant relayers.
     case random
 
+    /// Localised label. Plain `String` so it composes into row text
+    /// without ceremony; values are looked up against
+    /// `Localizable.xcstrings` at access time.
     var displayName: String {
         switch self {
-        case .primary: return "Primary"
-        case .random: return "Random"
+        case .primary: return String(localized: "Primary")
+        case .random: return String(localized: "Random")
         }
     }
 }
