@@ -3,13 +3,15 @@ import XCTest
 
 /// Pure-Swift unit tests for `SEPContractClient` — no real HTTP. A
 /// `RecordingTransport` captures the encoded invocation and returns a
-/// canned response, so we verify both the wire shape (snake_case keys,
-/// envelope structure) and the client's response decoding without
-/// touching `URLSession`.
+/// canned response, so we verify both the wire shape (camelCase
+/// envelope, snake_case payload, contractType + network top-level) and
+/// the client's response decoding without touching `URLSession`.
 final class SEPContractClientTests: XCTestCase {
     private let testContractID = "CONTRACTID000000000000000000000000000000000000000000000000"
 
-    func test_createGroupV2_sendsSnakeCasePayload() async throws {
+    // MARK: - Envelope shape
+
+    func test_createGroupTyranny_sendsCorrectEnvelopeAndPayload() async throws {
         let recorder = RecordingTransport(
             response: SEPSubmissionResponse(
                 accepted: true,
@@ -17,64 +19,66 @@ final class SEPContractClientTests: XCTestCase {
                 message: nil
             )
         )
-        let client = SEPContractClient(contractID: testContractID, transport: recorder)
+        let client = SEPContractClient(
+            contractID: testContractID,
+            contractType: .tyranny,
+            network: .testnet,
+            transport: recorder
+        )
 
-        let request = SEPCreateGroupV2Request(
-            caller: "GBABCDEF",
+        let payload = TyrannyCreateGroupPayload(
             groupID: Data(repeating: 0xAB, count: 32),
             commitment: Data(repeating: 0xCD, count: 32),
-            tier: UInt32(SEPTier.small.rawValue),
-            groupType: .tyranny,
-            memberCount: 1,
-            proof: Data(repeating: 0xEE, count: 64),
-            publicInputs: SEPPublicInputs(
-                commitment: Data(repeating: 0xCD, count: 32),
-                epoch: 0
-            )
+            tier: SEPTier.small.rawValue,
+            adminPubkeyCommitment: Data(repeating: 0x42, count: 32),
+            proof: Data(repeating: 0xEE, count: 1601),
+            publicInputs: [
+                Data(repeating: 0xCD, count: 32),
+                Data(repeating: 0x00, count: 32),
+                Data(repeating: 0x42, count: 32),
+                Data(repeating: 0x77, count: 32),
+            ]
         )
-        let response = try await client.createGroupV2(request)
+        let response = try await client.createGroupTyranny(payload)
 
         XCTAssertTrue(response.accepted)
         XCTAssertEqual(response.transactionHash, "abc123")
 
         let json = try XCTUnwrap(recorder.lastJSON())
-        XCTAssertEqual(json["function"] as? String, "create_group_v2")
-        XCTAssertEqual(json["contract_id"] as? String, testContractID)
-        let payload = try XCTUnwrap(json["payload"] as? [String: Any])
-        XCTAssertEqual(payload["caller"] as? String, "GBABCDEF")
-        XCTAssertEqual((payload["group_type"] as? NSNumber)?.uint32Value, SEPGroupType.tyranny.rawValue)
-        XCTAssertEqual((payload["member_count"] as? NSNumber)?.uint32Value, 1)
-        XCTAssertNotNil(payload["group_id"])  // Data → base64 string in JSON
-        XCTAssertNotNil(payload["public_inputs"])
+        // Top-level envelope (camelCase per relayer's RelayerRequest)
+        XCTAssertEqual(json["function"] as? String, "create_group")
+        XCTAssertEqual(json["contractID"] as? String, testContractID)
+        XCTAssertEqual(json["contractType"] as? String, "tyranny")
+        XCTAssertEqual(json["network"] as? String, "testnet")
+
+        // Payload (snake_case for the contract args)
+        let payloadJSON = try XCTUnwrap(json["payload"] as? [String: Any])
+        XCTAssertEqual((payloadJSON["tier"] as? NSNumber)?.intValue, 0)
+        XCTAssertNotNil(payloadJSON["group_id"])
+        XCTAssertNotNil(payloadJSON["admin_pubkey_commitment"])
+        XCTAssertNotNil(payloadJSON["proof"])
+        let publicInputs = try XCTUnwrap(payloadJSON["publicInputs"] as? [String])
+        XCTAssertEqual(publicInputs.count, 4, "Tyranny create needs 4 PI entries")
     }
 
-    func test_updateCommitment_routesToUpdateFunction() async throws {
+    func test_createGroupTyranny_mainnetSerializesAsPublic() async throws {
         let recorder = RecordingTransport(
             response: SEPSubmissionResponse(accepted: true, transactionHash: nil, message: nil)
         )
-        let client = SEPContractClient(contractID: testContractID, transport: recorder)
-
-        let request = SEPUpdateCommitmentRequest(
-            groupID: Data(repeating: 0x01, count: 32),
-            proof: Data(repeating: 0x02, count: 32),
-            publicInputs: SEPUpdatePublicInputs(
-                cOld: Data(repeating: 0x03, count: 32),
-                epochOld: 1,
-                cNew: Data(repeating: 0x04, count: 32)
-            )
+        let client = SEPContractClient(
+            contractID: testContractID,
+            contractType: .tyranny,
+            network: .publicNet,
+            transport: recorder
         )
-        _ = try await client.updateCommitment(request)
+        _ = try await client.createGroupTyranny(stubPayload())
 
         let json = try XCTUnwrap(recorder.lastJSON())
-        XCTAssertEqual(json["function"] as? String, "update_commitment")
-        let payload = try XCTUnwrap(json["payload"] as? [String: Any])
-        let publicInputs = try XCTUnwrap(payload["public_inputs"] as? [String: Any])
-        XCTAssertNotNil(publicInputs["c_old"])
-        XCTAssertNotNil(publicInputs["c_new"])
-        XCTAssertEqual((publicInputs["epoch_old"] as? NSNumber)?.uint64Value, 1)
+        XCTAssertEqual(json["network"] as? String, "public",
+                       "mainnet must serialise as `public` to match Stellar's terminology + relayer enum")
     }
 
-    func test_getState_sendsGroupIdInGetStateEnvelope() async throws {
+    func test_getCommitment_routesToGetCommitmentFunction() async throws {
         let entry = SEPCommitmentEntry(
             commitment: Data(repeating: 0x09, count: 32),
             epoch: 7,
@@ -83,16 +87,23 @@ final class SEPContractClientTests: XCTestCase {
             active: true
         )
         let recorder = RecordingTransport(response: entry)
-        let client = SEPContractClient(contractID: testContractID, transport: recorder)
+        let client = SEPContractClient(
+            contractID: testContractID,
+            contractType: .tyranny,
+            network: .testnet,
+            transport: recorder
+        )
 
-        let result = try await client.getState(groupID: Data(repeating: 0x55, count: 32))
+        let result = try await client.getCommitment(groupID: Data(repeating: 0x55, count: 32))
         XCTAssertEqual(result, entry)
 
         let json = try XCTUnwrap(recorder.lastJSON())
-        XCTAssertEqual(json["function"] as? String, "get_state")
+        XCTAssertEqual(json["function"] as? String, "get_commitment")
         let payload = try XCTUnwrap(json["payload"] as? [String: Any])
         XCTAssertNotNil(payload["group_id"])
     }
+
+    // MARK: - URLSession transport
 
     func test_urlSessionTransport_throwsOnNon2xx() async throws {
         let url = URL(string: "https://example.invalid/contract")!
@@ -108,10 +119,15 @@ final class SEPContractClientTests: XCTestCase {
         defer { StubURLProtocol.reset() }
         let session = StubURLProtocol.makeSession()
         let transport = URLSessionSEPContractTransport(endpoint: url, session: session)
-        let client = SEPContractClient(contractID: testContractID, transport: transport)
+        let client = SEPContractClient(
+            contractID: testContractID,
+            contractType: .tyranny,
+            network: .testnet,
+            transport: transport
+        )
 
         do {
-            _ = try await client.getState(groupID: Data(repeating: 0, count: 32))
+            _ = try await client.getCommitment(groupID: Data(repeating: 0, count: 32))
             XCTFail("expected SEPError.invalidResponse")
         } catch let SEPError.invalidResponse(statusCode, body) {
             XCTAssertEqual(statusCode, 500)
@@ -144,20 +160,28 @@ final class SEPContractClientTests: XCTestCase {
         defer { StubURLProtocol.reset() }
         let session = StubURLProtocol.makeSession()
         let transport = URLSessionSEPContractTransport(endpoint: url, session: session)
-        let client = SEPContractClient(contractID: testContractID, transport: transport)
+        let client = SEPContractClient(
+            contractID: testContractID,
+            contractType: .tyranny,
+            network: .testnet,
+            transport: transport
+        )
 
-        let request = SEPCreateGroupV2Request(
-            caller: "GBABCDEF",
+        let response = try await client.createGroupTyranny(stubPayload())
+        XCTAssertEqual(response, stub)
+    }
+
+    // MARK: - Helpers
+
+    private func stubPayload() -> TyrannyCreateGroupPayload {
+        TyrannyCreateGroupPayload(
             groupID: Data(repeating: 0, count: 32),
             commitment: Data(repeating: 0, count: 32),
             tier: 0,
-            groupType: .tyranny,
-            memberCount: 1,
-            proof: Data(),
-            publicInputs: SEPPublicInputs(commitment: Data(repeating: 0, count: 32), epoch: 0)
+            adminPubkeyCommitment: Data(repeating: 0, count: 32),
+            proof: Data(repeating: 0, count: 1601),
+            publicInputs: Array(repeating: Data(repeating: 0, count: 32), count: 4)
         )
-        let response = try await client.createGroupV2(request)
-        XCTAssertEqual(response, stub)
     }
 }
 

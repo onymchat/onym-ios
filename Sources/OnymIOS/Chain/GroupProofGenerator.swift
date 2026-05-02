@@ -1,19 +1,31 @@
 import Foundation
 import OnymSDK
 
-/// Output of `GroupProofGenerator.proveCreate`. The relayer / contract
-/// expect:
-/// - `proof` — 1568 bytes, the `Common.parsePlonkProof`-trimmed form of
-///   the raw 1601-byte SDK output (strips the four `len()` u64
-///   prefixes + the trailing `plookup_proof: None` byte).
-/// - `publicInputs` — the `(commitment, epoch)` pair the
-///   `SEPCreateGroupV2Request` carries. For create the SDK's
-///   per-type-specific PI bundle (`commitment || Fr(0) || …`) is sliced
-///   to its first 32 bytes for the commitment; epoch is always 0 for
-///   create.
+/// Output of `GroupProofGenerator.proveCreate`. The relayer expects:
+/// - `proof` — the **raw 1601-byte PLONK proof** (the relayer's
+///   `decode_wire_bytes(_, _, Some(1601))` rejects anything else; the
+///   `parsePlonkProof` trim happens on the contract side, not on the
+///   wire).
+/// - `publicInputs` — the SDK's full per-type PI bundle, split into
+///   32-byte chunks. Tyranny create returns 4 chunks
+///   (`commitment || Fr(0) || admin_pubkey_commitment || group_id_fr`)
+///   which the relayer forwards as the contract's `Vec<BytesN<32>>`
+///   public-inputs argument.
+/// - `commitment` and `adminPubkeyCommitment` are convenience
+///   accessors so callers don't have to re-slice the bundle.
 struct GroupCreateProof: Equatable, Sendable {
     let proof: Data
-    let publicInputs: SEPPublicInputs
+    let publicInputs: [Data]
+
+    /// First 32 bytes of the PI bundle — the new commitment the
+    /// contract will store.
+    var commitment: Data { publicInputs[0] }
+
+    /// Bytes 64..96 of the PI bundle (Tyranny only) — the Poseidon
+    /// commitment to the admin's BLS pubkey, surfaced separately
+    /// because the relayer needs it both as a top-level CLI arg and
+    /// as `publicInputs[2]`.
+    var adminPubkeyCommitment: Data { publicInputs[2] }
 }
 
 /// PR-B's chain seam for proof generation. Switches on `groupType` so
@@ -98,21 +110,21 @@ struct OnymGroupProofGenerator: GroupProofGenerator {
             throw GroupProofGeneratorError.sdkFailure(String(describing: error))
         }
 
-        let parsed: Data
-        do {
-            parsed = try Common.parsePlonkProof(result.proof)
-        } catch {
-            throw GroupProofGeneratorError.sdkFailure(String(describing: error))
-        }
-
-        // PI bundle layout (Tyranny.CreateProof):
+        // SDK returns the raw 1601-byte proof. Don't `parsePlonkProof`
+        // — the relayer rejects the trimmed form.
+        // PI bundle layout (`Tyranny.CreateProof.publicInputs`, 128 B):
         //   commitment(32) || Fr(0)(32) || admin_pubkey_commitment(32) || group_id_fr(32)
-        // Only the first 32 bytes (commitment) cross the wire; the rest
-        // are bound by the proof itself.
-        let commitment = result.publicInputs.prefix(32)
-        return GroupCreateProof(
-            proof: parsed,
-            publicInputs: SEPPublicInputs(commitment: Data(commitment), epoch: 0)
-        )
+        // Each 32-byte chunk maps to one `BytesN<32>` in the contract's
+        // `Vec<BytesN<32>>` public-inputs argument.
+        let bundle = result.publicInputs
+        guard bundle.count == 128 else {
+            throw GroupProofGeneratorError.sdkFailure(
+                "expected 128-byte PI bundle, got \(bundle.count)"
+            )
+        }
+        let chunks: [Data] = stride(from: 0, to: bundle.count, by: 32).map { offset in
+            Data(bundle[offset..<(offset + 32)])
+        }
+        return GroupCreateProof(proof: result.proof, publicInputs: chunks)
     }
 }

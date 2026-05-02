@@ -133,6 +133,7 @@ private struct OnymQuietButton: View {
 
 private struct CreateGroupStep1View: View {
     @Bindable var flow: CreateGroupFlow
+    @FocusState private var nameFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -180,12 +181,20 @@ private struct CreateGroupStep1View: View {
 
     private var nameField: some View {
         HStack {
-            TextField("", text: $flow.name, prompt: Text("Group name").foregroundColor(OnymTokens.text3))
+            TextField(
+                "",
+                text: $flow.name,
+                prompt: Text(flow.generatedName).foregroundColor(OnymTokens.text3)
+            )
                 .font(.system(size: 17, weight: .medium))
                 .foregroundStyle(OnymTokens.text)
                 .tint(accentColor)
                 .textInputAutocapitalization(.sentences)
                 .autocorrectionDisabled()
+                .focused($nameFocused)
+                .onChange(of: nameFocused) { _, isFocused in
+                    if isFocused { flow.tappedNameFieldFocused() }
+                }
                 .onChange(of: flow.name) { _, new in
                     if new.count > 32 { flow.name = String(new.prefix(32)) }
                 }
@@ -907,18 +916,33 @@ private struct CreateGroupCreatingView: View {
                 .foregroundStyle(OnymTokens.red)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 14)
-            Button {
-                flow.tappedDismissError()
-            } label: {
-                Text("Try again")
-                    .font(.system(size: 14.5, weight: .semibold))
-                    .foregroundStyle(flow.accent.color)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 8)
-                    .background(OnymTokens.surface2)
-                    .clipShape(Capsule())
+            HStack(spacing: 10) {
+                Button {
+                    flow.tappedCancelFromError()
+                } label: {
+                    Text("Cancel")
+                        .font(.system(size: 14.5, weight: .semibold))
+                        .foregroundStyle(OnymTokens.text2)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 8)
+                        .background(OnymTokens.surface3)
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    flow.tappedDismissError()
+                } label: {
+                    Text("Try again")
+                        .font(.system(size: 14.5, weight: .semibold))
+                        .foregroundStyle(flow.accent.color)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 8)
+                        .background(OnymTokens.surface2)
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .padding(14)
         .background(OnymTokens.red.opacity(0.10))

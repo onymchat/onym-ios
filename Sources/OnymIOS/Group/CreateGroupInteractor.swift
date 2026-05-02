@@ -35,6 +35,7 @@ struct CreateGroupInteractor: Sendable {
     let relayers: RelayerRepository
     let contracts: ContractsRepository
     let groups: GroupRepository
+    let networkPreference: any NetworkPreferenceProviding
     let proofGenerator: any GroupProofGenerator
     let inboxTransport: any InboxTransport
     /// Builds a `SEPContractTransport` from the relayer URL chosen
@@ -47,6 +48,7 @@ struct CreateGroupInteractor: Sendable {
         relayers: RelayerRepository,
         contracts: ContractsRepository,
         groups: GroupRepository,
+        networkPreference: any NetworkPreferenceProviding = UserDefaultsNetworkPreference(),
         proofGenerator: any GroupProofGenerator = OnymGroupProofGenerator(),
         inboxTransport: any InboxTransport,
         makeContractTransport: @escaping @Sendable (URL) -> any SEPContractTransport = { url in
@@ -57,6 +59,7 @@ struct CreateGroupInteractor: Sendable {
         self.relayers = relayers
         self.contracts = contracts
         self.groups = groups
+        self.networkPreference = networkPreference
         self.proofGenerator = proofGenerator
         self.inboxTransport = inboxTransport
         self.makeContractTransport = makeContractTransport
@@ -82,11 +85,12 @@ struct CreateGroupInteractor: Sendable {
             }
         }
 
-        // 2. Resolve relayer + contract
+        // 2. Resolve relayer + contract for the user's preferred network.
         guard let relayerURL = await relayers.selectURL() else {
             throw CreateGroupError.noActiveRelayer
         }
-        let key = AnchorSelectionKey(network: .testnet, type: .tyranny)
+        let activeNetwork = networkPreference.current()
+        let key = AnchorSelectionKey(network: activeNetwork.contractNetwork, type: .tyranny)
         guard let binding = await contracts.binding(for: key) else {
             throw CreateGroupError.noContractBinding(.tyranny)
         }
@@ -141,20 +145,23 @@ struct CreateGroupInteractor: Sendable {
         // 6. Anchor on chain
         onProgress(.anchoring)
         let transport = makeContractTransport(relayerURL)
-        let client = SEPContractClient(contractID: binding.contractID, transport: transport)
-        let request = SEPCreateGroupV2Request(
-            caller: identitySnapshot.stellarAccountID,
+        let client = SEPContractClient(
+            contractID: binding.contractID,
+            contractType: .tyranny,
+            network: activeNetwork.sepNetwork,
+            transport: transport
+        )
+        let payload = TyrannyCreateGroupPayload(
             groupID: groupID,
-            commitment: proof.publicInputs.commitment,
-            tier: UInt32(tier.rawValue),
-            groupType: .tyranny,
-            memberCount: UInt32(members.count),
+            commitment: proof.commitment,
+            tier: tier.rawValue,
+            adminPubkeyCommitment: proof.adminPubkeyCommitment,
             proof: proof.proof,
             publicInputs: proof.publicInputs
         )
         let response: SEPSubmissionResponse
         do {
-            response = try await client.createGroupV2(request)
+            response = try await client.createGroupTyranny(payload)
         } catch {
             throw CreateGroupError.anchorTransport(String(describing: error))
         }
@@ -174,19 +181,19 @@ struct CreateGroupInteractor: Sendable {
             members: members,
             epoch: 0,
             salt: salt,
-            commitment: proof.publicInputs.commitment,
+            commitment: proof.commitment,
             tier: tier,
             groupType: .tyranny,
             adminPubkeyHex: adminPubkeyHex,
             isPublishedOnChain: false
         )
         _ = await groups.insert(group)
-        await groups.markPublished(id: group.id, commitment: proof.publicInputs.commitment)
+        await groups.markPublished(id: group.id, commitment: proof.commitment)
 
         // 8. Send invitations
         if !invitees.isEmpty {
             onProgress(.sendingInvitations(total: invitees.count))
-            let payload = GroupInvitationPayload(
+            let invitePayload = GroupInvitationPayload(
                 version: 1,
                 groupID: groupID,
                 groupSecret: groupSecret,
@@ -194,14 +201,14 @@ struct CreateGroupInteractor: Sendable {
                 members: members,
                 epoch: 0,
                 salt: salt,
-                commitment: proof.publicInputs.commitment,
+                commitment: proof.commitment,
                 tierRaw: tier.rawValue,
                 groupTypeRaw: SEPGroupType.tyranny.rawValue,
                 adminPubkeyHex: adminPubkeyHex
             )
             let payloadBytes: Data
             do {
-                payloadBytes = try JSONEncoder().encode(payload)
+                payloadBytes = try JSONEncoder().encode(invitePayload)
             } catch {
                 throw CreateGroupError.invitationEncodingFailed
             }

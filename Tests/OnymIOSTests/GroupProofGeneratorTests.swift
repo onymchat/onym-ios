@@ -34,9 +34,15 @@ final class GroupProofGeneratorTests: XCTestCase {
         )
 
         let result = try OnymGroupProofGenerator().proveCreate(input)
-        XCTAssertEqual(result.proof.count, 1568, "Common.parsePlonkProof trims the 1601-byte raw output")
-        XCTAssertEqual(result.publicInputs.commitment.count, 32)
-        XCTAssertEqual(result.publicInputs.epoch, 0, "create-group is always epoch 0")
+        XCTAssertEqual(result.proof.count, 1601,
+                       "relayer expects the raw 1601-byte plonk proof — no parsePlonkProof on the wire")
+        XCTAssertEqual(result.publicInputs.count, 4,
+                       "Tyranny PI bundle splits into 4 × 32-byte chunks (commitment + Fr(0) + admin_pkc + group_id_fr)")
+        for (i, chunk) in result.publicInputs.enumerated() {
+            XCTAssertEqual(chunk.count, 32, "PI chunk #\(i) must be 32 bytes")
+        }
+        XCTAssertEqual(result.commitment, result.publicInputs[0])
+        XCTAssertEqual(result.adminPubkeyCommitment, result.publicInputs[2])
     }
 
     func test_proveCreate_anarchy_throwsNotYetSupported() {

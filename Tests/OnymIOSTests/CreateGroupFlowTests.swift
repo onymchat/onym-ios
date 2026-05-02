@@ -10,11 +10,14 @@ final class CreateGroupFlowTests: XCTestCase {
 
     // MARK: - Step1 → Step2
 
-    func test_canAdvanceToStep2_requiresNonEmptyNameAndAvailableGovernance() async throws {
+    func test_canAdvanceToStep2_acceptsAnyNameWhenGovernanceAvailable() async throws {
         let flow = await makeFlow()
-        XCTAssertFalse(flow.canAdvanceToStep2, "empty name blocks advance")
+        // Empty / whitespace name is fine — `effectiveName` falls
+        // back to the auto-generated placeholder.
+        flow.name = ""
+        XCTAssertTrue(flow.canAdvanceToStep2)
         flow.name = "  "
-        XCTAssertFalse(flow.canAdvanceToStep2, "whitespace-only name blocks advance")
+        XCTAssertTrue(flow.canAdvanceToStep2)
         flow.name = "Friends"
         XCTAssertTrue(flow.canAdvanceToStep2)
     }
@@ -33,10 +36,66 @@ final class CreateGroupFlowTests: XCTestCase {
         XCTAssertEqual(flow.route, .step2)
     }
 
-    func test_tappedNext_isNoOpWhenInvalid() async throws {
+    func test_tappedNext_emptyName_stillAdvances() async throws {
+        // Empty name advances — the placeholder will be used at submit.
         let flow = await makeFlow()
-        flow.tappedNext()  // empty name
+        flow.name = ""
+        flow.tappedNext()
+        XCTAssertEqual(flow.route, .step2)
+    }
+
+    func test_tappedNext_unavailableGovernance_isNoOp() async throws {
+        let flow = await makeFlow()
+        flow.governance = .anarchy
+        flow.tappedNext()
         XCTAssertEqual(flow.route, .step1)
+    }
+
+    // MARK: - Random placeholder name
+
+    func test_init_prePopulatesNameWithGeneratedPlaceholder() async throws {
+        let flow = await makeFlow()
+        XCTAssertFalse(flow.name.isEmpty,
+                       "init should pre-populate name with a friendly placeholder")
+        XCTAssertEqual(flow.name, flow.generatedName)
+        XCTAssertTrue(flow.generatedName.contains(" "),
+                      "placeholder should be 'Adjective Noun' shape")
+    }
+
+    func test_firstFocusOnNameField_clearsPlaceholder() async throws {
+        let flow = await makeFlow()
+        let original = flow.generatedName
+        XCTAssertEqual(flow.name, original)
+        flow.tappedNameFieldFocused()
+        XCTAssertEqual(flow.name, "", "first focus clears the placeholder")
+    }
+
+    func test_secondFocus_doesNotClearUserInput() async throws {
+        let flow = await makeFlow()
+        flow.tappedNameFieldFocused()  // clears placeholder
+        flow.name = "My Group"
+        flow.tappedNameFieldFocused()  // second focus — should be no-op
+        XCTAssertEqual(flow.name, "My Group")
+    }
+
+    func test_focusDoesNotClear_ifUserAlreadyEditedAwayFromPlaceholder() async throws {
+        // Edge case: programmatic name change before the field is
+        // ever focused. Focus should not stomp the user's value.
+        let flow = await makeFlow()
+        flow.name = "Manual"
+        flow.tappedNameFieldFocused()
+        XCTAssertEqual(flow.name, "Manual",
+                       "focus only clears when the field still holds the original placeholder")
+    }
+
+    func test_effectiveName_fallsBackToPlaceholder_whenEmpty() async throws {
+        let flow = await makeFlow()
+        let placeholder = flow.generatedName
+        flow.tappedNameFieldFocused()  // clears
+        XCTAssertEqual(flow.effectiveName, placeholder,
+                       "empty name should resolve to the auto-generated placeholder at submit")
+        flow.name = "Family"
+        XCTAssertEqual(flow.effectiveName, "Family")
     }
 
     // MARK: - InviteByKey
@@ -140,8 +199,23 @@ final class CreateGroupFlowTests: XCTestCase {
         flow.tappedDone()
         XCTAssertEqual(closedCount, 1)
         XCTAssertEqual(flow.route, .step1)
-        XCTAssertEqual(flow.name, "")
+        // Reset re-rolls the placeholder, so name == generatedName,
+        // not "".
+        XCTAssertEqual(flow.name, flow.generatedName)
+        XCTAssertFalse(flow.name.isEmpty)
         XCTAssertTrue(flow.invitees.isEmpty)
+    }
+
+    func test_tappedCancelFromError_closesAndResets() async throws {
+        let flow = await makeFlow()
+        var closedCount = 0
+        flow.onClose = { closedCount += 1 }
+        flow.route = .creating
+        flow.error = .anchorRejected(message: "oops")
+        flow.tappedCancelFromError()
+        XCTAssertEqual(closedCount, 1)
+        XCTAssertEqual(flow.route, .step1)
+        XCTAssertNil(flow.error)
     }
 
     // MARK: - Helpers

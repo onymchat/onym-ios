@@ -31,11 +31,24 @@ struct OnymInvitee: Equatable, Identifiable, Sendable {
 final class CreateGroupFlow {
     // MARK: - Form state
 
-    var name: String = ""
+    var name: String
     var accent: OnymAccent = .blue
     /// Always `.tyranny` in PR-C — the picker disables the others.
     var governance: OnymUIGovernance = .tyranny
     var invitees: [OnymInvitee] = []
+
+    /// Friendly placeholder generated on init / reset (e.g. "Maple
+    /// Garden"). The TextField pre-fills with this so the user can
+    /// hit Create immediately without typing — first focus on the
+    /// field clears it (see `tappedNameFieldFocused`). Submit also
+    /// falls back to this if the user emptied the field and didn't
+    /// retype.
+    private(set) var generatedName: String
+
+    /// Goes true on the first focus event of the name field. Used to
+    /// distinguish "user accepted the placeholder" from "user wants
+    /// to type their own".
+    private var nameFieldHasBeenFocused = false
 
     /// Bound to the InviteByKey screen's TextField.
     var inviteeInput: String = ""
@@ -63,14 +76,35 @@ final class CreateGroupFlow {
 
     init(interactor: CreateGroupInteractor) {
         self.interactor = interactor
+        let generated = Self.generatePlaceholderName()
+        self.generatedName = generated
+        self.name = generated
+    }
+
+    /// Called by the Step1 view when the name TextField gets focus.
+    /// On the *first* focus we clear the field so the user can type a
+    /// fresh name without manually deleting the placeholder. After
+    /// that, focus is a no-op — the user is in charge of the field.
+    func tappedNameFieldFocused() {
+        guard !nameFieldHasBeenFocused else { return }
+        nameFieldHasBeenFocused = true
+        if name == generatedName {
+            name = ""
+        }
     }
 
     // MARK: - Step 1 → Step 2
 
-    /// True when the name is non-empty and a valid governance type
-    /// is selected. Disables the Step1 "Next" button.
-    var canAdvanceToStep2: Bool {
-        !trimmedName.isEmpty && governance.isAvailable
+    /// True when a valid governance type is selected. The name can
+    /// be empty — submit falls back to `generatedName`. The Step1
+    /// "Next" button is enabled whenever governance is available.
+    var canAdvanceToStep2: Bool { governance.isAvailable }
+
+    /// What to send to the interactor: the user's typed name if
+    /// non-empty, else the placeholder we generated for them.
+    var effectiveName: String {
+        let trimmed = trimmedName
+        return trimmed.isEmpty ? generatedName : trimmed
     }
 
     func tappedNext() {
@@ -178,7 +212,7 @@ final class CreateGroupFlow {
         do {
             let invitees = self.invitees.map(\.inboxPublicKey)
             let group = try await interactor.create(
-                name: name,
+                name: effectiveName,
                 invitees: invitees,
                 onProgress: { [weak self] p in
                     Task { @MainActor in self?.progress = p }
@@ -210,8 +244,21 @@ final class CreateGroupFlow {
         route = .step2
     }
 
+    /// User chose to cancel out of the flow from the error state on
+    /// the Creating screen. The group may already be saved on disk
+    /// (we save before sending invitations) — leaving it intact is
+    /// fine, a future "retry invites" UI can pick it up. Just close
+    /// the modal and reset.
+    func tappedCancelFromError() {
+        reset()
+        onClose()
+    }
+
     private func reset() {
-        name = ""
+        let generated = Self.generatePlaceholderName()
+        generatedName = generated
+        name = generated
+        nameFieldHasBeenFocused = false
         accent = .blue
         governance = .tyranny
         invitees = []
@@ -221,6 +268,27 @@ final class CreateGroupFlow {
         error = nil
         createdGroup = nil
         route = .step1
+    }
+
+    /// Build a "Adjective Noun" label like "Maple Garden". Random
+    /// pick from a small lexicon picked for being warm + neutral.
+    /// Pure function so it's deterministic given the system RNG;
+    /// tests that need a stable name can override `generatedName`
+    /// directly after init.
+    static func generatePlaceholderName() -> String {
+        let adjectives = [
+            "Maple", "Quiet", "Sunny", "Brave", "Crimson",
+            "Velvet", "Northern", "Golden", "Ember", "Wild",
+            "Distant", "Tidal", "Silver", "Twilight", "Amber",
+        ]
+        let nouns = [
+            "Garden", "Forest", "Harbor", "Meadow", "Atlas",
+            "River", "Cottage", "Lantern", "Compass", "Orchard",
+            "Mountain", "Lighthouse", "Plateau", "Valley", "Bay",
+        ]
+        let a = adjectives.randomElement() ?? "Quiet"
+        let n = nouns.randomElement() ?? "Forest"
+        return "\(a) \(n)"
     }
 
     // MARK: - Helpers

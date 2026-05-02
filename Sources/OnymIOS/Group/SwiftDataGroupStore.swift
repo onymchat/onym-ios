@@ -113,7 +113,7 @@ actor SwiftDataGroupStore: GroupStore {
             createdAt: group.createdAt,
             epoch: Int64(bitPattern: group.epoch),
             tierRaw: group.tier.rawValue,
-            groupTypeRaw: Int(group.groupType.rawValue),
+            groupTypeRaw: group.groupType.rawValue,
             isPublishedOnChain: group.isPublishedOnChain,
             encryptedName: try StorageEncryption.encrypt(group.name),
             encryptedGroupSecret: try StorageEncryption.encrypt(group.groupSecret),
@@ -132,7 +132,7 @@ actor SwiftDataGroupStore: GroupStore {
             let members = try? JSONDecoder().decode([GovernanceMember].self, from: membersJSON),
             let salt = try? StorageEncryption.decrypt(row.encryptedSalt),
             let tier = SEPTier(rawValue: row.tierRaw),
-            let groupType = SEPGroupType(rawValue: UInt32(row.groupTypeRaw))
+            let groupType = SEPGroupType(rawValue: row.groupTypeRaw)
         else {
             return nil
         }

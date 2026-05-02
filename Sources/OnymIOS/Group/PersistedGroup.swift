@@ -27,7 +27,7 @@ final class PersistedGroup {
     var createdAt: Date
     var epoch: Int64
     var tierRaw: Int
-    var groupTypeRaw: Int
+    var groupTypeRaw: String
     var isPublishedOnChain: Bool
 
     var encryptedName: Data
@@ -42,7 +42,7 @@ final class PersistedGroup {
         createdAt: Date,
         epoch: Int64,
         tierRaw: Int,
-        groupTypeRaw: Int,
+        groupTypeRaw: String,
         isPublishedOnChain: Bool,
         encryptedName: Data,
         encryptedGroupSecret: Data,
