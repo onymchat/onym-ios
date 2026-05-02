@@ -15,8 +15,7 @@ struct RootView: View {
         case search
     }
 
-    let repository: IdentityRepository
-    let authenticator: BiometricAuthenticator
+    let dependencies: AppDependencies
 
     @State private var selectedTab: RootTab = .settings
 
@@ -24,10 +23,7 @@ struct RootView: View {
         TabView(selection: $selectedTab) {
             Tab("Settings", systemImage: "gearshape", value: .settings) {
                 NavigationStack {
-                    SettingsView(
-                        repository: repository,
-                        authenticator: authenticator
-                    )
+                    SettingsView(makeBackupFlow: dependencies.makeRecoveryPhraseBackupFlow)
                 }
             }
 

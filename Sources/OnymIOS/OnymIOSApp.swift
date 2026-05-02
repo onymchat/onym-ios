@@ -2,29 +2,39 @@ import SwiftUI
 
 @main
 struct OnymIOSApp: App {
-    private let repository: IdentityRepository
-    private let authenticator: BiometricAuthenticator
+    private let dependencies: AppDependencies
 
     init() {
         let args = ProcessInfo.processInfo.arguments
+        let repository: IdentityRepository
+        let authenticator: BiometricAuthenticator
         #if DEBUG
         if let testMode = Self.resolveTestMode(args: args) {
-            self.repository = testMode.repository
-            self.authenticator = testMode.authenticator
-            return
+            repository = testMode.repository
+            authenticator = testMode.authenticator
+        } else {
+            repository = IdentityRepository.shared
+            authenticator = LAContextAuthenticator()
         }
-        #endif
-        self.repository = IdentityRepository.shared
-        self.authenticator = LAContextAuthenticator()
+        #else
+        repository = IdentityRepository.shared
+        authenticator = LAContextAuthenticator()
         _ = args  // silence unused warning in Release
+        #endif
+
+        self.dependencies = AppDependencies(
+            makeRecoveryPhraseBackupFlow: { @MainActor in
+                RecoveryPhraseBackupFlow(
+                    repository: repository,
+                    authenticator: authenticator
+                )
+            }
+        )
     }
 
     var body: some Scene {
         WindowGroup {
-            RootView(
-                repository: repository,
-                authenticator: authenticator
-            )
+            RootView(dependencies: dependencies)
         }
     }
 }

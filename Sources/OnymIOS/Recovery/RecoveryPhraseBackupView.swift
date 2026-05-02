@@ -10,11 +10,8 @@ struct RecoveryPhraseBackupView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var obscured = false
 
-    init(repository: IdentityRepository, authenticator: BiometricAuthenticator) {
-        _flow = State(initialValue: RecoveryPhraseBackupFlow(
-            repository: repository,
-            authenticator: authenticator
-        ))
+    init(flow: RecoveryPhraseBackupFlow) {
+        _flow = State(initialValue: flow)
     }
 
     var body: some View {
