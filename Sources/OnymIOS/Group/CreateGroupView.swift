@@ -911,11 +911,22 @@ private struct CreateGroupCreatingView: View {
 
     private func errorBanner(_ error: CreateGroupError) -> some View {
         VStack(spacing: 12) {
-            Text(error.localizedDescription)
-                .font(.system(size: 13))
-                .foregroundStyle(OnymTokens.red)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 14)
+            // Soroban diagnostic chains can be 500+ chars; keep the
+            // banner from eating the whole screen. ScrollView caps the
+            // height; .textSelection(.enabled) lets the user copy the
+            // error for bug reports.
+            ScrollView(.vertical, showsIndicators: true) {
+                Text(error.localizedDescription)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(OnymTokens.red)
+                    .multilineTextAlignment(.leading)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 4)
+            }
+            .frame(maxHeight: 200)
+
             HStack(spacing: 10) {
                 Button {
                     flow.tappedCancelFromError()
