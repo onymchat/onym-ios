@@ -38,7 +38,19 @@ final class CreateGroupInteractorTests: XCTestCase {
         // Chain anchor was POSTed exactly once.
         let invocations = env.contractTransport.invocations
         XCTAssertEqual(invocations.count, 1)
-        XCTAssertEqual(invocations.first?.function, "create_group_v2")
+        XCTAssertEqual(invocations.first?.function, "create_group")
+    }
+
+    // MARK: - Network preference
+
+    func test_create_anchorsOnTheNetworkFromPreference() async throws {
+        // With NetworkPreference = mainnet but no mainnet contract in
+        // the manifest, the binding lookup should fail.
+        let env = await makeTestEnv(includeTyrannyContract: true, network: .mainnet)
+        await assertThrows(
+            try await env.makeInteractor().create(name: "G", invitees: []),
+            CreateGroupError.noContractBinding(.tyranny)
+        )
     }
 
     func test_create_withTwoInvitees_sendsOneInvitationPerInvitee() async throws {
@@ -166,11 +178,13 @@ final class CreateGroupInteractorTests: XCTestCase {
 
     private func makeTestEnv(
         addRelayer: Bool = true,
-        includeTyrannyContract: Bool = true
+        includeTyrannyContract: Bool = true,
+        network: AppNetwork = .testnet
     ) async -> CreateGroupTestEnv {
         let env = await CreateGroupTestEnv.make(
             addRelayer: addRelayer,
-            includeTyrannyContract: includeTyrannyContract
+            includeTyrannyContract: includeTyrannyContract,
+            network: network
         )
         return env
     }
@@ -191,9 +205,14 @@ private final class CreateGroupTestEnv {
     let inboxTransport: ConfigurableInboxTransport
     let contractTransport: ConfigurableContractTransport
     let proofGenerator: StubGroupProofGenerator
+    let networkPreference: StaticNetworkPreference
     private let keychain: KeychainStore
 
-    static func make(addRelayer: Bool, includeTyrannyContract: Bool) async -> CreateGroupTestEnv {
+    static func make(
+        addRelayer: Bool,
+        includeTyrannyContract: Bool,
+        network: AppNetwork
+    ) async -> CreateGroupTestEnv {
         let keychain = KeychainStore(
             service: "chat.onym.ios.identity.tests.create-group.\(UUID().uuidString)",
             account: "current"
@@ -247,6 +266,7 @@ private final class CreateGroupTestEnv {
             inboxTransport: ConfigurableInboxTransport(),
             contractTransport: ConfigurableContractTransport(),
             proofGenerator: StubGroupProofGenerator(),
+            networkPreference: StaticNetworkPreference(value: network),
             keychain: keychain
         )
     }
@@ -259,6 +279,7 @@ private final class CreateGroupTestEnv {
         inboxTransport: ConfigurableInboxTransport,
         contractTransport: ConfigurableContractTransport,
         proofGenerator: StubGroupProofGenerator,
+        networkPreference: StaticNetworkPreference,
         keychain: KeychainStore
     ) {
         self.identity = identity
@@ -268,6 +289,7 @@ private final class CreateGroupTestEnv {
         self.inboxTransport = inboxTransport
         self.contractTransport = contractTransport
         self.proofGenerator = proofGenerator
+        self.networkPreference = networkPreference
         self.keychain = keychain
     }
 
@@ -279,6 +301,7 @@ private final class CreateGroupTestEnv {
             relayers: relayers,
             contracts: contracts,
             groups: groups,
+            networkPreference: networkPreference,
             proofGenerator: proofGenerator,
             inboxTransport: inboxTransport,
             makeContractTransport: { [contractTransport] _ in contractTransport }
@@ -288,19 +311,22 @@ private final class CreateGroupTestEnv {
 
 // MARK: - Stubs
 
-/// Returns a deterministic 1568-byte "proof" without actually proving.
-/// Skips the ~3.5s real prover so the test suite stays fast.
+/// Returns a deterministic 1601-byte "proof" + 4-element PI bundle
+/// without actually proving. Skips the ~3.5s real prover so the test
+/// suite stays fast.
 private struct StubGroupProofGenerator: GroupProofGenerator {
     func proveCreate(_ input: GroupProofCreateInput) throws -> GroupCreateProof {
         guard input.groupType == .tyranny else {
             throw GroupProofGeneratorError.notYetSupported(input.groupType)
         }
         return GroupCreateProof(
-            proof: Data(repeating: 0xAB, count: 1568),
-            publicInputs: SEPPublicInputs(
-                commitment: Data(repeating: 0xCD, count: 32),
-                epoch: 0
-            )
+            proof: Data(repeating: 0xAB, count: 1601),
+            publicInputs: [
+                Data(repeating: 0xCD, count: 32),  // commitment
+                Data(repeating: 0x00, count: 32),  // Fr(0)
+                Data(repeating: 0x42, count: 32),  // admin_pubkey_commitment
+                Data(repeating: 0x77, count: 32),  // group_id_fr
+            ]
         )
     }
 }

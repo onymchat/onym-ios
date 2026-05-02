@@ -25,7 +25,12 @@ struct GroupInvitationPayload: Codable, Equatable, Sendable {
     /// always anchors first, so this is always set in practice.
     let commitment: Data?
     let tierRaw: Int
-    let groupTypeRaw: UInt32
+    /// Lowercase governance type label — `tyranny`, `anarchy`, etc.
+    /// Receiver decodes via `SEPGroupType(rawValue:)`. String spelling
+    /// matches the relayer + contract wire format so a single
+    /// `group_type` field is unambiguous across iOS, Android, and the
+    /// Stellar contract.
+    let groupTypeRaw: String
     /// Lowercase hex (96 chars) BLS pubkey of the Tyranny admin.
     /// `nil` for `.anarchy` / `.oneOnOne`.
     let adminPubkeyHex: String?

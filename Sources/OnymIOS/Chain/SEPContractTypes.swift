@@ -1,18 +1,18 @@
 import Foundation
 
-/// Mirrors `stellar-mls/swift-mls`'s `SEPGroupType` plus the post-v0.0.3
-/// `tyranny` case that swift-mls hasn't been bumped for yet. Persisted as
-/// the `group_type` u32 in the contract's `CommitmentEntryV2`.
-enum SEPGroupType: UInt32, Codable, CaseIterable, Sendable {
-    case anarchy = 0
-    case oneOnOne = 1
-    case democracy = 2
-    case oligarchy = 3
-    case tyranny = 4
+/// On-chain governance flavour. The relayer (`onym-relayer/src/config.rs`,
+/// `enum ContractType`) accepts the lowercase string spelling on the
+/// wire — these `rawValue`s are pinned to match.
+enum SEPGroupType: String, Codable, CaseIterable, Sendable {
+    case anarchy
+    case oneOnOne = "oneonone"
+    case democracy
+    case oligarchy
+    case tyranny
 }
 
 /// Tier sizing for a Merkle tree commitment. Values pinned to match the
-/// VK ceremonies.
+/// VK ceremonies. Wire-encoded as the raw `Int` for `--tier`.
 enum SEPTier: Int, Codable, CaseIterable, Sendable {
     case small = 0
     case medium = 1
@@ -35,70 +35,101 @@ enum SEPTier: Int, Codable, CaseIterable, Sendable {
     }
 }
 
-/// Public-input bundle accompanying a Groth16 / PLONK proof: the new
-/// commitment + the epoch number it lives at.
-struct SEPPublicInputs: Codable, Equatable, Sendable {
-    let commitment: Data
-    let epoch: UInt64
+/// Stellar network the relayer should target. Wire-encoded as the
+/// lowercase label (`testnet` or `public`) — `mainnet` is also accepted
+/// by the relayer as an alias for `public` but we always send `public`.
+enum SEPNetwork: String, Codable, CaseIterable, Sendable {
+    case testnet
+    case publicNet = "public"
 }
 
-/// Public-input bundle for the UpdateCircuit (#59 fix). The contract
-/// rederives `cNew` from the proof itself, so the relayer no longer
-/// trusts a client-supplied "new commitment". JSON keys use snake_case
-/// to match the relayer payload schema.
-struct SEPUpdatePublicInputs: Codable, Equatable, Sendable {
-    let cOld: Data
-    let epochOld: UInt64
-    let cNew: Data
+/// Generic envelope the relayer expects on `POST /`. Top-level shape
+/// (mirrors `RelayerRequest` in `onym-relayer/src/handler.rs`):
+///
+/// ```json
+/// {
+///   "contractID":   "C…",
+///   "contractType": "tyranny",
+///   "network":      "testnet",
+///   "function":     "create_group",
+///   "payload":      { …function-specific… }
+/// }
+/// ```
+///
+/// Payloads are typed per function (e.g. `TyrannyCreateGroupPayload`)
+/// and JSON-encoded with their own `CodingKeys`. JSONEncoder default
+/// `Data` strategy is base64 — the relayer accepts both base64 and hex
+/// (`decode_wire_bytes`), so byte fields round-trip without needing a
+/// custom encoder.
+struct SEPContractInvocation<Payload: Encodable & Sendable>: Encodable, Sendable {
+    let contractID: String
+    let contractType: SEPGroupType
+    let network: SEPNetwork
+    let function: String
+    let payload: Payload
 
     enum CodingKeys: String, CodingKey {
-        case cOld = "c_old"
-        case epochOld = "epoch_old"
-        case cNew = "c_new"
+        case contractID
+        case contractType
+        case network
+        case function
+        case payload
     }
 }
 
-/// Payload for `create_group_v2`. Used by Anarchy, 1v1, Democracy, AND
-/// Tyranny (the latter not yet listed in swift-mls). Oligarchy uses its
-/// own dedicated `SEPCreateOligarchyGroupRequest` because it seeds an
-/// extra admin root.
-struct SEPCreateGroupV2Request: Codable, Equatable, Sendable {
-    let caller: String
+/// `create_group` payload for the Tyranny contract. Differs from the
+/// Anarchy / 1-on-1 / Democracy shape — Tyranny needs the Poseidon
+/// `admin_pubkey_commitment` (32 B) as a separate CLI arg AND in the
+/// 4-element public-inputs vector that the contract verifies.
+///
+/// The PI vector is sent as 4 `Data` elements (each 32 bytes,
+/// JSON-encoded as base64 strings):
+/// `[commitment, fr_zero (= 32 zero bytes), admin_pubkey_commitment, group_id_fr]`
+/// — i.e. the SDK's 128-byte `Tyranny.CreateProof.publicInputs`
+/// bundle split into 4 chunks. Relayer handler:
+/// `build_public_inputs_from_object` → `ContractType::Tyranny` arm.
+struct TyrannyCreateGroupPayload: Encodable, Equatable, Sendable {
     let groupID: Data
     let commitment: Data
-    let tier: UInt32
-    let groupType: SEPGroupType
-    let memberCount: UInt32
+    let tier: Int
+    let adminPubkeyCommitment: Data
+    /// 1601-byte raw PLONK proof — relayer's `decode_wire_bytes(_, _, Some(1601))`
+    /// rejects anything else.
     let proof: Data
-    let publicInputs: SEPPublicInputs
+    /// 4 elements × 32 bytes — see comment above.
+    let publicInputs: [Data]
 
     enum CodingKeys: String, CodingKey {
-        case caller
         case groupID = "group_id"
         case commitment
         case tier
-        case groupType = "group_type"
-        case memberCount = "member_count"
+        case adminPubkeyCommitment = "admin_pubkey_commitment"
         case proof
-        case publicInputs = "public_inputs"
+        case publicInputs
     }
 }
 
-/// Payload for `update_commitment` (member-add / member-remove).
-struct SEPUpdateCommitmentRequest: Codable, Equatable, Sendable {
+/// `update_commitment` payload — Tyranny variant. Same 4-element PI
+/// shape as create, but the SDK's `Tyranny.UpdateProof.publicInputs`
+/// is 160 bytes = 5 chunks (`c_old || epoch_old || c_new ||
+/// admin_pubkey_commitment || group_id_fr`). Not used in PR-C; lives
+/// here so the chain seam is complete.
+struct TyrannyUpdateCommitmentPayload: Encodable, Equatable, Sendable {
     let groupID: Data
     let proof: Data
-    let publicInputs: SEPUpdatePublicInputs
+    let publicInputs: [Data]
 
     enum CodingKeys: String, CodingKey {
         case groupID = "group_id"
         case proof
-        case publicInputs = "public_inputs"
+        case publicInputs
     }
 }
 
-/// Payload for `get_state` / `get_state_v2` / `get_admin_root`.
-struct SEPGetStateRequest: Codable, Equatable, Sendable {
+/// Payload for `get_commitment`. The relayer's response is a JSON
+/// object containing `commitment`, `epoch`, `timestamp`, `tier`,
+/// `active` — captured by `SEPCommitmentEntry`.
+struct GetCommitmentPayload: Encodable, Equatable, Sendable {
     let groupID: Data
 
     enum CodingKeys: String, CodingKey {
@@ -106,8 +137,7 @@ struct SEPGetStateRequest: Codable, Equatable, Sendable {
     }
 }
 
-/// On-chain state returned by `get_state`. V1 entries (no group_type
-/// metadata).
+/// On-chain state returned by `get_commitment`.
 struct SEPCommitmentEntry: Codable, Equatable, Sendable {
     let commitment: Data
     let epoch: UInt64
@@ -116,9 +146,9 @@ struct SEPCommitmentEntry: Codable, Equatable, Sendable {
     let active: Bool
 }
 
-/// Relayer's response to a contract-invocation POST. `accepted` reflects
-/// the contract's verification result; `transactionHash` is set when a
-/// Soroban tx was actually submitted.
+/// Relayer's response to a contract-invocation POST. Mirrors
+/// `RelayerResponse` in `onym-relayer/src/handler.rs` — top-level
+/// camelCase with optional `transactionHash` and `message`.
 struct SEPSubmissionResponse: Codable, Equatable, Sendable {
     let accepted: Bool
     let transactionHash: String?

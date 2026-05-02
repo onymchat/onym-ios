@@ -13,6 +13,12 @@ struct SettingsView: View {
     @State private var showRecoveryPhrase = false
     @State private var showCreateGroup = false
 
+    /// Persisted in `UserDefaults` under the same key
+    /// `UserDefaultsNetworkPreference` reads. Toggling here changes the
+    /// network the next Create Group flow will use; existing groups
+    /// keep whatever network they were created on.
+    @AppStorage(UserDefaultsNetworkPreference.storageKey) private var useMainnet = false
+
     var body: some View {
         Form {
             Section {
@@ -69,10 +75,24 @@ struct SettingsView: View {
                     )
                 }
                 .accessibilityIdentifier("settings.anchors_row")
+
+                Toggle(isOn: $useMainnet) {
+                    HStack(spacing: 12) {
+                        SettingsIconBox(
+                            systemImage: useMainnet ? "globe.americas.fill" : "hammer.fill",
+                            background: useMainnet ? .green : .gray
+                        )
+                        Text("Use Mainnet")
+                    }
+                }
+                .accessibilityIdentifier("settings.use_mainnet_toggle")
             } header: {
                 Text("Network")
             } footer: {
-                Text("Choose the relayer that submits transactions and which contract version anchors new chats. Existing chats keep the contract they were created with.")
+                Text(useMainnet
+                    ? "New groups will be anchored on Stellar mainnet. Contracts must be deployed and allowlisted on the relayer."
+                    : "New groups will be anchored on Stellar testnet. Default while contracts are still being staged."
+                )
             }
         }
         .navigationTitle("Settings")

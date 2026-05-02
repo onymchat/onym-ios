@@ -1,26 +1,11 @@
 import Foundation
 
-/// Generic envelope wrapping a contract-function invocation. Mirrors
-/// `swift-mls`'s `SEPContractInvocation` so the relayer wire format stays
-/// in sync — the relayer reads `contract_id`, `function`, and `payload`
-/// out of the JSON top-level. Stellar Soroban SDK is intentionally not
-/// pulled in: relayers handle tx assembly + signing, this client just
-/// posts the function call.
-struct SEPContractInvocation<Payload: Encodable & Sendable>: Encodable, Sendable {
-    let contractID: String
-    let function: String
-    let payload: Payload
-
-    enum CodingKeys: String, CodingKey {
-        case contractID = "contract_id"
-        case function
-        case payload
-    }
-}
-
 /// Seam for the network leg. Tests inject a fake; production uses
 /// `URLSessionSEPContractTransport` constructed from a `RelayerEndpoint`
-/// resolved via `RelayerSelectionStrategy`.
+/// resolved by `RelayerRepository.selectURL`.
+///
+/// The `SEPContractInvocation` envelope itself lives in
+/// `SEPContractTypes.swift` so the wire-format types stay together.
 protocol SEPContractTransport: Sendable {
     func invoke<Payload: Encodable & Sendable, Response: Decodable & Sendable>(
         _ invocation: SEPContractInvocation<Payload>,
@@ -69,32 +54,41 @@ struct URLSessionSEPContractTransport: SEPContractTransport {
     }
 }
 
-/// Pins a `(contractID, transport)` pair and exposes the four contract
-/// entrypoints PR-A needs: `create_group_v2` (Anarchy / 1v1 / Democracy /
-/// Tyranny), `update_commitment` (Tyranny member-add later), `get_state`
-/// (post-create read-back). Per-type Oligarchy creation lives outside
-/// PR-A scope.
+/// Pins a `(contractID, contractType, network, transport)` tuple and
+/// exposes the per-function entrypoints PR-C needs:
+/// `create_group` (Tyranny only at this slice), `update_commitment`,
+/// `get_commitment`. Top-level fields are stamped onto every
+/// invocation so the relayer can route + allowlist-check.
 struct SEPContractClient: Sendable {
     let contractID: String
+    let contractType: SEPGroupType
+    let network: SEPNetwork
     let transport: any SEPContractTransport
 
-    init(contractID: String, transport: any SEPContractTransport) {
+    init(
+        contractID: String,
+        contractType: SEPGroupType,
+        network: SEPNetwork,
+        transport: any SEPContractTransport
+    ) {
         self.contractID = contractID
+        self.contractType = contractType
+        self.network = network
         self.transport = transport
     }
 
-    func createGroupV2(_ request: SEPCreateGroupV2Request) async throws -> SEPSubmissionResponse {
-        try await invoke("create_group_v2", payload: request, responseType: SEPSubmissionResponse.self)
+    func createGroupTyranny(_ payload: TyrannyCreateGroupPayload) async throws -> SEPSubmissionResponse {
+        try await invoke("create_group", payload: payload, responseType: SEPSubmissionResponse.self)
     }
 
-    func updateCommitment(_ request: SEPUpdateCommitmentRequest) async throws -> SEPSubmissionResponse {
-        try await invoke("update_commitment", payload: request, responseType: SEPSubmissionResponse.self)
+    func updateCommitmentTyranny(_ payload: TyrannyUpdateCommitmentPayload) async throws -> SEPSubmissionResponse {
+        try await invoke("update_commitment", payload: payload, responseType: SEPSubmissionResponse.self)
     }
 
-    func getState(groupID: Data) async throws -> SEPCommitmentEntry {
+    func getCommitment(groupID: Data) async throws -> SEPCommitmentEntry {
         try await invoke(
-            "get_state",
-            payload: SEPGetStateRequest(groupID: groupID),
+            "get_commitment",
+            payload: GetCommitmentPayload(groupID: groupID),
             responseType: SEPCommitmentEntry.self
         )
     }
@@ -105,7 +99,13 @@ struct SEPContractClient: Sendable {
         responseType: Response.Type
     ) async throws -> Response {
         try await transport.invoke(
-            SEPContractInvocation(contractID: contractID, function: function, payload: payload),
+            SEPContractInvocation(
+                contractID: contractID,
+                contractType: contractType,
+                network: network,
+                function: function,
+                payload: payload
+            ),
             responseType: responseType
         )
     }
