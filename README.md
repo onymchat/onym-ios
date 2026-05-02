@@ -58,18 +58,22 @@ Keychain.
 ├── scripts/
 │   └── lint-secrets.py                      ← static check: no off-repo secret reads
 ├── Sources/OnymIOS/
-│   ├── OnymIOSApp.swift                     ← @main, holds the repo
-│   ├── IdentityBootstrapView.swift          ← drains snapshots into @State
-│   └── Identity/
-│       ├── Identity.swift                   ← Sendable value type the views see
-│       ├── IdentityRepository.swift         ← actor + AsyncStream snapshots
-│       ├── KeychainStore.swift              ← single-blob Codable in Keychain
-│       ├── IdentityError.swift              ← single error type
-│       ├── Bip39.swift                      ← BIP39 wordlist + PBKDF2 + HKDF
-│       └── StellarStrKey.swift              ← Ed25519 → G... account ID encoder
+│   ├── OnymIOSApp.swift                     ← @main, holds repo + authenticator
+│   ├── Identity/
+│   │   ├── Identity.swift                   ← Sendable value type the views see
+│   │   ├── IdentityRepository.swift         ← actor + AsyncStream snapshots
+│   │   ├── KeychainStore.swift              ← single-blob Codable in Keychain
+│   │   ├── IdentityError.swift              ← single error type
+│   │   ├── Bip39.swift                      ← BIP39 wordlist + PBKDF2 + HKDF
+│   │   └── StellarStrKey.swift              ← Ed25519 → G... account ID encoder
+│   └── Recovery/
+│       ├── RecoveryPhraseBackupView.swift   ← root view + Intro/Reveal/Verify/Done
+│       ├── RecoveryPhraseBackupFlow.swift   ← @Observable @MainActor view-model
+│       └── BiometricAuthenticator.swift     ← protocol + LAContext impl
 ├── Tests/OnymIOSTests/
 │   ├── SmokeTests.swift                     ← OnymSDK wiring sanity check
-│   └── IdentityRepositoryTests.swift        ← real-Keychain integration tests
+│   ├── IdentityRepositoryTests.swift        ← real-Keychain integration tests
+│   └── RecoveryPhraseBackupFlowTests.swift  ← flow with real repo + fake auth
 └── README.md
 ```
 
@@ -218,6 +222,81 @@ The actor's executor serialises mutation; Keychain reads/writes,
 PBKDF2, HKDF, and OnymSDK FFI all run off the main thread by
 construction. Subscribers receive the current value immediately on
 subscribe, then a fresh value after every successful mutation.
+
+## Recovery-phrase backup flow
+
+The app currently boots straight into the "Back up keys" flow — the
+only screen wired up so far. The flow is the first piece of UI built
+on top of `IdentityRepository`, and it's the template for every
+subsequent flow: state lives in an `@Observable @MainActor`
+view-model; the view reads `flow.step` and emits intents; all side
+effects (`LAContext`, `UIPasteboard`, randomness, `Task.sleep`) are
+behind the flow boundary.
+
+```
+                     IdentityRepository (actor)
+                              │  AsyncStream<Identity?>
+                              ▼
+   RecoveryPhraseBackupFlow (@Observable @MainActor)
+   ┌─────────────────────────────────────────────────┐
+   │  step:  .intro                                  │
+   │       │ tappedContinueFromIntro                 │
+   │       ▼                                         │
+   │       authenticate() ── LAContext (via          │
+   │       │                  BiometricAuthenticator)│
+   │       ▼                                         │
+   │       .authFailed(reason) ◄── on failure        │
+   │       │ dismissedAuthError                      │
+   │       │                                         │
+   │       ▼ on success + identity ready             │
+   │       .reveal(phrase, revealed: false)          │
+   │       │ tappedReveal                            │
+   │       ▼                                         │
+   │       .reveal(phrase, revealed: true)           │
+   │       │ tappedCopyPhrase ── UIPasteboard        │
+   │       │                     (auto-clear 60s)    │
+   │       │ tappedContinueFromReveal                │
+   │       ▼                                         │
+   │       .verify(rounds: 3, index: 0, .idle)       │
+   │       │ picked(word:)                           │
+   │       │   correct → state .correct, sleep 450ms │
+   │       │             then advance index OR done  │
+   │       │   wrong   → state .wrong(word), retry   │
+   │       ▼                                         │
+   │       .done                                     │
+   │       │ tappedDoneFromCompletion                │
+   │       └──► back to .intro (single-screen app)   │
+   └─────────────────────────────────────────────────┘
+                              ▲
+                              │ intents
+                              │
+                  RecoveryPhraseBackupView (SwiftUI)
+                  reads flow.step, dispatches intents
+```
+
+The view never mutates state or calls OnymSDK; it doesn't even know
+about `IdentityRepository` directly. The flow's `start()` method
+bootstraps the repository and drains snapshots into a private
+`currentIdentity`. The Continue button on intro is gated on
+`flow.isReady` so a too-eager tap on first launch can't race the
+bootstrap write.
+
+The verify step picks 3 of 12 word positions at random, presents
+each as a 4-way multiple choice with the correct word + 3 distractors
+from the same phrase. On a wrong pick the user retries the same
+round; on three corrects in a row, the flow advances to `.done`.
+
+`BiometricAuthenticator` is a one-method protocol so the flow's
+unit tests can drive it without standing up a real `LAContext` (which
+needs UI presentation). `PasteboardWriter` plays the same role for
+`UIPasteboard` — tests use a fake that records what was written.
+
+13 XCTest cases in `RecoveryPhraseBackupFlowTests` cover every
+transition (intro → reveal → verify → done, auth failure, copy +
+auto-clear, wrong-pick retry, in-flight advance idempotency). Real
+`IdentityRepository` per test (unique Keychain service for
+isolation), seeded with a known mnemonic via `restore(mnemonic:)` so
+the recovery phrase is deterministic.
 
 ## Static checks
 
