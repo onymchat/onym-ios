@@ -1,0 +1,43 @@
+name: OnymIOS
+options:
+  bundleIdPrefix: chat.onym
+  deploymentTarget:
+    iOS: "17.0"
+  generateEmptyDirectories: true
+
+# OnymSDK is consumed via SwiftPM. The released tag pins a
+# .binaryTarget pointing at OnymFFI.xcframework attached to the
+# matching GitHub Release — SwiftPM downloads it at resolve time, so
+# this repo doesn't need Rust, the onym-contracts submodule, or any
+# cross-compile toolchain.
+packages:
+  OnymSDK:
+    url: https://github.com/onymchat/onym-sdk-swift.git
+    from: 0.0.1
+
+targets:
+  OnymIOS:
+    type: application
+    platform: iOS
+    sources:
+      - Sources/OnymIOS
+    dependencies:
+      - package: OnymSDK
+    settings:
+      base:
+        # Placeholder bundle id while this scaffold grows. Production
+        # iOS app currently lives under `chat.onym.ios` (the reference
+        # impl in stellar-mls); rename this when ready to take that
+        # over.
+        PRODUCT_BUNDLE_IDENTIFIER: chat.onym.ios.next
+        INFOPLIST_KEY_CFBundleDisplayName: Onym
+        MARKETING_VERSION: "0.0.1"
+        CURRENT_PROJECT_VERSION: 1
+        SWIFT_VERSION: "5.0"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: "UIInterfaceOrientationPortrait"
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGN_STYLE: Automatic
