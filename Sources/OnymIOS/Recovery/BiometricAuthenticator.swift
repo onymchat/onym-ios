@@ -30,6 +30,16 @@ struct LAContextAuthenticator: BiometricAuthenticator {
     }
 }
 
+#if DEBUG
+/// `BiometricAuthenticator` impl that always succeeds without prompting.
+/// Compiled out of Release builds so production never has a code path that
+/// silently bypasses biometric auth. Wired in by `OnymIOSApp.init` only
+/// when launched under XCUITest with the `--mock-biometric` argument.
+struct AlwaysAcceptAuthenticator: BiometricAuthenticator {
+    func authenticate(reason: String) async throws {}
+}
+#endif
+
 private extension LAContext {
     func evaluatePolicyAsync(_ policy: LAPolicy, localizedReason: String) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in

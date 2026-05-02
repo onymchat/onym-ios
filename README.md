@@ -60,7 +60,8 @@ Keychain.
 ├── scripts/
 │   └── lint-secrets.py                      ← static check: no off-repo secret reads
 ├── Sources/OnymIOS/
-│   ├── OnymIOSApp.swift                     ← @main, holds repo + authenticator
+│   ├── OnymIOSApp.swift                     ← @main, repo + authenticator + test wiring
+│   ├── RootView.swift                       ← TabView shell (Settings + Search role)
 │   ├── Identity/
 │   │   ├── Identity.swift                   ← Sendable value type the views see
 │   │   ├── IdentityRepository.swift         ← actor + AsyncStream snapshots
@@ -68,14 +69,28 @@ Keychain.
 │   │   ├── IdentityError.swift              ← single error type
 │   │   ├── Bip39.swift                      ← BIP39 wordlist + PBKDF2 + HKDF
 │   │   └── StellarStrKey.swift              ← Ed25519 → G... account ID encoder
-│   └── Recovery/
-│       ├── RecoveryPhraseBackupView.swift   ← root view + Intro/Reveal/Verify/Done
-│       ├── RecoveryPhraseBackupFlow.swift   ← @Observable @MainActor view-model
-│       └── BiometricAuthenticator.swift     ← protocol + LAContext impl
-├── Tests/OnymIOSTests/
+│   ├── Recovery/
+│   │   ├── RecoveryPhraseBackupView.swift   ← root view + Intro/Reveal/Verify/Done
+│   │   ├── RecoveryPhraseBackupFlow.swift   ← @Observable @MainActor view-model
+│   │   └── BiometricAuthenticator.swift     ← protocol + LAContext + DEBUG-only mock
+│   ├── Settings/
+│   │   └── SettingsView.swift               ← Form → Backup row → sheet
+│   └── Search/
+│       └── SearchView.swift                 ← placeholder for the .search role tab
+├── Tests/OnymIOSTests/                      ← unit / integration (XCTest, in-process)
 │   ├── SmokeTests.swift                     ← OnymSDK wiring sanity check
 │   ├── IdentityRepositoryTests.swift        ← real-Keychain integration tests
 │   └── RecoveryPhraseBackupFlowTests.swift  ← flow with real repo + fake auth
+├── Tests/OnymIOSUITests/                    ← XCUITest, drives the live app
+│   ├── RecoveryPhraseBackupUITests.swift    ← end-to-end flow coverage
+│   ├── PageObjects/                         ← per-screen wrappers
+│   │   ├── SettingsScreen.swift
+│   │   ├── IntroScreen.swift
+│   │   ├── RevealScreen.swift
+│   │   ├── VerifyScreen.swift
+│   │   └── DoneScreen.swift
+│   └── Support/
+│       └── AppLauncher.swift                ← fresh-launch helper with test args
 └── README.md
 ```
 
@@ -299,6 +314,91 @@ auto-clear, wrong-pick retry, in-flight advance idempotency). Real
 `IdentityRepository` per test (unique Keychain service for
 isolation), seeded with a known mnemonic via `restore(mnemonic:)` so
 the recovery phrase is deterministic.
+
+## UI tests
+
+`Tests/OnymIOSUITests/` is a separate `bundle.ui-testing` target (its
+own process, distinct from the in-process `OnymIOSTests` unit
+bundle). Tests boot the real app via `XCUIApplication`, drive it
+through the live SwiftUI views, and assert against the
+accessibility tree.
+
+### App-side test hooks
+
+`OnymIOSApp.init` reads three launch arguments under `#if DEBUG` so
+each test starts from a clean, deterministic state. Production
+Release builds compile this code path out — there's no way for a
+shipped binary to take the test-mode branch.
+
+| arg                  | effect                                                                                |
+|----------------------|---------------------------------------------------------------------------------------|
+| `--ui-testing`       | Required gate. Without it the App ignores the other two args.                         |
+| `--reset-keychain`   | Wipes the test-isolated keychain item before bootstrap.                               |
+| `--mock-biometric`   | Swaps `LAContextAuthenticator` for `AlwaysAcceptAuthenticator` (DEBUG-only struct).   |
+
+UI tests use a separate Keychain service
+(`chat.onym.ios.identity.uitests`) that is never touched by
+production builds, so even a developer running tests on their own
+device cannot disturb their real identity.
+
+### Page-object pattern
+
+Each screen has a `XYZScreen` struct in `PageObjects/` exposing the
+elements and high-level actions tests need:
+
+```swift
+let app = AppLauncher.launchFresh(language: "en")
+let settings = SettingsScreen(app: app)
+settings.tapBackupRecoveryPhrase()
+
+let intro = IntroScreen(app: app)
+intro.tapContinue()                           // waits for isReady internally
+
+let reveal = RevealScreen(app: app)
+reveal.tapReveal()
+let phrase = reveal.capturedPhrase()          // reads positions 1…12
+
+let verify = VerifyScreen(app: app)
+let position = verify.waitForRound()
+verify.pick(word: phrase[position - 1])
+```
+
+Selectors are stable accessibility identifiers
+(`reveal.word.<position>`, `verify.option.<word>`,
+`settings.backup_recovery_phrase_row`, etc.) — never label text,
+which would break the moment we localize a string or copy-edit a
+button.
+
+### How verify works without knowing the phrase
+
+The flow generates 3 random rounds, each picking a random word
+position and 4 random distractors. Tests can't predict which word
+is correct without reading the phrase off the Reveal screen first
+— so each test that exercises Verify reads the phrase via
+`reveal.capturedPhrase()`, then on each Verify round looks up the
+word at the requested position.
+
+### Wiring & runtime
+
+The `OnymIOS` scheme runs both `OnymIOSTests` and `OnymIOSUITests`
+on `xcodebuild test` (no `-only-testing` flag needed). Defaults:
+
+```sh
+xcodebuild test \
+  -project OnymIOS.xcodeproj \
+  -scheme OnymIOS \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -derivedDataPath /tmp/onym-ios-build
+```
+
+Wall-clock on iPhone 17 Pro simulator: ~89s for the full UI suite
+(4 cases × ~22s/each, dominated by the simulator launch). Unit
+tests still complete in ~1s. Run only the UI suite with
+`-only-testing:OnymIOSUITests`.
+
+The release pipeline (`.github/workflows/release.yml`) runs both
+suites in its `test` job — same `xcodebuild test` invocation, same
+`OnymIOS` scheme. UI tests are part of the release gate.
 
 ## Localization
 

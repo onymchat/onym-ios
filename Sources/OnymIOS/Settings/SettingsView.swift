@@ -22,6 +22,7 @@ struct SettingsView: View {
                     )
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("settings.backup_recovery_phrase_row")
             } header: {
                 Text("Security")
             } footer: {

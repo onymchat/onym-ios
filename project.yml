@@ -68,12 +68,29 @@ targets:
       - target: OnymIOS
       - package: OnymSDK
 
+  OnymIOSUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - Tests/OnymIOSUITests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: chat.onym.ios.uitests
+        SWIFT_VERSION: "5.0"
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ${DEVELOPMENT_TEAM}
+        TEST_TARGET_NAME: OnymIOS
+    dependencies:
+      - target: OnymIOS
+
 schemes:
   OnymIOS:
     build:
       targets:
         OnymIOS: all
         OnymIOSTests: [test]
+        OnymIOSUITests: [test]
     run:
       config: Debug
       environmentVariables:
@@ -82,6 +99,7 @@ schemes:
       config: Debug
       targets:
         - OnymIOSTests
+        - OnymIOSUITests
     profile:
       config: Release
     analyze:

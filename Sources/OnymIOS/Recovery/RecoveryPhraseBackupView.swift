@@ -150,6 +150,7 @@ private struct IntroScreen: View {
                 .opacity(isReady ? 1 : 0.5)
                 .padding(.horizontal, 16)
                 .padding(.top, 22)
+                .accessibilityIdentifier("intro.continue_button")
             }
             .padding(.bottom, 28)
         }
@@ -264,6 +265,7 @@ private struct RevealScreen: View {
                     }
                     .disabled(!revealed)
                     .opacity(revealed ? 1 : 0.4)
+                    .accessibilityIdentifier("reveal.copy_button")
                 }
                 .padding(.horizontal, 16)
 
@@ -279,6 +281,7 @@ private struct RevealScreen: View {
                 .opacity(revealed ? 1 : 0.5)
                 .padding(.horizontal, 16)
                 .padding(.top, 14)
+                .accessibilityIdentifier("reveal.continue_button")
 
                 Text("The phrase is generated on-device and never sent off the device.")
                     .font(.footnote)
@@ -312,6 +315,7 @@ private struct RevealScreen: View {
                             .monospacedDigit()
                         Text(word)
                             .font(.callout.weight(.medium))
+                            .accessibilityIdentifier("reveal.word.\(index + 1)")
                         Spacer(minLength: 0)
                     }
                     .padding(.horizontal, 10)
@@ -343,6 +347,7 @@ private struct RevealScreen: View {
                     }
                 }
                 .contentShape(Rectangle())
+                .accessibilityIdentifier("reveal.tap_button")
             }
         }
         .frame(maxWidth: .infinity)
@@ -377,6 +382,7 @@ private struct VerifyScreen: View {
                         .font(.system(size: 64, weight: .bold))
                         .foregroundStyle(Color.accentColor)
                         .monospacedDigit()
+                        .accessibilityIdentifier("verify.position")
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 20)
@@ -408,6 +414,7 @@ private struct VerifyScreen: View {
                         .frame(maxWidth: .infinity)
                         .padding(.horizontal, 32)
                         .padding(.top, 18)
+                        .accessibilityIdentifier("verify.error_message")
                 }
             }
             .padding(.bottom, 28)
@@ -450,6 +457,7 @@ private struct VerifyOption: View {
             )
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("verify.option.\(word)")
     }
 
     private var background: Color {
@@ -513,6 +521,7 @@ private struct DoneScreen: View {
             Text("Backup verified")
                 .font(.title.weight(.bold))
                 .padding(.bottom, 10)
+                .accessibilityIdentifier("done.title")
             Text("Your recovery phrase is confirmed. Store it somewhere safe — you'll only need it if you lose this device.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -529,6 +538,7 @@ private struct DoneScreen: View {
                     .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
             .padding(.horizontal, 16)
+            .accessibilityIdentifier("done.button")
 
             Spacer()
 
