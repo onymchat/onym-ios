@@ -41,14 +41,27 @@ When it does land:
 
 ```
 .
-├── project.yml                 ← xcodegen source of truth
-├── generate-xcodeproj.sh       ← regenerates OnymIOS.xcodeproj
-├── Sources/
-│   └── OnymIOS/
-│       ├── OnymIOSApp.swift          ← @main
-│       └── SDKWiringSmokeView.swift  ← one OnymSDK call to verify wiring
+├── project.yml                          ← xcodegen source of truth
+├── generate-xcodeproj.sh                ← regenerates OnymIOS.xcodeproj
+├── Sources/OnymIOS/
+│   ├── OnymIOSApp.swift                 ← @main
+│   └── SDKWiringSmokeView.swift         ← one OnymSDK call to verify wiring
+├── Tests/OnymIOSTests/
+│   └── SmokeTests.swift                 ← one XCTest exercising the same call
 └── README.md
 ```
+
+Bundle id is `chat.onym.ios` (production) — same as the reference
+impl currently shipping from `stellar-mls/clients/ios`. As long as
+both repos exist in parallel they'll fight over the same install
+slot on a device; coordinate the cutover when promoting onym-ios to
+the production build.
+
+Project options match the reference impl: deployment target iOS
+26.0, Xcode 26.0, the same `INFOPLIST_KEY_*` set (orientations,
+indirect input events, scene manifest), `TARGETED_DEVICE_FAMILY`
+1+2 (iPhone + iPad), `DEVELOPMENT_TEAM` from environment so unsigned
+builds work without local config.
 
 ## Build status — blocked on upstream
 

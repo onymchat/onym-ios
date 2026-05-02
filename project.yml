@@ -2,7 +2,8 @@ name: OnymIOS
 options:
   bundleIdPrefix: chat.onym
   deploymentTarget:
-    iOS: "17.0"
+    iOS: "26.0"
+  xcodeVersion: "26.0"
   generateEmptyDirectories: true
 
 # OnymSDK is consumed via SwiftPM. The released tag pins a
@@ -25,19 +26,56 @@ targets:
       - package: OnymSDK
     settings:
       base:
-        # Placeholder bundle id while this scaffold grows. Production
-        # iOS app currently lives under `chat.onym.ios` (the reference
-        # impl in stellar-mls); rename this when ready to take that
-        # over.
-        PRODUCT_BUNDLE_IDENTIFIER: chat.onym.ios.next
+        PRODUCT_BUNDLE_IDENTIFIER: chat.onym.ios
         INFOPLIST_KEY_CFBundleDisplayName: Onym
         MARKETING_VERSION: "0.0.1"
         CURRENT_PROJECT_VERSION: 1
         SWIFT_VERSION: "5.0"
         GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
-        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: "UIInterfaceOrientationPortrait"
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: NO
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ${DEVELOPMENT_TEAM}
+
+  OnymIOSTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - Tests/OnymIOSTests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: chat.onym.ios.tests
+        SWIFT_VERSION: "5.0"
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ${DEVELOPMENT_TEAM}
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/OnymIOS.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/OnymIOS"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+    dependencies:
+      - target: OnymIOS
+      - package: OnymSDK
+
+schemes:
+  OnymIOS:
+    build:
+      targets:
+        OnymIOS: all
+        OnymIOSTests: [test]
+    run:
+      config: Debug
+      environmentVariables:
+        OS_ACTIVITY_MODE: disable
+    test:
+      config: Debug
+      targets:
+        - OnymIOSTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
