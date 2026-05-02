@@ -3,22 +3,24 @@ import Foundation
 /// One entry in the known-relayers list published at
 /// `https://github.com/onymchat/onym-relayer/releases/latest/download/relayers.json`.
 /// Pure value type — no behaviour, just the wire shape. Custom user-
-/// added entries also use this type, with `network = "custom"`.
+/// added entries also use this type, with `networks = ["custom"]`.
 struct RelayerEndpoint: Codable, Equatable, Hashable, Identifiable, Sendable {
     /// Display name. For known entries, comes from the published list.
     /// For custom entries, defaults to the URL's host.
     let name: String
     /// Base URL of the relayer (no trailing slash).
     let url: URL
-    /// `"testnet"` / `"public"` (Stellar mainnet) / `"custom"`. Drives
-    /// the badge in the picker so a user doesn't accidentally treat a
-    /// mainnet relayer as testnet (or vice versa).
-    let network: String
+    /// One or more of `"testnet"` / `"public"` (Stellar mainnet) /
+    /// `"custom"`. The published manifest may list multiple networks
+    /// per relayer (a single deployment can serve both testnet and
+    /// mainnet). Drives the network badges in the picker so a user
+    /// doesn't accidentally treat a mainnet relayer as testnet.
+    let networks: [String]
 
     /// Stable id for SwiftUI list diffing — URL is the natural unique key.
     var id: URL { url }
 
-    /// Sentinel for the `network` field of user-typed entries.
+    /// Sentinel for `networks` of user-typed entries.
     static let customNetwork = "custom"
 
     /// Convenience for synthesising an endpoint from a custom URL the
@@ -28,8 +30,45 @@ struct RelayerEndpoint: Codable, Equatable, Hashable, Identifiable, Sendable {
         RelayerEndpoint(
             name: url.host() ?? url.absoluteString,
             url: url,
-            network: customNetwork
+            networks: [customNetwork]
         )
+    }
+
+    // MARK: - Codable
+
+    /// Backward-compat decoder: accepts the new `networks: [String]`
+    /// shape AND the legacy `network: String` shape (PR #20 / #22
+    /// saved configurations + the early relayers.json wire format).
+    /// Encoder always emits the new shape.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        url = try c.decode(URL.self, forKey: .url)
+        if let plural = try c.decodeIfPresent([String].self, forKey: .networks) {
+            networks = plural
+        } else if let singular = try c.decodeIfPresent(String.self, forKey: .legacyNetwork) {
+            networks = [singular]
+        } else {
+            networks = []
+        }
+    }
+
+    init(name: String, url: URL, networks: [String]) {
+        self.name = name
+        self.url = url
+        self.networks = networks
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(name, forKey: .name)
+        try c.encode(url, forKey: .url)
+        try c.encode(networks, forKey: .networks)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case name, url, networks
+        case legacyNetwork = "network"
     }
 }
 

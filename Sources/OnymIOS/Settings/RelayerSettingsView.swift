@@ -105,7 +105,7 @@ struct RelayerSettingsView: View {
                     .truncationMode(.middle)
             }
             Spacer()
-            networkBadge(endpoint.network)
+            networkBadges(endpoint.networks)
         }
         // `.contain` keeps the inner star Button individually
         // accessible (otherwise SwiftUI flattens the HStack into a
@@ -119,46 +119,99 @@ struct RelayerSettingsView: View {
 
     @ViewBuilder
     private var addFromKnownSection: some View {
-        let unconfigured = flow.unconfiguredKnownList
         Section {
-            if flow.state.snapshot.knownList.isEmpty {
-                HStack {
-                    ProgressView()
-                    Text("Fetching list…").foregroundStyle(.secondary)
-                }
-            } else if unconfigured.isEmpty {
-                Text("All published relayers added.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(unconfigured) { endpoint in
-                    Button {
-                        flow.tappedAddKnown(endpoint)
-                    } label: {
-                        HStack(spacing: 12) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(endpoint.name)
-                                    .foregroundStyle(.primary)
-                                Text(endpoint.url.absoluteString)
-                                    .font(.caption.monospaced())
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                            }
-                            Spacer()
-                            networkBadge(endpoint.network)
-                            Image(systemName: "plus.circle.fill")
-                                .foregroundStyle(Color.accentColor)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("relayer.add.known.\(endpoint.url.absoluteString)")
-                }
-            }
+            knownSectionContent
         } header: {
             Text("Add from Published List")
         } footer: {
             Text("Published by the onym-relayer project. Tap to add.")
+        }
+    }
+
+    /// Status-aware content for the published-list section. Gates on
+    /// `fetchStatus` (NOT `knownList.isEmpty`) so a failed fetch shows
+    /// an actionable error + retry instead of spinning forever, and a
+    /// successful fetch with an empty list shows that explicitly.
+    @ViewBuilder
+    private var knownSectionContent: some View {
+        let snapshot = flow.state.snapshot
+        let unconfigured = flow.unconfiguredKnownList
+        switch snapshot.fetchStatus {
+        case .idle:
+            // Background fetch hasn't been kicked off yet (or app
+            // launched without `.task { repo.start() }`).
+            HStack {
+                ProgressView()
+                Text("Fetching list…").foregroundStyle(.secondary)
+            }
+            .accessibilityIdentifier("relayer.add.known.fetching")
+
+        case .fetching:
+            // In flight; show the spinner unless we already have a
+            // cached list to display from a previous successful run.
+            if snapshot.knownList.isEmpty {
+                HStack {
+                    ProgressView()
+                    Text("Fetching list…").foregroundStyle(.secondary)
+                }
+                .accessibilityIdentifier("relayer.add.known.fetching")
+            } else {
+                knownEndpointsList(unconfigured: unconfigured)
+            }
+
+        case .failed(let message):
+            VStack(alignment: .leading, spacing: 8) {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Button("Try Again") {
+                    flow.tappedRetryFetch()
+                }
+                .accessibilityIdentifier("relayer.add.known.retry")
+            }
+
+        case .success:
+            if snapshot.knownList.isEmpty {
+                Text("No published relayers yet.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("relayer.add.known.empty")
+            } else if unconfigured.isEmpty {
+                Text("All published relayers added.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("relayer.add.known.all_added")
+            } else {
+                knownEndpointsList(unconfigured: unconfigured)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func knownEndpointsList(unconfigured: [RelayerEndpoint]) -> some View {
+        ForEach(unconfigured) { endpoint in
+            Button {
+                flow.tappedAddKnown(endpoint)
+            } label: {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(endpoint.name)
+                            .foregroundStyle(.primary)
+                        Text(endpoint.url.absoluteString)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    Spacer()
+                    networkBadges(endpoint.networks)
+                    Image(systemName: "plus.circle.fill")
+                        .foregroundStyle(Color.accentColor)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("relayer.add.known.\(endpoint.url.absoluteString)")
         }
     }
 
@@ -195,13 +248,21 @@ struct RelayerSettingsView: View {
 
     // MARK: - Atoms
 
-    private func networkBadge(_ network: String) -> some View {
-        Text(network.uppercased())
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(badgeForeground(for: network))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(badgeForeground(for: network).opacity(0.15), in: Capsule())
+    /// Render one badge per network the relayer serves. The published
+    /// manifest may list multiple networks per endpoint (a single
+    /// deployment can serve testnet + mainnet); custom user entries
+    /// have a single `"custom"` badge.
+    private func networkBadges(_ networks: [String]) -> some View {
+        HStack(spacing: 4) {
+            ForEach(networks, id: \.self) { network in
+                Text(network.uppercased())
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(badgeForeground(for: network))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(badgeForeground(for: network).opacity(0.15), in: Capsule())
+            }
+        }
     }
 
     private func badgeForeground(for network: String) -> Color {

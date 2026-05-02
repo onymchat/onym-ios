@@ -13,9 +13,9 @@ import XCTest
 /// - background `start()` is idempotent (no double fetch) and silent
 ///   on error.
 final class RelayerRepositoryTests: XCTestCase {
-    private let a = RelayerEndpoint(name: "A", url: URL(string: "https://a.example")!, network: "testnet")
-    private let b = RelayerEndpoint(name: "B", url: URL(string: "https://b.example")!, network: "testnet")
-    private let c = RelayerEndpoint(name: "C", url: URL(string: "https://c.example")!, network: "public")
+    private let a = RelayerEndpoint(name: "A", url: URL(string: "https://a.example")!, networks: ["testnet"])
+    private let b = RelayerEndpoint(name: "B", url: URL(string: "https://b.example")!, networks: ["testnet"])
+    private let c = RelayerEndpoint(name: "C", url: URL(string: "https://c.example")!, networks: ["public"])
 
     // MARK: - construction
 
@@ -48,7 +48,7 @@ final class RelayerRepositoryTests: XCTestCase {
         let repo = makeRepo(store: store)
 
         await repo.addEndpoint(a)
-        let renamed = RelayerEndpoint(name: "A renamed", url: a.url, network: a.network)
+        let renamed = RelayerEndpoint(name: "A renamed", url: a.url, networks: a.networks)
         let inserted = await repo.addEndpoint(renamed)
 
         XCTAssertFalse(inserted)
@@ -320,6 +320,78 @@ final class RelayerRepositoryTests: XCTestCase {
 
         await repo.setStrategy(.primary)
         XCTAssertTrue(store.loadConfiguration().hasUserInteracted)
+    }
+
+    // MARK: - fetch status
+
+    func test_initialState_fetchStatusIsIdle() async {
+        let repo = makeRepo()
+        let state = await repo.currentState()
+        XCTAssertEqual(state.fetchStatus, .idle)
+    }
+
+    func test_refresh_success_setsFetchStatusToSuccess() async throws {
+        let store = InMemoryRelayerSelectionStore()
+        let fetcher = FakeKnownRelayersFetcher(mode: .succeeds([a]))
+        let repo = RelayerRepository(fetcher: fetcher, store: store)
+
+        try await repo.refresh()
+
+        let status = await repo.currentState().fetchStatus
+        XCTAssertEqual(status, .success)
+    }
+
+    func test_refresh_success_emptyList_stillSetsSuccess() async throws {
+        let store = InMemoryRelayerSelectionStore()
+        let fetcher = FakeKnownRelayersFetcher(mode: .succeeds([]))
+        let repo = RelayerRepository(fetcher: fetcher, store: store)
+
+        try await repo.refresh()
+
+        let status = await repo.currentState().fetchStatus
+        XCTAssertEqual(status, .success,
+                       "empty fetched list is still a SUCCESS — UI shows 'No published relayers yet' rather than spinning")
+    }
+
+    func test_refresh_failure_setsFetchStatusToFailed_andRethrows() async {
+        let store = InMemoryRelayerSelectionStore()
+        let fetcher = FakeKnownRelayersFetcher(
+            mode: .failing(KnownRelayersFetchError.badStatus(404))
+        )
+        let repo = RelayerRepository(fetcher: fetcher, store: store)
+
+        do {
+            try await repo.refresh()
+            XCTFail("expected refresh to rethrow on fetcher failure")
+        } catch {
+            // expected
+        }
+
+        let status = await repo.currentState().fetchStatus
+        if case .failed(let message) = status {
+            XCTAssertFalse(message.isEmpty,
+                           "failed status must carry a non-empty user-facing message")
+        } else {
+            XCTFail("expected .failed, got \(status)")
+        }
+    }
+
+    func test_refresh_failure_leavesCachedKnownListIntact() async {
+        let cached = [a, b]
+        let store = InMemoryRelayerSelectionStore(cachedList: cached)
+        let fetcher = FakeKnownRelayersFetcher(
+            mode: .failing(URLError(.notConnectedToInternet))
+        )
+        let repo = RelayerRepository(fetcher: fetcher, store: store)
+
+        try? await repo.refresh()
+
+        let state = await repo.currentState()
+        XCTAssertEqual(state.knownList, cached,
+                       "fetch failure must not erase the cached list (UI still shows what it had)")
+        if case .failed = state.fetchStatus {} else {
+            XCTFail("expected .failed status after a fetch error")
+        }
     }
 
     // MARK: - helpers

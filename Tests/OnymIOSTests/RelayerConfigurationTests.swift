@@ -5,9 +5,9 @@ import XCTest
 /// chain interactors will call per request. No actor, no I/O, just
 /// the strategy + primary fallback rules.
 final class RelayerConfigurationTests: XCTestCase {
-    private let a = RelayerEndpoint(name: "A", url: URL(string: "https://a.example")!, network: "testnet")
-    private let b = RelayerEndpoint(name: "B", url: URL(string: "https://b.example")!, network: "testnet")
-    private let c = RelayerEndpoint(name: "C", url: URL(string: "https://c.example")!, network: "public")
+    private let a = RelayerEndpoint(name: "A", url: URL(string: "https://a.example")!, networks: ["testnet"])
+    private let b = RelayerEndpoint(name: "B", url: URL(string: "https://b.example")!, networks: ["testnet"])
+    private let c = RelayerEndpoint(name: "C", url: URL(string: "https://c.example")!, networks: ["public"])
 
     // MARK: - empty
 

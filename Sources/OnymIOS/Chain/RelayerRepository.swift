@@ -1,14 +1,36 @@
 import Foundation
 
-/// Combined snapshot consumed by the picker view. Three halves change
-/// independently — refreshing the GitHub list is async; configuration
-/// changes are synchronous user actions — but views always want them
-/// in one go.
+/// Outcome of the most recent attempt to fetch the published
+/// relayers list. Lets the picker show the right copy:
+/// - `.idle`: never attempted (cold launch before `start()`).
+/// - `.fetching`: in flight — show the spinner.
+/// - `.success`: got an answer (possibly an empty list — UI shows
+///   "No published relayers yet" rather than spinning forever).
+/// - `.failed(message)`: GitHub unreachable, asset 404, JSON broken,
+///   etc. UI shows the message + a retry affordance instead of
+///   spinning indefinitely.
+enum RelayerFetchStatus: Equatable, Sendable {
+    case idle
+    case fetching
+    case success
+    case failed(message: String)
+}
+
+/// Combined snapshot consumed by the picker view. The three halves
+/// change independently — the configuration is mutated synchronously
+/// by user intents, the known list is the result of an async GitHub
+/// fetch, the fetch status reflects the in-flight / failed state of
+/// that fetch — but views always want them in one go.
 struct RelayerState: Equatable, Sendable {
     let configuration: RelayerConfiguration
     let knownList: [RelayerEndpoint]
+    let fetchStatus: RelayerFetchStatus
 
-    static let empty = RelayerState(configuration: .empty, knownList: [])
+    static let empty = RelayerState(
+        configuration: .empty,
+        knownList: [],
+        fetchStatus: .idle
+    )
 }
 
 /// Owns the user's relayer configuration (multiple endpoints, primary
@@ -39,7 +61,8 @@ actor RelayerRepository {
         self.store = store
         self.cached = RelayerState(
             configuration: store.loadConfiguration(),
-            knownList: store.loadCachedKnownList()
+            knownList: store.loadCachedKnownList(),
+            fetchStatus: .idle
         )
     }
 
@@ -67,7 +90,28 @@ actor RelayerRepository {
     /// sticky — subsequent fetches never re-auto-populate, so a user
     /// who explicitly clears the list isn't fought by the next refresh.
     func refresh() async throws {
-        let list = try await fetcher.fetchLatest()
+        // Mark in-flight so the picker stops showing whatever stale
+        // status it had and renders the spinner.
+        cached = RelayerState(
+            configuration: cached.configuration,
+            knownList: cached.knownList,
+            fetchStatus: .fetching
+        )
+        publish()
+
+        let list: [RelayerEndpoint]
+        do {
+            list = try await fetcher.fetchLatest()
+        } catch {
+            cached = RelayerState(
+                configuration: cached.configuration,
+                knownList: cached.knownList,
+                fetchStatus: .failed(message: Self.message(for: error))
+            )
+            publish()
+            throw error
+        }
+
         store.saveCachedKnownList(list)
 
         let current = cached.configuration
@@ -84,8 +128,28 @@ actor RelayerRepository {
             updatedConfig = current
         }
 
-        cached = RelayerState(configuration: updatedConfig, knownList: list)
+        cached = RelayerState(
+            configuration: updatedConfig,
+            knownList: list,
+            fetchStatus: .success
+        )
         publish()
+    }
+
+    /// Map any thrown fetch error to a user-facing one-liner. Keeps
+    /// the picker copy short — the chain layer's diagnostic detail
+    /// doesn't belong in the UI.
+    private static func message(for error: Error) -> String {
+        switch error {
+        case KnownRelayersFetchError.badStatus(let code):
+            return String(localized: "Couldn't reach the published list (status \(code)).")
+        case KnownRelayersFetchError.malformedDocument:
+            return String(localized: "Published list is in an unexpected format.")
+        case is URLError:
+            return String(localized: "Couldn't reach the published list.")
+        default:
+            return String(localized: "Couldn't reach the published list.")
+        }
     }
 
     // MARK: - Configuration mutations
@@ -189,7 +253,11 @@ actor RelayerRepository {
 
     private func applyConfiguration(_ configuration: RelayerConfiguration) {
         store.saveConfiguration(configuration)
-        cached = RelayerState(configuration: configuration, knownList: cached.knownList)
+        cached = RelayerState(
+            configuration: configuration,
+            knownList: cached.knownList,
+            fetchStatus: cached.fetchStatus
+        )
         publish()
     }
 
