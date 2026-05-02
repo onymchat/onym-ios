@@ -9,4 +9,5 @@ struct AppDependencies {
     let makeRecoveryPhraseBackupFlow: @MainActor () -> RecoveryPhraseBackupFlow
     let makeRelayerSettingsFlow: @MainActor () -> RelayerSettingsFlow
     let makeAnchorsPickerFlow: @MainActor () -> AnchorsPickerFlow
+    let makeCreateGroupFlow: @MainActor () -> CreateGroupFlow
 }

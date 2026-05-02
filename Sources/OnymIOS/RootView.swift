@@ -26,7 +26,8 @@ struct RootView: View {
                     SettingsView(
                         makeBackupFlow: dependencies.makeRecoveryPhraseBackupFlow,
                         makeRelayerSettingsFlow: dependencies.makeRelayerSettingsFlow,
-                        makeAnchorsPickerFlow: dependencies.makeAnchorsPickerFlow
+                        makeAnchorsPickerFlow: dependencies.makeAnchorsPickerFlow,
+                        makeCreateGroupFlow: dependencies.makeCreateGroupFlow
                     )
                 }
             }
