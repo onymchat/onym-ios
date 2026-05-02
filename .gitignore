@@ -71,6 +71,12 @@ vendor/
 !.env.example
 !.env.sample
 
+# Relayer Bearer auth token — bundled at build time, never committed.
+# Local dev: copy RelayerSecrets.example.json → RelayerSecrets.json and
+# paste the dev token. Release CI: workflow writes this file from the
+# repo's `RELAYER_AUTH_TOKEN` secret before xcodegen runs.
+Resources/RelayerSecrets.json
+
 # Logs and temporary files
 *.log
 *.tmp

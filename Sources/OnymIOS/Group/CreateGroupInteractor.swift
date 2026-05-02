@@ -52,7 +52,10 @@ struct CreateGroupInteractor: Sendable {
         proofGenerator: any GroupProofGenerator = OnymGroupProofGenerator(),
         inboxTransport: any InboxTransport,
         makeContractTransport: @escaping @Sendable (URL) -> any SEPContractTransport = { url in
-            URLSessionSEPContractTransport(endpoint: url)
+            URLSessionSEPContractTransport(
+                endpoint: url,
+                authToken: RelayerSecrets.authToken
+            )
         }
     ) {
         self.identity = identity

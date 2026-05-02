@@ -18,17 +18,24 @@ struct URLSessionSEPContractTransport: SEPContractTransport {
     let session: URLSession
     let encoder: JSONEncoder
     let decoder: JSONDecoder
+    /// Optional Bearer token. When non-nil, every POST gets
+    /// `Authorization: Bearer <token>`. The relayer requires this
+    /// when `RELAYER_AUTH_TOKENS` is configured server-side
+    /// (`onym-relayer/src/validation.rs::validate_auth`).
+    let authToken: String?
 
     init(
         endpoint: URL,
         session: URLSession = .shared,
         encoder: JSONEncoder = JSONEncoder(),
-        decoder: JSONDecoder = JSONDecoder()
+        decoder: JSONDecoder = JSONDecoder(),
+        authToken: String? = nil
     ) {
         self.endpoint = endpoint
         self.session = session
         self.encoder = encoder
         self.decoder = decoder
+        self.authToken = authToken
     }
 
     func invoke<Payload: Encodable & Sendable, Response: Decodable & Sendable>(
@@ -38,6 +45,9 @@ struct URLSessionSEPContractTransport: SEPContractTransport {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let authToken {
+            request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
+        }
         request.httpBody = try encoder.encode(invocation)
 
         let (data, response) = try await session.data(for: request)

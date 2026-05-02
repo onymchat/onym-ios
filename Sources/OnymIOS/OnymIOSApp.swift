@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct OnymIOSApp: App {
     private let dependencies: AppDependencies
+    private let identityRepository: IdentityRepository
     private let relayerRepository: RelayerRepository
     private let contractsRepository: ContractsRepository
     private let groupRepository: GroupRepository
@@ -57,6 +58,7 @@ struct OnymIOSApp: App {
             store: UserDefaultsAnchorSelectionStore()
         )
         #endif
+        self.identityRepository = repository
         self.relayerRepository = relayerRepository
         self.contractsRepository = contractsRepository
 
@@ -107,6 +109,14 @@ struct OnymIOSApp: App {
         WindowGroup {
             RootView(dependencies: dependencies)
                 .task {
+                    // Bootstrap the identity eagerly so flows that need it
+                    // (Create Group, invitation seal, …) don't fail with
+                    // `.missingIdentity` if the user never opens the
+                    // Backup screen first. Idempotent: a second call after
+                    // success is a no-op. Failure is silent — the next
+                    // operation that needs identity will surface a clear
+                    // error to the user.
+                    _ = try? await identityRepository.bootstrap()
                     // Kick off both GitHub Releases fetches as soon as the
                     // app is on screen. Failures are silent; the user can
                     // still enter a custom relayer URL / pick an older
