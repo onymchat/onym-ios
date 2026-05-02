@@ -178,8 +178,15 @@ enum OnymUIGovernance: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// Per-PR-C scope: only Tyranny is wired to the chain layer.
-    var isAvailable: Bool { self == .tyranny }
+    /// True when this governance type is wired through the chain
+    /// layer end-to-end. Anarchy stays gated behind a "Soon" pill
+    /// until its create flow ships; Tyranny + 1-on-1 are live.
+    var isAvailable: Bool {
+        switch self {
+        case .tyranny, .oneOnOne: true
+        case .anarchy: false
+        }
+    }
 
     var sepGroupType: SEPGroupType {
         switch self {
