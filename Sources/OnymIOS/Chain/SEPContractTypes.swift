@@ -137,13 +137,24 @@ struct GetCommitmentPayload: Encodable, Equatable, Sendable {
     }
 }
 
-/// On-chain state returned by `get_commitment`.
+/// On-chain state returned by `get_commitment`. The contract-side
+/// `CommitmentEntry` shape varies per governance type — only
+/// `commitment` and `epoch` are present in every variant. The rest
+/// are decoded `if present`:
+///
+/// | Field        | anarchy | 1v1 | tyranny | democracy | oligarchy |
+/// |--------------|---------|-----|---------|-----------|-----------|
+/// | `commitment` | ✅      | ✅  | ✅      | ✅        | ✅        |
+/// | `epoch`      | ✅      | ✅  | ✅      | ✅        | ✅        |
+/// | `timestamp`  | (varies)| ✅  | ✅      | ✅        | ✅        |
+/// | `tier`       | (varies)| —   | ✅      | ✅        | ✅        |
+/// | `active`     | —       | —   | —       | ✅        | ✅        |
 struct SEPCommitmentEntry: Codable, Equatable, Sendable {
     let commitment: Data
     let epoch: UInt64
-    let timestamp: UInt64
-    let tier: UInt32
-    let active: Bool
+    let timestamp: UInt64?
+    let tier: UInt32?
+    let active: Bool?
 }
 
 /// Relayer's response to a contract-invocation POST. Mirrors
