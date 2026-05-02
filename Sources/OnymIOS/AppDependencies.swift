@@ -10,4 +10,5 @@ struct AppDependencies {
     let makeRelayerSettingsFlow: @MainActor () -> RelayerSettingsFlow
     let makeAnchorsPickerFlow: @MainActor () -> AnchorsPickerFlow
     let makeCreateGroupFlow: @MainActor () -> CreateGroupFlow
+    let makeChatsFlow: @MainActor () -> ChatsFlow
 }

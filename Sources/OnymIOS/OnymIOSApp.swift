@@ -101,6 +101,9 @@ struct OnymIOSApp: App {
                     groups: groupRepository,
                     inboxTransport: inboxTransport
                 ))
+            },
+            makeChatsFlow: { @MainActor in
+                ChatsFlow(repository: groupRepository)
             }
         )
     }

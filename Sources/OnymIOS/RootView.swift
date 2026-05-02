@@ -5,29 +5,40 @@ import SwiftUI
 /// "search" slot (separate from the regular tab strip), matching the
 /// stellar-mls / Apple-default Liquid Glass shape.
 ///
-/// Currently two tabs:
-///   - `.settings` — entry point for the recovery-phrase backup flow
-///   - `.search` — placeholder so the system search slot is occupied;
-///                 real search lands in a future chunk
+/// Three tabs:
+///   - `.chats`    — list of groups the user has created. Default tab on launch.
+///                   Empty state hosts the only entry point to Create Group.
+///   - `.settings` — recovery-phrase backup, relayer config, anchors picker.
+///   - `.search`   — placeholder occupying the system search slot; real
+///                   search lands in a future chunk.
 struct RootView: View {
     private enum RootTab: Hashable {
+        case chats
         case settings
         case search
     }
 
     let dependencies: AppDependencies
 
-    @State private var selectedTab: RootTab = .settings
+    @State private var selectedTab: RootTab = .chats
 
     var body: some View {
         TabView(selection: $selectedTab) {
+            Tab("Chats", systemImage: "bubble.left.and.bubble.right.fill", value: .chats) {
+                NavigationStack {
+                    ChatsView(
+                        flow: dependencies.makeChatsFlow(),
+                        makeCreateGroupFlow: dependencies.makeCreateGroupFlow
+                    )
+                }
+            }
+
             Tab("Settings", systemImage: "gearshape", value: .settings) {
                 NavigationStack {
                     SettingsView(
                         makeBackupFlow: dependencies.makeRecoveryPhraseBackupFlow,
                         makeRelayerSettingsFlow: dependencies.makeRelayerSettingsFlow,
-                        makeAnchorsPickerFlow: dependencies.makeAnchorsPickerFlow,
-                        makeCreateGroupFlow: dependencies.makeCreateGroupFlow
+                        makeAnchorsPickerFlow: dependencies.makeAnchorsPickerFlow
                     )
                 }
             }
