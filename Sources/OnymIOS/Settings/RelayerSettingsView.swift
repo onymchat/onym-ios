@@ -107,6 +107,11 @@ struct RelayerSettingsView: View {
             Spacer()
             networkBadge(endpoint.network)
         }
+        // `.contain` keeps the inner star Button individually
+        // accessible (otherwise SwiftUI flattens the HStack into a
+        // single accessibility element that absorbs the inner Button's
+        // identifier — caught the hard way by UI tests in PR #22).
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("relayer.configured.\(endpoint.url.absoluteString)")
     }
 

@@ -167,6 +167,11 @@ struct AnchorsVersionView: View {
                         .foregroundStyle(Color.accentColor)
                 }
             }
+            // Make the entire row hit-testable. Without this the
+            // `Spacer()` between the labels and the checkmark eats
+            // taps under `.buttonStyle(.plain)` and the action never
+            // fires (caught by UI tests in PR #22).
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("anchors.version.\(release.release)")

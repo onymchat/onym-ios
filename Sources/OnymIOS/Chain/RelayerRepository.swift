@@ -59,10 +59,32 @@ actor RelayerRepository {
     /// Force a fresh fetch (user-initiated pull-to-refresh, eventually).
     /// Awaits completion so callers can show progress UI. Failures
     /// throw so the UI can surface them.
+    ///
+    /// First-launch auto-populate: if the user has never touched the
+    /// configuration AND the fetched list is non-empty, every published
+    /// relayer is auto-added to `endpoints`, the strategy is set to
+    /// `.random`, and `hasUserInteracted` flips to `true`. The flag is
+    /// sticky — subsequent fetches never re-auto-populate, so a user
+    /// who explicitly clears the list isn't fought by the next refresh.
     func refresh() async throws {
         let list = try await fetcher.fetchLatest()
         store.saveCachedKnownList(list)
-        cached = RelayerState(configuration: cached.configuration, knownList: list)
+
+        let current = cached.configuration
+        let updatedConfig: RelayerConfiguration
+        if !current.hasUserInteracted && !list.isEmpty {
+            updatedConfig = RelayerConfiguration(
+                endpoints: list,
+                primaryURL: nil,
+                strategy: .random,
+                hasUserInteracted: true
+            )
+            store.saveConfiguration(updatedConfig)
+        } else {
+            updatedConfig = current
+        }
+
+        cached = RelayerState(configuration: updatedConfig, knownList: list)
         publish()
     }
 

@@ -24,16 +24,39 @@ struct OnymIOSApp: App {
         _ = args  // silence unused warning in Release
         #endif
 
-        let relayerRepository = RelayerRepository(
+        let relayerRepository: RelayerRepository
+        let contractsRepository: ContractsRepository
+        #if DEBUG
+        if args.contains("--ui-testing") {
+            relayerRepository = RelayerRepository(
+                fetcher: UITestKnownRelayersFetcher(),
+                store: UITestRelayerSelectionStore()
+            )
+            contractsRepository = ContractsRepository(
+                fetcher: UITestContractsManifestFetcher(),
+                store: UITestAnchorSelectionStore()
+            )
+        } else {
+            relayerRepository = RelayerRepository(
+                fetcher: GitHubReleasesKnownRelayersFetcher(),
+                store: UserDefaultsRelayerSelectionStore()
+            )
+            contractsRepository = ContractsRepository(
+                fetcher: GitHubReleasesContractsManifestFetcher(),
+                store: UserDefaultsAnchorSelectionStore()
+            )
+        }
+        #else
+        relayerRepository = RelayerRepository(
             fetcher: GitHubReleasesKnownRelayersFetcher(),
             store: UserDefaultsRelayerSelectionStore()
         )
-        self.relayerRepository = relayerRepository
-
-        let contractsRepository = ContractsRepository(
+        contractsRepository = ContractsRepository(
             fetcher: GitHubReleasesContractsManifestFetcher(),
             store: UserDefaultsAnchorSelectionStore()
         )
+        #endif
+        self.relayerRepository = relayerRepository
         self.contractsRepository = contractsRepository
 
         self.dependencies = AppDependencies(

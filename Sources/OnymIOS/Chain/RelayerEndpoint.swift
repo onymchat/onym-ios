@@ -77,8 +77,48 @@ struct RelayerConfiguration: Codable, Equatable, Hashable, Sendable {
     /// strategy `.primary`, `selectURL` falls back to `endpoints.first`.
     let primaryURL: URL?
     let strategy: RelayerStrategy
+    /// `false` only on cold install before the first `RelayerRepository.refresh()`
+    /// completes. The auto-populate path keys on this — the moment the
+    /// known-relayers list arrives from GitHub, every published entry is
+    /// added to `endpoints` and this flips to `true`. Any subsequent
+    /// mutator (add / remove / setPrimary / setStrategy) also flips it
+    /// to `true` so a user who explicitly clears the list isn't fought
+    /// by another auto-populate on the next refresh.
+    let hasUserInteracted: Bool
 
-    static let empty = RelayerConfiguration(endpoints: [], primaryURL: nil, strategy: .primary)
+    static let empty = RelayerConfiguration(
+        endpoints: [],
+        primaryURL: nil,
+        strategy: .random,
+        hasUserInteracted: false
+    )
+
+    init(
+        endpoints: [RelayerEndpoint],
+        primaryURL: URL?,
+        strategy: RelayerStrategy,
+        hasUserInteracted: Bool = true
+    ) {
+        self.endpoints = endpoints
+        self.primaryURL = primaryURL
+        self.strategy = strategy
+        self.hasUserInteracted = hasUserInteracted
+    }
+
+    /// Backward-compat: PR #20 saves don't carry `hasUserInteracted`.
+    /// Treat absence as "yes, the user already interacted" so we don't
+    /// re-auto-populate over a configuration they already touched.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        endpoints = try c.decode([RelayerEndpoint].self, forKey: .endpoints)
+        primaryURL = try c.decodeIfPresent(URL.self, forKey: .primaryURL)
+        strategy = try c.decode(RelayerStrategy.self, forKey: .strategy)
+        hasUserInteracted = try c.decodeIfPresent(Bool.self, forKey: .hasUserInteracted) ?? true
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case endpoints, primaryURL, strategy, hasUserInteracted
+    }
 
     /// Resolve the URL chain interactors should POST to. Pure — no
     /// side effects, no I/O, deterministic given the RNG. Returns
