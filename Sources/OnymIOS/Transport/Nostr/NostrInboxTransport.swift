@@ -29,20 +29,30 @@ final class NostrInboxTransport: InboxTransport {
     @discardableResult
     func send(_ payload: Data, to inbox: TransportInboxID) async throws -> PublishReceipt {
         let signer = try OnymNostrSigner.ephemeral()
+        let event = try Self.buildSendEvent(payload: payload, inbox: inbox, signer: signer)
+        let accepted = try await state.send(event: event)
+        return PublishReceipt(messageID: event.id, acceptedBy: accepted)
+    }
+
+    /// Pure event-builder for the send path. Exposed at `internal` access
+    /// so tests can verify the inbox tag set without standing up a relay.
+    static func buildSendEvent(
+        payload: Data,
+        inbox: TransportInboxID,
+        signer: NostrSigner
+    ) throws -> NostrEvent {
         let tags: [[String]] = [
-            ["d", Self.inboxTagPrefix + inbox.rawValue],
+            ["d", inboxTagPrefix + inbox.rawValue],
             ["t", inbox.rawValue],
             ["sep_inbox", inbox.rawValue],
             ["sep_version", "1"],
         ]
-        let event = try NostrEvent.build(
-            kind: Self.primaryKind,
+        return try NostrEvent.build(
+            kind: primaryKind,
             tags: tags,
             content: payload.base64EncodedString(),
             signer: signer
         )
-        let accepted = try await state.send(event: event)
-        return PublishReceipt(messageID: event.id, acceptedBy: accepted)
     }
 
     func subscribe(inbox: TransportInboxID) -> AsyncStream<InboundInbox> {
@@ -60,7 +70,11 @@ final class NostrInboxTransport: InboxTransport {
         await state.unsubscribe(inbox: inbox)
     }
 
-    fileprivate static func subscriptionFilters(inbox: String) -> [[String: Any]] {
+    /// Three filter shapes the subscriber installs on each relay:
+    /// the primary `#d` (parameterised-replaceable) plus a `#t`
+    /// fallback on the same kind, plus the legacy kind 24113 path
+    /// during migration. Internal so tests can assert the shape.
+    static func subscriptionFilters(inbox: String) -> [[String: Any]] {
         [
             [
                 "kinds": [primaryKind],

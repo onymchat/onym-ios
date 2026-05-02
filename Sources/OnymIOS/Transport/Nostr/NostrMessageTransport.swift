@@ -31,14 +31,25 @@ final class NostrMessageTransport: MessageTransport {
     @discardableResult
     func publish(_ payload: Data, to topic: TransportTopic) async throws -> PublishReceipt {
         let signer = try OnymNostrSigner.ephemeral()
-        let event = try NostrEvent.build(
-            kind: Self.primaryKind,
+        let event = try Self.buildPublishEvent(payload: payload, topic: topic, signer: signer)
+        let accepted = try await state.publish(event: event)
+        return PublishReceipt(messageID: event.id, acceptedBy: accepted)
+    }
+
+    /// Pure event-builder for the publish path. Exposed at `internal`
+    /// access so tests can verify Nostr framing (kind, topic tag, base64
+    /// payload, valid id) without standing up a relay.
+    static func buildPublishEvent(
+        payload: Data,
+        topic: TransportTopic,
+        signer: NostrSigner
+    ) throws -> NostrEvent {
+        try NostrEvent.build(
+            kind: primaryKind,
             tags: [["t", topic.rawValue]],
             content: payload.base64EncodedString(),
             signer: signer
         )
-        let accepted = try await state.publish(event: event)
-        return PublishReceipt(messageID: event.id, acceptedBy: accepted)
     }
 
     func subscribe(topic: TransportTopic, since: Date?) -> AsyncStream<InboundMessage> {
