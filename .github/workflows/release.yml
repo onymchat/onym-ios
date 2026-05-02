@@ -13,6 +13,11 @@ name: Release
 #   MATCH_DEPLOY_KEY     — SSH private key with read access to that repo
 #   MATCH_TEAM_ID        — Apple Developer team ID
 #   MATCH_PASSWORD       — encryption password for the match vault
+#   RELAYER_AUTH_TOKEN   — Bearer token for the deployed relayer
+#                          (matches one of the relayer's RELAYER_AUTH_TOKENS).
+#                          Bundled into Resources/RelayerSecrets.json at
+#                          build time. If unset, the IPA still builds but
+#                          relayer calls 401.
 #
 # (TestFlight upload is intentionally skipped, so ASC API keys aren't needed.)
 
@@ -199,6 +204,20 @@ jobs:
 
       - name: Install xcodegen
         run: brew install xcodegen
+
+      - name: Bundle relayer auth token
+        env:
+          RELAYER_AUTH_TOKEN: ${{ secrets.RELAYER_AUTH_TOKEN }}
+        run: |
+          # Resources/RelayerSecrets.json is gitignored — written here
+          # from the repo's RELAYER_AUTH_TOKEN secret so the IPA ships
+          # with the right Bearer token for the deployed relayer. If the
+          # secret is unset, write an empty token; the IPA will build
+          # but every relayer call will 401 — surfaces clearly to the
+          # user instead of silently failing.
+          cat > Resources/RelayerSecrets.json <<EOF
+          { "authToken": "${RELAYER_AUTH_TOKEN}" }
+          EOF
 
       - name: Generate Xcode project
         run: ./generate-xcodeproj.sh

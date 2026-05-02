@@ -135,6 +135,68 @@ final class SEPContractClientTests: XCTestCase {
         }
     }
 
+    func test_urlSessionTransport_sendsBearerAuthHeader_whenTokenSet() async throws {
+        let url = URL(string: "https://example.invalid/contract")!
+        let stub = SEPSubmissionResponse(accepted: true, transactionHash: nil, message: nil)
+        let body = try JSONEncoder().encode(stub)
+        let observed = AuthHeaderRecorder()
+        StubURLProtocol.set(handler: { request in
+            observed.set(request.value(forHTTPHeaderField: "Authorization"))
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (body, response)
+        })
+        defer { StubURLProtocol.reset() }
+        let session = StubURLProtocol.makeSession()
+        let transport = URLSessionSEPContractTransport(
+            endpoint: url,
+            session: session,
+            authToken: "deadbeefcafefood"
+        )
+        let client = SEPContractClient(
+            contractID: testContractID,
+            contractType: .tyranny,
+            network: .testnet,
+            transport: transport
+        )
+
+        _ = try await client.createGroupTyranny(stubPayload())
+        XCTAssertEqual(observed.value, "Bearer deadbeefcafefood")
+    }
+
+    func test_urlSessionTransport_omitsAuthHeader_whenTokenNil() async throws {
+        let url = URL(string: "https://example.invalid/contract")!
+        let stub = SEPSubmissionResponse(accepted: true, transactionHash: nil, message: nil)
+        let body = try JSONEncoder().encode(stub)
+        let observed = AuthHeaderRecorder()
+        StubURLProtocol.set(handler: { request in
+            observed.set(request.value(forHTTPHeaderField: "Authorization"))
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: "HTTP/1.1",
+                headerFields: nil
+            )!
+            return (body, response)
+        })
+        defer { StubURLProtocol.reset() }
+        let session = StubURLProtocol.makeSession()
+        let transport = URLSessionSEPContractTransport(endpoint: url, session: session)
+        let client = SEPContractClient(
+            contractID: testContractID,
+            contractType: .tyranny,
+            network: .testnet,
+            transport: transport
+        )
+
+        _ = try await client.createGroupTyranny(stubPayload())
+        XCTAssertNil(observed.value, "no Authorization header should be sent when authToken is nil")
+    }
+
     func test_urlSessionTransport_decodes2xxResponse() async throws {
         let url = URL(string: "https://example.invalid/contract")!
         let stub = SEPSubmissionResponse(
@@ -183,6 +245,16 @@ final class SEPContractClientTests: XCTestCase {
             publicInputs: Array(repeating: Data(repeating: 0, count: 32), count: 4)
         )
     }
+}
+
+/// Tiny actor-isolated cell that the StubURLProtocol handler closure
+/// can write into without tripping Sendable. Single property; not
+/// worth a full actor declaration.
+private final class AuthHeaderRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _value: String?
+    var value: String? { lock.withLock { _value } }
+    func set(_ v: String?) { lock.withLock { _value = v } }
 }
 
 // MARK: - Recording transport
