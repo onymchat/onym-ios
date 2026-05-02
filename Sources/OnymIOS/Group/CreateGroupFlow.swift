@@ -130,11 +130,38 @@ final class CreateGroupFlow {
     }
 
     /// Label for the primary "Create" CTA. Mirrors the design
-    /// (`Create empty group` / `Create with N people`).
+    /// (`Create empty group` / `Create with N people`). For 1-on-1
+    /// dialogs the count is implicit so the copy switches to
+    /// `Start dialog` / `Add the other person` instead.
     var createCTALabel: String {
-        if invitees.isEmpty { return "Create empty group" }
-        let n = invitees.count
-        return "Create with \(n) \(n == 1 ? "person" : "people")"
+        switch governance {
+        case .oneOnOne:
+            return invitees.isEmpty ? "Add the other person" : "Start dialog"
+        case .tyranny, .anarchy:
+            if invitees.isEmpty { return "Create empty group" }
+            let n = invitees.count
+            return "Create with \(n) \(n == 1 ? "person" : "people")"
+        }
+    }
+
+    /// Whether the Step2 "Create" button should be tappable. Tyranny /
+    /// anarchy accept any roster size (including zero); 1-on-1
+    /// requires exactly one invitee — the peer.
+    var canCreate: Bool {
+        switch governance {
+        case .oneOnOne: invitees.count == 1
+        case .tyranny, .anarchy: true
+        }
+    }
+
+    /// Whether the Step2 "Invite by inbox key" entry point should be
+    /// shown. 1-on-1 caps at one peer, so once the user has added the
+    /// peer we hide the row to avoid implying they can add more.
+    var canAddMoreInvitees: Bool {
+        switch governance {
+        case .oneOnOne: invitees.isEmpty
+        case .tyranny, .anarchy: true
+        }
     }
 
     // MARK: - InviteByKey

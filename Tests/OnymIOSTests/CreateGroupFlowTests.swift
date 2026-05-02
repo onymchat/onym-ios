@@ -185,6 +185,71 @@ final class CreateGroupFlowTests: XCTestCase {
         XCTAssertEqual(flow.createCTALabel, "Create with 2 people")
     }
 
+    // MARK: - OneOnOne governance gates
+
+    func test_oneOnOne_isNowAvailable() async throws {
+        // PR-3 flips the gate — Step1 should advance with .oneOnOne.
+        let flow = await makeFlow()
+        flow.governance = .oneOnOne
+        XCTAssertTrue(flow.canAdvanceToStep2)
+    }
+
+    func test_oneOnOne_canCreate_requiresExactlyOneInvitee() async throws {
+        let flow = await makeFlow()
+        flow.governance = .oneOnOne
+
+        // 0 invitees: not allowed
+        XCTAssertFalse(flow.canCreate, "1-on-1 with 0 invitees can't create")
+
+        // 1 invitee: allowed
+        flow.inviteeInput = String(repeating: "aa", count: 32)
+        flow.tappedAddInvitee()
+        XCTAssertTrue(flow.canCreate, "1-on-1 with 1 invitee can create")
+
+        // 2 invitees: not allowed (UI hides the entry point so this is
+        // a guardrail, but the property must still flip).
+        flow.invitees.append(OnymInvitee(
+            id: UUID(),
+            inboxPublicKey: Data(repeating: 0xBB, count: 32),
+            displayLabel: "bb…bb"
+        ))
+        XCTAssertFalse(flow.canCreate, "1-on-1 with 2 invitees can't create")
+    }
+
+    func test_oneOnOne_canAddMoreInvitees_capsAtOne() async throws {
+        let flow = await makeFlow()
+        flow.governance = .oneOnOne
+        XCTAssertTrue(flow.canAddMoreInvitees)
+        flow.inviteeInput = String(repeating: "aa", count: 32)
+        flow.tappedAddInvitee()
+        XCTAssertFalse(flow.canAddMoreInvitees,
+                       "1-on-1 hides the Invite-by-key row once the peer is added")
+    }
+
+    func test_oneOnOne_createCTALabel_promptsForPeerThenStartsDialog() async throws {
+        let flow = await makeFlow()
+        flow.governance = .oneOnOne
+        XCTAssertEqual(flow.createCTALabel, "Add the other person")
+        flow.inviteeInput = String(repeating: "aa", count: 32)
+        flow.tappedAddInvitee()
+        XCTAssertEqual(flow.createCTALabel, "Start dialog")
+    }
+
+    func test_tyranny_canAddMoreInvitees_alwaysTrue() async throws {
+        let flow = await makeFlow()
+        flow.governance = .tyranny
+        XCTAssertTrue(flow.canAddMoreInvitees)
+        flow.inviteeInput = String(repeating: "aa", count: 32)
+        flow.tappedAddInvitee()
+        XCTAssertTrue(flow.canAddMoreInvitees, "Tyranny doesn't cap invitee count")
+    }
+
+    func test_tyranny_canCreate_alwaysTrue() async throws {
+        let flow = await makeFlow()
+        flow.governance = .tyranny
+        XCTAssertTrue(flow.canCreate, "Tyranny accepts any roster size, including zero")
+    }
+
     // MARK: - onClose
 
     func test_tappedDone_resetsAndCallsOnClose() async throws {
