@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import OnymSDK
 
@@ -155,11 +156,57 @@ actor IdentityRepository {
         } catch {
             throw IdentityError.sdkFailure(String(describing: error))
         }
+        let stellarPub = stellarPublicKey(fromNostrSecret: snapshot.nostrSecretKey)
+        let inboxPub = inboxPublicKey(fromNostrSecret: snapshot.nostrSecretKey)
         let phrase = snapshot.entropy.map(Bip39.mnemonicFromEntropy)
         return Identity(
             nostrPublicKey: nostrPub,
             blsPublicKey: blsPub,
+            stellarPublicKey: stellarPub,
+            stellarAccountID: StellarStrKey.encodeAccountID(stellarPub),
+            inboxPublicKey: inboxPub,
+            inboxTag: inboxTag(from: inboxPub),
             recoveryPhrase: phrase
         )
+    }
+
+    /// HKDF-SHA256(nostrSecret, salt="chat.onym.ios", info="stellar-ed25519-v1", 32B).
+    /// The 32-byte output is used directly as the Ed25519 seed.
+    /// **MUST** match `KeyManager.deriveStellarKey` in stellar-mls — a recovery
+    /// phrase generated there must produce the same `G...` account ID here.
+    private static func stellarPublicKey(fromNostrSecret nostrSecret: Data) -> Data {
+        let derived = HKDF<SHA256>.deriveKey(
+            inputKeyMaterial: SymmetricKey(data: nostrSecret),
+            salt: Data("chat.onym.ios".utf8),
+            info: Data("stellar-ed25519-v1".utf8),
+            outputByteCount: 32
+        )
+        let seed = derived.withUnsafeBytes { Data($0) }
+        let privateKey = try! Curve25519.Signing.PrivateKey(rawRepresentation: seed)
+        return Data(privateKey.publicKey.rawRepresentation)
+    }
+
+    /// HKDF-SHA256(nostrSecret, salt="chat.onym.ios", info="x25519-key-agreement-v1", 32B).
+    /// **MUST** match `KeyManager.deriveKeyAgreementKey` in stellar-mls.
+    private static func inboxPublicKey(fromNostrSecret nostrSecret: Data) -> Data {
+        let derived = HKDF<SHA256>.deriveKey(
+            inputKeyMaterial: SymmetricKey(data: nostrSecret),
+            salt: Data("chat.onym.ios".utf8),
+            info: Data("x25519-key-agreement-v1".utf8),
+            outputByteCount: 32
+        )
+        let seed = derived.withUnsafeBytes { Data($0) }
+        let privateKey = try! Curve25519.KeyAgreement.PrivateKey(rawRepresentation: seed)
+        return Data(privateKey.publicKey.rawRepresentation)
+    }
+
+    /// First 8 bytes of `SHA-256("sep-inbox-v1" || inboxPublicKey)`, hex-encoded
+    /// (16 chars). **MUST** match `GroupCrypto.hiddenInboxTag` in stellar-mls.
+    private static func inboxTag(from inboxPublicKey: Data) -> String {
+        var hasher = SHA256()
+        hasher.update(data: Data("sep-inbox-v1".utf8))
+        hasher.update(data: inboxPublicKey)
+        let hash = hasher.finalize()
+        return hash.prefix(8).map { String(format: "%02x", $0) }.joined()
     }
 }

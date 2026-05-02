@@ -37,11 +37,20 @@ struct IdentityBootstrapView: View {
 
     @ViewBuilder
     private func identitySection(_ identity: Identity) -> some View {
-        labelled("Nostr public key (hex)") {
+        labelled("Nostr public key (hex, 32 bytes)") {
             Text(identity.nostrPublicKey.hexEncoded)
         }
         labelled("BLS12-381 public key (hex, 48 bytes)") {
             Text(identity.blsPublicKey.hexEncoded)
+        }
+        labelled("Stellar account ID (StrKey)") {
+            Text(identity.stellarAccountID)
+        }
+        labelled("Inbox public key — X25519 (hex, 32 bytes)") {
+            Text(identity.inboxPublicKey.hexEncoded)
+        }
+        labelled("Inbox tag (Nostr filter)") {
+            Text(identity.inboxTag)
         }
         if let phrase = identity.recoveryPhrase {
             labelled("Recovery phrase (BIP39)") {
