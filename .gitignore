@@ -4,6 +4,13 @@
 .LSOverride
 ._*
 
+# Generated Xcode project — project.yml is the source of truth, run
+# ./generate-xcodeproj.sh after pulling. Tracking pbxproj costs us a
+# merge-conflict tax on every multi-author PR with no upside since
+# xcodegen is fast.
+*.xcodeproj/
+*.xcworkspace/
+
 # Xcode user state
 xcuserdata/
 *.xcuserstate
