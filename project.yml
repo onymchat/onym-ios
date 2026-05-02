@@ -36,7 +36,14 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
-        INFOPLIST_KEY_UILaunchScreen_Generation: NO
+        # Without a UILaunchScreen entry, iOS treats the app as a legacy
+        # iPhone-4-era binary and letterboxes it on every modern device
+        # (visible as huge black bars above and below the app's content).
+        # Setting this YES makes xcodegen emit an empty `UILaunchScreen`
+        # dict in Info.plist — opt-in to native dimensions, no real
+        # launch storyboard required since the SwiftUI scene takes over
+        # immediately on launch.
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         TARGETED_DEVICE_FAMILY: "1,2"
