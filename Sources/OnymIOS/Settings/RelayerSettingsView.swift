@@ -1,0 +1,206 @@
+import SwiftUI
+
+/// Settings screen for configuring relayers. Three sections on one
+/// screen:
+///   - **Strategy** — segmented control: Primary | Random.
+///   - **Configured** — list of endpoints the user has added; tap
+///     star to mark primary, swipe to delete.
+///   - **Add** — published-list rows the user hasn't added yet, plus
+///     a custom-URL field.
+struct RelayerSettingsView: View {
+    @State private var flow: RelayerSettingsFlow
+
+    init(flow: RelayerSettingsFlow) {
+        _flow = State(initialValue: flow)
+    }
+
+    var body: some View {
+        Form {
+            strategySection
+            configuredSection
+            addFromKnownSection
+            addCustomSection
+        }
+        .navigationTitle("Relayer")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { flow.start() }
+    }
+
+    // MARK: - Strategy
+
+    @ViewBuilder
+    private var strategySection: some View {
+        Section {
+            Picker("Strategy", selection: Binding(
+                get: { flow.state.snapshot.configuration.strategy },
+                set: { flow.tappedStrategy($0) }
+            )) {
+                ForEach(RelayerStrategy.allCases, id: \.self) { strategy in
+                    Text(strategy.displayName).tag(strategy)
+                }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("relayer.strategy.picker")
+        } footer: {
+            Text(strategyFooter)
+        }
+    }
+
+    private var strategyFooter: String {
+        switch flow.state.snapshot.configuration.strategy {
+        case .primary:
+            return "Always use the primary relayer. If no primary is set, the first configured relayer is used."
+        case .random:
+            return "Pick a random relayer for each request. Useful for spreading load across redundant deployments."
+        }
+    }
+
+    // MARK: - Configured
+
+    @ViewBuilder
+    private var configuredSection: some View {
+        Section {
+            let endpoints = flow.state.snapshot.configuration.endpoints
+            if endpoints.isEmpty {
+                Text("No relayers configured. Add one below.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(endpoints) { endpoint in
+                    configuredRow(endpoint)
+                }
+                .onDelete { offsets in
+                    for offset in offsets {
+                        flow.tappedRemove(url: endpoints[offset].url)
+                    }
+                }
+            }
+        } header: {
+            Text("Configured")
+        }
+    }
+
+    @ViewBuilder
+    private func configuredRow(_ endpoint: RelayerEndpoint) -> some View {
+        HStack(spacing: 12) {
+            Button {
+                flow.tappedSetPrimary(url: endpoint.url)
+            } label: {
+                Image(systemName: flow.isPrimary(endpoint) ? "star.fill" : "star")
+                    .foregroundStyle(flow.isPrimary(endpoint) ? Color.yellow : Color.secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("relayer.configured.primary.\(endpoint.url.absoluteString)")
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(endpoint.name)
+                    .foregroundStyle(.primary)
+                Text(endpoint.url.absoluteString)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer()
+            networkBadge(endpoint.network)
+        }
+        .accessibilityIdentifier("relayer.configured.\(endpoint.url.absoluteString)")
+    }
+
+    // MARK: - Add from published list
+
+    @ViewBuilder
+    private var addFromKnownSection: some View {
+        let unconfigured = flow.unconfiguredKnownList
+        Section {
+            if flow.state.snapshot.knownList.isEmpty {
+                HStack {
+                    ProgressView()
+                    Text("Fetching list…").foregroundStyle(.secondary)
+                }
+            } else if unconfigured.isEmpty {
+                Text("All published relayers added.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(unconfigured) { endpoint in
+                    Button {
+                        flow.tappedAddKnown(endpoint)
+                    } label: {
+                        HStack(spacing: 12) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(endpoint.name)
+                                    .foregroundStyle(.primary)
+                                Text(endpoint.url.absoluteString)
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                            Spacer()
+                            networkBadge(endpoint.network)
+                            Image(systemName: "plus.circle.fill")
+                                .foregroundStyle(Color.accentColor)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("relayer.add.known.\(endpoint.url.absoluteString)")
+                }
+            }
+        } header: {
+            Text("Add from Published List")
+        } footer: {
+            Text("Published by the onym-relayer project. Tap to add.")
+        }
+    }
+
+    // MARK: - Custom URL
+
+    @ViewBuilder
+    private var addCustomSection: some View {
+        Section {
+            TextField("https://relayer.example.com", text: Binding(
+                get: { flow.state.customDraft },
+                set: { flow.customDraftChanged($0) }
+            ))
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            .keyboardType(.URL)
+            .accessibilityIdentifier("relayer.add.custom.field")
+
+            if let error = flow.state.customDraftError {
+                Text(error)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+
+            Button("Add Custom URL") {
+                flow.tappedAddCustom()
+            }
+            .accessibilityIdentifier("relayer.add.custom.button")
+        } header: {
+            Text("Add Custom URL")
+        } footer: {
+            Text("Use a private deployment, localhost, or any relayer not in the published list.")
+        }
+    }
+
+    // MARK: - Atoms
+
+    private func networkBadge(_ network: String) -> some View {
+        Text(network.uppercased())
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(badgeForeground(for: network))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(badgeForeground(for: network).opacity(0.15), in: Capsule())
+    }
+
+    private func badgeForeground(for network: String) -> Color {
+        switch network {
+        case "public": return .red
+        case "testnet": return .green
+        default: return .gray
+        }
+    }
+}

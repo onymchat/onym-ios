@@ -2,120 +2,216 @@ import XCTest
 @testable import OnymIOS
 
 /// Repository against the in-memory fakes — fast, focused on:
-/// - the snapshot replay-on-subscribe contract
-/// - selection persistence (delegates to store; this just verifies
-///   the wire-up and the snapshot push)
-/// - background `start()` populates the cached known list from the
-///   fetcher and pushes a snapshot
-/// - `start()` is idempotent — second call is a no-op while the
-///   first is in flight (no double-fetch)
-/// - `refresh()` surfaces errors to the caller (UI can show
-///   progress / error states)
+/// - construction loads cached state from the store,
+/// - list-shaped mutators (add / remove / setPrimary / setStrategy)
+///   persist via the store and push a fresh snapshot,
+/// - addEndpoint dedupes on URL (idempotent + updates metadata),
+/// - removeEndpoint clears the primary marker if it pointed at the
+///   removed endpoint,
+/// - setPrimary is a no-op when the URL isn't in the configured list,
+/// - selectURL respects the strategy stored in the configuration,
+/// - background `start()` is idempotent (no double fetch) and silent
+///   on error.
 final class RelayerRepositoryTests: XCTestCase {
-    private let testEndpoint = RelayerEndpoint(
-        name: "Test",
-        url: URL(string: "https://relayer-test.example")!,
-        network: "testnet"
-    )
+    private let a = RelayerEndpoint(name: "A", url: URL(string: "https://a.example")!, network: "testnet")
+    private let b = RelayerEndpoint(name: "B", url: URL(string: "https://b.example")!, network: "testnet")
+    private let c = RelayerEndpoint(name: "C", url: URL(string: "https://c.example")!, network: "public")
 
     // MARK: - construction
 
-    func test_init_loadsCachedSelectionAndKnownListFromStore() async {
+    func test_init_loadsCachedConfigurationAndKnownListFromStore() async {
+        let config = RelayerConfiguration(endpoints: [a, b], primaryURL: a.url, strategy: .random)
+        let store = InMemoryRelayerSelectionStore(configuration: config, cachedList: [a, b])
+        let fetcher = FakeKnownRelayersFetcher(mode: .succeeds([]))
+        let repo = RelayerRepository(fetcher: fetcher, store: store)
+
+        let state = await repo.currentState()
+        XCTAssertEqual(state.configuration, config)
+        XCTAssertEqual(state.knownList, [a, b])
+    }
+
+    // MARK: - addEndpoint
+
+    func test_addEndpoint_persistsAndPushesSnapshot() async {
+        let store = InMemoryRelayerSelectionStore()
+        let repo = makeRepo(store: store)
+
+        let inserted = await repo.addEndpoint(a)
+        XCTAssertTrue(inserted)
+        XCTAssertEqual(store.loadConfiguration().endpoints, [a])
+        let endpoints = await repo.currentState().configuration.endpoints
+        XCTAssertEqual(endpoints, [a])
+    }
+
+    func test_addEndpoint_dedupesOnURL_returnsFalseAndUpdatesMetadata() async {
+        let store = InMemoryRelayerSelectionStore()
+        let repo = makeRepo(store: store)
+
+        await repo.addEndpoint(a)
+        let renamed = RelayerEndpoint(name: "A renamed", url: a.url, network: a.network)
+        let inserted = await repo.addEndpoint(renamed)
+
+        XCTAssertFalse(inserted)
+        let endpoints = await repo.currentState().configuration.endpoints
+        XCTAssertEqual(endpoints.count, 1)
+        XCTAssertEqual(endpoints.first?.name, "A renamed")
+    }
+
+    // MARK: - removeEndpoint
+
+    func test_removeEndpoint_clearsPrimaryWhenItWasTheRemovedURL() async {
         let store = InMemoryRelayerSelectionStore(
-            selection: .known(testEndpoint),
-            cachedList: [testEndpoint]
+            configuration: RelayerConfiguration(endpoints: [a, b], primaryURL: a.url, strategy: .primary)
         )
-        let fetcher = FakeKnownRelayersFetcher(mode: .succeeds([]))
-        let repo = RelayerRepository(fetcher: fetcher, store: store)
+        let repo = makeRepo(store: store)
 
+        await repo.removeEndpoint(url: a.url)
         let state = await repo.currentState()
-        XCTAssertEqual(state.selection, .known(testEndpoint))
-        XCTAssertEqual(state.knownList, [testEndpoint])
+        XCTAssertEqual(state.configuration.endpoints, [b])
+        XCTAssertNil(state.configuration.primaryURL,
+                     "primary marker must clear when its endpoint is removed")
     }
 
-    // MARK: - select / selectCustom / clearSelection
+    func test_removeEndpoint_keepsPrimaryWhenADifferentURLIsRemoved() async {
+        let store = InMemoryRelayerSelectionStore(
+            configuration: RelayerConfiguration(endpoints: [a, b], primaryURL: a.url, strategy: .primary)
+        )
+        let repo = makeRepo(store: store)
 
-    func test_select_persistsAndPushesSnapshot() async {
-        let store = InMemoryRelayerSelectionStore()
-        let fetcher = FakeKnownRelayersFetcher(mode: .succeeds([]))
-        let repo = RelayerRepository(fetcher: fetcher, store: store)
-
-        await repo.select(testEndpoint)
-
-        XCTAssertEqual(store.loadSelection(), .known(testEndpoint))
+        await repo.removeEndpoint(url: b.url)
         let state = await repo.currentState()
-        XCTAssertEqual(state.selection, .known(testEndpoint))
+        XCTAssertEqual(state.configuration.endpoints, [a])
+        XCTAssertEqual(state.configuration.primaryURL, a.url)
     }
 
-    func test_selectCustom_persistsAndPushesSnapshot() async {
-        let store = InMemoryRelayerSelectionStore()
-        let fetcher = FakeKnownRelayersFetcher(mode: .succeeds([]))
-        let repo = RelayerRepository(fetcher: fetcher, store: store)
-        let customURL = URL(string: "https://my-relayer.dev")!
+    // MARK: - setPrimary
 
-        await repo.selectCustom(url: customURL)
+    func test_setPrimary_marksEndpointAndPushes() async {
+        let store = InMemoryRelayerSelectionStore(
+            configuration: RelayerConfiguration(endpoints: [a, b], primaryURL: nil, strategy: .primary)
+        )
+        let repo = makeRepo(store: store)
 
-        XCTAssertEqual(store.loadSelection(), .custom(customURL))
-        let state = await repo.currentState()
-        XCTAssertEqual(state.selection, .custom(customURL))
+        await repo.setPrimary(url: b.url)
+        let primary = await repo.currentState().configuration.primaryURL
+        XCTAssertEqual(primary, b.url)
     }
 
-    func test_clearSelection_removesPersistedAndPushesNilSnapshot() async {
-        let store = InMemoryRelayerSelectionStore(selection: .known(testEndpoint))
-        let fetcher = FakeKnownRelayersFetcher(mode: .succeeds([]))
-        let repo = RelayerRepository(fetcher: fetcher, store: store)
+    func test_setPrimary_noOpWhenURLNotInList() async {
+        let store = InMemoryRelayerSelectionStore(
+            configuration: RelayerConfiguration(endpoints: [a], primaryURL: a.url, strategy: .primary)
+        )
+        let repo = makeRepo(store: store)
 
-        await repo.clearSelection()
-
-        XCTAssertNil(store.loadSelection())
-        let state = await repo.currentState()
-        XCTAssertNil(state.selection)
+        let stranger = URL(string: "https://stranger.example")!
+        await repo.setPrimary(url: stranger)
+        let primary = await repo.currentState().configuration.primaryURL
+        XCTAssertEqual(primary, a.url,
+                       "setting primary to a URL not in the list must be a no-op")
     }
 
-    // MARK: - refresh
+    func test_setPrimary_nilClearsMarker() async {
+        let store = InMemoryRelayerSelectionStore(
+            configuration: RelayerConfiguration(endpoints: [a], primaryURL: a.url, strategy: .primary)
+        )
+        let repo = makeRepo(store: store)
 
-    func test_refresh_persistsAndPushesNewKnownList() async throws {
-        let store = InMemoryRelayerSelectionStore()
-        let fetched = [testEndpoint]
-        let fetcher = FakeKnownRelayersFetcher(mode: .succeeds(fetched))
-        let repo = RelayerRepository(fetcher: fetcher, store: store)
-
-        try await repo.refresh()
-
-        XCTAssertEqual(store.loadCachedKnownList(), fetched)
-        let state = await repo.currentState()
-        XCTAssertEqual(state.knownList, fetched)
+        await repo.setPrimary(url: nil)
+        let primary = await repo.currentState().configuration.primaryURL
+        XCTAssertNil(primary)
     }
 
-    func test_refresh_throwsAndLeavesCachedListIntact() async {
-        let cached = [testEndpoint]
-        let store = InMemoryRelayerSelectionStore(cachedList: cached)
-        let fetcher = FakeKnownRelayersFetcher(mode: .failing(URLError(.notConnectedToInternet)))
-        let repo = RelayerRepository(fetcher: fetcher, store: store)
+    // MARK: - setStrategy
 
-        do {
-            try await repo.refresh()
-            XCTFail("expected throw")
-        } catch {
-            // expected
+    func test_setStrategy_persistsAndPushes() async {
+        let store = InMemoryRelayerSelectionStore(
+            configuration: RelayerConfiguration(endpoints: [a], primaryURL: a.url, strategy: .primary)
+        )
+        let repo = makeRepo(store: store)
+
+        await repo.setStrategy(.random)
+        let strategy = await repo.currentState().configuration.strategy
+        XCTAssertEqual(strategy, .random)
+    }
+
+    // MARK: - selectURL
+
+    func test_selectURL_emptyEndpoints_returnsNil() async {
+        let repo = makeRepo()
+        let url = await repo.selectURL()
+        XCTAssertNil(url)
+    }
+
+    func test_selectURL_primaryStrategy_returnsPrimary() async {
+        let store = InMemoryRelayerSelectionStore(
+            configuration: RelayerConfiguration(endpoints: [a, b], primaryURL: b.url, strategy: .primary)
+        )
+        let repo = makeRepo(store: store)
+        let url = await repo.selectURL()
+        XCTAssertEqual(url, b.url)
+    }
+
+    func test_selectURL_randomStrategy_picksFromList() async {
+        let store = InMemoryRelayerSelectionStore(
+            configuration: RelayerConfiguration(endpoints: [a, b, c], primaryURL: nil, strategy: .random)
+        )
+        let repo = makeRepo(store: store)
+
+        let allowed = Set([a.url, b.url, c.url])
+        for _ in 0..<20 {
+            let url = await repo.selectURL()
+            XCTAssertTrue(allowed.contains(url ?? URL(string: "x:")!),
+                          "selectURL under .random must return one of the configured URLs")
         }
+    }
 
-        let state = await repo.currentState()
-        XCTAssertEqual(state.knownList, cached, "fetch failure must not erase the cached list")
+    // MARK: - snapshots
+
+    func test_snapshots_emitsCurrentValueOnSubscribe() async {
+        let store = InMemoryRelayerSelectionStore(
+            configuration: RelayerConfiguration(endpoints: [a], primaryURL: a.url, strategy: .primary),
+            cachedList: [a]
+        )
+        let repo = makeRepo(store: store)
+
+        var iterator = repo.snapshots.makeAsyncIterator()
+        let first = await iterator.next()
+        XCTAssertEqual(first?.configuration.endpoints, [a])
+        XCTAssertEqual(first?.knownList, [a])
+    }
+
+    func test_snapshots_emitsAfterMutation() async {
+        let repo = makeRepo()
+
+        var iterator = repo.snapshots.makeAsyncIterator()
+        _ = await iterator.next()  // initial empty
+        await repo.addEndpoint(a)
+        let next = await iterator.next()
+        XCTAssertEqual(next?.configuration.endpoints, [a])
     }
 
     // MARK: - start
 
-    func test_start_kicksOffBackgroundRefresh() async throws {
+    func test_start_persistsAndPushesNewKnownList() async throws {
         let store = InMemoryRelayerSelectionStore()
-        let fetched = [testEndpoint]
-        let fetcher = FakeKnownRelayersFetcher(mode: .succeeds(fetched))
+        let fetcher = FakeKnownRelayersFetcher(mode: .succeeds([a]))
         let repo = RelayerRepository(fetcher: fetcher, store: store)
 
         await repo.start()
-        // start() returns immediately; await the first non-empty snapshot.
-        let observed = try await waitForNonEmptyKnownList(repo: repo, timeoutMs: 1000)
-        XCTAssertEqual(observed, fetched)
+        try await waitForNonEmptyKnownList(repo: repo, timeoutMs: 1000)
+        XCTAssertEqual(store.loadCachedKnownList(), [a])
+    }
+
+    func test_start_isIdempotent() async throws {
+        let store = InMemoryRelayerSelectionStore()
+        let fetcher = FakeKnownRelayersFetcher(mode: .succeeds([a]))
+        let repo = RelayerRepository(fetcher: fetcher, store: store)
+
+        await repo.start()
+        await repo.start()
+        await repo.start()
+        try await waitForNonEmptyKnownList(repo: repo, timeoutMs: 1000)
+        XCTAssertEqual(fetcher.fetchCallCount, 1)
     }
 
     func test_start_swallowsFetchFailures() async {
@@ -123,74 +219,31 @@ final class RelayerRepositoryTests: XCTestCase {
         let fetcher = FakeKnownRelayersFetcher(mode: .failing(URLError(.timedOut)))
         let repo = RelayerRepository(fetcher: fetcher, store: store)
 
-        // Should not throw or trap — failures during background start
-        // are silent so app launch never crashes on a transient
-        // network problem.
         await repo.start()
-
-        // Wait one scheduler tick so the start task can finish.
         try? await Task.sleep(for: .milliseconds(50))
-        let state = await repo.currentState()
-        XCTAssertEqual(state.knownList, [], "fetch failed; no cache; list stays empty")
-    }
-
-    func test_start_isIdempotent_doesNotDoubleFetch() async throws {
-        let store = InMemoryRelayerSelectionStore()
-        let fetcher = FakeKnownRelayersFetcher(mode: .succeeds([testEndpoint]))
-        let repo = RelayerRepository(fetcher: fetcher, store: store)
-
-        await repo.start()
-        await repo.start()
-        await repo.start()
-
-        // Wait until at least the first fetch has completed.
-        _ = try await waitForNonEmptyKnownList(repo: repo, timeoutMs: 1000)
-        XCTAssertEqual(fetcher.fetchCallCount, 1, "start() must be idempotent")
-    }
-
-    // MARK: - snapshots
-
-    func test_snapshots_emitsCurrentValueOnSubscribe() async throws {
-        let store = InMemoryRelayerSelectionStore(
-            selection: .known(testEndpoint),
-            cachedList: [testEndpoint]
-        )
-        let fetcher = FakeKnownRelayersFetcher(mode: .succeeds([]))
-        let repo = RelayerRepository(fetcher: fetcher, store: store)
-
-        var iterator = repo.snapshots.makeAsyncIterator()
-        let first = await iterator.next()
-        XCTAssertEqual(first?.selection, .known(testEndpoint))
-        XCTAssertEqual(first?.knownList, [testEndpoint])
-    }
-
-    func test_snapshots_emitsAfterSelectMutation() async throws {
-        let store = InMemoryRelayerSelectionStore()
-        let fetcher = FakeKnownRelayersFetcher(mode: .succeeds([]))
-        let repo = RelayerRepository(fetcher: fetcher, store: store)
-
-        var iterator = repo.snapshots.makeAsyncIterator()
-        _ = await iterator.next()  // initial empty
-
-        await repo.select(testEndpoint)
-
-        let next = await iterator.next()
-        XCTAssertEqual(next?.selection, .known(testEndpoint))
+        let knownList = await repo.currentState().knownList
+        XCTAssertEqual(knownList, [])
     }
 
     // MARK: - helpers
 
+    private func makeRepo(
+        store: InMemoryRelayerSelectionStore = InMemoryRelayerSelectionStore(),
+        fetcher: FakeKnownRelayersFetcher? = nil
+    ) -> RelayerRepository {
+        let f = fetcher ?? FakeKnownRelayersFetcher(mode: .succeeds([]))
+        return RelayerRepository(fetcher: f, store: store)
+    }
+
     private func waitForNonEmptyKnownList(
         repo: RelayerRepository,
         timeoutMs: Int
-    ) async throws -> [RelayerEndpoint] {
+    ) async throws {
         let deadline = Date().addingTimeInterval(TimeInterval(timeoutMs) / 1000)
-        while true {
-            let state = await repo.currentState()
-            if !state.knownList.isEmpty { return state.knownList }
+        while await repo.currentState().knownList.isEmpty {
             if Date() > deadline {
                 XCTFail("timed out waiting for non-empty knownList")
-                return []
+                return
             }
             try await Task.sleep(for: .milliseconds(5))
         }
