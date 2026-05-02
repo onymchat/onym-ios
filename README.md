@@ -36,8 +36,9 @@ Solid boxes exist today; dashed boxes are planned.
                                                      ▼              │
                                           ┌──────────────────────────────────┐
                                           │ Interactors (@Observable)        │
-                                          │ stateless orchestration ·        │
-                                          │ no I/O · no persistence          │
+                                          │ owns flow state · no domain      │
+                                          │ state · UI-affordance I/O via    │
+                                          │ small local seams                │
                                           │ RecoveryPhraseBackupFlow         │
                                           │ ╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶     │
                                           │ ╎ planned: ChatFlow · InviteFlow ╎│
@@ -77,7 +78,10 @@ Solid boxes exist today; dashed boxes are planned.
                                           ║ Common · Anarchy · OneOnOne ·      ║
                                           ║ Tyranny — Plonk · Poseidon · BLS · ║
                                           ║ BIP340 Nostr signing               ║
-                                          ║ called ONLY from inside repositories ║
+                                          ║ imported only from the Identity    ║
+                                          ║ layer (repositories + their own    ║
+                                          ║ signer providers like              ║
+                                          ║ OnymNostrSignerProvider)           ║
                                           ╚════════════════════════════════════╝
 ```
 
@@ -89,9 +93,9 @@ review where it isn't.
 
 | Layer | May call | Forbidden |
 |---|---|---|
-| **View** | its own interactor (intents in, snapshots out) | repository directly · `OnymSDK` · Keychain · transport · `URLSession` · another interactor |
-| **Interactor** | repositories (commands + snapshots) | `OnymSDK` · Keychain · transport · disk · network · another interactor's internals |
-| **Repository** | persistence seam · transport seam · `OnymSDK` | another repository's internals · views · interactors |
+| **View** | its own interactor (intents in, snapshots out) · child-interactor factory closures from `AppDependencies` | repository directly · `OnymSDK` · Keychain · transport · `URLSession` · another interactor's internals |
+| **Interactor** | repositories (commands + snapshots) · its own small UI-affordance seams (clipboard, biometric prompt, haptics) | `OnymSDK` · Keychain · transport · disk · network · persistence I/O · another interactor's internals |
+| **Repository** | persistence seam · transport seam · `OnymSDK` (directly or via a repository-owned adapter like `OnymNostrSignerProvider`) | another repository's internals · views · interactors |
 | **Persistence / Transport seam** | the one concrete backend it implements | repositories · `OnymSDK` · the other seam |
 | **OnymSDK** | itself | everything above |
 
@@ -121,17 +125,25 @@ Two extra invariants that cut across the layers:
   `KeychainStore` reference — swapping in a SQLite-backed or in-memory
   store for a different deployment / test environment is a constructor
   change, not a rewrite.
-- **Interactors are stateless.** The reference impl puts orchestration
-  on `AppState`, a single `@Observable` god-object. We split
-  orchestration per-flow (`RecoveryPhraseBackupFlow` today, `ChatFlow`
-  / `InviteFlow` later); each owns its own state machine and *only*
-  its state machine. Repository state stays in the repository.
-- **Views never close over a repository.** SwiftUI views observe an
-  interactor's snapshot and dispatch intents; the interactor is the
-  only thing that holds a reference to a repository. A view written
-  against this layering can be redesigned (or A/B-tested, or skinned
-  for a different surface like a Watch complication) without changing
-  anything below it.
+- **Interactors own flow state, not domain state.** The reference impl
+  puts orchestration on `AppState`, a single `@Observable` god-object
+  that mixes per-screen flow state with cross-cutting domain state. We
+  split orchestration per-flow (`RecoveryPhraseBackupFlow` today,
+  `ChatFlow` / `InviteFlow` later); each owns its own state machine and
+  *only* its state machine — no shared mutable bag. Domain state stays
+  in the repository.
+- **Views never hold a repository reference.** `OnymIOSApp` constructs
+  `AppDependencies` once with factory closures that capture the
+  repositories. Views receive only the closures (`makeBackupFlow: () ->
+  RecoveryPhraseBackupFlow`) and call them when they need a fresh
+  interactor. The compiler can't accidentally dot-access a repository
+  from a view because views never see the type.
+- **`OnymSDK` is callable only from the Identity layer.** The
+  `Transport/Nostr/` seam imports zero `OnymSDK` symbols — it asks an
+  injected `NostrEphemeralSignerProvider` for a fresh signer per
+  outgoing event. The provider implementation
+  (`OnymNostrSignerProvider`) lives in `Identity/` next to
+  `IdentityRepository`, the only other place that imports `OnymSDK`.
 
 ### Why `IdentityRepository` is the root
 
