@@ -18,7 +18,7 @@ import OnymSDK
 /// PBKDF2, HKDF, and FFI calls into OnymSDK all run on the actor — never on
 /// the main thread by construction. Views interact via `await` from a
 /// `Task` (typically a SwiftUI `.task`).
-actor IdentityRepository: InvitationEnvelopeDecrypting {
+actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealing {
     static let shared = IdentityRepository()
 
     private let keychain: KeychainStore
@@ -153,6 +153,82 @@ actor IdentityRepository: InvitationEnvelopeDecrypting {
         }
     }
 
+    // MARK: - Invitation sealing
+
+    /// Sender-side mirror of `decryptInvitation`. Generates a fresh
+    /// per-envelope X25519 keypair, derives an AES-GCM key from the
+    /// ECDH shared secret with the recipient's inbox pubkey, encrypts
+    /// the payload, signs the ephemeral pubkey with the device's
+    /// Ed25519 identity key (M-5), and returns the JSON-serialised
+    /// `SealedEnvelope`. Secret material never escapes this actor —
+    /// only the resulting bytes do.
+    func sealInvitation(
+        payload: Data,
+        to recipientInboxPublicKey: Data
+    ) async throws -> Data {
+        let recipientPubkey: Curve25519.KeyAgreement.PublicKey
+        do {
+            recipientPubkey = try Curve25519.KeyAgreement.PublicKey(
+                rawRepresentation: recipientInboxPublicKey
+            )
+        } catch {
+            throw InvitationSealError.invalidRecipientPublicKey
+        }
+
+        guard let snapshot = try keychain.load() else {
+            throw InvitationSealError.identityNotLoaded
+        }
+        let signingKey = try Self.stellarSigningPrivateKey(fromNostrSecret: snapshot.nostrSecretKey)
+
+        let ephemeral = Curve25519.KeyAgreement.PrivateKey()
+        let sharedSecret: SharedSecret
+        do {
+            sharedSecret = try ephemeral.sharedSecretFromKeyAgreement(with: recipientPubkey)
+        } catch {
+            throw InvitationSealError.encryptionFailed
+        }
+        let key = sharedSecret.hkdfDerivedSymmetricKey(
+            using: SHA256.self,
+            salt: Data("sep-invitation-v1".utf8),
+            sharedInfo: Data("aes-256-gcm".utf8),
+            outputByteCount: 32
+        )
+
+        let nonce = AES.GCM.Nonce()
+        let sealed: AES.GCM.SealedBox
+        do {
+            sealed = try AES.GCM.seal(payload, using: key, nonce: nonce)
+        } catch {
+            throw InvitationSealError.encryptionFailed
+        }
+
+        let ephPubData = Data(ephemeral.publicKey.rawRepresentation)
+        let ephSig: Data
+        do {
+            ephSig = try signingKey.signature(for: ephPubData)
+        } catch {
+            throw InvitationSealError.signingFailed
+        }
+        let senderPubData = Data(signingKey.publicKey.rawRepresentation)
+
+        let envelope = SealedEnvelope(
+            version: 1,
+            scheme: "x25519-aes-256-gcm-v1",
+            ephemeralPublicKey: ephPubData,
+            ephemeralKeySignature: ephSig,
+            senderEd25519PublicKey: senderPubData,
+            nonce: Data(nonce),
+            ciphertext: Data(sealed.ciphertext),
+            authenticationTag: Data(sealed.tag)
+        )
+
+        do {
+            return try JSONEncoder().encode(envelope)
+        } catch {
+            throw InvitationSealError.encodingFailed
+        }
+    }
+
     // MARK: - Private
 
     private func subscribe(
@@ -237,6 +313,17 @@ actor IdentityRepository: InvitationEnvelopeDecrypting {
     /// **MUST** match `KeyManager.deriveStellarKey` in stellar-mls — a recovery
     /// phrase generated there must produce the same `G...` account ID here.
     private static func stellarPublicKey(fromNostrSecret nostrSecret: Data) -> Data {
+        let privateKey = (try? stellarSigningPrivateKey(fromNostrSecret: nostrSecret))!
+        return Data(privateKey.publicKey.rawRepresentation)
+    }
+
+    /// Sibling of `stellarPublicKey` that returns the Ed25519
+    /// *private* key. Used by `sealInvitation` for the M-5 attestation
+    /// signature on per-envelope ephemeral pubkeys. Never leaves this
+    /// actor.
+    private static func stellarSigningPrivateKey(
+        fromNostrSecret nostrSecret: Data
+    ) throws -> Curve25519.Signing.PrivateKey {
         let derived = HKDF<SHA256>.deriveKey(
             inputKeyMaterial: SymmetricKey(data: nostrSecret),
             salt: Data("chat.onym.ios".utf8),
@@ -244,8 +331,7 @@ actor IdentityRepository: InvitationEnvelopeDecrypting {
             outputByteCount: 32
         )
         let seed = derived.withUnsafeBytes { Data($0) }
-        let privateKey = try! Curve25519.Signing.PrivateKey(rawRepresentation: seed)
-        return Data(privateKey.publicKey.rawRepresentation)
+        return try Curve25519.Signing.PrivateKey(rawRepresentation: seed)
     }
 
     /// HKDF-SHA256(nostrSecret, salt="chat.onym.ios", info="x25519-key-agreement-v1", 32B).
