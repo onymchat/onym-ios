@@ -15,9 +15,11 @@ final class NostrMessageTransport: MessageTransport {
     private static let sinceSlack: TimeInterval = 60
 
     private let state: State
+    private let signerProvider: any NostrEphemeralSignerProvider
 
-    init() {
+    init(signerProvider: any NostrEphemeralSignerProvider) {
         self.state = State()
+        self.signerProvider = signerProvider
     }
 
     func connect(to endpoints: [TransportEndpoint]) async {
@@ -30,7 +32,7 @@ final class NostrMessageTransport: MessageTransport {
 
     @discardableResult
     func publish(_ payload: Data, to topic: TransportTopic) async throws -> PublishReceipt {
-        let signer = try OnymNostrSigner.ephemeral()
+        let signer = try signerProvider.makeEphemeralSigner()
         let event = try Self.buildPublishEvent(payload: payload, topic: topic, signer: signer)
         let accepted = try await state.publish(event: event)
         return PublishReceipt(messageID: event.id, acceptedBy: accepted)

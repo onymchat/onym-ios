@@ -13,9 +13,11 @@ final class NostrInboxTransport: InboxTransport {
     private static let inboxTagPrefix = "sep-inbox:"
 
     private let state: State
+    private let signerProvider: any NostrEphemeralSignerProvider
 
-    init() {
+    init(signerProvider: any NostrEphemeralSignerProvider) {
         self.state = State()
+        self.signerProvider = signerProvider
     }
 
     func connect(to endpoints: [TransportEndpoint]) async {
@@ -28,7 +30,7 @@ final class NostrInboxTransport: InboxTransport {
 
     @discardableResult
     func send(_ payload: Data, to inbox: TransportInboxID) async throws -> PublishReceipt {
-        let signer = try OnymNostrSigner.ephemeral()
+        let signer = try signerProvider.makeEphemeralSigner()
         let event = try Self.buildSendEvent(payload: payload, inbox: inbox, signer: signer)
         let accepted = try await state.send(event: event)
         return PublishReceipt(messageID: event.id, acceptedBy: accepted)
