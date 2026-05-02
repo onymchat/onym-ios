@@ -22,25 +22,126 @@ time `project.yml` changes.
 
 ## Architecture
 
-Three rules, enforced by file layout and access modifiers:
+Four layers, each isolated from the others by an explicit seam.
+Solid boxes exist today; dashed boxes are planned.
 
-- **Repositories own all I/O** — Keychain, network, on-device state.
-  Pure references; no UI.
-- **Unidirectional reactive flow to views** — repositories publish
-  state; views observe and render; user actions flow back as intents
-  that mutate repository state. No bidirectional bindings, no shared
-  mutable state across views.
-- **OnymSDK is internal-only** — repositories wrap it; views never
-  call it directly.
-- **Secret material stays inside its owning repository** — outside
-  callers must not read mnemonic / private-key fields off any value
-  type that exposes them. Statically enforced — see *Static checks*.
+```
+                                          ┌────────────────────────────────────┐
+                                          │ Views (SwiftUI)                    │
+                                          │ stateless · pure render            │
+                                          │ RootView · SettingsView ·          │
+                                          │ RecoveryPhraseBackupView           │
+                                          └──────────┬──────────────▲──────────┘
+                                                     │ intent       │ snapshot
+                                                     ▼              │
+                                          ┌──────────────────────────────────┐
+                                          │ Interactors (@Observable)        │
+                                          │ stateless orchestration ·        │
+                                          │ no I/O · no persistence          │
+                                          │ RecoveryPhraseBackupFlow         │
+                                          │ ╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶     │
+                                          │ ╎ planned: ChatFlow · InviteFlow ╎│
+                                          │ ╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶     │
+                                          └──────────┬──────────────▲────────┘
+                                                     │ command      │ snapshot
+                                                     ▼              │
+                                          ┌──────────────────────────────────┐
+                                          │ Repositories (actors)            │
+                                          │ stateful · own ALL I/O ·         │
+                                          │ AsyncStream<T> reactive surface  │
+                                          │                                  │
+                                          │   IdentityRepository  ◄── ROOT   │
+                                          │ ╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶     │
+                                          │ ╎ planned: ChatRepository      ╎ │
+                                          │ ╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶     │
+                                          └──┬────────────────────────────┬──┘
+                                             │                            │
+                        ┌────────────────────┘                            └───────────────────┐
+                        ▼                                                                     ▼
+          ╔═══════════════════════╗                                       ╔══════════════════════════════╗
+          ║ Persistence (seam)    ║                                       ║ Transport (seam)             ║
+          ║ KeychainStore         ║                                       ║ MessageTransport             ║
+          ║ ╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶   ║                                       ║ InboxTransport               ║
+          ║ ╎ planned: SQLite ╎   ║                                       ║                              ║
+          ║ ╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶╶   ║                                       ║                              ║
+          ╚══════════╤════════════╝                                       ╚══════════╤═══════════════════╝
+                     │                                                               │
+                     ▼                                                               ▼
+          ┌──────────────────────┐                              ┌────────────────────┬───────────────────────┐
+          │ iOS Keychain         │                              │ Nostr (today)      │ ╎ planned: Tor       ╎│
+          │ kSecClassGeneric…    │                              │ NostrRelayConn ·   │ ╎ HiddenServiceConn  ╎│
+          └──────────────────────┘                              │ NostrEvent · NIP-01│ ╎ (drop-in adapter)  ╎│
+                                                                └────────────────────┴───────────────────────┘
+                                          ╔════════════════════════════════════╗
+                                          ║ OnymSDK (FFI primitives)           ║
+                                          ║ Common · Anarchy · OneOnOne ·      ║
+                                          ║ Tyranny — Plonk · Poseidon · BLS · ║
+                                          ║ BIP340 Nostr signing               ║
+                                          ║ called ONLY from inside repositories ║
+                                          ╚════════════════════════════════════╝
+```
 
-The first repository — `IdentityRepository` — is an `actor` that
-publishes identity snapshots via `AsyncStream<Identity?>`. Views
-subscribe with `.task` and re-render whenever a new snapshot lands;
-they never see secret material, never call OnymSDK, never touch the
-Keychain.
+### Touch-surface rules
+
+What each layer is allowed to call. Statically enforced where possible
+(access modifiers, `scripts/lint-secrets.py`); load-bearing in code
+review where it isn't.
+
+| Layer | May call | Forbidden |
+|---|---|---|
+| **View** | its own interactor (intents in, snapshots out) | repository directly · `OnymSDK` · Keychain · transport · `URLSession` · another interactor |
+| **Interactor** | repositories (commands + snapshots) | `OnymSDK` · Keychain · transport · disk · network · another interactor's internals |
+| **Repository** | persistence seam · transport seam · `OnymSDK` | another repository's internals · views · interactors |
+| **Persistence / Transport seam** | the one concrete backend it implements | repositories · `OnymSDK` · the other seam |
+| **OnymSDK** | itself | everything above |
+
+Two extra invariants that cut across the layers:
+
+- **Secret material never leaves its owning repository.** No outside
+  caller reads `nostrSecretKey` / `blsSecretKey` / `entropy` /
+  `recoveryPhrase` off `Identity` or any other value type. Enforced by
+  `scripts/lint-secrets.py` (default-deny diff check; see *Static
+  checks*).
+- **Reactive flow is unidirectional.** Repositories publish via
+  `AsyncStream<T>`; interactors observe and command; views observe and
+  intent. No bidirectional bindings, no shared mutable state across
+  views, no view-side mutation.
+
+### Why this beats the reference impl in `stellar-mls/clients/ios`
+
+- **Transport is a seam, not a class.** `MessageTransport` /
+  `InboxTransport` are protocols; the Nostr implementation is one of
+  several possible adapters. A future Tor / hidden-service / `wss://`
+  mesh / mock transport drops in without touching any caller above the
+  seam. In the reference impl, `NostrMessageTransport` and chat code
+  are co-mingled — chat semantics (`GroupCrypto`, BLS attestation,
+  member tracking) live in the same file as relay framing, which is
+  why a transport swap there is a refactor, not a substitution.
+- **Persistence is a seam too.** `IdentityRepository` talks to a
+  `KeychainStore` reference — swapping in a SQLite-backed or in-memory
+  store for a different deployment / test environment is a constructor
+  change, not a rewrite.
+- **Interactors are stateless.** The reference impl puts orchestration
+  on `AppState`, a single `@Observable` god-object. We split
+  orchestration per-flow (`RecoveryPhraseBackupFlow` today, `ChatFlow`
+  / `InviteFlow` later); each owns its own state machine and *only*
+  its state machine. Repository state stays in the repository.
+- **Views never close over a repository.** SwiftUI views observe an
+  interactor's snapshot and dispatch intents; the interactor is the
+  only thing that holds a reference to a repository. A view written
+  against this layering can be redesigned (or A/B-tested, or skinned
+  for a different surface like a Watch complication) without changing
+  anything below it.
+
+### Why `IdentityRepository` is the root
+
+Identity is the only repository that doesn't depend on another
+repository — it bootstraps from the Keychain alone. Every other
+repository needs it: chat needs the BLS keypair to attest membership;
+transport needs the inbox identifier to subscribe. That makes it the
+dependency root: nothing else can come up before it does. The app's
+`@main` constructs `IdentityRepository` first, then injects it into
+every interactor that needs identity-derived state.
 
 ## Current state
 
