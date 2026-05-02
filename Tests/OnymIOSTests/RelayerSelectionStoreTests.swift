@@ -1,10 +1,16 @@
 import XCTest
 @testable import OnymIOS
 
-/// Round-trip the persistence seam against real UserDefaults. Each
-/// test gets its own suite so runs don't collide with each other or
-/// the production `.standard` defaults — same isolation pattern as
-/// the per-test Keychain service in `IdentityRepositoryTests`.
+/// UserDefaults round-trip with per-test suite isolation. Same pattern
+/// as `AnchorSelectionStoreTests` and the per-test Keychain service in
+/// `IdentityRepositoryTests`.
+///
+/// Also exercises the one-time migration from PR #18's
+/// single-selection format — the legacy `chat.onym.ios.relayer.selection`
+/// blob (`RelayerSelection` enum with `.known`/`.custom` cases) projects
+/// onto a one-endpoint `RelayerConfiguration` with that endpoint as
+/// primary, strategy `.primary`. After successful migration the legacy
+/// key is removed.
 final class RelayerSelectionStoreTests: XCTestCase {
     private var defaults: UserDefaults!
     private var suiteName: String!
@@ -25,32 +31,37 @@ final class RelayerSelectionStoreTests: XCTestCase {
         super.tearDown()
     }
 
-    // MARK: - selection
+    // MARK: - configuration round-trip
 
-    func test_loadSelection_returnsNilWhenNothingPersisted() {
-        XCTAssertNil(store.loadSelection())
+    func test_loadConfiguration_returnsEmptyWhenNothingPersisted() {
+        XCTAssertEqual(store.loadConfiguration(), .empty)
     }
 
-    func test_saveSelection_thenLoadSelection_roundtripsKnown() {
+    func test_saveAndLoadConfiguration_roundtripsAllFields() {
         let endpoint = RelayerEndpoint(
             name: "Test",
-            url: URL(string: "https://relayer.example.com")!,
+            url: URL(string: "https://relayer-test.example")!,
             network: "testnet"
         )
-        store.saveSelection(.known(endpoint))
-        XCTAssertEqual(store.loadSelection(), .known(endpoint))
+        let config = RelayerConfiguration(
+            endpoints: [endpoint],
+            primaryURL: endpoint.url,
+            strategy: .primary
+        )
+        store.saveConfiguration(config)
+        XCTAssertEqual(store.loadConfiguration(), config)
     }
 
-    func test_saveSelection_thenLoadSelection_roundtripsCustom() {
-        let url = URL(string: "https://my-private-relayer.dev")!
-        store.saveSelection(.custom(url))
-        XCTAssertEqual(store.loadSelection(), .custom(url))
-    }
+    func test_saveConfiguration_overwrites() {
+        let a = RelayerEndpoint(name: "A", url: URL(string: "https://a.example")!, network: "testnet")
+        let b = RelayerEndpoint(name: "B", url: URL(string: "https://b.example")!, network: "public")
+        store.saveConfiguration(RelayerConfiguration(endpoints: [a], primaryURL: a.url, strategy: .primary))
+        store.saveConfiguration(RelayerConfiguration(endpoints: [a, b], primaryURL: b.url, strategy: .random))
 
-    func test_saveSelectionNil_clearsPersistedSelection() {
-        store.saveSelection(.custom(URL(string: "https://x.com")!))
-        store.saveSelection(nil)
-        XCTAssertNil(store.loadSelection())
+        let loaded = store.loadConfiguration()
+        XCTAssertEqual(loaded.endpoints, [a, b])
+        XCTAssertEqual(loaded.primaryURL, b.url)
+        XCTAssertEqual(loaded.strategy, .random)
     }
 
     // MARK: - cached known list
@@ -68,13 +79,68 @@ final class RelayerSelectionStoreTests: XCTestCase {
         XCTAssertEqual(store.loadCachedKnownList(), list)
     }
 
-    func test_saveCachedKnownList_overwrites() {
-        store.saveCachedKnownList([
-            RelayerEndpoint(name: "A", url: URL(string: "https://a.com")!, network: "testnet")
-        ])
-        store.saveCachedKnownList([
-            RelayerEndpoint(name: "B", url: URL(string: "https://b.com")!, network: "public")
-        ])
-        XCTAssertEqual(store.loadCachedKnownList().map(\.name), ["B"])
+    // MARK: - PR #18 migration
+
+    func test_migration_legacyKnownSelection_yieldsSingleEndpointConfig() throws {
+        // Plant a legacy `.known(endpoint)` blob in the suite, then
+        // load and assert it migrates to a one-endpoint config.
+        let endpoint = RelayerEndpoint(
+            name: "Legacy",
+            url: URL(string: "https://legacy.example")!,
+            network: "testnet"
+        )
+        let legacyJSON = #"{ "known": { "name": "Legacy", "url": "https://legacy.example", "network": "testnet" } }"#
+        defaults.set(Data(legacyJSON.utf8), forKey: "chat.onym.ios.relayer.selection")
+
+        let migrated = store.loadConfiguration()
+        XCTAssertEqual(migrated.endpoints, [endpoint])
+        XCTAssertEqual(migrated.primaryURL, endpoint.url)
+        XCTAssertEqual(migrated.strategy, .primary)
+    }
+
+    func test_migration_legacyCustomSelection_yieldsSingleEndpointConfig() throws {
+        // Legacy `.custom(url)` synthesises a custom-network endpoint.
+        let legacyJSON = #"{ "custom": { "_0": "https://custom.example" } }"#
+        defaults.set(Data(legacyJSON.utf8), forKey: "chat.onym.ios.relayer.selection")
+
+        let migrated = store.loadConfiguration()
+        XCTAssertEqual(migrated.endpoints.count, 1)
+        XCTAssertEqual(migrated.endpoints.first?.url, URL(string: "https://custom.example"))
+        XCTAssertEqual(migrated.endpoints.first?.network, RelayerEndpoint.customNetwork)
+        XCTAssertEqual(migrated.primaryURL, URL(string: "https://custom.example"))
+        XCTAssertEqual(migrated.strategy, .primary)
+    }
+
+    func test_migration_runsOnlyOnce_legacyKeyRemovedAfterMigration() throws {
+        let legacyJSON = #"{ "known": { "name": "Legacy", "url": "https://legacy.example", "network": "testnet" } }"#
+        defaults.set(Data(legacyJSON.utf8), forKey: "chat.onym.ios.relayer.selection")
+
+        // First load triggers migration.
+        _ = store.loadConfiguration()
+
+        // Legacy key must be gone, replaced by the new configuration key.
+        XCTAssertNil(defaults.data(forKey: "chat.onym.ios.relayer.selection"))
+        XCTAssertNotNil(defaults.data(forKey: "chat.onym.ios.relayer.configuration"))
+
+        // Second load returns the migrated value without retriggering migration.
+        let second = store.loadConfiguration()
+        XCTAssertEqual(second.endpoints.count, 1)
+    }
+
+    func test_migration_unreadableLegacyBlob_dropsItAndReturnsEmpty() throws {
+        defaults.set(Data("garbage".utf8), forKey: "chat.onym.ios.relayer.selection")
+        let migrated = store.loadConfiguration()
+        XCTAssertEqual(migrated, .empty)
+        XCTAssertNil(defaults.data(forKey: "chat.onym.ios.relayer.selection"),
+                     "unreadable legacy blob must be dropped, not left lingering")
+    }
+
+    func test_noLegacy_noConfiguration_returnsEmptyWithoutWriting() {
+        // Cold start, no legacy blob, no new config — load returns
+        // empty and DOESN'T persist anything (avoids gratuitous
+        // UserDefaults writes on every cold launch).
+        let result = store.loadConfiguration()
+        XCTAssertEqual(result, .empty)
+        XCTAssertNil(defaults.data(forKey: "chat.onym.ios.relayer.configuration"))
     }
 }
