@@ -4,8 +4,8 @@ iOS app for Onym, built incrementally on top of
 [`onym-sdk-swift`](https://github.com/onymchat/onym-sdk-swift).
 
 This repo is being grown from scratch — small, hand-reviewable chunks.
-The first chunk (this initial state) just wires in the OnymSDK Swift
-Package.
+Chunk 1 wired in the OnymSDK Swift Package. Chunk 2 lands the
+persistent reactive identity repository.
 
 ## Setup
 
@@ -20,34 +20,49 @@ open OnymIOS.xcodeproj
 conflicts. Re-run `./generate-xcodeproj.sh` after pulling, or any
 time `project.yml` changes.
 
-## Architecture (target shape)
+## Architecture
 
-> **Not landed yet.** First chunk is just SDK wiring with one smoke
-> view. The architecture skeleton lands in a later chunk where there's
-> real domain logic to model.
+Three rules, enforced by file layout and access modifiers:
 
-When it does land:
-
-- **Repositories** own all I/O — keychain, network, on-device
-  state. Pure references; no UI.
+- **Repositories own all I/O** — Keychain, network, on-device state.
+  Pure references; no UI.
 - **Unidirectional reactive flow to views** — repositories publish
-  state; views observe and render; user actions flow back as
-  intents that mutate repository state. No bidirectional bindings,
-  no shared mutable state across views.
+  state; views observe and render; user actions flow back as intents
+  that mutate repository state. No bidirectional bindings, no shared
+  mutable state across views.
 - **OnymSDK is internal-only** — repositories wrap it; views never
   call it directly.
+- **Secret material stays inside its owning repository** — outside
+  callers must not read mnemonic / private-key fields off any value
+  type that exposes them. Statically enforced — see *Static checks*.
+
+The first repository — `IdentityRepository` — is an `actor` that
+publishes identity snapshots via `AsyncStream<Identity?>`. Views
+subscribe with `.task` and re-render whenever a new snapshot lands;
+they never see secret material, never call OnymSDK, never touch the
+Keychain.
 
 ## Current state
 
 ```
 .
-├── project.yml                          ← xcodegen source of truth
-├── generate-xcodeproj.sh                ← regenerates OnymIOS.xcodeproj
+├── project.yml                              ← xcodegen source of truth
+├── generate-xcodeproj.sh                    ← regenerates OnymIOS.xcodeproj
+├── scripts/
+│   └── lint-secrets.py                      ← static check: no off-repo secret reads
 ├── Sources/OnymIOS/
-│   ├── OnymIOSApp.swift                 ← @main
-│   └── SDKWiringSmokeView.swift         ← one OnymSDK call to verify wiring
+│   ├── OnymIOSApp.swift                     ← @main, holds the repo
+│   ├── IdentityBootstrapView.swift          ← drains snapshots into @State
+│   └── Identity/
+│       ├── Identity.swift                   ← Sendable value type the views see
+│       ├── IdentityRepository.swift         ← actor + AsyncStream snapshots
+│       ├── KeychainStore.swift              ← single-blob Codable in Keychain
+│       ├── IdentityError.swift              ← single error type
+│       ├── Bip39.swift                      ← BIP39 wordlist + PBKDF2 + HKDF
+│       └── StellarStrKey.swift              ← Ed25519 → G... account ID encoder
 ├── Tests/OnymIOSTests/
-│   └── SmokeTests.swift                 ← one XCTest exercising the same call
+│   ├── SmokeTests.swift                     ← OnymSDK wiring sanity check
+│   └── IdentityRepositoryTests.swift        ← real-Keychain integration tests
 └── README.md
 ```
 
@@ -63,35 +78,175 @@ indirect input events, scene manifest), `TARGETED_DEVICE_FAMILY`
 1+2 (iPhone + iPad), `DEVELOPMENT_TEAM` from environment so unsigned
 builds work without local config.
 
-## Build status — blocked on upstream
+## Identity persistence
 
-Adding the SPM dep on `onym-sdk-swift` from `0.0.1` resolves cleanly,
-but `xcodebuild` errors:
+One Keychain item (`kSecClassGenericPassword`, service
+`chat.onym.ios.identity`) holds a JSON-encoded `StoredSnapshot`:
+
+```swift
+struct StoredSnapshot: Codable {
+    let entropy: Data?           // 16 bytes (BIP39 128-bit entropy)
+    let nostrSecretKey: Data     // 32 bytes (secp256k1)
+    let blsSecretKey: Data       // 32 bytes (BLS12-381 Fr)
+}
+```
+
+Single-blob layout means every mutation is one atomic `SecItemUpdate`
+(or `SecItemAdd`) — there is no intermediate state where one secret
+has been written and another has not. Accessibility:
+`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` (survives reboot,
+never leaves the device, no iCloud Keychain sync).
+
+## Derivation
+
+`Identity` exposes four public keys plus two derived identifiers.
+Two pairs are persisted (nostr + BLS); the other two are HKDF-derived
+from the nostr secret on every load. The private halves of the
+derived pairs stay inside the repository.
 
 ```
-error: The package product 'OnymSDK' cannot be used as a dependency
-of this target because it uses unsafe build flags.
+                ┌─────────────────────────────────────┐
+                │  BIP39 mnemonic  (12 words)         │
+                └────────────────┬────────────────────┘
+                                 │ PBKDF2-HMAC-SHA512  (2048 iters)
+                                 ▼
+                ┌─────────────────────────────────────┐
+                │  64-byte seed                       │
+                └────────┬────────────────┬───────────┘
+                         │                │     HKDF-SHA256
+                         ▼                ▼     salt = "chat.onym.bip39"
+              ┌──────────────────┐ ┌──────────────────┐
+              │ nostr secret     │ │ BLS secret       │
+              │ (32B secp256k1)  │ │ (32B BLS Fr)     │
+              └────┬─────────────┘ └────────┬─────────┘
+                   │ HKDF-SHA256              │
+                   │ salt = "chat.onym.ios"   │
+       ┌───────────┼───────────────┐          │
+       ▼           ▼               ▼          │
+  ┌─────────┐ ┌─────────────┐ ┌─────────────┐ │
+  │ Stellar │ │  X25519     │ │ inboxTag    │ │
+  │ Ed25519 │ │  (key agr.) │ │ (16-hex)    │ │
+  │ → G...  │ │  → inbox    │ │ SHA-256     │ │
+  └─────────┘ └─────────────┘ │ ("sep-      │ │
+                              │  inbox-v1"  │ │
+                              │  ‖ X25519   │ │
+                              │   pubkey)   │ │
+                              │   [0..8]    │ │
+                              └─────────────┘ │
+                                              │
+                                              ▼
+                              48B BLS12-381 G1 compressed pubkey
 ```
 
-`v0.0.1` tagged the **dev-loop** variant of `Package.swift` (with
-`linkerSettings: [.unsafeFlags(["-L./build/host", ...])]` to link the
-host-built Rust staticlibs). SPM refuses to consume packages with
-unsafe flags as dependencies — that's the intended SPM safety gate.
+Constants are byte-identical to the reference impl
+(`stellar-mls/clients/ios/StellarChat`) so a recovery phrase
+generated there restores the same identity here, and vice versa.
+**Don't change these without coordinating every client.**
 
-The fix lives in
-[`onymchat/onym-sdk-swift#2`](https://github.com/onymchat/onym-sdk-swift/pull/2)
-— that PR adds a `Release` workflow that builds an `XCFramework` and
-tags a release-variant `Package.swift` consuming it via
-`.binaryTarget(url:checksum:)`. Once that PR merges and the workflow
-runs (`gh workflow run Release -f tag=v0.0.x`), this repo's build
-will go green.
+| Step | Input | Salt | Info | Algorithm |
+|---|---|---|---|---|
+| Seed                  | mnemonic       | `"mnemonic"+passphrase` | —                          | PBKDF2-HMAC-SHA512, 2048 iters |
+| Nostr secret          | seed           | `chat.onym.bip39`       | `nostr-secp256k1-v1`       | HKDF-SHA256, 32B |
+| BLS secret            | seed           | `chat.onym.bip39`       | `bls12-381-v1`             | HKDF-SHA256, 32B |
+| Stellar Ed25519 seed  | nostr secret   | `chat.onym.ios`         | `stellar-ed25519-v1`       | HKDF-SHA256, 32B |
+| X25519 seed (inbox)   | nostr secret   | `chat.onym.ios`         | `x25519-key-agreement-v1`  | HKDF-SHA256, 32B |
+| Inbox tag             | X25519 pubkey  | —                       | prefix `sep-inbox-v1`      | SHA-256, hex(prefix(8)) |
+| Stellar account ID    | Ed25519 pubkey | —                       | version byte `6 << 3 = 48` | StrKey (CRC16-XMODEM + base32) |
 
-In the meantime, the wiring (project.yml + Swift sources) is
-structurally correct and ready for review.
+`IdentityRepositoryTests.test_derivation_matchesCrossPlatformFixture`
+locks the entire chain in against the canonical BIP39 test vector
+(`abandon × 11 + about`). Any drift in any constant breaks that test
+loudly.
+
+### Why all four pubkeys live on `Identity`
+
+| Field | Used by |
+|---|---|
+| `nostrPublicKey` (32B secp256k1)    | Nostr event verification; npub display |
+| `blsPublicKey` (48B BLS12-381)      | SEP group membership trees + plonk proofs |
+| `stellarPublicKey` (32B Ed25519)    | Transport bundles; attestations; envelope-sig verification |
+| `stellarAccountID` (`G...`)         | `callerAddress` on every Soroban contract call |
+| `inboxPublicKey` (32B X25519)       | ECDH target — peers encrypt invitations to us against this |
+| `inboxTag` (16-hex)                 | Nostr `#t`/`#d` filter — addresses invites to our inbox |
+
+All are deterministic from the persisted secrets, so the repository
+computes them once at load and ships precomputed bytes on the
+snapshot. Views read precomputed values; they never trigger an FFI
+call or HKDF derivation.
+
+The Stellar Ed25519 and X25519 **private** keys never leave the
+repository. When signing / decryption methods land (next chunks),
+they'll be `repo.stellarSign(_:)` / `repo.decryptInvitation(_:)` —
+not raw private-key access on `Identity`.
+
+## Reactive shape
+
+```
+                 ┌──────────────────────────────────┐
+                 │  actor IdentityRepository        │
+                 │                                  │
+                 │  bootstrap / generateNew /       │
+                 │  restore  / wipe                 │
+                 │       │                          │
+                 │       ▼                          │
+                 │  apply(Identity?)                │
+                 │       │                          │
+                 │       └─► yield to N AsyncStream │
+                 │           continuations          │
+                 └──────────────┬───────────────────┘
+                                │  AsyncStream<Identity?>
+                                ▼
+                 ┌──────────────────────────────────┐
+                 │  SwiftUI View                    │
+                 │  .task {                         │
+                 │      for await snap in repo      │
+                 │          .snapshots {            │
+                 │              identity = snap     │
+                 │      }                           │
+                 │  }                               │
+                 └──────────────────────────────────┘
+```
+
+The actor's executor serialises mutation; Keychain reads/writes,
+PBKDF2, HKDF, and OnymSDK FFI all run off the main thread by
+construction. Subscribers receive the current value immediately on
+subscribe, then a fresh value after every successful mutation.
+
+## Static checks
+
+`scripts/lint-secrets.py` is a default-deny static check that fails
+the build on any read of identity secrets — `.nostrSecretKey`,
+`.blsSecretKey`, `.recoveryPhrase`, `.entropy` — outside the
+allowlisted files (the repository, its persistence layer, the
+identity value type, and its tests). The goal: catch accidental
+secret leaks at the diff level, not after they've shipped to logs /
+crash reports / screenshots.
+
+Run before pushing:
+
+```sh
+python3 scripts/lint-secrets.py
+```
+
+To intentionally read a secret (e.g. a future biometric-gated
+recovery-phrase reveal), annotate with `// onym:allow-secret-read`
+on the line itself or anywhere in the contiguous `//`-comment block
+directly above. Each suppression should justify itself in code review:
+
+```swift
+// Rendered behind biometric on the recovery-phrase backup screen —
+// production reveal UI gates this and disables screenshots.
+// onym:allow-secret-read
+let phrase = identity.recoveryPhrase
+```
+
+The check is not part of `xcodebuild` (yet) — wire into a pre-commit
+hook or CI step as a follow-up. Adding a new file to the allowlist
+requires editing the script and naming the reason in the PR.
 
 ## Versioning
 
-This repo will track `OnymSDK` at `from: "0.0.1"`. Until the SDK hits
+This repo tracks `OnymSDK` at `from: "0.0.1"`. Until the SDK hits
 1.0, breaking changes can land in any minor bump — pin to a specific
 version (`exact: "X.Y.Z"`) if reproducibility matters more than
 auto-upgrade.
