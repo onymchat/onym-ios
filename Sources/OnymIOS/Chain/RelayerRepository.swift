@@ -1,30 +1,31 @@
 import Foundation
 
-/// Combined snapshot consumed by the picker view. Two halves change
-/// independently — refreshing the GitHub list is async; selection is
-/// a synchronous user action — but views always want both in one go.
+/// Combined snapshot consumed by the picker view. Three halves change
+/// independently — refreshing the GitHub list is async; configuration
+/// changes are synchronous user actions — but views always want them
+/// in one go.
 struct RelayerState: Equatable, Sendable {
-    let selection: RelayerSelection?
+    let configuration: RelayerConfiguration
     let knownList: [RelayerEndpoint]
 
-    static let empty = RelayerState(selection: nil, knownList: [])
+    static let empty = RelayerState(configuration: .empty, knownList: [])
 }
 
-/// Owns the user's relayer choice + the cached known-relayers list.
-/// Mirrors `IdentityRepository` / `IncomingInvitationsRepository`
-/// shape: `actor` with snapshot replay on subscribe + a fresh push
-/// after every successful mutation.
+/// Owns the user's relayer configuration (multiple endpoints, primary
+/// marker, strategy) + the cached known-relayers list. Mirrors
+/// `IdentityRepository` shape: `actor` with snapshot replay on
+/// subscribe + a fresh push after every successful mutation.
 ///
 /// Lifecycle:
-/// 1. `OnymIOSApp.init` constructs the repository with the prod
-///    fetcher + UserDefaults store.
+/// 1. `OnymIOSApp.init` constructs the repository with prod fetcher +
+///    UserDefaults store.
 /// 2. App `.task { await repo.start() }` triggers a background fetch
-///    of the latest `relayers.json`. While it's in flight, the UI
-///    sees whatever was cached on disk from the last successful run.
-/// 3. User taps Settings → Network → Relayer; the picker view reads
-///    `snapshots`, dispatches `select` / `selectCustom` intents.
-/// 4. Future chain interactors read `snapshot.selection?.url` to
-///    decide where to POST.
+///    of the latest `relayers.json`. While in flight, the UI sees
+///    whatever was cached on disk from the last successful run.
+/// 3. User opens Settings → Network → Relayer; the settings view
+///    dispatches add/remove/setPrimary/setStrategy intents.
+/// 4. Future chain interactors call `selectURL()` for the URL to POST
+///    to per request — strategy decides primary vs random.
 actor RelayerRepository {
     private let fetcher: any KnownRelayersFetcher
     private let store: any RelayerSelectionStore
@@ -37,16 +38,17 @@ actor RelayerRepository {
         self.fetcher = fetcher
         self.store = store
         self.cached = RelayerState(
-            selection: store.loadSelection(),
+            configuration: store.loadConfiguration(),
             knownList: store.loadCachedKnownList()
         )
     }
 
+    // MARK: - Background refresh
+
     /// Trigger a background refresh of the known-relayers list.
     /// Idempotent — a second call while the first is in flight is a
-    /// no-op. Failures fall through silently; the cached list (if
-    /// any) remains the source of truth, and the user can always
-    /// enter a custom URL.
+    /// no-op. Failures fall through silently; the cached list (if any)
+    /// remains the source of truth.
     func start() {
         guard startTask == nil else { return }
         startTask = Task { [weak self] in
@@ -60,35 +62,96 @@ actor RelayerRepository {
     func refresh() async throws {
         let list = try await fetcher.fetchLatest()
         store.saveCachedKnownList(list)
-        cached = RelayerState(selection: cached.selection, knownList: list)
+        cached = RelayerState(configuration: cached.configuration, knownList: list)
         publish()
     }
 
-    /// User picked one of the published relayers from the list.
-    func select(_ endpoint: RelayerEndpoint) {
-        let selection = RelayerSelection.known(endpoint)
-        store.saveSelection(selection)
-        cached = RelayerState(selection: selection, knownList: cached.knownList)
-        publish()
+    // MARK: - Configuration mutations
+
+    /// Add an endpoint to the configured list. Idempotent on URL — a
+    /// second add of the same URL replaces the existing entry's
+    /// metadata (name / network) but doesn't duplicate the row.
+    /// Returns true on insert, false on update.
+    @discardableResult
+    func addEndpoint(_ endpoint: RelayerEndpoint) -> Bool {
+        var endpoints = cached.configuration.endpoints
+        let inserted: Bool
+        if let index = endpoints.firstIndex(where: { $0.url == endpoint.url }) {
+            endpoints[index] = endpoint
+            inserted = false
+        } else {
+            endpoints.append(endpoint)
+            inserted = true
+        }
+        applyConfiguration(
+            RelayerConfiguration(
+                endpoints: endpoints,
+                primaryURL: cached.configuration.primaryURL,
+                strategy: cached.configuration.strategy
+            )
+        )
+        return inserted
     }
 
-    /// User typed a custom URL (private deployment, localhost, etc.).
-    func selectCustom(url: URL) {
-        let selection = RelayerSelection.custom(url)
-        store.saveSelection(selection)
-        cached = RelayerState(selection: selection, knownList: cached.knownList)
-        publish()
+    /// Remove the endpoint with the given URL. If the removed endpoint
+    /// was the primary, the primary marker clears (next `selectURL`
+    /// under `.primary` strategy falls back to the new first endpoint).
+    func removeEndpoint(url: URL) {
+        let endpoints = cached.configuration.endpoints.filter { $0.url != url }
+        let primaryURL = cached.configuration.primaryURL == url ? nil : cached.configuration.primaryURL
+        applyConfiguration(
+            RelayerConfiguration(
+                endpoints: endpoints,
+                primaryURL: primaryURL,
+                strategy: cached.configuration.strategy
+            )
+        )
     }
 
-    /// User cleared the selection (e.g. signing out of a deployment).
-    func clearSelection() {
-        store.saveSelection(nil)
-        cached = RelayerState(selection: nil, knownList: cached.knownList)
-        publish()
+    /// Mark `url` as primary. Pass `nil` to clear the primary marker.
+    /// No-op if `url` isn't in the configured endpoints (caller should
+    /// have added it first).
+    func setPrimary(url: URL?) {
+        if let url, !cached.configuration.endpoints.contains(where: { $0.url == url }) {
+            return
+        }
+        applyConfiguration(
+            RelayerConfiguration(
+                endpoints: cached.configuration.endpoints,
+                primaryURL: url,
+                strategy: cached.configuration.strategy
+            )
+        )
     }
 
-    /// Snapshot the current state without subscribing to future ones.
+    func setStrategy(_ strategy: RelayerStrategy) {
+        applyConfiguration(
+            RelayerConfiguration(
+                endpoints: cached.configuration.endpoints,
+                primaryURL: cached.configuration.primaryURL,
+                strategy: strategy
+            )
+        )
+    }
+
+    /// Convenience for tests / screens that want to drop everything.
+    func clearConfiguration() {
+        applyConfiguration(.empty)
+    }
+
+    // MARK: - Read
+
     func currentState() -> RelayerState { cached }
+
+    /// Resolve the URL chain interactors should POST to, per the
+    /// configured strategy. Pure read of `cached.configuration`;
+    /// no I/O. Returns nil only when the configured-endpoints list
+    /// is empty (regardless of strategy).
+    func selectURL() -> URL? {
+        cached.configuration.selectURL()
+    }
+
+    // MARK: - AsyncStream
 
     nonisolated var snapshots: AsyncStream<RelayerState> {
         AsyncStream { continuation in
@@ -101,6 +164,12 @@ actor RelayerRepository {
     }
 
     // MARK: - Private
+
+    private func applyConfiguration(_ configuration: RelayerConfiguration) {
+        store.saveConfiguration(configuration)
+        cached = RelayerState(configuration: configuration, knownList: cached.knownList)
+        publish()
+    }
 
     private func subscribe(
         id: UUID,
@@ -120,8 +189,6 @@ actor RelayerRepository {
         }
     }
 
-    /// Internal-use refresh; swallows errors so background `start()`
-    /// can't leak an exception. Public callers go through `refresh()`.
     private func refreshFromNetwork() async {
         do {
             try await refresh()
