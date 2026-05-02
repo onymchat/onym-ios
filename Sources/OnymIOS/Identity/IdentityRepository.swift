@@ -18,7 +18,7 @@ import OnymSDK
 /// PBKDF2, HKDF, and FFI calls into OnymSDK all run on the actor — never on
 /// the main thread by construction. Views interact via `await` from a
 /// `Task` (typically a SwiftUI `.task`).
-actor IdentityRepository {
+actor IdentityRepository: InvitationEnvelopeDecrypting {
     static let shared = IdentityRepository()
 
     private let keychain: KeychainStore
@@ -88,6 +88,68 @@ actor IdentityRepository {
             continuation.onTermination = { _ in
                 Task { await self.unsubscribe(id: id) }
             }
+        }
+    }
+
+    // MARK: - Invitation decryption
+
+    /// Decode an inbox-transport-delivered invitation envelope and open
+    /// it with the X25519 private key derived from the persisted nostr
+    /// secret. The private key is recomputed on every call (single
+    /// HKDF) and discarded — secret material never escapes this actor.
+    func decryptInvitation(envelopeBytes: Data) throws -> Data {
+        let envelope: SealedEnvelope
+        do {
+            envelope = try JSONDecoder().decode(SealedEnvelope.self, from: envelopeBytes)
+        } catch {
+            throw InvitationDecryptError.malformedEnvelope
+        }
+        guard envelope.scheme == "x25519-aes-256-gcm-v1" else {
+            throw InvitationDecryptError.unsupportedScheme(envelope.scheme)
+        }
+        guard let ephPubData = envelope.ephemeralPublicKey else {
+            throw InvitationDecryptError.missingEphemeralKey
+        }
+        guard let nonceData = envelope.nonce, let tag = envelope.authenticationTag else {
+            throw InvitationDecryptError.missingNonceOrTag
+        }
+
+        // M-5 / N-1: verify Ed25519 signature on the ephemeral pubkey if
+        // present. Prevents a relay from substituting its own ephemeral
+        // key (which would let it decrypt the invitation in flight).
+        if let sigData = envelope.ephemeralKeySignature,
+           let senderPubData = envelope.senderEd25519PublicKey {
+            do {
+                let verifyingKey = try Curve25519.Signing.PublicKey(rawRepresentation: senderPubData)
+                guard verifyingKey.isValidSignature(sigData, for: ephPubData) else {
+                    throw InvitationDecryptError.signatureVerificationFailed
+                }
+            } catch let error as InvitationDecryptError {
+                throw error
+            } catch {
+                throw InvitationDecryptError.signatureVerificationFailed
+            }
+        }
+
+        guard let snapshot = try keychain.load() else {
+            throw InvitationDecryptError.identityNotLoaded
+        }
+        let privateKey = try Self.inboxKeyAgreementPrivateKey(fromNostrSecret: snapshot.nostrSecretKey)
+
+        do {
+            let ephPub = try Curve25519.KeyAgreement.PublicKey(rawRepresentation: ephPubData)
+            let sharedSecret = try privateKey.sharedSecretFromKeyAgreement(with: ephPub)
+            let key = sharedSecret.hkdfDerivedSymmetricKey(
+                using: SHA256.self,
+                salt: Data("sep-invitation-v1".utf8),
+                sharedInfo: Data("aes-256-gcm".utf8),
+                outputByteCount: 32
+            )
+            let nonce = try AES.GCM.Nonce(data: nonceData)
+            let box = try AES.GCM.SealedBox(nonce: nonce, ciphertext: envelope.ciphertext, tag: tag)
+            return try AES.GCM.open(box, using: key)
+        } catch {
+            throw InvitationDecryptError.decryptionFailed
         }
     }
 
@@ -189,6 +251,16 @@ actor IdentityRepository {
     /// HKDF-SHA256(nostrSecret, salt="chat.onym.ios", info="x25519-key-agreement-v1", 32B).
     /// **MUST** match `KeyManager.deriveKeyAgreementKey` in stellar-mls.
     private static func inboxPublicKey(fromNostrSecret nostrSecret: Data) -> Data {
+        let privateKey = (try? inboxKeyAgreementPrivateKey(fromNostrSecret: nostrSecret))!
+        return Data(privateKey.publicKey.rawRepresentation)
+    }
+
+    /// Sibling of `inboxPublicKey` that returns the X25519 *private* key
+    /// instead of just the public half. Used internally by
+    /// `decryptInvitation`. The private key never leaves this actor.
+    private static func inboxKeyAgreementPrivateKey(
+        fromNostrSecret nostrSecret: Data
+    ) throws -> Curve25519.KeyAgreement.PrivateKey {
         let derived = HKDF<SHA256>.deriveKey(
             inputKeyMaterial: SymmetricKey(data: nostrSecret),
             salt: Data("chat.onym.ios".utf8),
@@ -196,8 +268,7 @@ actor IdentityRepository {
             outputByteCount: 32
         )
         let seed = derived.withUnsafeBytes { Data($0) }
-        let privateKey = try! Curve25519.KeyAgreement.PrivateKey(rawRepresentation: seed)
-        return Data(privateKey.publicKey.rawRepresentation)
+        return try Curve25519.KeyAgreement.PrivateKey(rawRepresentation: seed)
     }
 
     /// First 8 bytes of `SHA-256("sep-inbox-v1" || inboxPublicKey)`, hex-encoded
