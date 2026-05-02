@@ -76,3 +76,9 @@ vendor/
 *.tmp
 *.swp
 *.swo
+
+# Claude Code per-session worktrees + agent scratch state. Each chunk
+# is developed in its own `.claude/worktrees/<name>/` checkout that
+# gets wiped after its PR merges. Nothing in this directory is build
+# input or the source of truth.
+.claude/
