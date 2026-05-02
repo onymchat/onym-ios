@@ -46,7 +46,10 @@ struct RelayerSettingsView: View {
         }
     }
 
-    private var strategyFooter: String {
+    /// Returns a `LocalizedStringKey` so the literals are auto-extracted
+    /// into `Localizable.xcstrings` (a plain `String` would be opaque to
+    /// the extractor and `Text(_)` wouldn't localize it).
+    private var strategyFooter: LocalizedStringKey {
         switch flow.state.snapshot.configuration.strategy {
         case .primary:
             return "Always use the primary relayer. If no primary is set, the first configured relayer is used."

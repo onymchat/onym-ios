@@ -7,11 +7,13 @@ enum ContractNetwork: String, Codable, CaseIterable, Hashable, Sendable {
     case testnet
     case `public`
 
-    /// User-facing label.
+    /// Localised label. Plain `String` so it composes into row text
+    /// without ceremony; values are looked up against
+    /// `Localizable.xcstrings` at access time.
     var displayName: String {
         switch self {
-        case .testnet: return "Testnet"
-        case .public: return "Mainnet"
+        case .testnet: return String(localized: "Testnet")
+        case .public: return String(localized: "Mainnet")
         }
     }
 }
@@ -27,14 +29,14 @@ enum GovernanceType: String, Codable, CaseIterable, Hashable, Sendable {
     case oneonone
     case tyranny
 
-    /// User-facing label.
+    /// Localised label. See `ContractNetwork.displayName`.
     var displayName: String {
         switch self {
-        case .anarchy: return "Anarchy"
-        case .democracy: return "Democracy"
-        case .oligarchy: return "Oligarchy"
-        case .oneonone: return "One-on-one"
-        case .tyranny: return "Tyranny"
+        case .anarchy: return String(localized: "Anarchy")
+        case .democracy: return String(localized: "Democracy")
+        case .oligarchy: return String(localized: "Oligarchy")
+        case .oneonone: return String(localized: "One-on-one")
+        case .tyranny: return String(localized: "Tyranny")
         }
     }
 }
