@@ -7,6 +7,7 @@ import SwiftUI
 struct SettingsView: View {
     let makeBackupFlow: @MainActor () -> RecoveryPhraseBackupFlow
     let makeRelayerPickerFlow: @MainActor () -> RelayerPickerFlow
+    let makeAnchorsPickerFlow: @MainActor () -> AnchorsPickerFlow
 
     @State private var showRecoveryPhrase = false
 
@@ -39,10 +40,20 @@ struct SettingsView: View {
                     )
                 }
                 .accessibilityIdentifier("settings.relayer_row")
+
+                NavigationLink {
+                    AnchorsView(flow: makeAnchorsPickerFlow())
+                } label: {
+                    row(
+                        icon: SettingsIconBox(systemImage: "link", background: .indigo),
+                        title: "Anchors"
+                    )
+                }
+                .accessibilityIdentifier("settings.anchors_row")
             } header: {
                 Text("Network")
             } footer: {
-                Text("Choose the relayer used to anchor on-chain group state. Pick one from the published list or enter a custom URL.")
+                Text("Choose the relayer that submits transactions and which contract version anchors new chats. Existing chats keep the contract they were created with.")
             }
         }
         .navigationTitle("Settings")

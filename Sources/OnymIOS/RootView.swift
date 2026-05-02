@@ -25,7 +25,8 @@ struct RootView: View {
                 NavigationStack {
                     SettingsView(
                         makeBackupFlow: dependencies.makeRecoveryPhraseBackupFlow,
-                        makeRelayerPickerFlow: dependencies.makeRelayerPickerFlow
+                        makeRelayerPickerFlow: dependencies.makeRelayerPickerFlow,
+                        makeAnchorsPickerFlow: dependencies.makeAnchorsPickerFlow
                     )
                 }
             }
