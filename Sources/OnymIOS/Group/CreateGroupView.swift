@@ -33,7 +33,6 @@ struct CreateGroupView: View {
                 .id(flow.route)
                 .transition(.opacity)
         }
-        .preferredColorScheme(.dark)
         .animation(.easeInOut(duration: 0.18), value: flow.route)
     }
 
@@ -171,7 +170,7 @@ private struct CreateGroupStep1View: View {
                     )
                 Image(systemName: "camera.fill")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.black)
+                    .foregroundStyle(OnymTokens.onAccent)
             }
             .offset(x: 4, y: 4)
         }
@@ -342,7 +341,7 @@ private struct CreateGroupStep1View: View {
                     Circle().fill(accentColor)
                     Image(systemName: "checkmark")
                         .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.black)
+                        .foregroundStyle(OnymTokens.onAccent)
                 }
                 .frame(width: 18, height: 18)
                 .offset(x: 6, y: -4)
@@ -869,7 +868,7 @@ private struct CreateGroupCreatingView: View {
                     Circle().fill(OnymTokens.green)
                     Image(systemName: "checkmark")
                         .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(.black)
+                        .foregroundStyle(OnymTokens.onAccent)
                 case .active:
                     Circle()
                         .stroke(flow.accent.color, lineWidth: 2)
@@ -1067,7 +1066,7 @@ private struct CreateGroupSuccessView: View {
                         .overlay(Circle().stroke(OnymTokens.bg, lineWidth: 2))
                     Image(systemName: "checkmark")
                         .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(.black)
+                        .foregroundStyle(OnymTokens.onAccent)
                 }
                 .frame(width: 28, height: 28)
                 .offset(x: 4, y: 4)
