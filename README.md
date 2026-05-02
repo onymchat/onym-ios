@@ -48,6 +48,13 @@ Keychain.
 .
 ├── project.yml                              ← xcodegen source of truth
 ├── generate-xcodeproj.sh                    ← regenerates OnymIOS.xcodeproj
+├── Gemfile                                  ← fastlane gem
+├── fastlane/
+│   ├── Fastfile                             ← `release` lane: match adhoc + gym
+│   ├── Appfile                              ← bundle id + team
+│   └── Matchfile                            ← match repo URL + readonly defaults
+├── .github/workflows/
+│   └── release.yml                          ← lint → tests → IPA → GH Release
 ├── scripts/
 │   └── lint-secrets.py                      ← static check: no off-repo secret reads
 ├── Sources/OnymIOS/
@@ -240,9 +247,53 @@ directly above. Each suppression should justify itself in code review:
 let phrase = identity.recoveryPhrase
 ```
 
-The check is not part of `xcodebuild` (yet) — wire into a pre-commit
-hook or CI step as a follow-up. Adding a new file to the allowlist
-requires editing the script and naming the reason in the PR.
+The check runs in CI as the first job of the Release workflow (see
+*Releasing*). Adding a file to the allowlist requires editing the
+script and naming the reason in the PR.
+
+## Releasing
+
+`gh workflow run Release -f tag=vX.Y.Z` runs
+`.github/workflows/release.yml`, which gates the IPA on:
+
+1. **Lint** (`scripts/lint-secrets.py`, ubuntu) — no off-repo
+   secret reads. Hard fail.
+2. **Create release** (ubuntu) — generates notes from `git log
+   <prev-tag>..HEAD` and opens an empty GitHub Release at the tag.
+3. **Test** (self-hosted macOS ARM64) — `xcodebuild test` against an
+   iPhone simulator.
+4. **Build** (self-hosted macOS ARM64; needs all three above) —
+   `bundle exec fastlane ios release` runs match (adhoc, readonly,
+   git storage) → gym → produces a signed `OnymIOS-<version>.ipa`,
+   which is uploaded to the release as an asset.
+
+Lint, create-release, and test run in parallel; build only starts
+when all three succeed. If lint fails the IPA never builds.
+
+The structure was lifted from
+`stellar-mls/.github/workflows/release.yml` — minus TestFlight
+upload, OTA droplet rsync, Android, and the NotificationService
+extension. Same Match repo / team / bundle id (`chat.onym.ios`) so
+no new Apple Developer setup is needed.
+
+### Required repo secrets
+
+| Secret             | Purpose                                                |
+|--------------------|--------------------------------------------------------|
+| `MATCH_GIT_URL`    | git URL of the fastlane-match repo (cert/profile vault) |
+| `MATCH_DEPLOY_KEY` | SSH private key with read access to that repo         |
+| `MATCH_TEAM_ID`    | Apple Developer team ID                                |
+| `MATCH_PASSWORD`   | encryption password for the match vault                |
+
+TestFlight upload is intentionally skipped, so ASC API keys
+(`ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_PRIVATE_KEY_P8`) are NOT
+needed for this workflow. Add them later if/when an App Store /
+TestFlight lane lands.
+
+The `[self-hosted, macOS, ARM64]` runner is shared with stellar-mls.
+If you need to switch to a GitHub-hosted `macos-latest` runner,
+replace the `runs-on` lines and budget for the Apple ecosystem
+install steps (Xcode select, simulator runtime).
 
 ## Versioning
 

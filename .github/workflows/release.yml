@@ -1,0 +1,171 @@
+name: Release
+
+# Cuts an OnymIOS release: lint → tests → ad-hoc IPA → upload to GH Release.
+# Trimmed from stellar-mls/.github/workflows/release.yml — drops TestFlight,
+# OTA droplet rsync, Android, NotificationService extension. Just enough to
+# get a signed ad-hoc IPA attached to a GitHub Release.
+#
+# Trigger:
+#   gh workflow run Release -f tag=v0.1.0
+#
+# Required repo secrets:
+#   MATCH_GIT_URL        — git URL of the fastlane-match repo (cert/profile vault)
+#   MATCH_DEPLOY_KEY     — SSH private key with read access to that repo
+#   MATCH_TEAM_ID        — Apple Developer team ID
+#   MATCH_PASSWORD       — encryption password for the match vault
+#
+# (TestFlight upload is intentionally skipped, so ASC API keys aren't needed.)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.1.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write   # tag push + GitHub Release creation + asset upload
+
+jobs:
+  lint:
+    name: Lint (no off-repo secret reads)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/lint-secrets.py
+
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate release notes
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          PREV_TAG=$(git tag --sort=-v:refname | grep -v "^${TAG}$" | head -1)
+          if [ -n "$PREV_TAG" ]; then
+            RANGE="${PREV_TAG}..HEAD"
+          else
+            RANGE="HEAD"
+          fi
+          {
+            echo "## What's Changed"
+            echo ""
+            git log "$RANGE" --pretty=format:"- %s" --no-merges
+            echo ""
+            echo ""
+            echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${TAG}"
+          } > release_notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          target_commitish: ${{ github.sha }}
+          body_path: release_notes.md
+
+  test:
+    runs-on: [self-hosted, macOS, ARM64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 26
+        run: sudo xcode-select -s /Applications/Xcode_26.app
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: ./generate-xcodeproj.sh
+
+      - name: Pick iOS Simulator destination
+        id: sim
+        run: |
+          # Pick an available iPhone simulator (devicetypes list includes
+          # retired models with no created simulator). Fail loud if none.
+          NAME=$(xcrun simctl list devices available --json \
+            | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; \
+                         names=[dev['name'] for runtime,devs in d.items() \
+                                if 'iOS' in runtime \
+                                for dev in devs if 'iPhone' in dev['name']]; \
+                         print(names[-1] if names else '', end='')")
+          if [ -z "$NAME" ]; then
+            echo "No iPhone simulator device available on runner" >&2
+            xcrun simctl list devices available >&2
+            exit 1
+          fi
+          echo "Using simulator: $NAME"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+
+      - name: xcodebuild test
+        # NOTE: do NOT pass CODE_SIGNING_ALLOWED=NO — without the synthesised
+        # `application-identifier` entitlement, every Keychain call in the
+        # IdentityRepository tests fails with errSecMissingEntitlement (-34018).
+        run: |
+          xcodebuild test \
+            -project OnymIOS.xcodeproj \
+            -scheme OnymIOS \
+            -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }},OS=latest" \
+            -derivedDataPath /tmp/onym-ios-release-test
+
+  build:
+    runs-on: [self-hosted, macOS, ARM64]
+    needs: [lint, create-release, test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 26
+        run: sudo xcode-select -s /Applications/Xcode_26.app
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: ./generate-xcodeproj.sh
+
+      - name: Configure SSH for Match
+        env:
+          MATCH_DEPLOY_KEY: ${{ secrets.MATCH_DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$MATCH_DEPLOY_KEY" > ~/.ssh/match_key
+          chmod 600 ~/.ssh/match_key
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          cat >> ~/.ssh/config <<EOF
+          Host github.com
+            IdentityFile ~/.ssh/match_key
+            IdentitiesOnly yes
+          EOF
+
+      - name: Install Fastlane
+        run: |
+          bundle config set --local path 'vendor/bundle'
+          bundle install
+
+      - name: Build ad-hoc IPA
+        env:
+          MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
+          MATCH_TEAM_ID: ${{ secrets.MATCH_TEAM_ID }}
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+        run: bundle exec fastlane ios release
+
+      - name: Parse version from tag
+        id: version
+        env:
+          TAG: ${{ inputs.tag }}
+        run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Rename IPA with version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: mv build/ios/adhoc/OnymIOS.ipa "OnymIOS-${VERSION}.ipa"
+
+      - name: Upload IPA to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          files: OnymIOS-${{ steps.version.outputs.version }}.ipa

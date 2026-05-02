@@ -56,6 +56,10 @@ fastlane/Preview.html
 fastlane/test_output/
 fastlane/screenshots/**/*.png
 
+# Bundler (Fastlane gem dependency tree)
+vendor/
+.bundle/
+
 # App signing material and local secrets
 *.mobileprovision
 *.provisionprofile
