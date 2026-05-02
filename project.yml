@@ -5,6 +5,7 @@ options:
     iOS: "26.0"
   xcodeVersion: "26.0"
   generateEmptyDirectories: true
+  developmentLanguage: en
 
 # OnymSDK is consumed via SwiftPM. The released tag pins a
 # .binaryTarget pointing at OnymFFI.xcframework attached to the
@@ -22,6 +23,7 @@ targets:
     platform: iOS
     sources:
       - Sources/OnymIOS
+      - Resources
     dependencies:
       - package: OnymSDK
     settings:
