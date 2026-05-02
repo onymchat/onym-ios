@@ -1,24 +1,57 @@
 import SwiftUI
+import UIKit
 
 // MARK: - Tokens
 
-/// Dark-theme design tokens for the Create Group flow. Mirrors the
-/// tokens in the Claude Designed reference (`THEMES.dark` in
-/// `app.jsx`). Light theme will land later — PR-C ships dark only.
+/// Theme-adaptive design tokens for the Create Group flow. Each color
+/// resolves to its light or dark variant via the system trait
+/// collection — no per-view `@Environment(\.colorScheme)` plumbing
+/// required, the `UIColor` dynamic provider does the work.
+///
+/// Mirrors the Claude Designed reference's `THEMES.dark` + `THEMES.light`
+/// from `app.jsx`. Pinned RGB values came directly from that source.
 enum OnymTokens {
-    static let bg = Color(red: 0, green: 0, blue: 0)
-    static let surface = Color(red: 0x0E / 255, green: 0x0E / 255, blue: 0x10 / 255)
-    static let surface2 = Color(red: 0x17 / 255, green: 0x17 / 255, blue: 0x1A / 255)
-    static let surface3 = Color(red: 0x1F / 255, green: 0x1F / 255, blue: 0x23 / 255)
-    static let text = Color(red: 0xF2 / 255, green: 0xF2 / 255, blue: 0xF4 / 255)
-    static let text2 = Color(red: 0xF2 / 255, green: 0xF2 / 255, blue: 0xF4 / 255).opacity(0.62)
-    static let text3 = Color(red: 0xF2 / 255, green: 0xF2 / 255, blue: 0xF4 / 255).opacity(0.40)
-    static let hairline = Color.white.opacity(0.07)
-    static let hairlineStrong = Color.white.opacity(0.12)
-    static let green = Color(red: 0x34 / 255, green: 0xC7 / 255, blue: 0x59 / 255)
-    static let red = Color(red: 0xFF / 255, green: 0x45 / 255, blue: 0x3A / 255)
-    /// Reads on accent fills.
-    static let onAccent = Color.black
+    static let bg              = Color.dynamic(light: hex(0xFFFFFF),  dark: hex(0x000000))
+    static let surface         = Color.dynamic(light: hex(0xF5F5F7),  dark: hex(0x0E0E10))
+    static let surface2        = Color.dynamic(light: hex(0xFFFFFF),  dark: hex(0x17171A))
+    static let surface3        = Color.dynamic(light: hex(0xEBEBEF),  dark: hex(0x1F1F23))
+    static let text            = Color.dynamic(light: hex(0x0A0A0C),  dark: hex(0xF2F2F4))
+    static let text2           = Color.dynamic(light: hex(0x0A0A0C, 0.62), dark: hex(0xF2F2F4, 0.62))
+    static let text3           = Color.dynamic(light: hex(0x0A0A0C, 0.42), dark: hex(0xF2F2F4, 0.40))
+    static let hairline        = Color.dynamic(light: .black.opacity(0.06), dark: .white.opacity(0.07))
+    static let hairlineStrong  = Color.dynamic(light: .black.opacity(0.12), dark: .white.opacity(0.12))
+    static let green           = Color.dynamic(light: hex(0x1FA84A),  dark: hex(0x34C759))
+    static let red             = Color.dynamic(light: hex(0xE5392E),  dark: hex(0xFF453A))
+
+    /// Reads on accent fills (button labels, governance card check
+    /// glyphs, success seal). Light → white text on saturated accent;
+    /// dark → black text. The same `OnymTokens.onAccent` keeps the
+    /// view code theme-agnostic.
+    static let onAccent        = Color.dynamic(light: .white,         dark: .black)
+
+    /// Hex literal helper. Optional alpha multiplies sRGB opacity in
+    /// place — saves the per-call `.opacity(...)` modifier when
+    /// declaring text2 / text3 style tokens.
+    private static func hex(_ rgb: UInt32, _ alpha: Double = 1) -> Color {
+        Color(
+            red:   Double((rgb >> 16) & 0xFF) / 255,
+            green: Double((rgb >> 8)  & 0xFF) / 255,
+            blue:  Double(rgb         & 0xFF) / 255,
+            opacity: alpha
+        )
+    }
+}
+
+extension Color {
+    /// Build a SwiftUI `Color` that swaps between `light` and `dark`
+    /// based on the system trait collection. Backed by `UIColor`'s
+    /// dynamic provider so it reacts to user dark-mode toggles
+    /// without re-rendering or re-evaluating the calling view.
+    static func dynamic(light: Color, dark: Color) -> Color {
+        Color(UIColor { traits in
+            traits.userInterfaceStyle == .dark ? UIColor(dark) : UIColor(light)
+        })
+    }
 }
 
 // MARK: - Accent palette
@@ -28,15 +61,26 @@ enum OnymAccent: String, CaseIterable, Identifiable, Sendable {
 
     var id: String { rawValue }
 
+    /// Per-theme variants from the design. Light variants are
+    /// slightly desaturated for legibility on white surfaces; dark
+    /// variants are the brighter saturated set that pops on black.
     var color: Color {
         switch self {
-        case .orange: Color(red: 0xFF / 255, green: 0x7A / 255, blue: 0x45 / 255)
-        case .blue:   Color(red: 0x3F / 255, green: 0xA8 / 255, blue: 0xFF / 255)
-        case .green:  Color(red: 0x3D / 255, green: 0xD6 / 255, blue: 0x6E / 255)
-        case .purple: Color(red: 0xB2 / 255, green: 0x78 / 255, blue: 0xFF / 255)
-        case .pink:   Color(red: 0xFF / 255, green: 0x4D / 255, blue: 0x6D / 255)
-        case .yellow: Color(red: 0xFF / 255, green: 0xC9 / 255, blue: 0x3C / 255)
+        case .orange: Color.dynamic(light: rgb(0xE85F2A), dark: rgb(0xFF7A45))
+        case .blue:   Color.dynamic(light: rgb(0x1F86E0), dark: rgb(0x3FA8FF))
+        case .green:  Color.dynamic(light: rgb(0x1FA84A), dark: rgb(0x3DD66E))
+        case .purple: Color.dynamic(light: rgb(0x8B4DEB), dark: rgb(0xB278FF))
+        case .pink:   Color.dynamic(light: rgb(0xE03253), dark: rgb(0xFF4D6D))
+        case .yellow: Color.dynamic(light: rgb(0xD9A400), dark: rgb(0xFFC93C))
         }
+    }
+
+    private func rgb(_ hex: UInt32) -> Color {
+        Color(
+            red:   Double((hex >> 16) & 0xFF) / 255,
+            green: Double((hex >> 8)  & 0xFF) / 255,
+            blue:  Double(hex         & 0xFF) / 255
+        )
     }
 }
 
@@ -200,7 +244,7 @@ struct OnymGovIcon: View {
                 .position(x: 22 * size / 44, y: 27 * size / 44)
 
             Circle()
-                .fill(dimmed ? OnymTokens.text3 : Color.white)
+                .fill(dimmed ? OnymTokens.text3 : OnymTokens.onAccent)
                 .frame(width: 2.4 * size / 44, height: 2.4 * size / 44)
                 .position(x: 22 * size / 44, y: 20 * size / 44)
         }
