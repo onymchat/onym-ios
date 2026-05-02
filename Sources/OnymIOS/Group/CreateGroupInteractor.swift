@@ -71,10 +71,39 @@ struct CreateGroupInteractor: Sendable {
     /// Run the full pipeline. `onProgress` is called on the actor's
     /// executor — pass `{ progress in Task { @MainActor in … } }` if
     /// you need to update SwiftUI state from it.
+    ///
+    /// `governanceType` selects the contract family. Only `.tyranny`
+    /// and `.oneOnOne` are wired today; the rest throw
+    /// `CreateGroupError.unsupportedGovernanceType` early so the UI
+    /// surfaces a clear "TBD" rather than a vague proof failure.
+    ///
+    /// `.oneOnOne` requires exactly **one** invitee — the peer. The
+    /// creator mints a fresh ephemeral BLS Fr scalar for that peer
+    /// (the founding ceremony has both keys present by SDK design)
+    /// and ships it inside the invitation envelope so the receiver
+    /// can adopt it as their per-dialog identity.
     func create(
+        governanceType: SEPGroupType = .tyranny,
         name: String,
         invitees: [Data],
         onProgress: @Sendable (CreateGroupProgress) -> Void = { _ in }
+    ) async throws -> ChatGroup {
+        switch governanceType {
+        case .tyranny:
+            return try await createTyranny(name: name, invitees: invitees, onProgress: onProgress)
+        case .oneOnOne:
+            return try await createOneOnOne(name: name, invitees: invitees, onProgress: onProgress)
+        case .anarchy, .democracy, .oligarchy:
+            throw CreateGroupError.unsupportedGovernanceType(governanceType)
+        }
+    }
+
+    // MARK: - Tyranny
+
+    private func createTyranny(
+        name: String,
+        invitees: [Data],
+        onProgress: @Sendable (CreateGroupProgress) -> Void
     ) async throws -> ChatGroup {
         // 1. Validate
         onProgress(.validating)
@@ -220,50 +249,228 @@ struct CreateGroupInteractor: Sendable {
                 groupTypeRaw: SEPGroupType.tyranny.rawValue,
                 adminPubkeyHex: adminPubkeyHex
             )
-            let payloadBytes: Data
-            do {
-                payloadBytes = try JSONEncoder().encode(invitePayload)
-            } catch {
-                throw CreateGroupError.invitationEncodingFailed
-            }
-            for (index, inboxKey) in invitees.enumerated() {
-                let sealed: Data
-                do {
-                    sealed = try await identity.sealInvitation(
-                        payload: payloadBytes,
-                        to: inboxKey
-                    )
-                } catch {
-                    throw CreateGroupError.invitationSendFailed(
-                        index: index,
-                        reason: String(describing: error)
-                    )
-                }
-                let inboxTag = Self.inboxTag(from: inboxKey)
-                let receipt: PublishReceipt
-                do {
-                    receipt = try await inboxTransport.send(
-                        sealed,
-                        to: TransportInboxID(rawValue: inboxTag)
-                    )
-                } catch {
-                    throw CreateGroupError.invitationSendFailed(
-                        index: index,
-                        reason: String(describing: error)
-                    )
-                }
-                guard receipt.acceptedBy >= 1 else {
-                    throw CreateGroupError.invitationSendFailed(
-                        index: index,
-                        reason: "no relay accepted the invitation"
-                    )
-                }
-            }
+            try await sendInvitations(invitePayload, to: invitees)
         }
 
-        // The flag was already flipped via `markPublished`; reload our
-        // in-memory snapshot to mirror the on-disk state.
-        return await groups.snapshots.first(where: { $0.contains { $0.id == group.id } })?
+        return await reloadGroup(group)
+    }
+
+    // MARK: - OneOnOne
+
+    private func createOneOnOne(
+        name: String,
+        invitees: [Data],
+        onProgress: @Sendable (CreateGroupProgress) -> Void
+    ) async throws -> ChatGroup {
+        // 1. Validate — 1-on-1 is exactly two parties: the creator and
+        //    one peer. Zero or 2+ invitees is a programmer/UI error.
+        onProgress(.validating)
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            throw CreateGroupError.invalidName
+        }
+        guard invitees.count == 1 else {
+            throw CreateGroupError.oneOnOneRequiresExactlyOnePeer(got: invitees.count)
+        }
+        let peerInboxKey = invitees[0]
+        guard peerInboxKey.count == 32 else {
+            throw CreateGroupError.invalidInviteeKey(index: 0)
+        }
+
+        // 2. Resolve relayer + contract.
+        guard let relayerURL = await relayers.selectURL() else {
+            throw CreateGroupError.noActiveRelayer
+        }
+        let activeNetwork = networkPreference.current()
+        let key = AnchorSelectionKey(network: activeNetwork.contractNetwork, type: .oneonone)
+        guard let binding = await contracts.binding(for: key) else {
+            throw CreateGroupError.noContractBinding(.oneonone)
+        }
+
+        // 3. Group params (no tier — OneOnOne contract is fixed depth).
+        let groupID = Self.randomBytes(32)
+        let groupSecret = Self.randomBytes(32)
+        let salt = GroupCommitmentBuilder.generateSalt()
+
+        // 4. Both BLS secrets must be present at create time — the SDK's
+        //    founding ceremony is the one moment both keys exist on the
+        //    same device. The peer secret is shipped inside the
+        //    invitation envelope so the receiver adopts it as their
+        //    per-dialog identity.
+        let creatorBlsSecret: Data
+        do {
+            creatorBlsSecret = try await identity.blsSecretKey()
+        } catch {
+            throw CreateGroupError.missingIdentity
+        }
+        guard let identitySnapshot = await identity.currentIdentity() else {
+            throw CreateGroupError.missingIdentity
+        }
+        var peerBlsSecret = Self.randomBytes(32)
+        // The OneOnOne SDK rejects equal secrets. Vanishingly unlikely
+        // with 256 bits of entropy, but cheap to defend against — flip
+        // a single bit so we always differ.
+        if peerBlsSecret == creatorBlsSecret {
+            peerBlsSecret[0] ^= 0x01
+        }
+
+        let creatorMember: GovernanceMember
+        let peerMember: GovernanceMember
+        do {
+            creatorMember = GovernanceMember(
+                publicKeyCompressed: identitySnapshot.blsPublicKey,
+                leafHash: try GroupCommitmentBuilder.computeLeafHash(secretKey: creatorBlsSecret)
+            )
+            peerMember = GovernanceMember(
+                publicKeyCompressed: try GroupCommitmentBuilder.computePublicKey(secretKey: peerBlsSecret),
+                leafHash: try GroupCommitmentBuilder.computeLeafHash(secretKey: peerBlsSecret)
+            )
+        } catch {
+            throw CreateGroupError.sdkFailure(String(describing: error))
+        }
+        let members = [creatorMember, peerMember].sorted { lhs, rhs in
+            lhs.publicKeyCompressed.lexicographicallyPrecedes(rhs.publicKeyCompressed)
+        }
+
+        // 5. Generate proof — OneOnOne SDK takes both secrets directly.
+        onProgress(.proving)
+        let proofInput = GroupProofCreateInput(
+            groupType: .oneOnOne,
+            tier: .small,                   // ignored by SDK
+            members: members,               // ignored by SDK
+            adminBlsSecretKey: creatorBlsSecret,
+            adminIndex: 0,                  // ignored by SDK
+            groupID: groupID,
+            salt: salt,
+            peerBlsSecretKey: peerBlsSecret
+        )
+        let proof: GroupCreateProof
+        do {
+            proof = try proofGenerator.proveCreate(proofInput)
+        } catch let err as GroupProofGeneratorError {
+            throw CreateGroupError.proofGenerationFailed(err)
+        } catch {
+            throw CreateGroupError.sdkFailure(String(describing: error))
+        }
+
+        // 6. Anchor on chain.
+        onProgress(.anchoring)
+        let transport = makeContractTransport(relayerURL)
+        let client = SEPContractClient(
+            contractID: binding.contractID,
+            contractType: .oneOnOne,
+            network: activeNetwork.sepNetwork,
+            transport: transport
+        )
+        let payload = OneOnOneCreateGroupPayload(
+            groupID: groupID,
+            commitment: proof.commitment,
+            proof: proof.proof,
+            publicInputs: proof.publicInputs
+        )
+        let response: SEPSubmissionResponse
+        do {
+            response = try await client.createGroupOneOnOne(payload)
+        } catch {
+            throw CreateGroupError.anchorTransport(String(describing: error))
+        }
+        guard response.accepted else {
+            throw CreateGroupError.anchorRejected(message: response.message)
+        }
+
+        // 7. Save locally — no admin in 1-on-1, so adminPubkeyHex stays nil.
+        let groupIDHex = groupID.map { String(format: "%02x", $0) }.joined()
+        let group = ChatGroup(
+            id: groupIDHex,
+            name: trimmedName,
+            groupSecret: groupSecret,
+            createdAt: Date(),
+            members: members,
+            epoch: 0,
+            salt: salt,
+            commitment: proof.commitment,
+            tier: .small,
+            groupType: .oneOnOne,
+            adminPubkeyHex: nil,
+            isPublishedOnChain: false
+        )
+        _ = await groups.insert(group)
+        await groups.markPublished(id: group.id, commitment: proof.commitment)
+
+        // 8. Send the single invitation — peer secret rides inside.
+        onProgress(.sendingInvitations(total: 1))
+        let invitePayload = GroupInvitationPayload(
+            version: 1,
+            groupID: groupID,
+            groupSecret: groupSecret,
+            name: trimmedName,
+            members: members,
+            epoch: 0,
+            salt: salt,
+            commitment: proof.commitment,
+            tierRaw: SEPTier.small.rawValue,
+            groupTypeRaw: SEPGroupType.oneOnOne.rawValue,
+            adminPubkeyHex: nil,
+            peerBlsSecret: peerBlsSecret
+        )
+        try await sendInvitations(invitePayload, to: [peerInboxKey])
+
+        return await reloadGroup(group)
+    }
+
+    // MARK: - Shared invitation send loop
+
+    private func sendInvitations(
+        _ invitePayload: GroupInvitationPayload,
+        to invitees: [Data]
+    ) async throws {
+        let payloadBytes: Data
+        do {
+            payloadBytes = try JSONEncoder().encode(invitePayload)
+        } catch {
+            throw CreateGroupError.invitationEncodingFailed
+        }
+        for (index, inboxKey) in invitees.enumerated() {
+            let sealed: Data
+            do {
+                sealed = try await identity.sealInvitation(
+                    payload: payloadBytes,
+                    to: inboxKey
+                )
+            } catch {
+                throw CreateGroupError.invitationSendFailed(
+                    index: index,
+                    reason: String(describing: error)
+                )
+            }
+            let inboxTag = Self.inboxTag(from: inboxKey)
+            let receipt: PublishReceipt
+            do {
+                receipt = try await inboxTransport.send(
+                    sealed,
+                    to: TransportInboxID(rawValue: inboxTag)
+                )
+            } catch {
+                throw CreateGroupError.invitationSendFailed(
+                    index: index,
+                    reason: String(describing: error)
+                )
+            }
+            guard receipt.acceptedBy >= 1 else {
+                throw CreateGroupError.invitationSendFailed(
+                    index: index,
+                    reason: "no relay accepted the invitation"
+                )
+            }
+        }
+    }
+
+    /// Reload the freshly-published group from the repo so the caller
+    /// sees `isPublishedOnChain = true` (the flag was flipped via
+    /// `markPublished`, but the local `group` snapshot was built
+    /// before that mutation).
+    private func reloadGroup(_ group: ChatGroup) async -> ChatGroup {
+        await groups.snapshots.first(where: { $0.contains { $0.id == group.id } })?
             .first { $0.id == group.id }
             ?? group
     }
@@ -348,6 +555,12 @@ enum CreateGroupError: Error, Equatable, Sendable {
     case invitationEncodingFailed
     case invitationSendFailed(index: Int, reason: String)
     case sdkFailure(String)
+    /// `.oneOnOne` requires exactly one invitee (the peer); the UI
+    /// gates this but the interactor double-checks.
+    case oneOnOneRequiresExactlyOnePeer(got: Int)
+    /// Caller passed `.anarchy` / `.democracy` / `.oligarchy` — not
+    /// wired to the chain yet.
+    case unsupportedGovernanceType(SEPGroupType)
 }
 
 extension CreateGroupError: LocalizedError {
@@ -372,6 +585,10 @@ extension CreateGroupError: LocalizedError {
             return "Invitation #\(index + 1) failed: \(reason)"
         case let .sdkFailure(message):
             return "SDK failure: \(message)"
+        case let .oneOnOneRequiresExactlyOnePeer(got):
+            return "1-on-1 dialog needs exactly 1 peer (got \(got))"
+        case let .unsupportedGovernanceType(type):
+            return "\(type.rawValue) is not supported yet"
         }
     }
 }

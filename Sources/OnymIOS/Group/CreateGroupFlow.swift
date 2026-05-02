@@ -212,6 +212,7 @@ final class CreateGroupFlow {
         do {
             let invitees = self.invitees.map(\.inboxPublicKey)
             let group = try await interactor.create(
+                governanceType: governance.sepGroupType,
                 name: effectiveName,
                 invitees: invitees,
                 onProgress: { [weak self] p in
