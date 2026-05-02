@@ -8,4 +8,5 @@ import Foundation
 struct AppDependencies {
     let makeRecoveryPhraseBackupFlow: @MainActor () -> RecoveryPhraseBackupFlow
     let makeRelayerPickerFlow: @MainActor () -> RelayerPickerFlow
+    let makeAnchorsPickerFlow: @MainActor () -> AnchorsPickerFlow
 }

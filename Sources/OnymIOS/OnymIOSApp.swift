@@ -4,6 +4,7 @@ import SwiftUI
 struct OnymIOSApp: App {
     private let dependencies: AppDependencies
     private let relayerRepository: RelayerRepository
+    private let contractsRepository: ContractsRepository
 
     init() {
         let args = ProcessInfo.processInfo.arguments
@@ -29,6 +30,12 @@ struct OnymIOSApp: App {
         )
         self.relayerRepository = relayerRepository
 
+        let contractsRepository = ContractsRepository(
+            fetcher: GitHubReleasesContractsManifestFetcher(),
+            store: UserDefaultsAnchorSelectionStore()
+        )
+        self.contractsRepository = contractsRepository
+
         self.dependencies = AppDependencies(
             makeRecoveryPhraseBackupFlow: { @MainActor in
                 RecoveryPhraseBackupFlow(
@@ -38,6 +45,9 @@ struct OnymIOSApp: App {
             },
             makeRelayerPickerFlow: { @MainActor in
                 RelayerPickerFlow(repository: relayerRepository)
+            },
+            makeAnchorsPickerFlow: { @MainActor in
+                AnchorsPickerFlow(repository: contractsRepository)
             }
         )
     }
@@ -46,10 +56,12 @@ struct OnymIOSApp: App {
         WindowGroup {
             RootView(dependencies: dependencies)
                 .task {
-                    // Kick off the GitHub Releases fetch as soon as the
-                    // app is on screen. Failures are silent; the user
-                    // can always enter a custom URL.
+                    // Kick off both GitHub Releases fetches as soon as the
+                    // app is on screen. Failures are silent; the user can
+                    // still enter a custom relayer URL / pick an older
+                    // contract from whatever was cached on the previous run.
                     await relayerRepository.start()
+                    await contractsRepository.start()
                 }
         }
     }
