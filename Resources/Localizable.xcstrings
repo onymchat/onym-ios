@@ -82,6 +82,22 @@
         }
       }
     },
+    "Backup Recovery Phrase" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Backup Recovery Phrase"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Резервная копия фразы восстановления"
+          }
+        }
+      }
+    },
     "Backup verified" : {
       "localizations" : {
         "en" : {
@@ -306,6 +322,54 @@
         }
       }
     },
+    "Search" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Поиск"
+          }
+        }
+      }
+    },
+    "Search lands in a later chunk." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search lands in a later chunk."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Поиск появится в одном из следующих обновлений."
+          }
+        }
+      }
+    },
+    "Security" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Security"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Безопасность"
+          }
+        }
+      }
+    },
     "Select word number" : {
       "localizations" : {
         "en" : {
@@ -318,6 +382,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Выберите слово номер"
+          }
+        }
+      }
+    },
+    "Settings" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Settings"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Настройки"
           }
         }
       }
@@ -382,6 +462,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Повторить"
+          }
+        }
+      }
+    },
+    "View your 12-word recovery phrase. You will need it to restore your identity on a new device." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "View your 12-word recovery phrase. You will need it to restore your identity on a new device."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Просмотрите свою фразу восстановления из 12 слов. Она понадобится для восстановления личности на новом устройстве."
           }
         }
       }

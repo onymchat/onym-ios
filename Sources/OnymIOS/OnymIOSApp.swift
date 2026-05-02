@@ -7,7 +7,7 @@ struct OnymIOSApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RecoveryPhraseBackupView(
+            RootView(
                 repository: repository,
                 authenticator: authenticator
             )
