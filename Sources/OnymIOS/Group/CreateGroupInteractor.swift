@@ -99,7 +99,13 @@ struct CreateGroupInteractor: Sendable {
         }
 
         // 3. Group params
-        let groupID = Self.randomBytes(32)
+        // `groupID` MUST be a canonical bls12-381 Fr (BE value < r) —
+        // sep-tyranny's `is_canonical_fr(&group_id)` rejects anything
+        // else with `Error::InvalidCommitmentEncoding` (#15). The check
+        // exists to close a same-`group_id_fr` collision via
+        // `group_id + p (mod 2^256)` — see the contract comment at
+        // sep-tyranny/src/lib.rs:290–298.
+        let groupID = Self.randomCanonicalFr()
         let groupSecret = Self.randomBytes(32)
         let salt = GroupCommitmentBuilder.generateSalt()
         let tier: SEPTier = .small
@@ -274,6 +280,47 @@ struct CreateGroupInteractor: Sendable {
         var bytes = [UInt8](repeating: 0, count: count)
         _ = SecRandomCopyBytes(kSecRandomDefault, count, &bytes)
         return Data(bytes)
+    }
+
+    /// Uniformly-random 32-byte BE value strictly less than the
+    /// bls12-381 scalar field order `r`. Rejection-samples until a
+    /// canonical value falls out — accept rate is `r / 2^256 ≈ 0.453`,
+    /// so the loop terminates in ~2.2 iterations on average.
+    ///
+    /// Why we can't just take `randomBytes(32) mod r`: the contract
+    /// rejects any non-canonical encoding outright (sep-tyranny
+    /// `Error::InvalidCommitmentEncoding`), and the SDK's silent mod-r
+    /// reduction would diverge from the contract's check on ~25% of
+    /// inputs. Generating canonically at the source removes the
+    /// reduction question entirely.
+    static func randomCanonicalFr() -> Data {
+        while true {
+            var bytes = [UInt8](repeating: 0, count: 32)
+            _ = SecRandomCopyBytes(kSecRandomDefault, 32, &bytes)
+            if isCanonicalFr(bytes) {
+                return Data(bytes)
+            }
+        }
+    }
+
+    /// True iff the 32-byte BE value is strictly less than the
+    /// bls12-381 scalar field order
+    /// `r = 0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001`.
+    /// Mirrors the contract's `is_canonical_fr` predicate
+    /// (sep-tyranny/src/lib.rs:688).
+    static func isCanonicalFr(_ bytes: [UInt8]) -> Bool {
+        guard bytes.count == 32 else { return false }
+        let r: [UInt8] = [
+            0x73, 0xed, 0xa7, 0x53, 0x29, 0x9d, 0x7d, 0x48,
+            0x33, 0x39, 0xd8, 0x08, 0x09, 0xa1, 0xd8, 0x05,
+            0x53, 0xbd, 0xa4, 0x02, 0xff, 0xfe, 0x5b, 0xfe,
+            0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x01,
+        ]
+        for i in 0..<32 {
+            if bytes[i] < r[i] { return true }
+            if bytes[i] > r[i] { return false }
+        }
+        return false  // bytes == r → not canonical (must be strictly less)
     }
 }
 
