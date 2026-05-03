@@ -9,6 +9,7 @@ struct ChatsView: View {
     let flow: ChatsFlow
     let identitiesFlow: IdentitiesFlow
     let makeCreateGroupFlow: @MainActor () -> CreateGroupFlow
+    let makeShareInviteFlow: @MainActor () -> ShareInviteFlow
 
     @State private var showCreateGroup = false
 
@@ -46,6 +47,7 @@ struct ChatsView: View {
         .fullScreenCover(isPresented: $showCreateGroup) {
             CreateGroupViewHost(
                 makeFlow: makeCreateGroupFlow,
+                makeShareInviteFlow: makeShareInviteFlow,
                 onClose: { showCreateGroup = false }
             )
         }

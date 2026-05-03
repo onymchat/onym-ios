@@ -10,6 +10,7 @@ enum CreateGroupRoute: Equatable, Sendable {
     case inviteByKey      // paste 64-char inbox key
     case creating         // progress steps
     case success          // hero + members + done
+    case shareInvite      // PR-5 deeplink: mint + share intro link
 }
 
 /// One pasted-and-validated invitee. The 32-byte X25519 key is what
@@ -265,6 +266,15 @@ final class CreateGroupFlow {
     func tappedDone() {
         reset()
         onClose()
+    }
+
+    /// Move from the success screen to the deeplink share screen.
+    /// No-op if the group hasn't finished creating yet (the button is
+    /// disabled in that state, but defensive against double-tap
+    /// races).
+    func tappedShareInvite() {
+        guard createdGroup != nil else { return }
+        route = .shareInvite
     }
 
     func tappedDismissError() {
