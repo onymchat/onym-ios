@@ -39,6 +39,23 @@ targets:
       path: Info.plist
       properties:
         CFBundleDisplayName: Onym
+        # `$(...)` is Xcode's build-setting substitution, NOT xcodegen
+        # env interpolation — these strings end up verbatim in
+        # Info.plist and Xcode resolves them per build. The
+        # MARKETING_VERSION / CURRENT_PROJECT_VERSION build settings
+        # below are interpolated by xcodegen at generate time
+        # (see `${...}` in `settings.base`), so the chain is:
+        #     resolve-release-version.sh
+        #         → env MARKETING_VERSION
+        #             → xcodegen `${MARKETING_VERSION}` interpolation
+        #                 → Build Setting in pbxproj
+        #                     → `$(MARKETING_VERSION)` in Info.plist
+        #                         → Bundle.main.infoDictionary at runtime
+        # xcodegen does NOT emit these keys by default; without them
+        # Info.plist falls back to its hand-written `1.0` / `1` and the
+        # About screen ships a stale value forever.
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: true
           UISceneConfigurations: {}
@@ -81,8 +98,14 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: chat.onym.ios
-        MARKETING_VERSION: "0.0.1"
-        CURRENT_PROJECT_VERSION: 1
+        # Single source of truth: the GitHub release tag. xcodegen
+        # interpolates `${MARKETING_VERSION}` / `${CURRENT_PROJECT_VERSION}`
+        # from the env at generate time; `generate-xcodeproj.sh` always
+        # sources `scripts/resolve-release-version.sh` first so these
+        # env vars are guaranteed to be set (with a `0.0.0-dev` /
+        # `git describe` fallback for local builds between tags).
+        MARKETING_VERSION: ${MARKETING_VERSION}
+        CURRENT_PROJECT_VERSION: ${CURRENT_PROJECT_VERSION}
         SWIFT_VERSION: "5.0"
         # Asset catalog name for the AppIcon set. `AppIcon` is the
         # default — explicit so renaming the .appiconset folder fails

@@ -43,6 +43,15 @@ permissions:
   contents: write   # tag push + GitHub Release creation + asset upload
   issues: write     # `report-to-issue` ticks per-class checkboxes
 
+# Pipe the dispatch tag straight into `scripts/resolve-release-version.sh`
+# (which `generate-xcodeproj.sh` sources). Setting it at workflow level
+# means every job's xcodegen run picks up the right value — the IPA's
+# `CFBundleShortVersionString` / `CFBundleVersion` (and the About
+# screen) match the tag exactly, with `git describe` only used as a
+# fallback for one-off local builds. See PR for the full chain.
+env:
+  RELEASE_VERSION: ${{ inputs.tag }}
+
 jobs:
   lint:
     name: Lint (no off-repo secret reads)
@@ -94,6 +103,11 @@ jobs:
           # Without this xcodebuild compiles pointer files into
           # Assets.car and any test that touches the icon UI fails.
           lfs: true
+          # Full history + tags so `scripts/resolve-release-version.sh`
+          # (sourced by `generate-xcodeproj.sh`) can fall back to
+          # `git describe` if `RELEASE_VERSION` ever isn't honoured.
+          # Belt + braces — the env var is the canonical path.
+          fetch-depth: 0
 
       - name: Force LFS smudge (self-hosted workspace persists across runs)
         # actions/checkout@v4 runs `git lfs fetch` but skips the smudge
@@ -197,6 +211,9 @@ jobs:
           # icon-bearing buttons miss because Assets.car holds pointer
           # text instead of pixels.
           lfs: true
+          # See unit-tests for fetch-depth rationale (git-describe
+          # fallback in `scripts/resolve-release-version.sh`).
+          fetch-depth: 0
 
       - name: Force LFS smudge (self-hosted workspace persists across runs)
         # See unit-tests for rationale. Without this the persistent
@@ -277,6 +294,9 @@ jobs:
           # shipped IPA carries pointer files instead of art and the
           # App Store install will fail icon validation.
           lfs: true
+          # See unit-tests for fetch-depth rationale (git-describe
+          # fallback in `scripts/resolve-release-version.sh`).
+          fetch-depth: 0
 
       - name: Force LFS smudge (self-hosted workspace persists across runs)
         # See unit-tests for rationale.
@@ -350,22 +370,25 @@ jobs:
         if: always()
         run: rm -f /tmp/match_key /tmp/match_known_hosts
 
-      - name: Parse version from tag
+      - name: Resolve release version (for IPA filename)
         id: version
-        env:
-          TAG: ${{ inputs.tag }}
-        run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+        # `scripts/resolve-release-version.sh` is the same script
+        # `generate-xcodeproj.sh` sources earlier in this job — emits
+        # `MARKETING_VERSION=...` + `CURRENT_PROJECT_VERSION=...` lines,
+        # which `>> $GITHUB_OUTPUT` turns into step outputs. Single
+        # source of truth for the IPA filename and the bundle version.
+        run: scripts/resolve-release-version.sh >> "$GITHUB_OUTPUT"
 
       - name: Rename IPA with version
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ steps.version.outputs.MARKETING_VERSION }}
         run: mv build/ios/adhoc/OnymIOS.ipa "OnymIOS-${VERSION}.ipa"
 
       - name: Upload IPA to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.tag }}
-          files: OnymIOS-${{ steps.version.outputs.version }}.ipa
+          files: OnymIOS-${{ steps.version.outputs.MARKETING_VERSION }}.ipa
 
   # ----------------------------------------------------------------------
   # Report XCTest outcomes back into the originating release issue.

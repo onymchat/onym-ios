@@ -20,7 +20,22 @@ if ! command -v xcodegen >/dev/null 2>&1; then
     exit 1
 fi
 
+# `MARKETING_VERSION` + `CURRENT_PROJECT_VERSION` drive the About
+# screen and the bundle's `CFBundleShortVersionString` /
+# `CFBundleVersion`. project.yml uses `${MARKETING_VERSION}` /
+# `${CURRENT_PROJECT_VERSION}` env interpolation so the resolved
+# values get baked into the generated xcodeproj. Resolution order:
+#
+#   env RELEASE_VERSION → `git describe --tags --match 'v*'`
+#   → fallback `0.0.0-dev`.
+#
+# See scripts/resolve-release-version.sh.
+eval "$(./scripts/resolve-release-version.sh)"
+export MARKETING_VERSION CURRENT_PROJECT_VERSION
+
 xcodegen generate
 echo
 echo "Generated: $SCRIPT_DIR/OnymIOS.xcodeproj"
+echo "  MARKETING_VERSION       = $MARKETING_VERSION"
+echo "  CURRENT_PROJECT_VERSION = $CURRENT_PROJECT_VERSION"
 echo "Open with: open OnymIOS.xcodeproj"
