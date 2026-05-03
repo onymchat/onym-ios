@@ -12,6 +12,13 @@ struct OnymIOSApp: App {
     private let introKeyStore: any IntroKeyStore
     private let introRequestStore: any IntroRequestStore
 
+    /// Captured intro capability from a Universal Link or custom-
+    /// scheme deeplink (`https://onym.chat/join?c=…` /
+    /// `onym://join?c=…`). Drives a `.sheet(item:)` over RootView —
+    /// PR-6 surfaces a placeholder; PR-7 will replace it with the
+    /// real `JoinView` + `JoinFlow`.
+    @State private var pendingCapability: IntroCapability?
+
     init() {
         let args = ProcessInfo.processInfo.arguments
         let repository: IdentityRepository
@@ -234,6 +241,32 @@ struct OnymIOSApp: App {
                         currentTask = Task { await pump.run(entries: entries) }
                     }
                     currentTask?.cancel()
+                }
+                .onOpenURL { url in
+                    // Custom URL scheme (`onym://join?c=…`) and
+                    // Universal Link cold-start both surface here on
+                    // SwiftUI 4+. The allowlist in DeeplinkCapture
+                    // guards against forged ACTION_VIEW analogues.
+                    if let cap = DeeplinkCapture.introCapability(from: url) {
+                        pendingCapability = cap
+                    }
+                }
+                .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
+                    // Universal Link warm-start (e.g. backgrounded
+                    // app foregrounded by tapping a link in
+                    // Messages). On modern iOS `.onOpenURL` typically
+                    // covers this too, but the dual handler matches
+                    // Apple's documented best-practice and removes
+                    // a class of "did the link tap arrive?" bugs.
+                    if let cap = DeeplinkCapture.introCapability(from: activity.webpageURL) {
+                        pendingCapability = cap
+                    }
+                }
+                .sheet(item: $pendingCapability) { cap in
+                    JoinInviteCapturedPlaceholderView(
+                        capability: cap,
+                        onBack: { pendingCapability = nil }
+                    )
                 }
         }
     }

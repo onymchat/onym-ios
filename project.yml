@@ -55,6 +55,29 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
+        # PR-6: custom URL scheme for the Level-2 deeplink invite
+        # fallback. `onym://join?c=…` lands in `.onOpenURL`. The
+        # CFBundleURLName uses bundle-prefix namespacing per Apple
+        # convention; CFBundleURLSchemes must be `onym` (not the
+        # bundle id) to match the Android scheme so the same URL
+        # works on both platforms.
+        CFBundleURLTypes:
+          - CFBundleTypeRole: Editor
+            CFBundleURLName: chat.onym.ios.join
+            CFBundleURLSchemes:
+              - onym
+    entitlements:
+      path: OnymIOS.entitlements
+      properties:
+        # PR-6: Universal Links for `https://onym.chat/join*` and
+        # `https://onym.chat/onboard*`. The matching AASA file at
+        # `https://onym.chat/.well-known/apple-app-site-association`
+        # must list the team-prefixed app id (5V5EUT3ZXJ.chat.onym.ios)
+        # against `appIDs`. Without the AASA file the OS still
+        # routes the URL through the browser; the app only takes
+        # over once Apple's CDN has fetched + validated the file.
+        com.apple.developer.associated-domains:
+          - applinks:onym.chat
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: chat.onym.ios
@@ -69,6 +92,7 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: ${DEVELOPMENT_TEAM}
+        CODE_SIGN_ENTITLEMENTS: OnymIOS.entitlements
 
   OnymIOSTests:
     type: bundle.unit-test
