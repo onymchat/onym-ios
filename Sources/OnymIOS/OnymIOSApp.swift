@@ -153,12 +153,12 @@ extension OnymIOSApp {
         args: [String]
     ) -> (repository: IdentityRepository, authenticator: BiometricAuthenticator)? {
         guard args.contains("--ui-testing") else { return nil }
-        let keychain = KeychainStore(
-            service: "chat.onym.ios.identity.uitests",
-            account: "current"
-        )
+        let keychain = IdentityKeychainStore(testNamespace: "uitests")
         if args.contains("--reset-keychain") {
-            try? keychain.wipe()
+            try? keychain.wipeAll()
+            // Also clear the "selected identity" UserDefault so each
+            // UI test boots into the same first-launch shape.
+            UserDefaults.standard.removeObject(forKey: "chat.onym.ios.identity.selectedID")
         }
         let repo = IdentityRepository(keychain: keychain)
         let auth: BiometricAuthenticator = args.contains("--mock-biometric")

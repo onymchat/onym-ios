@@ -9,35 +9,39 @@ import XCTest
 /// recipient) and the M-5 ephemeral-pubkey signature must verify
 /// against the sender's identity key.
 final class IdentityRepositorySealInvitationTests: XCTestCase {
-    private var senderKeychain: KeychainStore!
+    private var senderKeychain: IdentityKeychainStore!
     private var sender: IdentityRepository!
-    private var recipientKeychain: KeychainStore!
+    private var recipientKeychain: IdentityKeychainStore!
     private var recipient: IdentityRepository!
 
     override func setUp() async throws {
         try await super.setUp()
-        senderKeychain = KeychainStore(
-            service: "chat.onym.ios.identity.tests.sender.\(UUID().uuidString)",
-            account: "current"
+        senderKeychain = IdentityKeychainStore(
+            testNamespace: "seal-sender-\(UUID().uuidString)"
         )
-        sender = IdentityRepository(keychain: senderKeychain)
+        sender = IdentityRepository(
+            keychain: senderKeychain,
+            selectionStore: .inMemory()
+        )
         _ = try await sender.restore(
             mnemonic: "legal winner thank year wave sausage worth useful legal winner thank yellow"
         )
 
-        recipientKeychain = KeychainStore(
-            service: "chat.onym.ios.identity.tests.recipient.\(UUID().uuidString)",
-            account: "current"
+        recipientKeychain = IdentityKeychainStore(
+            testNamespace: "seal-recipient-\(UUID().uuidString)"
         )
-        recipient = IdentityRepository(keychain: recipientKeychain)
+        recipient = IdentityRepository(
+            keychain: recipientKeychain,
+            selectionStore: .inMemory()
+        )
         _ = try await recipient.restore(
             mnemonic: "letter advice cage absurd amount doctor acoustic avoid letter advice cage above"
         )
     }
 
     override func tearDown() async throws {
-        try? senderKeychain.wipe()
-        try? recipientKeychain.wipe()
+        try? senderKeychain.wipeAll()
+        try? recipientKeychain.wipeAll()
         senderKeychain = nil
         sender = nil
         recipientKeychain = nil

@@ -7,20 +7,22 @@ import XCTest
 /// thing the app actually uses, and a mock here would defeat the point of
 /// integration-testing the persistence layer.
 final class IdentityRepositoryTests: XCTestCase {
-    private var keychain: KeychainStore!
+    private var keychain: IdentityKeychainStore!
     private var repo: IdentityRepository!
 
     override func setUp() {
         super.setUp()
-        keychain = KeychainStore(
-            service: "chat.onym.ios.identity.tests.\(UUID().uuidString)",
-            account: "current"
+        keychain = IdentityKeychainStore(
+            testNamespace: "tests-\(UUID().uuidString)"
         )
-        repo = IdentityRepository(keychain: keychain)
+        repo = IdentityRepository(
+            keychain: keychain,
+            selectionStore: .inMemory()
+        )
     }
 
     override func tearDown() {
-        try? keychain.wipe()
+        try? keychain.wipeAll()
         keychain = nil
         repo = nil
         super.tearDown()
@@ -42,7 +44,9 @@ final class IdentityRepositoryTests: XCTestCase {
         XCTAssertNotNil(identity.recoveryPhrase)
         XCTAssertEqual(identity.recoveryPhrase?.split(separator: " ").count, 12)
 
-        let stored = try keychain.load()
+        let ids = try keychain.list()
+        XCTAssertEqual(ids.count, 1, "bootstrap must persist exactly one identity")
+        let stored = try keychain.read(ids[0])
         XCTAssertNotNil(stored, "bootstrap must persist to Keychain")
         XCTAssertEqual(stored?.entropy?.count, 16)
         XCTAssertEqual(stored?.nostrSecretKey.count, 32)
@@ -149,8 +153,8 @@ final class IdentityRepositoryTests: XCTestCase {
 
         let current = await repo.currentIdentity()
         XCTAssertNil(current)
-        let stored = try keychain.load()
-        XCTAssertNil(stored)
+        XCTAssertEqual(try keychain.list(), [],
+                       "wipe must clear every per-identity keychain item")
     }
 
     // MARK: - snapshots

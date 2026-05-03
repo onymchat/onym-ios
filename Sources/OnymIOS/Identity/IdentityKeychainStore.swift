@@ -1,6 +1,31 @@
 import Foundation
 import Security
 
+/// Atomic, single-blob persistence for the on-device identity secrets.
+/// One Keychain item per identity holds the JSON-encoded
+/// `StoredSnapshot` (entropy + both secret keys + display name) — any
+/// mutation is one `SecItemUpdate` (or `SecItemAdd`) call so there's
+/// no partial-write window.
+///
+/// `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` is the default
+/// for every item written through this store.
+struct StoredSnapshot: Codable, Sendable, Equatable {
+    /// Display name surfaced in the identity picker. Optional because
+    /// the on-disk format has historically allowed nameless imports;
+    /// `IdentityRepository` synthesises a default ("Identity 1", …)
+    /// when nil.
+    var name: String?
+    /// 16 bytes (128-bit BIP39 entropy). `nil` only if the identity
+    /// was imported from raw key material without an associated
+    /// mnemonic — kept for forward-compat with a future "import raw
+    /// secret" path.
+    let entropy: Data?
+    /// 32-byte secp256k1 secret key for Nostr signing.
+    let nostrSecretKey: Data
+    /// 32-byte BLS12-381 Fr scalar for SEP group membership.
+    let blsSecretKey: Data
+}
+
 /// Per-identity Keychain store. Each identity gets its own
 /// `kSecClassGenericPassword` item under the service name
 /// `chat.onym.ios.identity.<uuid>`. Listing identities is a single
