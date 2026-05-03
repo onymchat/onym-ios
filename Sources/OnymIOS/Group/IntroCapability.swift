@@ -51,7 +51,13 @@ import Foundation
 ///  - `group_name` omitted from JSON when nil (custom `encode(to:)`
 ///    using `encodeIfPresent` — matches Android's
 ///    `encodeDefaults = false`)
-struct IntroCapability: Codable, Equatable, Sendable {
+struct IntroCapability: Codable, Equatable, Sendable, Identifiable {
+    /// `id` for SwiftUI `.sheet(item:)` / `.fullScreenCover(item:)`
+    /// presentation. The intro pubkey is uniformly random per
+    /// invite, so it's a stable identity for one in-flight
+    /// capability — two distinct invites can never collide.
+    var id: Data { introPublicKey }
+
     /// X25519 32-byte pubkey, freshly minted per invite. Encrypts
     /// the joiner's request envelope; the inviter's app holds the
     /// matching private key.
