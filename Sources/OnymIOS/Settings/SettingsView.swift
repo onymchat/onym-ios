@@ -42,8 +42,7 @@ struct SettingsView: View {
                     } label: {
                         SettingsRow(
                             title: "Identities",
-                            subtitle: identitySubtitle,
-                            onTap: {}
+                            subtitle: identitySubtitle
                         ) {
                             SettingsIconTile(symbol: "person.2.fill", bg: SettingsTile.purple)
                         }
@@ -57,8 +56,7 @@ struct SettingsView: View {
                         SettingsRow(
                             title: "Privacy & Encryption",
                             subtitle: "End-to-end · BIP-39",
-                            last: true,
-                            onTap: {}
+                            last: true
                         ) {
                             SettingsIconTile(symbol: "lock.shield.fill", bg: SettingsTile.blue)
                         }
@@ -74,8 +72,7 @@ struct SettingsView: View {
                     } label: {
                         SettingsRow(
                             title: "Relayer",
-                            subtitle: "Stellar Soroban · onymchat",
-                            onTap: {}
+                            subtitle: "Stellar Soroban · onymchat"
                         ) {
                             SettingsIconTile(symbol: "antenna.radiowaves.left.and.right",
                                              bg: SettingsTile.indigo)
@@ -89,8 +86,7 @@ struct SettingsView: View {
                     } label: {
                         SettingsRow(
                             title: "Anchors",
-                            subtitle: useMainnet ? "Stellar · Mainnet" : "Stellar · Testnet",
-                            onTap: {}
+                            subtitle: useMainnet ? "Stellar · Mainnet" : "Stellar · Testnet"
                         ) {
                             SettingsIconTile(symbol: "link", bg: SettingsTile.orange)
                         }
@@ -123,8 +119,7 @@ struct SettingsView: View {
                     } label: {
                         SettingsRow(
                             title: "Appearance",
-                            subtitle: "Theme · accent · text size",
-                            onTap: {}
+                            subtitle: "Theme · accent · text size"
                         ) {
                             SettingsIconTile(symbol: "circle.lefthalf.filled",
                                              bg: SettingsTile.gray)
@@ -139,8 +134,7 @@ struct SettingsView: View {
                         SettingsRow(
                             title: "About Onym",
                             subtitle: aboutSubtitle,
-                            last: true,
-                            onTap: {}
+                            last: true
                         ) {
                             SettingsIconTile(symbol: "info.circle.fill", bg: SettingsTile.teal)
                         }

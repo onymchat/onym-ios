@@ -43,8 +43,7 @@ struct IdentityDetailView: View {
                         SettingsRow(
                             title: "Share invite key",
                             subtitle: "QR code or link",
-                            last: true,
-                            onTap: {}
+                            last: true
                         ) {
                             SettingsIconTile(symbol: "square.and.arrow.up", bg: SettingsTile.indigo)
                         }

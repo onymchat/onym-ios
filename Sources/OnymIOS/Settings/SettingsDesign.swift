@@ -151,8 +151,12 @@ struct SettingsRowDivider: View {
 }
 
 /// Single Apple-Settings row. `tile` is the leading icon. `right` is
-/// the trailing content (chips, value text, switches). When `onTap` is
-/// non-nil and `hasChevron` is true the row renders a trailing chevron.
+/// the trailing content (chips, value text, switches). The row is
+/// pure layout — wrap it in a `NavigationLink` (push) or a `Button`
+/// (in-place action) externally, or pass `onTap` for a built-in
+/// Button. The chevron renders whenever `hasChevron` is true,
+/// independent of `onTap`, because the wrapping `NavigationLink`
+/// itself owns the tap.
 struct SettingsRow<Tile: View, Right: View>: View {
     let title: LocalizedStringKey
     var titleColor: Color = OnymTokens.text
@@ -167,48 +171,54 @@ struct SettingsRow<Tile: View, Right: View>: View {
     @ViewBuilder var right: () -> Right
 
     var body: some View {
-        Button {
-            onTap?()
-        } label: {
-            VStack(spacing: 0) {
-                HStack(spacing: 12) {
-                    tile()
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(title)
-                            .font(titleMono
-                                  ? .system(size: 16.5, design: .monospaced)
-                                  : .system(size: 16.5))
-                            .foregroundStyle(titleColor)
+        if let onTap {
+            // Tappable variant — used for in-place actions (Copy
+            // public key, Set as active, …). Wrap in `NavigationLink`
+            // or external `Button` for push navigation instead.
+            Button(action: onTap) { rowBody }
+                .buttonStyle(.plain)
+        } else {
+            rowBody
+        }
+    }
+
+    private var rowBody: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                tile()
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(titleMono
+                              ? .system(size: 16.5, design: .monospaced)
+                              : .system(size: 16.5))
+                        .foregroundStyle(titleColor)
+                        .lineLimit(1)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(subtitleMono
+                                  ? .system(size: 12.5, design: .monospaced)
+                                  : .system(size: 12.5))
+                            .foregroundStyle(OnymTokens.text2)
                             .lineLimit(1)
-                        if let subtitle {
-                            Text(subtitle)
-                                .font(subtitleMono
-                                      ? .system(size: 12.5, design: .monospaced)
-                                      : .system(size: 12.5))
-                                .foregroundStyle(OnymTokens.text2)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                        }
-                    }
-                    Spacer(minLength: 8)
-                    right()
-                    if hasChevron, onTap != nil {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(OnymTokens.text3)
+                            .truncationMode(.middle)
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 11)
-                .contentShape(Rectangle())
-
-                if !last {
-                    SettingsRowDivider(inset: inset)
+                Spacer(minLength: 8)
+                right()
+                if hasChevron {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(OnymTokens.text3)
                 }
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 11)
+            .contentShape(Rectangle())
+
+            if !last {
+                SettingsRowDivider(inset: inset)
+            }
         }
-        .buttonStyle(.plain)
-        .disabled(onTap == nil)
     }
 }
 
