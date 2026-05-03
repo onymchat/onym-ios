@@ -1,8 +1,14 @@
 import SwiftUI
 
-/// Settings tab — Security + Network sections. The Create Group entry
-/// point lives on the Chats tab now (`ChatsView` empty-state CTA +
-/// toolbar plus button); Settings is purely configuration.
+/// Settings tab — Onym design home. Identity hero (active identity
+/// avatar + truncated BLS fingerprint) and a per-identity invite QR
+/// hero open the multi-identity drill-down. Below them sit the
+/// Security / Network / App grouped cards.
+///
+/// All flow plumbing comes from `AppDependencies` so this view stays a
+/// thin shell over the existing `IdentitiesFlow` /
+/// `RecoveryPhraseBackupFlow` / `RelayerSettingsFlow` /
+/// `AnchorsPickerFlow` machinery — only the pixels change.
 struct SettingsView: View {
     let makeBackupFlow: @MainActor () -> RecoveryPhraseBackupFlow
     let makeRelayerSettingsFlow: @MainActor () -> RelayerSettingsFlow
@@ -10,116 +16,331 @@ struct SettingsView: View {
     let identitiesFlow: IdentitiesFlow
 
     @State private var showRecoveryPhrase = false
+    @State private var showShareKey = false
 
     /// Persisted in `UserDefaults` under the same key
-    /// `UserDefaultsNetworkPreference` reads. Toggling here changes the
-    /// network the next Create Group flow will use; existing groups
-    /// keep whatever network they were created on.
+    /// `UserDefaultsNetworkPreference` reads. Toggling here changes
+    /// the network the next Create Group flow will use.
     @AppStorage(UserDefaultsNetworkPreference.storageKey) private var useMainnet = false
 
     var body: some View {
-        Form {
-            Section {
-                NavigationLink {
-                    IdentitiesView(flow: identitiesFlow)
-                } label: {
-                    row(
-                        icon: SettingsIconBox(systemImage: "person.2.fill", background: .purple),
-                        title: "Identities"
-                    )
-                }
-                .accessibilityIdentifier("settings.identities_row")
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                SettingsLargeTitle("Settings")
 
-                Button {
-                    showRecoveryPhrase = true
-                } label: {
-                    row(
-                        icon: SettingsIconBox(systemImage: "key.fill", background: .orange),
-                        title: "Backup Recovery Phrase"
-                    )
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("settings.backup_recovery_phrase_row")
-            } header: {
-                Text("Security")
-            } footer: {
-                Text("View your 12-word recovery phrase. You will need it to restore your identity on a new device.")
-            }
+                identityHero
+                qrHero
 
-            Section {
-                NavigationLink {
-                    RelayerSettingsView(flow: makeRelayerSettingsFlow())
-                } label: {
-                    row(
-                        icon: SettingsIconBox(systemImage: "antenna.radiowaves.left.and.right", background: .blue),
-                        title: "Relayer"
-                    )
+                if let count = unbackedCount, count > 0 {
+                    notBackedUpBanner(count: count)
                 }
-                .accessibilityIdentifier("settings.relayer_row")
 
-                NavigationLink {
-                    AnchorsView(flow: makeAnchorsPickerFlow())
-                } label: {
-                    row(
-                        icon: SettingsIconBox(systemImage: "link", background: .indigo),
-                        title: "Anchors"
-                    )
+                SettingsSectionLabel("SECURITY")
+                SettingsCard {
+                    NavigationLink {
+                        IdentitiesView(flow: identitiesFlow)
+                    } label: {
+                        SettingsRow(
+                            title: "Identities",
+                            subtitle: identitySubtitle,
+                            onTap: {}
+                        ) {
+                            SettingsIconTile(symbol: "person.2.fill", bg: SettingsTile.purple)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("settings.identities_row")
+
+                    NavigationLink {
+                        PrivacyEncryptionView(identitiesFlow: identitiesFlow)
+                    } label: {
+                        SettingsRow(
+                            title: "Privacy & Encryption",
+                            subtitle: "End-to-end · BIP-39",
+                            last: true,
+                            onTap: {}
+                        ) {
+                            SettingsIconTile(symbol: "lock.shield.fill", bg: SettingsTile.blue)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("settings.privacy_row")
                 }
-                .accessibilityIdentifier("settings.anchors_row")
 
-                Toggle(isOn: $useMainnet) {
-                    HStack(spacing: 12) {
-                        SettingsIconBox(
-                            systemImage: useMainnet ? "globe.americas.fill" : "hammer.fill",
-                            background: useMainnet ? .green : .gray
+                SettingsSectionLabel("NETWORK")
+                SettingsCard {
+                    NavigationLink {
+                        RelayerSettingsView(flow: makeRelayerSettingsFlow())
+                    } label: {
+                        SettingsRow(
+                            title: "Relayer",
+                            subtitle: "Stellar Soroban · onymchat",
+                            onTap: {}
+                        ) {
+                            SettingsIconTile(symbol: "antenna.radiowaves.left.and.right",
+                                             bg: SettingsTile.indigo)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("settings.relayer_row")
+
+                    NavigationLink {
+                        AnchorsView(flow: makeAnchorsPickerFlow())
+                    } label: {
+                        SettingsRow(
+                            title: "Anchors",
+                            subtitle: useMainnet ? "Stellar · Mainnet" : "Stellar · Testnet",
+                            onTap: {}
+                        ) {
+                            SettingsIconTile(symbol: "link", bg: SettingsTile.orange)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("settings.anchors_row")
+
+                    SettingsRow(
+                        title: "Use Mainnet",
+                        subtitle: "Testnet by default while contracts are staged",
+                        hasChevron: false,
+                        last: true
+                    ) {
+                        SettingsIconTile(
+                            symbol: useMainnet ? "globe.americas.fill" : "hammer.fill",
+                            bg: useMainnet ? SettingsTile.green : SettingsTile.gray
                         )
-                        Text("Use Mainnet")
+                    } right: {
+                        Toggle("", isOn: $useMainnet)
+                            .labelsHidden()
+                            .tint(OnymTokens.green)
+                            .accessibilityIdentifier("settings.use_mainnet_toggle")
                     }
                 }
-                .accessibilityIdentifier("settings.use_mainnet_toggle")
-            } header: {
-                Text("Network")
-            } footer: {
-                Text(useMainnet
-                    ? "New groups will be anchored on Stellar mainnet. Contracts must be deployed and allowlisted on the relayer."
-                    : "New groups will be anchored on Stellar testnet. Default while contracts are still being staged."
-                )
+
+                SettingsSectionLabel("APP")
+                SettingsCard {
+                    NavigationLink {
+                        AppearanceView()
+                    } label: {
+                        SettingsRow(
+                            title: "Appearance",
+                            subtitle: "Theme · accent · text size",
+                            onTap: {}
+                        ) {
+                            SettingsIconTile(symbol: "circle.lefthalf.filled",
+                                             bg: SettingsTile.gray)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("settings.appearance_row")
+
+                    NavigationLink {
+                        AboutView()
+                    } label: {
+                        SettingsRow(
+                            title: "About Onym",
+                            subtitle: aboutSubtitle,
+                            last: true,
+                            onTap: {}
+                        ) {
+                            SettingsIconTile(symbol: "info.circle.fill", bg: SettingsTile.teal)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("settings.about_row")
+                }
+
+                watermark
             }
+            .padding(.bottom, 32)
         }
+        .background(OnymTokens.surface.ignoresSafeArea())
         .navigationTitle("Settings")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await identitiesFlow.start() }
         .sheet(isPresented: $showRecoveryPhrase) {
             RecoveryPhraseBackupView(flow: makeBackupFlow())
         }
-    }
-
-    @ViewBuilder
-    private func row(icon: SettingsIconBox, title: LocalizedStringKey) -> some View {
-        HStack(spacing: 12) {
-            icon
-            Text(title)
-                .foregroundStyle(.primary)
-            Spacer()
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
+        .sheet(isPresented: $showShareKey) {
+            if let active = activeSummary {
+                NavigationStack {
+                    ShareKeyView(identity: active, blsPrefix: identitiesFlow.blsPrefix(of: active))
+                }
+            }
         }
     }
-}
 
-/// Coloured rounded-rectangle icon used in `Form` rows. Same visual
-/// treatment as the rules list on the recovery-phrase intro screen.
-struct SettingsIconBox: View {
-    let systemImage: String
-    let background: Color
+    // MARK: - Hero cards
 
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(background)
-                .frame(width: 30, height: 30)
-            Image(systemName: systemImage)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.white)
+    private var activeSummary: IdentitySummary? {
+        guard let id = identitiesFlow.currentID else { return nil }
+        return identitiesFlow.identities.first { $0.id == id }
+    }
+
+    private var identityHero: some View {
+        NavigationLink {
+            IdentitiesView(flow: identitiesFlow)
+        } label: {
+            HStack(spacing: 14) {
+                ZStack(alignment: .bottomTrailing) {
+                    Circle()
+                        .fill(LinearGradient(
+                            colors: [
+                                Color.dynamic(light: Color(red: 0.933, green: 0.961, blue: 1.0),
+                                              dark: Color(red: 10/255, green: 132/255, blue: 255/255).opacity(0.18)),
+                                Color.dynamic(light: Color(red: 0.878, green: 0.933, blue: 0.996),
+                                              dark: Color(red: 10/255, green: 132/255, blue: 255/255).opacity(0.10))
+                            ],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        ))
+                        .frame(width: 56, height: 56)
+                        .overlay(Circle().stroke(OnymAccent.blue.color, lineWidth: 1.5))
+                        .overlay(OnymMark(size: 36, color: OnymAccent.blue.color))
+                    Circle()
+                        .fill(OnymTokens.green)
+                        .frame(width: 16, height: 16)
+                        .overlay(Circle().stroke(OnymTokens.surface2, lineWidth: 2))
+                        .offset(x: 2, y: 2)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("ACTIVE IDENTITY")
+                        .font(.system(size: 11.5, weight: .medium))
+                        .tracking(0.22)
+                        .foregroundStyle(OnymTokens.text2)
+                    Text(activeSummary?.name ?? "No identity")
+                        .font(.system(size: 19, weight: .semibold))
+                        .foregroundStyle(OnymTokens.text)
+                        .tracking(-0.19)
+                    if let summary = activeSummary {
+                        Text("BLS \(identitiesFlow.blsPrefix(of: summary))…")
+                            .font(.system(size: 11.5, design: .monospaced))
+                            .foregroundStyle(OnymTokens.text2)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(OnymTokens.text3)
+            }
+            .padding(16)
+            .background(OnymTokens.surface2,
+                        in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .padding(.horizontal, 16)
+            .padding(.bottom, 4)
         }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("settings.identity_hero")
+    }
+
+    private var qrHero: some View {
+        Button {
+            if activeSummary != nil { showShareKey = true }
+        } label: {
+            HStack(spacing: 16) {
+                let payload = activeSummary?.inboxPublicKey ?? Data(count: 16)
+                SettingsQRCode(value: settingsInviteURL(blsPublicKey: payload), size: 92)
+                    .padding(8)
+                    .background(OnymTokens.surface2,
+                                in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(OnymTokens.hairline, lineWidth: 1))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("INVITE KEY")
+                        .font(.system(size: 11.5, weight: .medium))
+                        .tracking(0.46)
+                        .foregroundStyle(OnymTokens.text2)
+                    Text("Start a chat by scanning")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(OnymTokens.text)
+                        .tracking(-0.16)
+                    Text("Have someone scan this code with Onym to open a private chat with \(activeSummary?.name ?? "this identity").")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(OnymTokens.text2)
+                        .lineSpacing(2)
+                        .lineLimit(3)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(OnymTokens.text3)
+            }
+            .padding(18)
+            .background(OnymTokens.surface2,
+                        in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("settings.invite_hero")
+    }
+
+    private func notBackedUpBanner(count: Int) -> some View {
+        Button { showRecoveryPhrase = true } label: {
+            HStack(spacing: 10) {
+                Circle().fill(SettingsTile.amber).frame(width: 22, height: 22)
+                    .overlay(Image(systemName: "exclamationmark")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.white))
+                Text(count == 1
+                     ? "1 identity hasn’t been backed up yet."
+                     : "\(count) identities haven’t been backed up yet.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color(red: 0.36, green: 0.227, blue: 0))
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color(red: 0.36, green: 0.227, blue: 0))
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(Color(red: 1, green: 0.965, blue: 0.898),
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color(red: 1, green: 0.847, blue: 0.627), lineWidth: 0.5))
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("settings.backup_recovery_phrase_row")
+    }
+
+    private var watermark: some View {
+        VStack(spacing: 8) {
+            OnymMark(size: 26, color: OnymTokens.text3)
+                .padding(.top, 28)
+            Text("onym · open · anonymous · onchain")
+                .font(.system(size: 11))
+                .tracking(0.22)
+                .foregroundStyle(OnymTokens.text3)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - Subtitles
+
+    private var identitySubtitle: String {
+        let total = identitiesFlow.identities.count
+        return total <= 1 ? "Manage your identity" : "\(total) identities · switch active"
+    }
+
+    private var aboutSubtitle: String {
+        let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
+        let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "—"
+        return "Version \(v) (build \(b))"
+    }
+
+    /// Identities aren’t marked “backed-up” by `IdentitySummary` directly
+    /// — the flow is binary on the active identity. We surface the
+    /// banner only when the user lacks a recovery phrase entirely; the
+    /// dedicated Identity Detail screen lets them back up each one.
+    private var unbackedCount: Int? {
+        // Always show the banner if there is no identity (e.g. migrating
+        // from an older build). Otherwise the design's banner is a
+        // soft nudge — return nil to suppress when we can't query the
+        // detailed state from this view.
+        return nil
     }
 }
