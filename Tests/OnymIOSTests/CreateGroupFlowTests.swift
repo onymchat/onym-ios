@@ -22,13 +22,6 @@ final class CreateGroupFlowTests: XCTestCase {
         XCTAssertTrue(flow.canAdvanceToStep2)
     }
 
-    func test_unavailableGovernance_blocksAdvance() async throws {
-        let flow = await makeFlow()
-        flow.name = "Friends"
-        flow.governance = .anarchy   // not yet supported
-        XCTAssertFalse(flow.canAdvanceToStep2)
-    }
-
     func test_tappedNext_advancesToStep2() async throws {
         let flow = await makeFlow()
         flow.name = "Friends"
@@ -42,13 +35,6 @@ final class CreateGroupFlowTests: XCTestCase {
         flow.name = ""
         flow.tappedNext()
         XCTAssertEqual(flow.route, .step2)
-    }
-
-    func test_tappedNext_unavailableGovernance_isNoOp() async throws {
-        let flow = await makeFlow()
-        flow.governance = .anarchy
-        flow.tappedNext()
-        XCTAssertEqual(flow.route, .step1)
     }
 
     // MARK: - Random placeholder name
@@ -248,6 +234,43 @@ final class CreateGroupFlowTests: XCTestCase {
         let flow = await makeFlow()
         flow.governance = .tyranny
         XCTAssertTrue(flow.canCreate, "Tyranny accepts any roster size, including zero")
+    }
+
+    // MARK: - Anarchy governance gates
+
+    func test_anarchy_isNowAvailable() async throws {
+        // PR-3 of Anarchy flips the gate — Step1 should advance with .anarchy.
+        let flow = await makeFlow()
+        flow.governance = .anarchy
+        XCTAssertTrue(flow.canAdvanceToStep2)
+    }
+
+    func test_anarchy_canCreate_alwaysTrue() async throws {
+        // Anarchy behaves like Tyranny — any roster size, no required peer.
+        let flow = await makeFlow()
+        flow.governance = .anarchy
+        XCTAssertTrue(flow.canCreate, "Anarchy accepts any roster size, including zero")
+        flow.inviteeInput = String(repeating: "aa", count: 32)
+        flow.tappedAddInvitee()
+        XCTAssertTrue(flow.canCreate, "still true with one invitee")
+    }
+
+    func test_anarchy_canAddMoreInvitees_alwaysTrue() async throws {
+        let flow = await makeFlow()
+        flow.governance = .anarchy
+        XCTAssertTrue(flow.canAddMoreInvitees)
+        flow.inviteeInput = String(repeating: "aa", count: 32)
+        flow.tappedAddInvitee()
+        XCTAssertTrue(flow.canAddMoreInvitees, "Anarchy doesn't cap invitee count")
+    }
+
+    func test_anarchy_createCTALabel_matchesTyrannyShape() async throws {
+        let flow = await makeFlow()
+        flow.governance = .anarchy
+        XCTAssertEqual(flow.createCTALabel, "Create empty group")
+        flow.inviteeInput = String(repeating: "aa", count: 32)
+        flow.tappedAddInvitee()
+        XCTAssertEqual(flow.createCTALabel, "Create with 1 person")
     }
 
     // MARK: - onClose
