@@ -121,6 +121,31 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
         broadcast()
     }
 
+    /// Rename `id` to `newName`. Trims; blank input is a silent no-op
+    /// (matches the iOS prototype's `name || i.name` "blank input keeps
+    /// old name" behaviour) and unchanged values skip the disk write.
+    ///
+    /// Callable on any identity, active or inactive. Refreshes the
+    /// `identitiesStream` summary list so listeners see the new name;
+    /// the active `snapshots` stream isn't touched because `Identity`
+    /// doesn't carry the display name (only `IdentitySummary` does).
+    ///
+    /// - Throws: `IdentityError.identityNotLoaded` if `id` doesn't exist
+    ///   on this device.
+    func rename(_ id: IdentityID, newName: String) throws {
+        try ensureLoaded()
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return }
+        guard var snapshot = try keychain.read(id) else {
+            throw IdentityError.identityNotLoaded
+        }
+        if snapshot.name == trimmed { return }
+        snapshot.name = trimmed
+        try keychain.write(id, snapshot)
+        names[id] = trimmed
+        broadcast()
+    }
+
     /// Restore an identity from a 12- or 24-word BIP39 mnemonic. With
     /// the no-backcompat licence this wipes every existing identity
     /// first — preserves the legacy single-slot `restore` semantic so

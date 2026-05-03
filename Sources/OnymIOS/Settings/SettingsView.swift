@@ -115,20 +115,6 @@ struct SettingsView: View {
                 SettingsSectionLabel("APP")
                 SettingsCard {
                     NavigationLink {
-                        AppearanceView()
-                    } label: {
-                        SettingsRow(
-                            title: "Appearance",
-                            subtitle: "Theme · accent · text size"
-                        ) {
-                            SettingsIconTile(symbol: "circle.lefthalf.filled",
-                                             bg: SettingsTile.gray)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("settings.appearance_row")
-
-                    NavigationLink {
                         AboutView()
                     } label: {
                         SettingsRow(
