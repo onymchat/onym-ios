@@ -248,9 +248,12 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
     // MARK: - Invitation decryption
 
     /// Decode an inbox-transport-delivered invitation envelope and open
-    /// it with the currently-selected identity's X25519 private key.
-    /// PR-4 will fan this out across every identity by inbox tag.
-    func decryptInvitation(envelopeBytes: Data) throws -> Data {
+    /// it with the **specified identity's** X25519 private key. The
+    /// fan-out transport stamps each persisted invitation with the
+    /// receiving identity's ID; callers pass that stamp here so the
+    /// envelope decrypts under the right key — even when the receiving
+    /// identity isn't the currently-selected one.
+    func decryptInvitation(envelopeBytes: Data, asIdentity identityID: IdentityID) throws -> Data {
         let envelope: SealedEnvelope
         do {
             envelope = try JSONDecoder().decode(SealedEnvelope.self, from: envelopeBytes)
@@ -283,10 +286,7 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
             }
         }
 
-        guard let currentID else {
-            throw InvitationDecryptError.identityNotLoaded
-        }
-        guard let snapshot = try keychain.read(currentID) else {
+        guard let snapshot = try keychain.read(identityID) else {
             throw InvitationDecryptError.identityNotLoaded
         }
         let privateKey = try Self.inboxKeyAgreementPrivateKey(

@@ -21,14 +21,14 @@ actor FakeInvitationEnvelopeDecrypter: InvitationEnvelopeDecrypting {
     }
 
     private let mode: Mode
-    private(set) var decryptCalls: [Data] = []
+    private(set) var decryptCalls: [(envelopeBytes: Data, identityID: IdentityID)] = []
 
     init(mode: Mode) {
         self.mode = mode
     }
 
-    func decryptInvitation(envelopeBytes: Data) throws -> Data {
-        decryptCalls.append(envelopeBytes)
+    func decryptInvitation(envelopeBytes: Data, asIdentity identityID: IdentityID) throws -> Data {
+        decryptCalls.append((envelopeBytes, identityID))
         switch mode {
         case .fixed(let plaintext):
             return plaintext

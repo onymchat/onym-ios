@@ -8,13 +8,24 @@ import SwiftData
 @Model
 final class PersistedInvitation {
     @Attribute(.unique) var id: String
+    /// UUID string of the identity this envelope was delivered to.
+    /// Plain (not encrypted) so SwiftData `#Predicate` can filter on
+    /// it. Owner IDs are random per-device UUIDs — nothing to leak.
+    var ownerIdentityIDString: String
     var encryptedPayload: Data
     var receivedAt: Date
     /// Cleartext: enum tag (small enumeration, not user-identifying).
     var statusRaw: String
 
-    init(id: String, encryptedPayload: Data, receivedAt: Date, statusRaw: String) {
+    init(
+        id: String,
+        ownerIdentityIDString: String,
+        encryptedPayload: Data,
+        receivedAt: Date,
+        statusRaw: String
+    ) {
         self.id = id
+        self.ownerIdentityIDString = ownerIdentityIDString
         self.encryptedPayload = encryptedPayload
         self.receivedAt = receivedAt
         self.statusRaw = statusRaw
@@ -31,6 +42,10 @@ actor SwiftDataInvitationStore: InvitationStore {
     /// Production initializer — on-disk SQLite under
     /// `Application Support/OnymIOS/Invitations.store`, with
     /// `FileProtectionType.complete` on the directory.
+    ///
+    /// Per the multi-identity no-backcompat licence, schema-mismatch
+    /// errors at `ModelContainer(...)` init wipe the on-disk store and
+    /// retry once. Same pattern as `SwiftDataGroupStore`.
     init() throws {
         let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
@@ -44,7 +59,21 @@ actor SwiftDataInvitationStore: InvitationStore {
         let url = storeDir.appendingPathComponent("Invitations.store")
         let schema = Schema([PersistedInvitation.self])
         let config = ModelConfiguration(schema: schema, url: url, cloudKitDatabase: .none)
-        let container = try ModelContainer(for: schema, configurations: [config])
+        let container: ModelContainer
+        do {
+            container = try ModelContainer(for: schema, configurations: [config])
+        } catch {
+            // Schema migration failure — wipe + retry. SwiftData's
+            // SQLite trio (`.store`, `.store-shm`, `.store-wal`) all
+            // need to go.
+            for suffix in ["", "-shm", "-wal"] {
+                try? FileManager.default.removeItem(
+                    at: url.deletingPathExtension().appendingPathExtension("store\(suffix)")
+                )
+            }
+            try? FileManager.default.removeItem(at: url)
+            container = try ModelContainer(for: schema, configurations: [config])
+        }
         self.container = container
         self.context = ModelContext(container)
     }
@@ -85,6 +114,7 @@ actor SwiftDataInvitationStore: InvitationStore {
         guard let encrypted = try? StorageEncryption.encrypt(record.payload) else { return false }
         context.insert(PersistedInvitation(
             id: record.id,
+            ownerIdentityIDString: record.ownerIdentityID.rawValue.uuidString,
             encryptedPayload: encrypted,
             receivedAt: record.receivedAt,
             statusRaw: record.status.rawValue
@@ -112,13 +142,26 @@ actor SwiftDataInvitationStore: InvitationStore {
         try? context.save()
     }
 
+    func deleteOwner(_ ownerIDString: String) {
+        let descriptor = FetchDescriptor<PersistedInvitation>(
+            predicate: #Predicate { $0.ownerIdentityIDString == ownerIDString }
+        )
+        if let rows = try? context.fetch(descriptor) {
+            for row in rows { context.delete(row) }
+        }
+        try? context.save()
+    }
+
     // MARK: - Mapping
 
     private static func decode(_ row: PersistedInvitation) -> IncomingInvitationRecord? {
-        guard let payload = try? StorageEncryption.decrypt(row.encryptedPayload) else { return nil }
+        guard let owner = IdentityID(row.ownerIdentityIDString),
+              let payload = try? StorageEncryption.decrypt(row.encryptedPayload)
+        else { return nil }
         let status = IncomingInvitationStatus(rawValue: row.statusRaw) ?? .pending
         return IncomingInvitationRecord(
             id: row.id,
+            ownerIdentityID: owner,
             payload: payload,
             receivedAt: row.receivedAt,
             status: status

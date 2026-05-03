@@ -257,17 +257,21 @@ private actor FanoutInvitationStore: InvitationStore {
     }
 
     func updateStatus(id: String, status: IncomingInvitationStatus) {
-        guard var existing = rows[id] else { return }
-        existing = IncomingInvitationRecord(
+        guard let existing = rows[id] else { return }
+        rows[id] = IncomingInvitationRecord(
             id: existing.id,
+            ownerIdentityID: existing.ownerIdentityID,
             payload: existing.payload,
             receivedAt: existing.receivedAt,
             status: status
         )
-        rows[id] = existing
     }
 
     func delete(id: String) {
         rows.removeValue(forKey: id)
+    }
+
+    func deleteOwner(_ ownerIDString: String) {
+        rows = rows.filter { $0.value.ownerIdentityID.rawValue.uuidString != ownerIDString }
     }
 }

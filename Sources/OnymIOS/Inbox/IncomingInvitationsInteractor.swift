@@ -17,11 +17,19 @@ struct IncomingInvitationsInteractor: Sendable {
     /// `recordIncoming` call on the repository; the repository's
     /// idempotent save handles duplicates from redundant relays.
     /// Caller owns the `Task` and is responsible for cancellation.
-    func run(inbox: TransportInboxID) async {
+    ///
+    /// `ownerIdentityID` is the identity whose inbox `inbox` belongs
+    /// to — the persisted record stamps this so downstream
+    /// `IdentityRepository.decryptInvitation(asIdentity:)` can decrypt
+    /// under the right key. Single-identity callers (legacy +
+    /// non-fanout test paths) pass the active identity's ID.
+    /// `InboxFanoutInteractor` superseded this for production wiring.
+    func run(inbox: TransportInboxID, ownerIdentityID: IdentityID) async {
         for await message in inboxTransport.subscribe(inbox: inbox) {
             if Task.isCancelled { break }
             await repository.recordIncoming(
                 id: message.messageID,
+                ownerIdentityID: ownerIdentityID,
                 payload: message.payload,
                 receivedAt: message.receivedAt
             )

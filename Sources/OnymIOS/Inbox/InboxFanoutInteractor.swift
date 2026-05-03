@@ -125,11 +125,17 @@ private actor ActiveSubscriptions {
         for id in wanted {
             guard let tag = tagsByID[id], live[id] == nil else { continue }
             let stream = inboxTransport.subscribe(inbox: tag)
-            let task = Task { [repository] in
+            // Capture the per-subscription identity ID into the Task —
+            // the persisted record stamps `ownerIdentityID = id` so
+            // `decryptInvitation(asIdentity:)` can later route the
+            // envelope to the right per-identity X25519 key, even if
+            // the user has switched to a different identity.
+            let task = Task { [repository, id] in
                 for await message in stream {
                     if Task.isCancelled { break }
                     await repository.recordIncoming(
                         id: message.messageID,
+                        ownerIdentityID: id,
                         payload: message.payload,
                         receivedAt: message.receivedAt
                     )

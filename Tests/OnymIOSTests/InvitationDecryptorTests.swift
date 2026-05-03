@@ -14,14 +14,23 @@ final class InvitationDecryptorTests: XCTestCase {
         let decrypter = FakeInvitationEnvelopeDecrypter(mode: .fixed(plaintext))
         let interactor = InvitationDecryptor(envelopeDecrypter: decrypter)
 
-        let invitation = Self.makeInvitation(id: "evt-1", payload: Data("envelope-bytes".utf8))
+        let owner = IdentityID()
+        let invitation = Self.makeInvitation(
+            id: "evt-1",
+            ownerIdentityID: owner,
+            payload: Data("envelope-bytes".utf8)
+        )
         let decrypted = try await interactor.decrypt(invitation)
 
         XCTAssertEqual(decrypted.name, "Onym Launch")
         XCTAssertEqual(decrypted.senderNostrPubkey, "deadbeef")
         let calls = await decrypter.decryptCalls
-        XCTAssertEqual(calls, [Data("envelope-bytes".utf8)],
+        XCTAssertEqual(calls.count, 1,
+                       "interactor must call the decrypter once per invitation")
+        XCTAssertEqual(calls.first?.envelopeBytes, Data("envelope-bytes".utf8),
                        "interactor must hand the persisted ciphertext bytes to the decrypter unchanged")
+        XCTAssertEqual(calls.first?.identityID, owner,
+                       "interactor must route to the per-record ownerIdentityID — that's how cross-identity envelopes decrypt")
     }
 
     func test_decrypt_drivesMultipleInvitationsIndependently() async throws {
@@ -33,8 +42,9 @@ final class InvitationDecryptorTests: XCTestCase {
         ]))
         let interactor = InvitationDecryptor(envelopeDecrypter: decrypter)
 
-        let d1 = try await interactor.decrypt(Self.makeInvitation(id: "1", payload: Data("env-1".utf8)))
-        let d2 = try await interactor.decrypt(Self.makeInvitation(id: "2", payload: Data("env-2".utf8)))
+        let owner = IdentityID()
+        let d1 = try await interactor.decrypt(Self.makeInvitation(id: "1", ownerIdentityID: owner, payload: Data("env-1".utf8)))
+        let d2 = try await interactor.decrypt(Self.makeInvitation(id: "2", ownerIdentityID: owner, payload: Data("env-2".utf8)))
 
         XCTAssertEqual(d1.name, "Group A")
         XCTAssertEqual(d2.name, "Group B")
@@ -45,7 +55,7 @@ final class InvitationDecryptorTests: XCTestCase {
     func test_decrypt_propagatesDecrypterError() async {
         let decrypter = FakeInvitationEnvelopeDecrypter(mode: .failing(.signatureVerificationFailed))
         let interactor = InvitationDecryptor(envelopeDecrypter: decrypter)
-        let invitation = Self.makeInvitation(id: "evt-1", payload: Data())
+        let invitation = Self.makeInvitation(id: "evt-1", ownerIdentityID: IdentityID(), payload: Data())
 
         do {
             _ = try await interactor.decrypt(invitation)
@@ -63,7 +73,7 @@ final class InvitationDecryptorTests: XCTestCase {
         // isn't a `DecryptedInvitation` — JSON decode should throw.
         let decrypter = FakeInvitationEnvelopeDecrypter(mode: .fixed(Data("not the right shape".utf8)))
         let interactor = InvitationDecryptor(envelopeDecrypter: decrypter)
-        let invitation = Self.makeInvitation(id: "evt-1", payload: Data())
+        let invitation = Self.makeInvitation(id: "evt-1", ownerIdentityID: IdentityID(), payload: Data())
 
         do {
             _ = try await interactor.decrypt(invitation)
@@ -79,11 +89,18 @@ final class InvitationDecryptorTests: XCTestCase {
 
     private static func makeInvitation(
         id: String,
+        ownerIdentityID: IdentityID,
         payload: Data,
         receivedAt: Date = Date(),
         status: IncomingInvitationStatus = .pending
     ) -> IncomingInvitation {
-        IncomingInvitation(id: id, payload: payload, receivedAt: receivedAt, status: status)
+        IncomingInvitation(
+            id: id,
+            ownerIdentityID: ownerIdentityID,
+            payload: payload,
+            receivedAt: receivedAt,
+            status: status
+        )
     }
 
     private static func encodeInvitation(

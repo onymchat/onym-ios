@@ -51,13 +51,17 @@ final class IdentityRepositorySealInvitationTests: XCTestCase {
 
     func test_sealInvitation_roundtripsThroughDecrypt() async throws {
         let recipientIdentity = try await XCTUnwrapAsync(await recipient.currentIdentity())
+        let recipientID = try await XCTUnwrapAsync(await recipient.currentSelectedID())
         let plaintext = Data("hello, invitee".utf8)
 
         let sealed = try await sender.sealInvitation(
             payload: plaintext,
             to: recipientIdentity.inboxPublicKey
         )
-        let decrypted = try await recipient.decryptInvitation(envelopeBytes: sealed)
+        let decrypted = try await recipient.decryptInvitation(
+            envelopeBytes: sealed,
+            asIdentity: recipientID
+        )
         XCTAssertEqual(decrypted, plaintext)
     }
 

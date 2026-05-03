@@ -49,7 +49,7 @@ final class IdentityRepositoryInvitationDecryptTests: XCTestCase {
             recipientX25519PublicKey: identity.inboxPublicKey
         )
 
-        let decrypted = try await repository.decryptInvitation(envelopeBytes: envelope)
+        let decrypted = try await decryptUsingCurrent(envelope)
         XCTAssertEqual(decrypted, plaintext)
     }
 
@@ -63,7 +63,7 @@ final class IdentityRepositoryInvitationDecryptTests: XCTestCase {
             senderSigningKey: senderSigningKey
         )
 
-        let decrypted = try await repository.decryptInvitation(envelopeBytes: envelope)
+        let decrypted = try await decryptUsingCurrent(envelope)
         XCTAssertEqual(decrypted, Data("signed".utf8))
     }
 
@@ -71,7 +71,7 @@ final class IdentityRepositoryInvitationDecryptTests: XCTestCase {
 
     func test_decryptInvitation_rejectsMalformedJSON() async {
         await assertThrows(
-            try await repository.decryptInvitation(envelopeBytes: Data("not json".utf8)),
+            try await decryptUsingCurrent(Data("not json".utf8)),
             InvitationDecryptError.malformedEnvelope
         )
     }
@@ -89,7 +89,7 @@ final class IdentityRepositoryInvitationDecryptTests: XCTestCase {
         )
         let bytes = try JSONEncoder().encode(envelope)
         await assertThrows(
-            try await repository.decryptInvitation(envelopeBytes: bytes),
+            try await decryptUsingCurrent(bytes),
             InvitationDecryptError.unsupportedScheme("aes-256-gcm-v1")
         )
     }
@@ -107,7 +107,7 @@ final class IdentityRepositoryInvitationDecryptTests: XCTestCase {
         )
         let bytes = try JSONEncoder().encode(envelope)
         await assertThrows(
-            try await repository.decryptInvitation(envelopeBytes: bytes),
+            try await decryptUsingCurrent(bytes),
             InvitationDecryptError.missingEphemeralKey
         )
     }
@@ -139,7 +139,7 @@ final class IdentityRepositoryInvitationDecryptTests: XCTestCase {
         let bytes = try JSONEncoder().encode(envelope)
 
         await assertThrows(
-            try await repository.decryptInvitation(envelopeBytes: bytes),
+            try await decryptUsingCurrent(bytes),
             InvitationDecryptError.signatureVerificationFailed
         )
     }
@@ -168,7 +168,7 @@ final class IdentityRepositoryInvitationDecryptTests: XCTestCase {
         let bytes = try JSONEncoder().encode(envelope)
 
         await assertThrows(
-            try await repository.decryptInvitation(envelopeBytes: bytes),
+            try await decryptUsingCurrent(bytes),
             InvitationDecryptError.decryptionFailed
         )
     }
@@ -186,12 +186,16 @@ final class IdentityRepositoryInvitationDecryptTests: XCTestCase {
         )
 
         await assertThrows(
-            try await repository.decryptInvitation(envelopeBytes: envelope),
+            try await decryptUsingCurrent(envelope),
             InvitationDecryptError.decryptionFailed
         )
     }
 
     func test_decryptInvitation_throwsIdentityNotLoaded_afterWipe() async throws {
+        // Capture the identity's ID BEFORE wipe — the new explicit-ID
+        // API needs a target. Post-wipe, calling decrypt with that ID
+        // hits an empty keychain and surfaces `.identityNotLoaded`.
+        let id = try await XCTUnwrapAsync(await repository.currentSelectedID())
         try await repository.wipe()
 
         let strangerKey = Curve25519.KeyAgreement.PrivateKey()
@@ -201,7 +205,7 @@ final class IdentityRepositoryInvitationDecryptTests: XCTestCase {
         )
 
         await assertThrows(
-            try await repository.decryptInvitation(envelopeBytes: envelope),
+            try await repository.decryptInvitation(envelopeBytes: envelope, asIdentity: id),
             InvitationDecryptError.identityNotLoaded
         )
     }
@@ -234,5 +238,17 @@ final class IdentityRepositoryInvitationDecryptTests: XCTestCase {
             throw XCTSkip("nil")
         }
         return value
+    }
+
+    /// Convenience: decrypt under the currently-selected identity.
+    /// Every test in this file works with the single restored identity
+    /// from `setUp`, so this saves the per-test boilerplate of fetching
+    /// `currentSelectedID()` before every `decryptInvitation` call.
+    /// The cross-identity routing is exercised by
+    /// `IdentityRepositorySealInvitationTests` and
+    /// `IncomingInvitationsRepositoryTests` instead.
+    private func decryptUsingCurrent(_ envelope: Data) async throws -> Data {
+        let id = try await XCTUnwrapAsync(await repository.currentSelectedID())
+        return try await repository.decryptInvitation(envelopeBytes: envelope, asIdentity: id)
     }
 }
