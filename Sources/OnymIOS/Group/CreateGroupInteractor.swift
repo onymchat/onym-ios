@@ -288,7 +288,11 @@ struct CreateGroupInteractor: Sendable {
         }
 
         // 3. Group params (no tier — OneOnOne contract is fixed depth).
-        let groupID = Self.randomBytes(32)
+        // sep-oneonone doesn't gate `group_id` canonicality today (no
+        // proof binding), but we use the canonical sampler anyway for
+        // consistency with Tyranny + to keep all on-chain group IDs
+        // valid Fr scalars in case a future contract rev adds the check.
+        let groupID = Self.randomCanonicalFr()
         let groupSecret = Self.randomBytes(32)
         let salt = GroupCommitmentBuilder.generateSalt()
 
@@ -299,6 +303,11 @@ struct CreateGroupInteractor: Sendable {
         //    per-dialog identity.
         let creatorBlsSecret: Data
         do {
+            // Proof witness for `OneOnOne.proveCreate(secretKey0:)` +
+            // `Common.leafHash(secretKey:)`. Same justification as the
+            // Tyranny path — SDK takes the BLS secret directly. Stays
+            // in this stack frame.
+            // onym:allow-secret-read
             creatorBlsSecret = try await identity.blsSecretKey()
         } catch {
             throw CreateGroupError.missingIdentity
@@ -306,12 +315,15 @@ struct CreateGroupInteractor: Sendable {
         guard let identitySnapshot = await identity.currentIdentity() else {
             throw CreateGroupError.missingIdentity
         }
-        var peerBlsSecret = Self.randomBytes(32)
+        // BLS secret keys are canonical Fr by convention. The SDK reduces
+        // silently if not, but any future strictness check would silently
+        // break us — so generate canonical at the source.
+        var peerBlsSecret = Self.randomCanonicalFr()
         // The OneOnOne SDK rejects equal secrets. Vanishingly unlikely
-        // with 256 bits of entropy, but cheap to defend against — flip
-        // a single bit so we always differ.
-        if peerBlsSecret == creatorBlsSecret {
-            peerBlsSecret[0] ^= 0x01
+        // with 256 bits of entropy, but cheap to defend against —
+        // resample on the off chance of a collision.
+        while peerBlsSecret == creatorBlsSecret {
+            peerBlsSecret = Self.randomCanonicalFr()
         }
 
         let creatorMember: GovernanceMember
