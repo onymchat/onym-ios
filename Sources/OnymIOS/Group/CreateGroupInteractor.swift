@@ -93,7 +93,9 @@ struct CreateGroupInteractor: Sendable {
             return try await createTyranny(name: name, invitees: invitees, onProgress: onProgress)
         case .oneOnOne:
             return try await createOneOnOne(name: name, invitees: invitees, onProgress: onProgress)
-        case .anarchy, .democracy, .oligarchy:
+        case .anarchy:
+            return try await createAnarchy(name: name, invitees: invitees, onProgress: onProgress)
+        case .democracy, .oligarchy:
             throw CreateGroupError.unsupportedGovernanceType(governanceType)
         }
     }
@@ -436,6 +438,177 @@ struct CreateGroupInteractor: Sendable {
             peerBlsSecret: peerBlsSecret
         )
         try await sendInvitations(invitePayload, to: [peerInboxKey])
+
+        return await reloadGroup(group)
+    }
+
+    // MARK: - Anarchy
+
+    /// Anarchy create: founding ceremony is a membership proof at
+    /// epoch 0 over a single-member roster (just the creator). No
+    /// admin field, no peer secret. The roster grows later via
+    /// `update_commitment` (post-V1 scope) — for now any invitees the
+    /// user pastes get the standard sealed invitation envelope so they
+    /// can join via that future flow.
+    ///
+    /// Mirrors `createTyranny`'s shape (tier-bounded depth + per-call
+    /// canonical-Fr groupID + invitation send loop) but uses
+    /// `AnarchyCreateGroupPayload` (no `admin_pubkey_commitment`, adds
+    /// `member_count`) and saves the group with `groupType: .anarchy,
+    /// adminPubkeyHex: nil`.
+    private func createAnarchy(
+        name: String,
+        invitees: [Data],
+        onProgress: @Sendable (CreateGroupProgress) -> Void
+    ) async throws -> ChatGroup {
+        // 1. Validate
+        onProgress(.validating)
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            throw CreateGroupError.invalidName
+        }
+        for (index, key) in invitees.enumerated() {
+            guard key.count == 32 else {
+                throw CreateGroupError.invalidInviteeKey(index: index)
+            }
+        }
+
+        // 2. Resolve relayer + contract.
+        guard let relayerURL = await relayers.selectURL() else {
+            throw CreateGroupError.noActiveRelayer
+        }
+        let activeNetwork = networkPreference.current()
+        let key = AnchorSelectionKey(network: activeNetwork.contractNetwork, type: .anarchy)
+        guard let binding = await contracts.binding(for: key) else {
+            throw CreateGroupError.noContractBinding(.anarchy)
+        }
+
+        // 3. Group params. sep-anarchy doesn't gate `group_id`
+        // canonicality today (no proof binding), but use the canonical
+        // sampler anyway for consistency with Tyranny / OneOnOne.
+        let groupID = Self.randomCanonicalFr()
+        let groupSecret = Self.randomBytes(32)
+        let salt = GroupCommitmentBuilder.generateSalt()
+        let tier: SEPTier = .small
+
+        // 4. Creator member.
+        let blsSecret: Data
+        do {
+            // Proof witness for `Anarchy.proveMembership(proverSecretKey:)` +
+            // `Common.leafHash(secretKey:)`. Same justification as the
+            // Tyranny / OneOnOne paths.
+            // onym:allow-secret-read
+            blsSecret = try await identity.blsSecretKey()
+        } catch {
+            throw CreateGroupError.missingIdentity
+        }
+        guard let identitySnapshot = await identity.currentIdentity() else {
+            throw CreateGroupError.missingIdentity
+        }
+        guard let ownerID = await identity.currentSelectedID() else {
+            // currentIdentity() returned non-nil but currentSelectedID()
+            // returned nil — actor invariant violated, treat as missing.
+            throw CreateGroupError.missingIdentity
+        }
+        let creatorMember: GovernanceMember
+        do {
+            creatorMember = GovernanceMember(
+                publicKeyCompressed: identitySnapshot.blsPublicKey,
+                leafHash: try GroupCommitmentBuilder.computeLeafHash(secretKey: blsSecret)
+            )
+        } catch {
+            throw CreateGroupError.sdkFailure(String(describing: error))
+        }
+        let members = [creatorMember]  // single-element list, already sorted
+
+        // 5. Generate proof — Anarchy.proveMembership at epoch 0.
+        onProgress(.proving)
+        let proofInput = GroupProofCreateInput(
+            groupType: .anarchy,
+            tier: tier,
+            members: members,
+            adminBlsSecretKey: blsSecret,    // re-used as `proverSecretKey`
+            adminIndex: 0,                    // creator's leaf position
+            groupID: groupID,                 // not bound into proof for Anarchy
+            salt: salt
+        )
+        let proof: GroupCreateProof
+        do {
+            proof = try proofGenerator.proveCreate(proofInput)
+        } catch let err as GroupProofGeneratorError {
+            throw CreateGroupError.proofGenerationFailed(err)
+        } catch {
+            throw CreateGroupError.sdkFailure(String(describing: error))
+        }
+
+        // 6. Anchor on chain.
+        onProgress(.anchoring)
+        let transport = makeContractTransport(relayerURL)
+        let client = SEPContractClient(
+            contractID: binding.contractID,
+            contractType: .anarchy,
+            network: activeNetwork.sepNetwork,
+            transport: transport
+        )
+        let payload = AnarchyCreateGroupPayload(
+            groupID: groupID,
+            commitment: proof.commitment,
+            tier: tier.rawValue,
+            memberCount: members.count,
+            proof: proof.proof,
+            publicInputs: proof.publicInputs
+        )
+        let response: SEPSubmissionResponse
+        do {
+            response = try await client.createGroupAnarchy(payload)
+        } catch {
+            throw CreateGroupError.anchorTransport(String(describing: error))
+        }
+        guard response.accepted else {
+            throw CreateGroupError.anchorRejected(message: response.message)
+        }
+
+        // 7. Save locally — no admin in Anarchy, so adminPubkeyHex stays nil.
+        let groupIDHex = groupID.map { String(format: "%02x", $0) }.joined()
+        let group = ChatGroup(
+            id: groupIDHex,
+            ownerIdentityID: ownerID,
+            name: trimmedName,
+            groupSecret: groupSecret,
+            createdAt: Date(),
+            members: members,
+            epoch: 0,
+            salt: salt,
+            commitment: proof.commitment,
+            tier: tier,
+            groupType: .anarchy,
+            adminPubkeyHex: nil,
+            isPublishedOnChain: false
+        )
+        _ = await groups.insert(group)
+        await groups.markPublished(id: group.id, commitment: proof.commitment)
+
+        // 8. Send invitations (if any). Anarchy invitations carry no
+        // admin field and no peer secret — the receiver uses their
+        // own BLS identity when they later add themselves via
+        // `update_commitment`.
+        if !invitees.isEmpty {
+            onProgress(.sendingInvitations(total: invitees.count))
+            let invitePayload = GroupInvitationPayload(
+                version: 1,
+                groupID: groupID,
+                groupSecret: groupSecret,
+                name: trimmedName,
+                members: members,
+                epoch: 0,
+                salt: salt,
+                commitment: proof.commitment,
+                tierRaw: tier.rawValue,
+                groupTypeRaw: SEPGroupType.anarchy.rawValue,
+                adminPubkeyHex: nil
+            )
+            try await sendInvitations(invitePayload, to: invitees)
+        }
 
         return await reloadGroup(group)
     }
