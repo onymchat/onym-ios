@@ -24,6 +24,7 @@ final class ChatGroupTests: XCTestCase {
     private func makeGroup(id: String) -> ChatGroup {
         ChatGroup(
             id: id,
+            ownerIdentityID: IdentityID(),
             name: "test",
             groupSecret: Data(repeating: 0, count: 32),
             createdAt: Date(timeIntervalSince1970: 0),

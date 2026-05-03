@@ -24,4 +24,10 @@ protocol GroupStore: Sendable {
     func markPublished(id: String, commitment: Data?) async
 
     func delete(id: String) async
+
+    /// Delete every row whose `ownerIdentityIDString` matches.
+    /// `ownerIDString` is the UUID-string form of the removed
+    /// `IdentityID`. Used by the identity-removal hook in
+    /// `GroupRepository.removeForOwner`.
+    func deleteOwner(_ ownerIDString: String) async
 }

@@ -128,6 +128,25 @@ struct OnymIOSApp: App {
                     await contractsRepository.start()
                     // Replay groups for the in-memory snapshot stream.
                     await groupRepository.reload()
+                    // Wire identity selection → group filter so the chats
+                    // list flips when the user switches identity.
+                    if let initialID = await identityRepository.currentSelectedID() {
+                        await groupRepository.setCurrentIdentity(initialID)
+                    }
+                }
+                .task {
+                    // Long-lived listener: forward every selection change.
+                    for await id in identityRepository.currentIdentityID {
+                        await groupRepository.setCurrentIdentity(id)
+                    }
+                }
+                .task {
+                    // Long-lived listener: wipe identity-scoped chats
+                    // when an identity is removed (the secrets are
+                    // already gone — this clears the on-disk groups).
+                    for await removed in identityRepository.identityRemoved {
+                        await groupRepository.removeForOwner(removed)
+                    }
                 }
         }
     }

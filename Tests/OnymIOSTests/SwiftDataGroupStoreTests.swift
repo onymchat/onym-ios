@@ -127,7 +127,8 @@ final class SwiftDataGroupStoreTests: XCTestCase {
         id: String,
         name: String,
         adminPubkeyHex: String? = nil,
-        createdAt: Date = Date(timeIntervalSince1970: 1_700_000_000)
+        createdAt: Date = Date(timeIntervalSince1970: 1_700_000_000),
+        ownerIdentityID: IdentityID = IdentityID()
     ) -> ChatGroup {
         let member = GovernanceMember(
             publicKeyCompressed: Data(repeating: 0x11, count: 48),
@@ -135,6 +136,7 @@ final class SwiftDataGroupStoreTests: XCTestCase {
         )
         return ChatGroup(
             id: id,
+            ownerIdentityID: ownerIdentityID,
             name: name,
             groupSecret: Data(repeating: 0x33, count: 32),
             createdAt: createdAt,
