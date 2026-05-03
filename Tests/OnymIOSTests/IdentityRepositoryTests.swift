@@ -192,6 +192,73 @@ final class IdentityRepositoryTests: XCTestCase {
         XCTAssertEqual(observed, [nil, generated, restored, nil])
     }
 
+    // MARK: - rename
+
+    func test_rename_inactiveIdentity_persistsAcrossFreshRepoAndKeysUnchanged() async throws {
+        _ = try await repo.bootstrap()
+        let bootstrappedID = await repo.currentSelectedID()
+        let firstID = try XCTUnwrap(bootstrappedID)
+        let secondID = try await repo.add(name: "Work")
+        // Per iOS `add` semantics the new identity does NOT auto-select.
+        // Switch to it explicitly so `firstID` is the *inactive* one we
+        // rename below.
+        try await repo.select(secondID)
+
+        // Snapshot the active Identity bytes BEFORE rename so we can
+        // prove a name-only edit doesn't trigger re-derivation.
+        let beforeIdentity = await repo.currentIdentity()
+        let activeBefore = try XCTUnwrap(beforeIdentity)
+
+        try await repo.rename(firstID, newName: "Personal")
+
+        let summaries = await repo.currentIdentities()
+        XCTAssertEqual(summaries.first { $0.id == firstID }?.name, "Personal")
+        XCTAssertEqual(summaries.first { $0.id == secondID }?.name, "Work")
+        let selected = await repo.currentSelectedID()
+        XCTAssertEqual(selected, secondID,
+                       "active selection unchanged by rename")
+
+        let afterIdentity = await repo.currentIdentity()
+        let activeAfter = try XCTUnwrap(afterIdentity)
+        XCTAssertEqual(activeBefore, activeAfter,
+                       "rename must not re-derive any keypair bytes")
+
+        // Survives a full reload from disk.
+        let freshRepo = IdentityRepository(
+            keychain: keychain,
+            selectionStore: .inMemory()
+        )
+        _ = try await freshRepo.bootstrap()
+        let reloaded = await freshRepo.currentIdentities()
+        XCTAssertEqual(reloaded.first { $0.id == firstID }?.name, "Personal")
+        XCTAssertEqual(reloaded.first { $0.id == secondID }?.name, "Work")
+    }
+
+    func test_rename_trimsWhitespace() async throws {
+        let id = try await repo.add(name: "Original")
+        try await repo.rename(id, newName: "  Padded   ")
+        let summaries = await repo.currentIdentities()
+        XCTAssertEqual(summaries.first { $0.id == id }?.name, "Padded")
+    }
+
+    func test_rename_blankInput_isNoOp() async throws {
+        let id = try await repo.add(name: "Keep")
+        try await repo.rename(id, newName: "   ")
+        try await repo.rename(id, newName: "")
+        let summaries = await repo.currentIdentities()
+        XCTAssertEqual(summaries.first { $0.id == id }?.name, "Keep")
+    }
+
+    func test_rename_unknownId_throws() async throws {
+        _ = try await repo.bootstrap()
+        do {
+            try await repo.rename(IdentityID(), newName: "Whatever")
+            XCTFail("expected identityNotLoaded")
+        } catch IdentityError.identityNotLoaded {
+            // expected
+        }
+    }
+
     func test_snapshots_supportsMultipleConcurrentSubscribers() async throws {
         let a = SnapshotCollector()
         let b = SnapshotCollector()

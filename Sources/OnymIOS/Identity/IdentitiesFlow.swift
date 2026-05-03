@@ -88,6 +88,14 @@ final class IdentitiesFlow {
         Task { try? await repository.select(id) }
     }
 
+    /// Rename `id` to `newName`. Trimmed-blank input is a silent no-op
+    /// in the repository — UI doesn't pre-validate. Fire-and-forget,
+    /// matching `select` / `confirmRemoval`; errors here have no
+    /// realistic UX recovery path on iOS today.
+    func rename(_ id: IdentityID, newName: String) {
+        Task { try? await repository.rename(id, newName: newName) }
+    }
+
     /// Submit the AddIdentity sheet. On success the sheet is closed
     /// (`addError` cleared, `pendingName` reset); on failure the
     /// sheet stays open with the error inlined.
