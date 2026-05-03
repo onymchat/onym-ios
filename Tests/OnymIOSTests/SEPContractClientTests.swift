@@ -61,6 +61,55 @@ final class SEPContractClientTests: XCTestCase {
         XCTAssertEqual(publicInputs.count, 4, "Tyranny create needs 4 PI entries")
     }
 
+    func test_createGroupOneOnOne_sendsCorrectEnvelopeAndPayload() async throws {
+        let recorder = RecordingTransport(
+            response: SEPSubmissionResponse(
+                accepted: true,
+                transactionHash: "1v1tx",
+                message: nil
+            )
+        )
+        let client = SEPContractClient(
+            contractID: testContractID,
+            contractType: .oneOnOne,
+            network: .testnet,
+            transport: recorder
+        )
+
+        let payload = OneOnOneCreateGroupPayload(
+            groupID: Data(repeating: 0xAB, count: 32),
+            commitment: Data(repeating: 0xCD, count: 32),
+            proof: Data(repeating: 0xEE, count: 1601),
+            publicInputs: [
+                Data(repeating: 0xCD, count: 32),
+                Data(repeating: 0x00, count: 32),
+            ]
+        )
+        let response = try await client.createGroupOneOnOne(payload)
+
+        XCTAssertTrue(response.accepted)
+        XCTAssertEqual(response.transactionHash, "1v1tx")
+
+        let json = try XCTUnwrap(recorder.lastJSON())
+        XCTAssertEqual(json["function"] as? String, "create_group")
+        XCTAssertEqual(json["contractID"] as? String, testContractID)
+        XCTAssertEqual(json["contractType"] as? String, "oneonone",
+                       "OneOnOne contract type wire spelling must match relayer's ContractType enum")
+        XCTAssertEqual(json["network"] as? String, "testnet")
+
+        let payloadJSON = try XCTUnwrap(json["payload"] as? [String: Any])
+        XCTAssertNotNil(payloadJSON["group_id"])
+        XCTAssertNotNil(payloadJSON["commitment"])
+        XCTAssertNotNil(payloadJSON["proof"])
+        XCTAssertNil(payloadJSON["tier"],
+                     "OneOnOne is fixed-depth — no tier field on the wire")
+        XCTAssertNil(payloadJSON["admin_pubkey_commitment"],
+                     "OneOnOne has no admin_pubkey_commitment — that's Tyranny-only")
+        let publicInputs = try XCTUnwrap(payloadJSON["publicInputs"] as? [String])
+        XCTAssertEqual(publicInputs.count, 2,
+                       "OneOnOne create needs 2 PI entries: [commitment, Fr(0)]")
+    }
+
     func test_createGroupTyranny_mainnetSerializesAsPublic() async throws {
         let recorder = RecordingTransport(
             response: SEPSubmissionResponse(accepted: true, transactionHash: nil, message: nil)

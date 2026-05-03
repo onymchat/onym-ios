@@ -37,33 +37,45 @@ protocol GroupProofGenerator: Sendable {
     func proveCreate(_ input: GroupProofCreateInput) throws -> GroupCreateProof
 }
 
-/// Inputs for a create-group proof. The caller (PR-C interactor) is
-/// responsible for:
-/// - lex-sorting `members` by `publicKeyCompressed` before computing
-///   `adminIndex` (the SDK reuses the same sort to validate
-///   `memberLeafHashes[adminIndex] == leafHash(adminBlsSecretKey)`),
-/// - generating a fresh 32-byte salt via `GroupCommitmentBuilder.generateSalt`,
-/// - choosing the tier based on the expected member count.
+/// Inputs for a create-group proof. Per-type field requirements:
+///
+/// - **Tyranny**: needs `members` (lex-sorted by `publicKeyCompressed`),
+///   `adminBlsSecretKey` (the device's own BLS Fr), `adminIndex`
+///   (admin's position in the sorted roster), `groupID` (used as the
+///   `group_id_fr` binding scalar), `tier`, `salt`.
+/// - **OneOnOne**: needs `adminBlsSecretKey` (party 0 = creator) and
+///   `peerBlsSecretKey` (party 1 = peer — the creator mints a fresh
+///   ephemeral one and ships it inside the invitation envelope), plus
+///   `salt`. `members` / `adminIndex` / `tier` / `groupID` are
+///   ignored by the SDK call (groupID is still used as the contract's
+///   storage-key arg, but doesn't bind into the proof). Both secrets
+///   MUST differ — the SDK rejects `secretKey0 == secretKey1`.
 struct GroupProofCreateInput: Sendable {
     let groupType: SEPGroupType
     let tier: SEPTier
-    /// Lex-sorted by `publicKeyCompressed`. The packed `leafHash`es
-    /// land in the prover in this order.
+    /// Lex-sorted by `publicKeyCompressed`. Tyranny-only.
     let members: [GovernanceMember]
     /// 32 bytes BE — the sender's own BLS Fr scalar.
     let adminBlsSecretKey: Data
     /// Position of the admin in `members` (after the lex sort).
+    /// Tyranny-only.
     let adminIndex: Int
     /// 32-byte raw group ID — used directly as the `group_id_fr`
     /// per-group binding scalar in the Tyranny circuit.
     let groupID: Data
     /// 32 bytes; LE-mod-r in-circuit.
     let salt: Data
+    /// 32 bytes BE — peer's BLS Fr scalar. **Required for OneOnOne**,
+    /// nil for other types. The OneOnOne SDK rejects equal secrets,
+    /// so the caller must mint a fresh ephemeral peer key (not reuse
+    /// the device's BLS secret).
+    var peerBlsSecretKey: Data? = nil
 }
 
 enum GroupProofGeneratorError: Error, Equatable, Sendable {
     case notYetSupported(SEPGroupType)
     case adminIndexOutOfRange(index: Int, count: Int)
+    case missingPeerSecret
     case sdkFailure(String)
 }
 
@@ -75,13 +87,36 @@ struct OnymGroupProofGenerator: GroupProofGenerator {
         switch input.groupType {
         case .tyranny:
             return try proveTyrannyCreate(input)
-        case .anarchy, .oneOnOne, .democracy, .oligarchy:
-            // PR-B ships Tyranny only — see `project_create_group_plan`
-            // memory note. The other types stay stubbed until their own
-            // slice; wiring them here without a UI to drive them just
-            // accumulates dead code.
+        case .oneOnOne:
+            return try proveOneOnOneCreate(input)
+        case .anarchy, .democracy, .oligarchy:
             throw GroupProofGeneratorError.notYetSupported(input.groupType)
         }
+    }
+
+    private func proveOneOnOneCreate(_ input: GroupProofCreateInput) throws -> GroupCreateProof {
+        guard let peerSecret = input.peerBlsSecretKey else {
+            throw GroupProofGeneratorError.missingPeerSecret
+        }
+        let result: OneOnOne.CreateProof
+        do {
+            result = try OneOnOne.proveCreate(
+                secretKey0: input.adminBlsSecretKey,
+                secretKey1: peerSecret,
+                salt: input.salt
+            )
+        } catch {
+            throw GroupProofGeneratorError.sdkFailure(String(describing: error))
+        }
+        // OneOnOne returns a single 32B commitment (not a bundled PI
+        // blob). The contract's `create_membership_public_inputs`
+        // expects 2 entries — `[commitment, Fr(0)]` — to match the
+        // shared anarchy depth-5 membership-VK shape.
+        let frZero = Data(repeating: 0, count: 32)
+        return GroupCreateProof(
+            proof: result.proof,
+            publicInputs: [result.commitment, frZero]
+        )
     }
 
     private func proveTyrannyCreate(_ input: GroupProofCreateInput) throws -> GroupCreateProof {

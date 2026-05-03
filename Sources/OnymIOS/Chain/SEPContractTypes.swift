@@ -109,6 +109,31 @@ struct TyrannyCreateGroupPayload: Encodable, Equatable, Sendable {
     }
 }
 
+/// `create_group` payload for the OneOnOne (1v1) contract. Simpler
+/// than Tyranny — no tier (1v1 is fixed at depth 5, exactly 2
+/// members), no admin_pubkey_commitment. The `publicInputs` vector
+/// is the standard membership-style 2-element form
+/// `[commitment, Fr(0)]` that the contract's
+/// `create_membership_public_inputs` expects.
+///
+/// Relayer handler: `add_create_group_args` →
+/// `ContractType::OneOnOne` arm.
+struct OneOnOneCreateGroupPayload: Encodable, Equatable, Sendable {
+    let groupID: Data
+    let commitment: Data
+    /// 1601-byte raw PLONK proof — same constraint as Tyranny.
+    let proof: Data
+    /// 2 elements × 32 bytes — `[commitment, Fr(0)]`.
+    let publicInputs: [Data]
+
+    enum CodingKeys: String, CodingKey {
+        case groupID = "group_id"
+        case commitment
+        case proof
+        case publicInputs
+    }
+}
+
 /// `update_commitment` payload — Tyranny variant. Same 4-element PI
 /// shape as create, but the SDK's `Tyranny.UpdateProof.publicInputs`
 /// is 160 bytes = 5 chunks (`c_old || epoch_old || c_new ||
