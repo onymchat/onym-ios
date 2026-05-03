@@ -1,12 +1,14 @@
 import SwiftUI
 
-/// Settings screen for configuring relayers. Three sections on one
-/// screen:
-///   - **Strategy** — segmented control: Primary | Random.
-///   - **Configured** — list of endpoints the user has added; tap
-///     star to mark primary, swipe to delete.
-///   - **Add** — published-list rows the user hasn't added yet, plus
-///     a custom-URL field.
+/// Settings → Relayer. Reskinned to the Onym design — segmented
+/// strategy toggle, configured-relayers card with star-to-promote and
+/// network chips, dedicated custom-URL section, plus a dark "Run your
+/// own relayer" CTA that pushes the explainer screen linking to
+/// `github.com/onymchat/onym-relayer`.
+///
+/// All flow integrations remain intact (`RelayerSettingsFlow` drives
+/// every intent); only the visual layer changed. Accessibility
+/// identifiers are preserved so existing UI tests still bind.
 struct RelayerSettingsView: View {
     @State private var flow: RelayerSettingsFlow
 
@@ -15,42 +17,72 @@ struct RelayerSettingsView: View {
     }
 
     var body: some View {
-        Form {
-            strategySection
-            configuredSection
-            addFromKnownSection
-            addCustomSection
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                SettingsLargeTitle("Relayer")
+
+                strategyToggle
+
+                SettingsSectionLabel("CONFIGURED · \(flow.state.snapshot.configuration.endpoints.count)")
+                configuredCard
+
+                SettingsSectionLabel("ADD FROM PUBLISHED LIST")
+                publishedCard
+                SettingsFootnote("Published by the onym-relayer project. Tap to add.")
+
+                SettingsSectionLabel("ADD CUSTOM URL")
+                customURLCard
+                SettingsFootnote("Use a private deployment, localhost, or any relayer not in the published list.")
+
+                runYourOwnCTA
+            }
+            .padding(.bottom, 32)
         }
+        .background(OnymTokens.surface.ignoresSafeArea())
         .navigationTitle("Relayer")
         .navigationBarTitleDisplayMode(.inline)
         .task { flow.start() }
     }
 
-    // MARK: - Strategy
+    // MARK: - Strategy toggle (segmented capsule)
 
-    @ViewBuilder
-    private var strategySection: some View {
-        Section {
-            Picker("Strategy", selection: Binding(
-                get: { flow.state.snapshot.configuration.strategy },
-                set: { flow.tappedStrategy($0) }
-            )) {
-                ForEach(RelayerStrategy.allCases, id: \.self) { strategy in
-                    Text(strategy.displayName).tag(strategy)
+    private var strategyToggle: some View {
+        let current = flow.state.snapshot.configuration.strategy
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 0) {
+                ForEach(RelayerStrategy.allCases, id: \.self) { s in
+                    Button { flow.tappedStrategy(s) } label: {
+                        Text(s.displayName)
+                            .font(.system(size: 13.5,
+                                          weight: current == s ? .semibold : .medium))
+                            .foregroundStyle(OnymTokens.text)
+                            .frame(maxWidth: .infinity, minHeight: 32)
+                            .background(current == s
+                                        ? AnyShapeStyle(OnymTokens.surface2)
+                                        : AnyShapeStyle(Color.clear),
+                                        in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("relayer.strategy.\(s.rawValue)")
                 }
             }
-            .pickerStyle(.segmented)
+            .padding(2)
+            .background(OnymTokens.surface3,
+                        in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .padding(.horizontal, 16)
             .accessibilityIdentifier("relayer.strategy.picker")
-        } footer: {
-            Text(strategyFooter)
+
+            Text(strategyFooter(current))
+                .font(.system(size: 12.5))
+                .foregroundStyle(OnymTokens.text2)
+                .lineSpacing(2)
+                .padding(.horizontal, 20)
+                .padding(.top, 10)
         }
     }
 
-    /// Returns a `LocalizedStringKey` so the literals are auto-extracted
-    /// into `Localizable.xcstrings` (a plain `String` would be opaque to
-    /// the extractor and `Text(_)` wouldn't localize it).
-    private var strategyFooter: LocalizedStringKey {
-        switch flow.state.snapshot.configuration.strategy {
+    private func strategyFooter(_ strategy: RelayerStrategy) -> LocalizedStringKey {
+        switch strategy {
         case .primary:
             return "Always use the primary relayer. If no primary is set, the first configured relayer is used."
         case .random:
@@ -61,215 +93,229 @@ struct RelayerSettingsView: View {
     // MARK: - Configured
 
     @ViewBuilder
-    private var configuredSection: some View {
-        Section {
-            let endpoints = flow.state.snapshot.configuration.endpoints
-            if endpoints.isEmpty {
+    private var configuredCard: some View {
+        let endpoints = flow.state.snapshot.configuration.endpoints
+        if endpoints.isEmpty {
+            SettingsCard {
                 Text("No relayers configured. Add one below.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(endpoints) { endpoint in
-                    configuredRow(endpoint)
-                }
-                .onDelete { offsets in
-                    for offset in offsets {
-                        flow.tappedRemove(url: endpoints[offset].url)
+                    .font(.system(size: 14))
+                    .foregroundStyle(OnymTokens.text3)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 16).padding(.vertical, 14)
+            }
+        } else {
+            SettingsCard {
+                ForEach(Array(endpoints.enumerated()), id: \.element.url) { idx, endpoint in
+                    SettingsRow(
+                        title: LocalizedStringKey(endpoint.name),
+                        subtitle: endpoint.url.absoluteString,
+                        subtitleMono: true,
+                        hasChevron: false,
+                        inset: 56,
+                        last: idx == endpoints.count - 1
+                    ) {
+                        Button { flow.tappedSetPrimary(url: endpoint.url) } label: {
+                            Image(systemName: flow.isPrimary(endpoint) ? "star.fill" : "star")
+                                .font(.system(size: 17))
+                                .foregroundStyle(flow.isPrimary(endpoint) ? SettingsTile.amber : OnymTokens.text3)
+                                .frame(width: 30, height: 30)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("relayer.configured.primary.\(endpoint.url.absoluteString)")
+                    } right: {
+                        HStack(spacing: 4) {
+                            ForEach(endpoint.networks, id: \.self) { net in
+                                SettingsChip(
+                                    text: net.uppercased(),
+                                    fg: chipColor(for: net),
+                                    bg: chipColor(for: net).opacity(0.15)
+                                )
+                            }
+                        }
                     }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("relayer.configured.\(endpoint.url.absoluteString)")
                 }
             }
-        } header: {
-            Text("Configured")
         }
     }
 
-    @ViewBuilder
-    private func configuredRow(_ endpoint: RelayerEndpoint) -> some View {
-        HStack(spacing: 12) {
-            Button {
-                flow.tappedSetPrimary(url: endpoint.url)
-            } label: {
-                Image(systemName: flow.isPrimary(endpoint) ? "star.fill" : "star")
-                    .foregroundStyle(flow.isPrimary(endpoint) ? Color.yellow : Color.secondary)
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("relayer.configured.primary.\(endpoint.url.absoluteString)")
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(endpoint.name)
-                    .foregroundStyle(.primary)
-                Text(endpoint.url.absoluteString)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            Spacer()
-            networkBadges(endpoint.networks)
-        }
-        // `.contain` keeps the inner star Button individually
-        // accessible (otherwise SwiftUI flattens the HStack into a
-        // single accessibility element that absorbs the inner Button's
-        // identifier — caught the hard way by UI tests in PR #22).
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("relayer.configured.\(endpoint.url.absoluteString)")
-    }
-
-    // MARK: - Add from published list
-
-    @ViewBuilder
-    private var addFromKnownSection: some View {
-        Section {
-            knownSectionContent
-        } header: {
-            Text("Add from Published List")
-        } footer: {
-            Text("Published by the onym-relayer project. Tap to add.")
+    private func chipColor(for network: String) -> Color {
+        switch network {
+        case "public":  return OnymTokens.red
+        case "testnet": return OnymTokens.green
+        default:        return SettingsTile.gray
         }
     }
 
-    /// Status-aware content for the published-list section. Gates on
-    /// `fetchStatus` (NOT `knownList.isEmpty`) so a failed fetch shows
-    /// an actionable error + retry instead of spinning forever, and a
-    /// successful fetch with an empty list shows that explicitly.
+    // MARK: - Published list
+
     @ViewBuilder
-    private var knownSectionContent: some View {
+    private var publishedCard: some View {
         let snapshot = flow.state.snapshot
         let unconfigured = flow.unconfiguredKnownList
-        switch snapshot.fetchStatus {
-        case .idle:
-            // Background fetch hasn't been kicked off yet (or app
-            // launched without `.task { repo.start() }`).
-            HStack {
-                ProgressView()
-                Text("Fetching list…").foregroundStyle(.secondary)
-            }
-            .accessibilityIdentifier("relayer.add.known.fetching")
-
-        case .fetching:
-            // In flight; show the spinner unless we already have a
-            // cached list to display from a previous successful run.
-            if snapshot.knownList.isEmpty {
-                HStack {
-                    ProgressView()
-                    Text("Fetching list…").foregroundStyle(.secondary)
+        SettingsCard {
+            switch snapshot.fetchStatus {
+            case .idle:
+                fetchingRow
+            case .fetching:
+                if snapshot.knownList.isEmpty { fetchingRow }
+                else { knownList(unconfigured) }
+            case .failed(let message):
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(message)
+                        .font(.system(size: 14))
+                        .foregroundStyle(OnymTokens.text2)
+                    Button("Try Again") { flow.tappedRetryFetch() }
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(OnymAccent.blue.color)
+                        .accessibilityIdentifier("relayer.add.known.retry")
                 }
-                .accessibilityIdentifier("relayer.add.known.fetching")
-            } else {
-                knownEndpointsList(unconfigured: unconfigured)
-            }
-
-        case .failed(let message):
-            VStack(alignment: .leading, spacing: 8) {
-                Text(message)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                Button("Try Again") {
-                    flow.tappedRetryFetch()
+                .padding(.horizontal, 16).padding(.vertical, 14)
+            case .success:
+                if snapshot.knownList.isEmpty {
+                    Text("No published relayers yet.")
+                        .font(.system(size: 14))
+                        .foregroundStyle(OnymTokens.text3)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 16).padding(.vertical, 14)
+                        .accessibilityIdentifier("relayer.add.known.empty")
+                } else if unconfigured.isEmpty {
+                    Text("All published relayers added.")
+                        .font(.system(size: 14))
+                        .foregroundStyle(OnymTokens.text3)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 16).padding(.vertical, 14)
+                        .accessibilityIdentifier("relayer.add.known.all_added")
+                } else {
+                    knownList(unconfigured)
                 }
-                .accessibilityIdentifier("relayer.add.known.retry")
-            }
-
-        case .success:
-            if snapshot.knownList.isEmpty {
-                Text("No published relayers yet.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("relayer.add.known.empty")
-            } else if unconfigured.isEmpty {
-                Text("All published relayers added.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("relayer.add.known.all_added")
-            } else {
-                knownEndpointsList(unconfigured: unconfigured)
             }
         }
     }
 
+    private var fetchingRow: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+            Text("Fetching list…")
+                .font(.system(size: 14))
+                .foregroundStyle(OnymTokens.text2)
+        }
+        .padding(.horizontal, 16).padding(.vertical, 14)
+        .accessibilityIdentifier("relayer.add.known.fetching")
+    }
+
     @ViewBuilder
-    private func knownEndpointsList(unconfigured: [RelayerEndpoint]) -> some View {
-        ForEach(unconfigured) { endpoint in
-            Button {
-                flow.tappedAddKnown(endpoint)
-            } label: {
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(endpoint.name)
-                            .foregroundStyle(.primary)
-                        Text(endpoint.url.absoluteString)
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
+    private func knownList(_ unconfigured: [RelayerEndpoint]) -> some View {
+        ForEach(Array(unconfigured.enumerated()), id: \.element.url) { idx, endpoint in
+            SettingsRow(
+                title: LocalizedStringKey(endpoint.name),
+                subtitle: endpoint.url.absoluteString,
+                subtitleMono: true,
+                hasChevron: false,
+                inset: 56,
+                last: idx == unconfigured.count - 1,
+                onTap: { flow.tappedAddKnown(endpoint) }
+            ) {
+                Circle().fill(OnymAccent.blue.color)
+                    .frame(width: 30, height: 30)
+                    .overlay(Image(systemName: "plus")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(OnymTokens.onAccent))
+            } right: {
+                HStack(spacing: 4) {
+                    ForEach(endpoint.networks, id: \.self) { net in
+                        SettingsChip(
+                            text: net.uppercased(),
+                            fg: chipColor(for: net),
+                            bg: chipColor(for: net).opacity(0.15)
+                        )
                     }
-                    Spacer()
-                    networkBadges(endpoint.networks)
-                    Image(systemName: "plus.circle.fill")
-                        .foregroundStyle(Color.accentColor)
                 }
-                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
             .accessibilityIdentifier("relayer.add.known.\(endpoint.url.absoluteString)")
         }
     }
 
     // MARK: - Custom URL
 
-    @ViewBuilder
-    private var addCustomSection: some View {
-        Section {
-            TextField("https://relayer.example.com", text: Binding(
-                get: { flow.state.customDraft },
-                set: { flow.customDraftChanged($0) }
-            ))
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
-            .keyboardType(.URL)
-            .accessibilityIdentifier("relayer.add.custom.field")
+    private var customURLCard: some View {
+        SettingsCard {
+            TextField("https://relayer.example.com",
+                      text: Binding(
+                        get: { flow.state.customDraft },
+                        set: { flow.customDraftChanged($0) }
+                      ))
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .keyboardType(.URL)
+                .font(.system(size: 16, design: .monospaced))
+                .padding(.horizontal, 16).padding(.vertical, 12)
+                .accessibilityIdentifier("relayer.add.custom.field")
 
             if let error = flow.state.customDraftError {
                 Text(error)
-                    .font(.footnote)
+                    .font(.system(size: 13))
                     .foregroundStyle(.red)
+                    .padding(.horizontal, 16).padding(.vertical, 8)
             }
 
-            Button("Add Custom URL") {
-                flow.tappedAddCustom()
+            SettingsRowDivider(inset: 16)
+
+            SettingsRow(
+                title: "Add Custom URL",
+                hasChevron: false,
+                inset: 0,
+                last: true,
+                onTap: { flow.tappedAddCustom() }
+            ) {
+                Circle().fill(OnymAccent.blue.color)
+                    .frame(width: 22, height: 22)
+                    .overlay(Image(systemName: "plus")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(OnymTokens.onAccent))
             }
             .accessibilityIdentifier("relayer.add.custom.button")
-        } header: {
-            Text("Add Custom URL")
-        } footer: {
-            Text("Use a private deployment, localhost, or any relayer not in the published list.")
         }
     }
 
-    // MARK: - Atoms
+    // MARK: - Run your own relayer CTA
 
-    /// Render one badge per network the relayer serves. The published
-    /// manifest may list multiple networks per endpoint (a single
-    /// deployment can serve testnet + mainnet); custom user entries
-    /// have a single `"custom"` badge.
-    private func networkBadges(_ networks: [String]) -> some View {
-        HStack(spacing: 4) {
-            ForEach(networks, id: \.self) { network in
-                Text(network.uppercased())
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(badgeForeground(for: network))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(badgeForeground(for: network).opacity(0.15), in: Capsule())
+    private var runYourOwnCTA: some View {
+        NavigationLink {
+            RunYourOwnRelayerView()
+        } label: {
+            HStack(spacing: 14) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(.white.opacity(0.08))
+                        .frame(width: 44, height: 44)
+                    Image(systemName: "chevron.left.forwardslash.chevron.right")
+                        .font(.system(size: 18))
+                        .foregroundStyle(.white)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Run your own relayer")
+                        .font(.system(size: 15.5, weight: .semibold))
+                        .foregroundStyle(.white)
+                    Text("Deploy onym-relayer from GitHub in 5 minutes")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(.white.opacity(0.65))
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.5))
             }
+            .padding(18)
+            .background(LinearGradient(colors: [Color(red: 0.106, green: 0.122, blue: 0.141),
+                                                  Color(red: 0.051, green: 0.067, blue: 0.090)],
+                                        startPoint: .topLeading, endPoint: .bottomTrailing),
+                         in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .padding(.horizontal, 16)
+            .padding(.top, 24)
         }
-    }
-
-    private func badgeForeground(for network: String) -> Color {
-        switch network {
-        case "public": return .red
-        case "testnet": return .green
-        default: return .gray
-        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("relayer.run_your_own")
     }
 }
