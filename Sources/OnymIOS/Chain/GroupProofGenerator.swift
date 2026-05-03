@@ -89,9 +89,55 @@ struct OnymGroupProofGenerator: GroupProofGenerator {
             return try proveTyrannyCreate(input)
         case .oneOnOne:
             return try proveOneOnOneCreate(input)
-        case .anarchy, .democracy, .oligarchy:
+        case .anarchy:
+            return try proveAnarchyCreate(input)
+        case .democracy, .oligarchy:
             throw GroupProofGeneratorError.notYetSupported(input.groupType)
         }
+    }
+
+    /// Anarchy create: there's no dedicated `proveCreate` SDK call —
+    /// the founding ceremony is a regular membership proof at epoch 0
+    /// over a single-member roster (just the creator). The contract's
+    /// `create_group` arm verifies it as a membership proof and stores
+    /// the resulting commitment as the group's epoch-0 anchor.
+    private func proveAnarchyCreate(_ input: GroupProofCreateInput) throws -> GroupCreateProof {
+        guard input.adminIndex >= 0, input.adminIndex < input.members.count else {
+            // `adminIndex` is the prover's index for membership; field
+            // name is shared with Tyranny but Anarchy has no admin
+            // privileges — it's purely "which leaf am I".
+            throw GroupProofGeneratorError.adminIndexOutOfRange(
+                index: input.adminIndex,
+                count: input.members.count
+            )
+        }
+        var packedLeaves = Data(capacity: input.members.count * 32)
+        for member in input.members {
+            packedLeaves.append(member.leafHash)
+        }
+
+        let result: Anarchy.MembershipProof
+        do {
+            result = try Anarchy.proveMembership(
+                depth: input.tier.depth,
+                memberLeafHashes: packedLeaves,
+                proverSecretKey: input.adminBlsSecretKey,
+                proverIndex: input.adminIndex,
+                epoch: 0,
+                salt: input.salt
+            )
+        } catch {
+            throw GroupProofGeneratorError.sdkFailure(String(describing: error))
+        }
+
+        // MembershipProof carries a single 32B commitment, not a bundled
+        // PI blob. The contract expects `[commitment, Fr(0)]` as the
+        // 2-element PI vector — same shape OneOnOne uses.
+        let frZero = Data(repeating: 0, count: 32)
+        return GroupCreateProof(
+            proof: result.proof,
+            publicInputs: [result.commitment, frZero]
+        )
     }
 
     private func proveOneOnOneCreate(_ input: GroupProofCreateInput) throws -> GroupCreateProof {
