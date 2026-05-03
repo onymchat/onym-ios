@@ -1,0 +1,139 @@
+name: Release from issue
+
+# Triggered when an issue tagged `release` opens (or gets the `release`
+# label later). Discovers `XCTestCase` subclasses, hydrates the issue
+# body's `UI_TESTS` section with one checkbox per class, and dispatches
+# the existing `Release` workflow with the tag + issue number so its
+# `report-to-issue` job can tick boxes after tests run.
+#
+# The Release workflow itself stays the source of truth for build/test
+# steps; this file is purely orchestration.
+
+on:
+  issues:
+    types: [opened, labeled]
+
+permissions:
+  issues: write       # edit body + post failure comments
+  actions: write      # workflow_dispatch the Release workflow
+  contents: read
+
+jobs:
+  trigger:
+    # Skip unless the issue carries the `release` label. `labeled` event
+    # only fires for the label being added, so checking the array on
+    # `opened` is enough.
+    if: contains(github.event.issue.labels.*.name, 'release')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract tag from issue body
+        id: tag
+        env:
+          BODY: ${{ github.event.issue.body }}
+        run: |
+          # Issue-form `Tag` field renders as `### Tag\n\n<value>\n` in
+          # the body. Grab the first vX.Y.Z that follows that heading
+          # (regex-anchored so we don't pick up a tag mentioned later
+          # in release notes or manual-QA prose).
+          TAG=$(printf '%s' "$BODY" \
+            | awk '
+                /^### Tag/ { found = 1; next }
+                found && NF { print; exit }
+              ' \
+            | tr -d '[:space:]')
+          if [ -z "$TAG" ]; then
+            echo "::error::No tag found under '### Tag' in issue body"
+            exit 1
+          fi
+          if ! printf '%s' "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Tag '$TAG' is not vX.Y.Z"
+            gh issue comment "$ISSUE" --body "❌ Tag \`$TAG\` is not in \`vX.Y.Z\` format. Edit the issue and retry, or close + open a new one."
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Extracted tag: $TAG"
+        # gh needs both vars at the failure-comment step
+        # (set here so the env propagates to the failure path too).
+
+      - name: Discover XCTestCase classes
+        id: discover
+        run: |
+          # Grep both test targets for `final class X: XCTestCase` and
+          # the bare `class X: XCTestCase` form. Emit `<Target>.<Class>`
+          # so the in-issue checklist is unambiguous when unit + UI
+          # targets ever share a class name.
+          #
+          # Swift Testing (`@Test`) is intentionally NOT discovered —
+          # the test targets are XCTest-only as of v0.0.9. When/if Swift
+          # Testing lands, extend this grep.
+          discover() {
+            local dir="$1" target="$2"
+            grep -rhE '^[[:space:]]*(final[[:space:]]+)?class[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*:[[:space:]]*XCTestCase' "$dir" \
+              | sed -E "s/^[[:space:]]*(final[[:space:]]+)?class[[:space:]]+([A-Za-z_][A-Za-z0-9_]*).*/${target}.\2/" \
+              | sort -u
+          }
+          {
+            discover Tests/OnymIOSTests   OnymIOSTests
+            discover Tests/OnymIOSUITests OnymIOSUITests
+          } > /tmp/classes.txt
+          COUNT=$(wc -l < /tmp/classes.txt | tr -d ' ')
+          if [ "$COUNT" -eq 0 ]; then
+            echo "::error::No XCTestCase classes found — discovery regex broke?"
+            exit 1
+          fi
+          echo "Discovered $COUNT classes"
+          cat /tmp/classes.txt
+
+      - name: Hydrate UI_TESTS section in issue body
+        env:
+          BODY: ${{ github.event.issue.body }}
+          ISSUE: ${{ github.event.issue.number }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Build the new section: one `- [ ] <FQN>` per class. The
+          # report-to-issue job in `Release` flips boxes to `[x]` after
+          # xcodebuild finishes.
+          {
+            echo "_Discovered $(wc -l < /tmp/classes.txt | tr -d ' ') XCTestCase classes — boxes flip to \`[x]\` once \`Release\` finishes._"
+            echo ""
+            while IFS= read -r CLASS; do
+              echo "- [ ] $CLASS"
+            done < /tmp/classes.txt
+          } > /tmp/ui_tests_section.md
+
+          # Sed-friendly extraction: replace everything between the two
+          # marker comments with the new content. Uses python for safe
+          # multi-line replacement (sed cross-platform multiline is a
+          # mess).
+          python3 - <<'PY' "$BODY" /tmp/ui_tests_section.md /tmp/new_body.md
+          import re, sys, pathlib
+          body = sys.argv[1]
+          new_section = pathlib.Path(sys.argv[2]).read_text()
+          out_path = pathlib.Path(sys.argv[3])
+
+          start = "<!-- UI_TESTS_START -->"
+          end = "<!-- UI_TESTS_END -->"
+          pattern = re.compile(
+              re.escape(start) + r".*?" + re.escape(end),
+              re.DOTALL,
+          )
+          replacement = f"{start}\n{new_section}\n{end}"
+          if not pattern.search(body):
+              sys.exit(f"FATAL: markers {start!r}/{end!r} not found in issue body")
+          out_path.write_text(pattern.sub(replacement, body))
+          PY
+          gh issue edit "$ISSUE" --body-file /tmp/new_body.md
+
+      - name: Dispatch Release workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          gh workflow run Release \
+            --ref main \
+            -f tag="$TAG" \
+            -f issue_number="$ISSUE"
+          gh issue comment "$ISSUE" --body "🚀 Dispatched \`Release\` for tag \`$TAG\`. Watch progress in [Actions](https://github.com/${{ github.repository }}/actions/workflows/release.yml). Test results will hydrate the **Test results** section above when the run finishes."

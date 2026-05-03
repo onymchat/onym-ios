@@ -1,0 +1,83 @@
+name: Release
+description: Cut a new OnymIOS release. Submitting this issue auto-dispatches the Release workflow against `main` and reports XCTest results back into the body.
+title: "Release "
+labels:
+  - release
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Opening this issue triggers the `Release` workflow against `main` for the tag below.
+        The workflow will overwrite the **Test results** section with one checkbox per
+        `XCTestCase` subclass and tick `[x]` for each class whose tests pass. The **Manual QA**
+        section is yours — automation never touches it.
+
+  - type: input
+    id: tag
+    attributes:
+      label: Tag
+      description: Semver, prefixed with `v` (e.g. `v0.0.10`). The workflow refuses anything else.
+      placeholder: v0.0.10
+    validations:
+      required: true
+      # Issue forms accept a regex on `pattern`; the workflow re-validates
+      # server-side as a defence-in-depth check.
+      pattern: '^v[0-9]+\.[0-9]+\.[0-9]+$'
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Release notes (optional)
+      description: Free-text highlights. The Release workflow generates a per-commit changelog automatically; use this for higher-level prose.
+
+  - type: markdown
+    attributes:
+      value: |
+        ## Test results
+
+        <!-- UI_TESTS_START -->
+        _Pending — the `release-from-issue` workflow will replace this paragraph with a per-class checklist within ~30 seconds of submitting._
+        <!-- UI_TESTS_END -->
+
+  - type: markdown
+    attributes:
+      value: |
+        ## Manual QA
+
+        <!-- MANUAL_QA_START -->
+        Run through these against the IPA attached to the GitHub Release. Tick as you go.
+
+        ### Install + onboarding
+        - [ ] Fresh install via TestFlight or AltStore signs in cleanly
+        - [ ] First-run BIP39 generation produces a 12-word phrase
+        - [ ] Backup → Reveal → Verify (3 rounds) reaches the Done screen
+        - [ ] App launches without splash flicker on cold start
+
+        ### Identity
+        - [ ] Restore from a known mnemonic produces the expected Stellar address
+        - [ ] Inbox key in Settings → Advanced matches across reinstalls of the same mnemonic
+
+        ### Create Group — Tyranny
+        - [ ] Step 1 → Step 2 → Create reaches Success against testnet
+        - [ ] Group lands in the Chats tab as published-on-chain
+        - [ ] Inviting one peer (paste their inbox key) sends an invitation that the receiver can accept
+
+        ### Create Group — 1-on-1
+        - [ ] "1-on-1" governance card is selectable on Step 1 (no "Soon" pill)
+        - [ ] Step 2 requires exactly one peer; CTA reads "Start dialog"
+        - [ ] Created dialog lands in Chats; both parties see the same group
+
+        ### Theme + locale
+        - [ ] Light theme renders Create Group flow correctly
+        - [ ] Dark theme renders the same screens correctly
+        - [ ] Russian locale shows localized strings on Settings + Backup
+
+        ### Anchors + Relayer
+        - [ ] Settings → Anchors picker resolves to the latest contracts manifest
+        - [ ] Settings → Relayer can add a custom URL and switch primary
+
+        ### Release artifacts
+        - [ ] App Store screenshots refreshed via fastlane (if any UI changed materially)
+        - [ ] Push notification entitlement still validates against the bundle ID
+        - [ ] IPA installs cleanly through AltStore (the only currently shipped channel)
+        <!-- MANUAL_QA_END -->
