@@ -141,26 +141,33 @@ struct OnymIOSApp: App {
                     // contract from whatever was cached on the previous run.
                     await relayerRepository.start()
                     await contractsRepository.start()
-                    // Replay groups for the in-memory snapshot stream.
+                    // Replay groups + invitations for the in-memory snapshot streams.
                     await groupRepository.reload()
-                    // Wire identity selection → group filter so the chats
-                    // list flips when the user switches identity.
+                    await incomingInvitations.reload()
+                    // Wire identity selection → group + invitations filter
+                    // so both lists flip when the user switches identity.
                     if let initialID = await identityRepository.currentSelectedID() {
                         await groupRepository.setCurrentIdentity(initialID)
+                        await incomingInvitations.setCurrentIdentity(initialID)
                     }
                 }
                 .task {
-                    // Long-lived listener: forward every selection change.
+                    // Long-lived listener: forward every selection change
+                    // to the per-identity-filtered repositories.
                     for await id in identityRepository.currentIdentityID {
                         await groupRepository.setCurrentIdentity(id)
+                        await incomingInvitations.setCurrentIdentity(id)
                     }
                 }
                 .task {
-                    // Long-lived listener: wipe identity-scoped chats
+                    // Long-lived listener: wipe identity-scoped state
                     // when an identity is removed (the secrets are
-                    // already gone — this clears the on-disk groups).
+                    // already gone — this clears chats + invitations
+                    // from disk so cross-identity bleed-through is
+                    // impossible).
                     for await removed in identityRepository.identityRemoved {
                         await groupRepository.removeForOwner(removed)
+                        await incomingInvitations.removeForOwner(removed)
                     }
                 }
                 .task {

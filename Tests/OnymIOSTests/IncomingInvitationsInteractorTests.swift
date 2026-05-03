@@ -20,12 +20,21 @@ final class IncomingInvitationsInteractorTests: XCTestCase {
     private var interactor: IncomingInvitationsInteractor!
 
     private let inbox = TransportInboxID(rawValue: "inbox-abc")
+    /// Stub identity that owns the inbox in this test surface. The
+    /// interactor stamps `ownerIdentityID` on every persisted record;
+    /// these tests don't exercise the multi-identity routing layer
+    /// (covered by `IncomingInvitationsRepositoryTests` +
+    /// `InvitationDecryptorTests`), so a single fixed ID is fine.
+    private let ownerID = IdentityID()
 
     override func setUp() {
         super.setUp()
         transport = FakeInboxTransport()
         store = InMemoryInvitationStore()
-        repository = IncomingInvitationsRepository(store: store)
+        repository = IncomingInvitationsRepository(
+            store: store,
+            currentIdentityID: ownerID
+        )
         interactor = IncomingInvitationsInteractor(
             inboxTransport: transport,
             repository: repository
@@ -43,7 +52,7 @@ final class IncomingInvitationsInteractorTests: XCTestCase {
     // MARK: - pump shape
 
     func test_oneInboundMessage_persistsOneInvitation() async throws {
-        let task = Task { await interactor.run(inbox: inbox) }
+        let task = Task { await interactor.run(inbox: inbox, ownerIdentityID: ownerID) }
         try await waitForSubscribe()
 
         await transport.emit(makeInbound(messageID: "evt-1", payload: Data("hello".utf8)))
@@ -60,7 +69,7 @@ final class IncomingInvitationsInteractorTests: XCTestCase {
     }
 
     func test_multipleInboundMessages_persistAllInOrder() async throws {
-        let task = Task { await interactor.run(inbox: inbox) }
+        let task = Task { await interactor.run(inbox: inbox, ownerIdentityID: ownerID) }
         try await waitForSubscribe()
 
         let now = Date()
@@ -80,7 +89,7 @@ final class IncomingInvitationsInteractorTests: XCTestCase {
     }
 
     func test_duplicateMessageID_dedupedAtRepository() async throws {
-        let task = Task { await interactor.run(inbox: inbox) }
+        let task = Task { await interactor.run(inbox: inbox, ownerIdentityID: ownerID) }
         try await waitForSubscribe()
 
         // Same messageID twice — simulates two redundant relays
@@ -103,7 +112,7 @@ final class IncomingInvitationsInteractorTests: XCTestCase {
     // MARK: - cancellation
 
     func test_cancellation_exitsRunLoopAndUnsubscribes() async throws {
-        let task = Task { await interactor.run(inbox: inbox) }
+        let task = Task { await interactor.run(inbox: inbox, ownerIdentityID: ownerID) }
         try await waitForSubscribe()
 
         task.cancel()

@@ -15,8 +15,19 @@ struct InvitationDecryptor: Sendable {
     /// Decrypt and parse one invitation. Throws the underlying
     /// `InvitationDecryptError` on envelope-layer failures, or a
     /// `DecodingError` if the plaintext isn't a `DecryptedInvitation`.
+    ///
+    /// The envelope decrypts under `invitation.ownerIdentityID`'s
+    /// X25519 key — the per-record stamp set by the fan-out transport
+    /// at receive time. This makes cross-identity decryption work:
+    /// invitations sitting in the inbox of an identity that isn't the
+    /// currently-selected one still decrypt successfully when the
+    /// user later switches to (or just acts on a notification for)
+    /// that identity.
     func decrypt(_ invitation: IncomingInvitation) async throws -> DecryptedInvitation {
-        let plaintext = try await envelopeDecrypter.decryptInvitation(envelopeBytes: invitation.payload)
+        let plaintext = try await envelopeDecrypter.decryptInvitation(
+            envelopeBytes: invitation.payload,
+            asIdentity: invitation.ownerIdentityID
+        )
         return try JSONDecoder().decode(DecryptedInvitation.self, from: plaintext)
     }
 }

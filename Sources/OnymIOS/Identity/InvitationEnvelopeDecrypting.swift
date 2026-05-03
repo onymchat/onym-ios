@@ -7,13 +7,15 @@ import Foundation
 /// (i.e. `IdentityRepository`) ever holds the X25519 private key.
 protocol InvitationEnvelopeDecrypting: Sendable {
     /// Decode `envelopeBytes` (a JSON-serialised `SealedEnvelope`) and
-    /// open the AES-GCM ciphertext using the X25519 private key derived
-    /// from the on-device identity. Returns the plaintext bytes.
+    /// open the AES-GCM ciphertext using `identityID`'s X25519 private
+    /// key. Callers pass the per-record `ownerIdentityID` stamped at
+    /// receive time, so cross-identity envelopes still decrypt without
+    /// requiring the user to switch identities first.
     ///
-    /// Throws on: malformed JSON, wrong scheme, missing identity,
-    /// invalid signature on the ephemeral key (when present), or
-    /// AES-GCM tag mismatch.
-    func decryptInvitation(envelopeBytes: Data) async throws -> Data
+    /// Throws on: malformed JSON, wrong scheme, identity not found in
+    /// the keychain, invalid signature on the ephemeral key (when
+    /// present), or AES-GCM tag mismatch.
+    func decryptInvitation(envelopeBytes: Data, asIdentity identityID: IdentityID) async throws -> Data
 }
 
 enum InvitationDecryptError: Error, Equatable, Sendable {

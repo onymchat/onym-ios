@@ -119,12 +119,14 @@ final class SwiftDataInvitationStoreTests: XCTestCase {
 
     private static func makeRecord(
         id: String,
+        ownerIdentityID: IdentityID = IdentityID(),
         payload: Data = Data("payload".utf8),
         receivedAt: Date = Date(),
         status: IncomingInvitationStatus = .pending
     ) -> IncomingInvitationRecord {
         IncomingInvitationRecord(
             id: id,
+            ownerIdentityID: ownerIdentityID,
             payload: payload,
             receivedAt: receivedAt,
             status: status

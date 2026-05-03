@@ -17,6 +17,12 @@ enum IncomingInvitationStatus: String, Sendable, CaseIterable {
 /// rest.
 struct IncomingInvitationRecord: Sendable, Equatable {
     let id: String
+    /// The identity this envelope was delivered to. The fan-out
+    /// transport stamps this from the inbox tag the message arrived
+    /// on, so `IdentityRepository.decryptInvitation(asIdentity:)`
+    /// always uses the right per-identity X25519 key — even when the
+    /// receiving identity isn't the currently-selected one.
+    let ownerIdentityID: IdentityID
     let payload: Data
     let receivedAt: Date
     let status: IncomingInvitationStatus
@@ -36,4 +42,10 @@ protocol InvitationStore: Sendable {
 
     func updateStatus(id: String, status: IncomingInvitationStatus) async
     func delete(id: String) async
+
+    /// Drop every invitation row whose `ownerIdentityIDString` matches.
+    /// Used by `IncomingInvitationsRepository.removeForOwner` in
+    /// response to `IdentityRepository.identityRemoved` — mirrors
+    /// `GroupStore.deleteOwner`.
+    func deleteOwner(_ ownerIDString: String) async
 }
