@@ -30,23 +30,29 @@ body:
       label: Release notes (optional)
       description: Free-text highlights. The Release workflow generates a per-commit changelog automatically; use this for higher-level prose.
 
-  - type: markdown
+  # The next two textareas exist purely to inject HTML comment markers
+  # into the submitted issue body. `type: markdown` blocks render only
+  # in the form UI and are stripped from the issue body — only `input`,
+  # `textarea`, `dropdown`, and `checkboxes` carry through. The
+  # description discourages editing; the orchestrator + report jobs
+  # rewrite the content between markers anyway.
+  - type: textarea
+    id: ui_tests
     attributes:
+      label: Test results
+      description: Auto-populated by the `release-from-issue` workflow within ~30 seconds. Don't edit unless you want to override.
       value: |
-        ## Test results
-
         <!-- UI_TESTS_START -->
-        _Pending — the `release-from-issue` workflow will replace this paragraph with a per-class checklist within ~30 seconds of submitting._
+        _Pending — will populate with one checkbox per discovered `XCTestCase` subclass._
         <!-- UI_TESTS_END -->
 
-  - type: markdown
+  - type: textarea
+    id: manual_qa
     attributes:
+      label: Manual QA
+      description: Tick these off against the IPA attached to the GitHub Release. Automation never touches this section — feel free to edit/extend.
       value: |
-        ## Manual QA
-
         <!-- MANUAL_QA_START -->
-        Run through these against the IPA attached to the GitHub Release. Tick as you go.
-
         ### Install + onboarding
         - [ ] Fresh install via TestFlight or AltStore signs in cleanly
         - [ ] First-run BIP39 generation produces a 12-word phrase
