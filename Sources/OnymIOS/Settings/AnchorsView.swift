@@ -49,8 +49,7 @@ struct AnchorsView: View {
                 SettingsRow(
                     title: LocalizedStringKey(network.displayName),
                     subtitle: networkSubtitle(network),
-                    last: last,
-                    onTap: {}
+                    last: last
                 ) {
                     SettingsContentTile(bg: bg) {
                         Text(letter).font(.system(size: 11, weight: .bold))
@@ -124,8 +123,7 @@ struct AnchorsNetworkView: View {
                     title: LocalizedStringKey(type.displayName),
                     subtitle: "\(binding.release) " + (isExplicit ? "(selected)" : "(latest)"),
                     inset: 56,
-                    last: last,
-                    onTap: {}
+                    last: last
                 ) {
                     GovernanceTypeTile(type: type)
                 }
@@ -222,8 +220,7 @@ struct AnchorsVersionView: View {
                     } label: {
                         SettingsRow(
                             title: "Deploy from source",
-                            subtitle: "Build & publish your own contract",
-                            onTap: {}
+                            subtitle: "Build & publish your own contract"
                         ) {
                             SettingsIconTile(symbol: "chevron.left.forwardslash.chevron.right",
                                              bg: OnymTokens.text)
@@ -238,8 +235,7 @@ struct AnchorsVersionView: View {
                         SettingsRow(
                             title: "Use existing address",
                             subtitle: "Point to a deployed contract",
-                            last: true,
-                            onTap: {}
+                            last: true
                         ) {
                             SettingsIconTile(symbol: "shippingbox.fill",
                                              bg: SettingsTile.indigo)
@@ -279,15 +275,13 @@ struct AnchorsVersionView: View {
 
     @ViewBuilder
     private func versionRow(release: ContractRelease, isSelected: Bool, isLatest: Bool, last: Bool) -> some View {
-        Button {
-            flow.tappedVersion(key: key, releaseTag: release.release)
-            dismiss()
+        NavigationLink {
+            ContractDetailView(flow: flow, key: key, release: release)
         } label: {
             SettingsRow(
                 title: LocalizedStringKey(release.release),
                 titleMono: true,
                 subtitle: release.publishedAt.formatted(date: .abbreviated, time: .omitted),
-                hasChevron: false,
                 inset: 16,
                 last: last
             ) {

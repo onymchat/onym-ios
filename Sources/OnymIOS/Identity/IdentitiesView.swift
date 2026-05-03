@@ -27,8 +27,7 @@ struct IdentitiesView: View {
                                 subtitle: "BLS \(flow.blsPrefix(of: summary))…",
                                 subtitleMono: true,
                                 inset: 68,
-                                last: idx == summaries.count - 1,
-                                onTap: {}
+                                last: idx == summaries.count - 1
                             ) {
                                 IdentityRingTile(active: summary.id == flow.currentID, size: 40)
                             } right: {
