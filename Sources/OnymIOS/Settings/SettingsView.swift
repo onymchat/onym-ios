@@ -7,6 +7,7 @@ struct SettingsView: View {
     let makeBackupFlow: @MainActor () -> RecoveryPhraseBackupFlow
     let makeRelayerSettingsFlow: @MainActor () -> RelayerSettingsFlow
     let makeAnchorsPickerFlow: @MainActor () -> AnchorsPickerFlow
+    let identitiesFlow: IdentitiesFlow
 
     @State private var showRecoveryPhrase = false
 
@@ -19,6 +20,16 @@ struct SettingsView: View {
     var body: some View {
         Form {
             Section {
+                NavigationLink {
+                    IdentitiesView(flow: identitiesFlow)
+                } label: {
+                    row(
+                        icon: SettingsIconBox(systemImage: "person.2.fill", background: .purple),
+                        title: "Identities"
+                    )
+                }
+                .accessibilityIdentifier("settings.identities_row")
+
                 Button {
                     showRecoveryPhrase = true
                 } label: {

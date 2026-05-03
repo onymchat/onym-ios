@@ -5,10 +5,15 @@ import Foundation
 /// closure that captures the repositories / I/O affordances it needs —
 /// views receive only these factories so they never hold a repository
 /// reference themselves.
+@MainActor
 struct AppDependencies {
     let makeRecoveryPhraseBackupFlow: @MainActor () -> RecoveryPhraseBackupFlow
     let makeRelayerSettingsFlow: @MainActor () -> RelayerSettingsFlow
     let makeAnchorsPickerFlow: @MainActor () -> AnchorsPickerFlow
     let makeCreateGroupFlow: @MainActor () -> CreateGroupFlow
     let makeChatsFlow: @MainActor () -> ChatsFlow
+    /// Single shared instance — the toolbar picker on Chats and the
+    /// Settings → Identities screen observe the same state, so a
+    /// factory closure here would split them.
+    let identitiesFlow: IdentitiesFlow
 }
