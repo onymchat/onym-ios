@@ -11,7 +11,12 @@ name: Release from issue
 
 on:
   issues:
-    types: [opened, labeled]
+    # Only `opened` — the issue template auto-applies the `release`
+    # label as part of issue creation, so the `opened` event payload
+    # already includes it. Listening for `labeled` too would dispatch
+    # Release twice per submission (once per event); confirmed during
+    # the dry-run on issue #42.
+    types: [opened]
 
 permissions:
   issues: write       # edit body + post failure comments
@@ -20,8 +25,9 @@ permissions:
 
 jobs:
   trigger:
-    # Skip unless the issue carries the `release` label. `labeled` event
-    # only fires for the label being added, so checking the array on
+    # Skip unless the issue carries the `release` label. Defensive — if
+    # someone opens a non-release issue manually, this filter blocks
+    # the run before it touches the body or dispatches anything.
     # `opened` is enough.
     if: contains(github.event.issue.labels.*.name, 'release')
     runs-on: ubuntu-latest
