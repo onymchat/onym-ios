@@ -22,6 +22,10 @@ actor KeychainIntroKeyStore: IntroKeyStore {
     static let account = "blob"
 
     private let service: String
+    /// Per-owner subscriber continuations. Mutations re-emit the
+    /// filtered+sorted snapshot to every subscriber whose owner
+    /// matches.
+    private var continuations: [IdentityID: [UUID: AsyncStream<[IntroKeyEntry]>.Continuation]] = [:]
 
     init(testNamespace: String? = nil) {
         if let testNamespace, !testNamespace.isEmpty {
@@ -39,6 +43,7 @@ actor KeychainIntroKeyStore: IntroKeyStore {
         current.removeAll { $0.introPub == entry.introPublicKey }
         current.append(StoredIntroKey(from: entry))
         writeAll(current)
+        publish(forOwner: entry.ownerIdentityID)
     }
 
     func find(introPublicKey: Data) async -> IntroKeyEntry? {
@@ -56,9 +61,13 @@ actor KeychainIntroKeyStore: IntroKeyStore {
 
     func revoke(introPublicKey: Data) async {
         var current = loadAll()
-        let before = current.count
+        let removedRows = current.filter { $0.introPub == introPublicKey }
         current.removeAll { $0.introPub == introPublicKey }
-        if current.count != before { writeAll(current) }
+        if !removedRows.isEmpty {
+            writeAll(current)
+            let owners = Set(removedRows.compactMap { IdentityID($0.ownerIdentityID) })
+            for owner in owners { publish(forOwner: owner) }
+        }
     }
 
     @discardableResult
@@ -67,8 +76,46 @@ actor KeychainIntroKeyStore: IntroKeyStore {
         let before = current.count
         current.removeAll { $0.ownerIdentityID == ownerIdentityID.rawValue.uuidString }
         let removed = before - current.count
-        if removed > 0 { writeAll(current) }
+        if removed > 0 {
+            writeAll(current)
+            publish(forOwner: ownerIdentityID)
+        }
         return removed
+    }
+
+    nonisolated func entriesStream(forOwner ownerIdentityID: IdentityID) -> AsyncStream<[IntroKeyEntry]> {
+        AsyncStream { continuation in
+            let id = UUID()
+            Task { await self.subscribe(owner: ownerIdentityID, id: id, continuation: continuation) }
+            continuation.onTermination = { @Sendable _ in
+                Task { await self.unsubscribe(owner: ownerIdentityID, id: id) }
+            }
+        }
+    }
+
+    private func subscribe(
+        owner: IdentityID,
+        id: UUID,
+        continuation: AsyncStream<[IntroKeyEntry]>.Continuation
+    ) async {
+        continuations[owner, default: [:]][id] = continuation
+        continuation.yield(await listForOwner(owner))
+    }
+
+    private func unsubscribe(owner: IdentityID, id: UUID) {
+        continuations[owner]?.removeValue(forKey: id)
+        if continuations[owner]?.isEmpty == true {
+            continuations.removeValue(forKey: owner)
+        }
+    }
+
+    private func publish(forOwner owner: IdentityID) {
+        guard let bucket = continuations[owner] else { return }
+        let snapshot = loadAll()
+            .filter { $0.ownerIdentityID == owner.rawValue.uuidString }
+            .sorted { $0.createdAtMillis > $1.createdAtMillis }
+            .compactMap { $0.toEntry() }
+        for cont in bucket.values { cont.yield(snapshot) }
     }
 
     /// Test helper — drop the blob entirely. No-op if it's already
