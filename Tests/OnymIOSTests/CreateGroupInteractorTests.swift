@@ -245,15 +245,80 @@ final class CreateGroupInteractorTests: XCTestCase {
         )
     }
 
-    func test_create_anarchy_throws_unsupported() async throws {
-        let env = await makeTestEnv()
+    // MARK: - Anarchy
+
+    func test_create_anarchy_anchorsOnAnarchyContractAndShipsInvitations() async throws {
+        let env = await makeTestEnv(includeAnarchyContract: true)
+        let interactor = env.makeInteractor()
+
+        let inviteeKey = Data(repeating: 0xCC, count: 32)
+        let group = try await interactor.create(
+            governanceType: .anarchy,
+            name: "Open Garden",
+            invitees: [inviteeKey]
+        )
+
+        XCTAssertEqual(group.groupType, .anarchy)
+        XCTAssertEqual(group.members.count, 1, "creator-only roster at create time")
+        XCTAssertNil(group.adminPubkeyHex, "Anarchy has no admin")
+        XCTAssertEqual(group.tier, .small)
+        XCTAssertTrue(group.isPublishedOnChain)
+
+        let invocations = env.contractTransport.invocations
+        XCTAssertEqual(invocations.count, 1)
+        XCTAssertEqual(invocations.first?.function, "create_group")
+        let body = try XCTUnwrap(invocations.first.flatMap {
+            try? JSONSerialization.jsonObject(with: $0.payload) as? [String: Any]
+        })
+        XCTAssertEqual(body["contractType"] as? String, "anarchy")
+        let payload = try XCTUnwrap(body["payload"] as? [String: Any])
+        XCTAssertNil(payload["admin_pubkey_commitment"], "no admin field on Anarchy wire")
+        XCTAssertEqual((payload["tier"] as? NSNumber)?.intValue, 0, "tier=small=0")
+        XCTAssertEqual((payload["member_count"] as? NSNumber)?.intValue, 1)
+        let publicInputs = try XCTUnwrap(payload["publicInputs"] as? [String])
+        XCTAssertEqual(publicInputs.count, 2, "Anarchy ships [commitment, Fr(0)]")
+
+        // The invitation got sent.
+        let sends = await env.inboxTransport.sends
+        XCTAssertEqual(sends.count, 1)
+    }
+
+    func test_create_anarchy_zeroInvitees_anchorsButSendsNothing() async throws {
+        let env = await makeTestEnv(includeAnarchyContract: true)
+        let interactor = env.makeInteractor()
+        let group = try await interactor.create(
+            governanceType: .anarchy,
+            name: "Solo Anarchy",
+            invitees: []
+        )
+        XCTAssertTrue(group.isPublishedOnChain)
+        let sends = await env.inboxTransport.sends
+        XCTAssertTrue(sends.isEmpty, "no invitees → no sends")
+    }
+
+    func test_create_anarchy_noContractBinding_throws() async throws {
+        let env = await makeTestEnv(includeAnarchyContract: false)
         await assertThrows(
             try await env.makeInteractor().create(
                 governanceType: .anarchy,
                 name: "G",
                 invitees: []
             ),
-            CreateGroupError.unsupportedGovernanceType(.anarchy)
+            CreateGroupError.noContractBinding(.anarchy)
+        )
+    }
+
+    func test_create_democracy_throws_unsupported() async throws {
+        // Anarchy is now supported — the unsupported guardrail still
+        // fires for democracy / oligarchy.
+        let env = await makeTestEnv()
+        await assertThrows(
+            try await env.makeInteractor().create(
+                governanceType: .democracy,
+                name: "G",
+                invitees: []
+            ),
+            CreateGroupError.unsupportedGovernanceType(.democracy)
         )
     }
 
@@ -279,12 +344,14 @@ final class CreateGroupInteractorTests: XCTestCase {
         addRelayer: Bool = true,
         includeTyrannyContract: Bool = true,
         includeOneOnOneContract: Bool = false,
+        includeAnarchyContract: Bool = false,
         network: AppNetwork = .testnet
     ) async -> CreateGroupTestEnv {
         let env = await CreateGroupTestEnv.make(
             addRelayer: addRelayer,
             includeTyrannyContract: includeTyrannyContract,
             includeOneOnOneContract: includeOneOnOneContract,
+            includeAnarchyContract: includeAnarchyContract,
             network: network
         )
         return env
@@ -313,6 +380,7 @@ private final class CreateGroupTestEnv {
         addRelayer: Bool,
         includeTyrannyContract: Bool,
         includeOneOnOneContract: Bool = false,
+        includeAnarchyContract: Bool = false,
         network: AppNetwork
     ) async -> CreateGroupTestEnv {
         let keychain = IdentityKeychainStore(
@@ -355,6 +423,13 @@ private final class CreateGroupTestEnv {
                 network: .testnet,
                 type: .oneonone,
                 id: "C1V1CONTRACTTEST000000000000000000000000000000000000000"
+            ))
+        }
+        if includeAnarchyContract {
+            contractEntries.append(ContractEntry(
+                network: .testnet,
+                type: .anarchy,
+                id: "CANARCHYCONTRACTTEST00000000000000000000000000000000000"
             ))
         }
         let manifest = ContractsManifest(
@@ -465,6 +540,23 @@ private struct StubGroupProofGenerator: GroupProofGenerator {
                 proof: Data(repeating: 0xCC, count: 1601),
                 publicInputs: [
                     Data(repeating: 0xEE, count: 32),  // commitment
+                    Data(repeating: 0x00, count: 32),  // Fr(0)
+                ]
+            )
+        case .anarchy:
+            // Mirror the real Anarchy proveMembership-at-epoch-0 shape:
+            // 2-element PI like OneOnOne, no admin field. Validate the
+            // prover-index guard so the interactor branch stays honest.
+            guard input.adminIndex >= 0, input.adminIndex < input.members.count else {
+                throw GroupProofGeneratorError.adminIndexOutOfRange(
+                    index: input.adminIndex,
+                    count: input.members.count
+                )
+            }
+            return GroupCreateProof(
+                proof: Data(repeating: 0xDD, count: 1601),
+                publicInputs: [
+                    Data(repeating: 0xBE, count: 32),  // commitment
                     Data(repeating: 0x00, count: 32),  // Fr(0)
                 ]
             )
