@@ -26,6 +26,11 @@ final class IdentityRepositoryMultiIdentityTests: XCTestCase {
 
     func test_bootstrap_emptyKeychain_generatesDefaultIdentity() async throws {
         let identity = try await repo.bootstrap()
+        // Bootstrap produces an Identity with a populated recovery
+        // phrase; this test asserts presence-only (length / words),
+        // never logs or stores the value. Same access pattern as
+        // `IdentityRepositoryTests.test_bootstrap_freshInstall_…`.
+        // onym:allow-secret-read
         XCTAssertNotNil(identity.recoveryPhrase)
         let summaries = await repo.currentIdentities()
         XCTAssertEqual(summaries.count, 1)
