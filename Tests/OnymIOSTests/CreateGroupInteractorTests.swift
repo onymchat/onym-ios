@@ -158,6 +158,105 @@ final class CreateGroupInteractorTests: XCTestCase {
         }
     }
 
+    // MARK: - OneOnOne
+
+    func test_create_oneOnOne_anchorsOnOneOnOneContractAndShipsPeerSecret() async throws {
+        let env = await makeTestEnv(includeOneOnOneContract: true)
+        let interactor = env.makeInteractor()
+        let peerInbox = Data(repeating: 0xAA, count: 32)
+
+        let group = try await interactor.create(
+            governanceType: .oneOnOne,
+            name: "Alice & Bob",
+            invitees: [peerInbox]
+        )
+
+        // Group has both members, no admin, fixed-depth tier.
+        XCTAssertEqual(group.groupType, .oneOnOne)
+        XCTAssertEqual(group.members.count, 2, "creator + peer")
+        XCTAssertNil(group.adminPubkeyHex, "1-on-1 has no admin")
+        XCTAssertEqual(group.tier, .small)
+        XCTAssertTrue(group.isPublishedOnChain)
+
+        // Anchored on the OneOnOne contract via `create_group`.
+        let invocations = env.contractTransport.invocations
+        XCTAssertEqual(invocations.count, 1)
+        XCTAssertEqual(invocations.first?.function, "create_group")
+        let body = try XCTUnwrap(invocations.first.flatMap {
+            try? JSONSerialization.jsonObject(with: $0.payload) as? [String: Any]
+        })
+        XCTAssertEqual(body["contractType"] as? String, "oneonone")
+        let payload = try XCTUnwrap(body["payload"] as? [String: Any])
+        XCTAssertNil(payload["admin_pubkey_commitment"], "no admin field on OneOnOne wire")
+        XCTAssertNil(payload["tier"], "no tier field on OneOnOne wire")
+        let publicInputs = try XCTUnwrap(payload["publicInputs"] as? [String])
+        XCTAssertEqual(publicInputs.count, 2, "OneOnOne ships [commitment, Fr(0)]")
+
+        // One sealed invitation went out to the peer's inbox.
+        let sends = await env.inboxTransport.sends
+        XCTAssertEqual(sends.count, 1)
+
+        // The sealed payload contains the peer's BLS secret. We can't
+        // inspect the sealed bytes (they're AES-GCM-encrypted), but
+        // sealInvitation is a passthrough wrapper around AES-GCM seal —
+        // peeking at what the interactor handed to `sealInvitation` is
+        // out of scope, so we settle for verifying the public-input
+        // commitment came from our stub (proves the OneOnOne arm ran).
+        XCTAssertNotNil(group.commitment)
+        XCTAssertEqual(group.commitment, Data(repeating: 0xEE, count: 32))
+    }
+
+    func test_create_oneOnOne_zeroInvitees_throws() async throws {
+        let env = await makeTestEnv(includeOneOnOneContract: true)
+        await assertThrows(
+            try await env.makeInteractor().create(
+                governanceType: .oneOnOne,
+                name: "Solo",
+                invitees: []
+            ),
+            CreateGroupError.oneOnOneRequiresExactlyOnePeer(got: 0)
+        )
+    }
+
+    func test_create_oneOnOne_twoInvitees_throws() async throws {
+        let env = await makeTestEnv(includeOneOnOneContract: true)
+        await assertThrows(
+            try await env.makeInteractor().create(
+                governanceType: .oneOnOne,
+                name: "Crowd",
+                invitees: [
+                    Data(repeating: 0xAA, count: 32),
+                    Data(repeating: 0xBB, count: 32),
+                ]
+            ),
+            CreateGroupError.oneOnOneRequiresExactlyOnePeer(got: 2)
+        )
+    }
+
+    func test_create_oneOnOne_noContractBinding_throws() async throws {
+        let env = await makeTestEnv(includeOneOnOneContract: false)
+        await assertThrows(
+            try await env.makeInteractor().create(
+                governanceType: .oneOnOne,
+                name: "G",
+                invitees: [Data(repeating: 0xAA, count: 32)]
+            ),
+            CreateGroupError.noContractBinding(.oneonone)
+        )
+    }
+
+    func test_create_anarchy_throws_unsupported() async throws {
+        let env = await makeTestEnv()
+        await assertThrows(
+            try await env.makeInteractor().create(
+                governanceType: .anarchy,
+                name: "G",
+                invitees: []
+            ),
+            CreateGroupError.unsupportedGovernanceType(.anarchy)
+        )
+    }
+
     // MARK: - Helpers
 
     private func assertThrows<T: Sendable>(
@@ -179,11 +278,13 @@ final class CreateGroupInteractorTests: XCTestCase {
     private func makeTestEnv(
         addRelayer: Bool = true,
         includeTyrannyContract: Bool = true,
+        includeOneOnOneContract: Bool = false,
         network: AppNetwork = .testnet
     ) async -> CreateGroupTestEnv {
         let env = await CreateGroupTestEnv.make(
             addRelayer: addRelayer,
             includeTyrannyContract: includeTyrannyContract,
+            includeOneOnOneContract: includeOneOnOneContract,
             network: network
         )
         return env
@@ -211,6 +312,7 @@ private final class CreateGroupTestEnv {
     static func make(
         addRelayer: Bool,
         includeTyrannyContract: Bool,
+        includeOneOnOneContract: Bool = false,
         network: AppNetwork
     ) async -> CreateGroupTestEnv {
         let keychain = KeychainStore(
@@ -238,9 +340,21 @@ private final class CreateGroupTestEnv {
             await relayers.setPrimary(url: URL(string: "https://relayer.test.example")!)
         }
 
-        let contractEntries: [ContractEntry] = includeTyrannyContract
-            ? [ContractEntry(network: .testnet, type: .tyranny, id: "CTYRANNYTEST00000000000000000000000000000000000000000000")]
-            : []
+        var contractEntries: [ContractEntry] = []
+        if includeTyrannyContract {
+            contractEntries.append(ContractEntry(
+                network: .testnet,
+                type: .tyranny,
+                id: "CTYRANNYTEST00000000000000000000000000000000000000000000"
+            ))
+        }
+        if includeOneOnOneContract {
+            contractEntries.append(ContractEntry(
+                network: .testnet,
+                type: .oneonone,
+                id: "C1V1CONTRACTTEST000000000000000000000000000000000000000"
+            ))
+        }
         let manifest = ContractsManifest(
             version: 1,
             releases: [
@@ -311,23 +425,39 @@ private final class CreateGroupTestEnv {
 
 // MARK: - Stubs
 
-/// Returns a deterministic 1601-byte "proof" + 4-element PI bundle
+/// Returns a deterministic 1601-byte "proof" + per-type PI bundle
 /// without actually proving. Skips the ~3.5s real prover so the test
 /// suite stays fast.
 private struct StubGroupProofGenerator: GroupProofGenerator {
     func proveCreate(_ input: GroupProofCreateInput) throws -> GroupCreateProof {
-        guard input.groupType == .tyranny else {
+        switch input.groupType {
+        case .tyranny:
+            return GroupCreateProof(
+                proof: Data(repeating: 0xAB, count: 1601),
+                publicInputs: [
+                    Data(repeating: 0xCD, count: 32),  // commitment
+                    Data(repeating: 0x00, count: 32),  // Fr(0)
+                    Data(repeating: 0x42, count: 32),  // admin_pubkey_commitment
+                    Data(repeating: 0x77, count: 32),  // group_id_fr
+                ]
+            )
+        case .oneOnOne:
+            // Mirror the real OneOnOne SDK shape: raise if peer secret
+            // missing so the interactor's OneOnOne branch stays honest
+            // in tests.
+            guard input.peerBlsSecretKey != nil else {
+                throw GroupProofGeneratorError.missingPeerSecret
+            }
+            return GroupCreateProof(
+                proof: Data(repeating: 0xCC, count: 1601),
+                publicInputs: [
+                    Data(repeating: 0xEE, count: 32),  // commitment
+                    Data(repeating: 0x00, count: 32),  // Fr(0)
+                ]
+            )
+        default:
             throw GroupProofGeneratorError.notYetSupported(input.groupType)
         }
-        return GroupCreateProof(
-            proof: Data(repeating: 0xAB, count: 1601),
-            publicInputs: [
-                Data(repeating: 0xCD, count: 32),  // commitment
-                Data(repeating: 0x00, count: 32),  // Fr(0)
-                Data(repeating: 0x42, count: 32),  // admin_pubkey_commitment
-                Data(repeating: 0x77, count: 32),  // group_id_fr
-            ]
-        )
     }
 }
 
