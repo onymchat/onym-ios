@@ -46,23 +46,25 @@ final class CreateGroupOneOnOneE2ETests: XCTestCase {
     private static let testMnemonic =
         "legal winner thank year wave sausage worth useful legal winner thank yellow"
 
-    private var keychain: KeychainStore!
+    private var keychain: IdentityKeychainStore!
     private var identity: IdentityRepository!
 
     override func setUp() async throws {
         try await super.setUp()
         try requireIntegrationGate()
 
-        keychain = KeychainStore(
-            service: "chat.onym.ios.identity.tests.e2e.oneonone.\(UUID().uuidString)",
-            account: "current"
+        keychain = IdentityKeychainStore(
+            testNamespace: "oneonone-e2e-\(UUID().uuidString)"
         )
-        identity = IdentityRepository(keychain: keychain)
+        identity = IdentityRepository(
+            keychain: keychain,
+            selectionStore: .inMemory()
+        )
         _ = try await identity.restore(mnemonic: Self.testMnemonic)
     }
 
     override func tearDown() async throws {
-        try? keychain?.wipe()
+        try? keychain?.wipeAll()
         keychain = nil
         identity = nil
         try await super.tearDown()

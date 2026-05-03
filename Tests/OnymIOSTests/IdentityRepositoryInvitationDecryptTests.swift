@@ -12,7 +12,7 @@ import XCTest
 /// so we can produce real ciphertext without porting the encrypt path
 /// to production (no app code sends invitations yet).
 final class IdentityRepositoryInvitationDecryptTests: XCTestCase {
-    private var keychain: KeychainStore!
+    private var keychain: IdentityKeychainStore!
     private var repository: IdentityRepository!
 
     /// BIP39 vector that gives a richer mnemonic than `abandon × 11 +
@@ -21,16 +21,18 @@ final class IdentityRepositoryInvitationDecryptTests: XCTestCase {
 
     override func setUp() async throws {
         try await super.setUp()
-        keychain = KeychainStore(
-            service: "chat.onym.ios.identity.tests.\(UUID().uuidString)",
-            account: "current"
+        keychain = IdentityKeychainStore(
+            testNamespace: "decrypt-tests-\(UUID().uuidString)"
         )
-        repository = IdentityRepository(keychain: keychain)
+        repository = IdentityRepository(
+            keychain: keychain,
+            selectionStore: .inMemory()
+        )
         _ = try await repository.restore(mnemonic: testMnemonic)
     }
 
     override func tearDown() async throws {
-        try? keychain.wipe()
+        try? keychain.wipeAll()
         keychain = nil
         repository = nil
         try await super.tearDown()

@@ -307,7 +307,7 @@ private final class CreateGroupTestEnv {
     let contractTransport: ConfigurableContractTransport
     let proofGenerator: StubGroupProofGenerator
     let networkPreference: StaticNetworkPreference
-    private let keychain: KeychainStore
+    private let keychain: IdentityKeychainStore
 
     static func make(
         addRelayer: Bool,
@@ -315,11 +315,13 @@ private final class CreateGroupTestEnv {
         includeOneOnOneContract: Bool = false,
         network: AppNetwork
     ) async -> CreateGroupTestEnv {
-        let keychain = KeychainStore(
-            service: "chat.onym.ios.identity.tests.create-group.\(UUID().uuidString)",
-            account: "current"
+        let keychain = IdentityKeychainStore(
+            testNamespace: "create-group-\(UUID().uuidString)"
         )
-        let identity = IdentityRepository(keychain: keychain)
+        let identity = IdentityRepository(
+            keychain: keychain,
+            selectionStore: .inMemory()
+        )
         // Use a real BIP39 vector so we get real BLS keys + StrKey AccountID.
         _ = try? await identity.restore(
             mnemonic: "legal winner thank year wave sausage worth useful legal winner thank yellow"
@@ -394,7 +396,7 @@ private final class CreateGroupTestEnv {
         contractTransport: ConfigurableContractTransport,
         proofGenerator: StubGroupProofGenerator,
         networkPreference: StaticNetworkPreference,
-        keychain: KeychainStore
+        keychain: IdentityKeychainStore
     ) {
         self.identity = identity
         self.relayers = relayers
@@ -407,7 +409,7 @@ private final class CreateGroupTestEnv {
         self.keychain = keychain
     }
 
-    deinit { try? keychain.wipe() }
+    deinit { try? keychain.wipeAll() }
 
     func makeInteractor() -> CreateGroupInteractor {
         CreateGroupInteractor(

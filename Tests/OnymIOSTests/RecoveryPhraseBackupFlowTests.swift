@@ -20,7 +20,7 @@ final class RecoveryPhraseBackupFlowTests: XCTestCase {
     // 4 truly distinct options to choose from.
     private let testMnemonic = "legal winner thank year wave sausage worth useful legal winner thank yellow"
 
-    private var keychain: KeychainStore!
+    private var keychain: IdentityKeychainStore!
     private var repository: IdentityRepository!
     private var authenticator: FakeAuthenticator!
     private var pasteboard: FakePasteboard!
@@ -28,11 +28,13 @@ final class RecoveryPhraseBackupFlowTests: XCTestCase {
 
     override func setUp() async throws {
         try await super.setUp()
-        keychain = KeychainStore(
-            service: "chat.onym.ios.identity.recoverytests.\(UUID().uuidString)",
-            account: "current"
+        keychain = IdentityKeychainStore(
+            testNamespace: "recoverytests-\(UUID().uuidString)"
         )
-        repository = IdentityRepository(keychain: keychain)
+        repository = IdentityRepository(
+            keychain: keychain,
+            selectionStore: .inMemory()
+        )
         _ = try await repository.restore(mnemonic: testMnemonic)
         authenticator = FakeAuthenticator()
         pasteboard = FakePasteboard()
@@ -49,7 +51,7 @@ final class RecoveryPhraseBackupFlowTests: XCTestCase {
 
     override func tearDown() async throws {
         flow.stop()
-        try? keychain.wipe()
+        try? keychain.wipeAll()
         flow = nil
         pasteboard = nil
         authenticator = nil

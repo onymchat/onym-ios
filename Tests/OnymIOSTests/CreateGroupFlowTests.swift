@@ -294,14 +294,16 @@ final class CreateGroupFlowTests: XCTestCase {
 @MainActor
 private final class CreateGroupFlowTestEnv {
     let interactor: CreateGroupInteractor
-    private let keychain: KeychainStore
+    private let keychain: IdentityKeychainStore
 
     static func make() async -> CreateGroupFlowTestEnv {
-        let keychain = KeychainStore(
-            service: "chat.onym.ios.identity.tests.flow.\(UUID().uuidString)",
-            account: "current"
+        let keychain = IdentityKeychainStore(
+            testNamespace: "flow-\(UUID().uuidString)"
         )
-        let identity = IdentityRepository(keychain: keychain)
+        let identity = IdentityRepository(
+            keychain: keychain,
+            selectionStore: .inMemory()
+        )
         _ = try? await identity.restore(
             mnemonic: "legal winner thank year wave sausage worth useful legal winner thank yellow"
         )
@@ -336,12 +338,12 @@ private final class CreateGroupFlowTestEnv {
         return CreateGroupFlowTestEnv(interactor: interactor, keychain: keychain)
     }
 
-    private init(interactor: CreateGroupInteractor, keychain: KeychainStore) {
+    private init(interactor: CreateGroupInteractor, keychain: IdentityKeychainStore) {
         self.interactor = interactor
         self.keychain = keychain
     }
 
-    deinit { try? keychain.wipe() }
+    deinit { try? keychain.wipeAll() }
 }
 
 private struct FlowTestInboxTransport: InboxTransport {
