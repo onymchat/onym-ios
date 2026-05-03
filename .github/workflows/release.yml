@@ -33,9 +33,15 @@ on:
         description: 'Release tag (e.g. v0.1.0)'
         required: true
         type: string
+      issue_number:
+        description: 'Optional issue number to report XCTest results to (set automatically when dispatched from `release-from-issue.yml`).'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: write   # tag push + GitHub Release creation + asset upload
+  issues: write     # `report-to-issue` ticks per-class checkboxes
 
 jobs:
   lint:
@@ -170,8 +176,10 @@ jobs:
             -resultBundlePath /tmp/onym-ios-unit.xcresult \
             -only-testing:OnymIOSTests
 
-      - name: Upload unit test xcresult on failure
-        if: failure()
+      - name: Upload unit test xcresult
+        # `always()` so `report-to-issue` can parse green runs too —
+        # not just failures.
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: unit-tests-xcresult
@@ -250,8 +258,9 @@ jobs:
             -resultBundlePath /tmp/onym-ios-ui.xcresult \
             -only-testing:OnymIOSUITests
 
-      - name: Upload UI test xcresult on failure
-        if: failure()
+      - name: Upload UI test xcresult
+        # `always()` so `report-to-issue` can parse green runs too.
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ui-tests-xcresult
@@ -296,19 +305,25 @@ jobs:
       - name: Generate Xcode project
         run: ./generate-xcodeproj.sh
 
-      - name: Configure SSH for Match
+      - name: Configure SSH for Match (job-isolated, no global mutation)
+        # PRIOR BUG: this step used to `cat >> ~/.ssh/config <<EOF`. On a
+        # self-hosted macOS runner `~` is the runner user's actual home
+        # directory, so every release run silently appended a `Host
+        # github.com` block to the user's personal SSH config — and
+        # because `cat <<EOF` adds no leading newline, on a config that
+        # didn't end with `\n` the appended `Host` merged into the
+        # previous line's last token (`yes` → `yesHost`), turning the
+        # file into garbage and breaking unrelated git operations.
+        #
+        # New shape: write the key + a job-scoped known_hosts to /tmp,
+        # and let the fastlane step pick them up via GIT_SSH_COMMAND.
+        # No mutation of `~/.ssh/`.
         env:
           MATCH_DEPLOY_KEY: ${{ secrets.MATCH_DEPLOY_KEY }}
         run: |
-          mkdir -p ~/.ssh
-          echo "$MATCH_DEPLOY_KEY" > ~/.ssh/match_key
-          chmod 600 ~/.ssh/match_key
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
-          cat >> ~/.ssh/config <<EOF
-          Host github.com
-            IdentityFile ~/.ssh/match_key
-            IdentitiesOnly yes
-          EOF
+          umask 077
+          echo "$MATCH_DEPLOY_KEY" > /tmp/match_key
+          ssh-keyscan github.com > /tmp/match_known_hosts
 
       - name: Install Fastlane
         run: |
@@ -320,7 +335,20 @@ jobs:
           MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
           MATCH_TEAM_ID: ${{ secrets.MATCH_TEAM_ID }}
           MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          # `-F /dev/null` ignores the runner user's personal SSH config,
+          # `-i` pins the per-job key, `IdentitiesOnly` blocks the agent
+          # from offering other keys. All ssh invoked by `git clone` of
+          # the match repo (and any sub-clones fastlane does) inherits
+          # this without touching shared state.
+          GIT_SSH_COMMAND: 'ssh -i /tmp/match_key -o IdentitiesOnly=yes -F /dev/null -o UserKnownHostsFile=/tmp/match_known_hosts -o StrictHostKeyChecking=accept-new'
         run: bundle exec fastlane ios release
+
+      - name: Clean up match key
+        # Best-effort wipe of the per-job key. /tmp on macOS persists
+        # across reboots so leaving it would let the next workflow's
+        # user (or a curious local user) read the deploy key.
+        if: always()
+        run: rm -f /tmp/match_key /tmp/match_known_hosts
 
       - name: Parse version from tag
         id: version
@@ -338,3 +366,84 @@ jobs:
         with:
           tag_name: ${{ inputs.tag }}
           files: OnymIOS-${{ steps.version.outputs.version }}.ipa
+
+  # ----------------------------------------------------------------------
+  # Report XCTest outcomes back into the originating release issue.
+  #
+  # Runs whether tests passed or failed (`if: always()`), but only when
+  # an `issue_number` was supplied (manual `gh workflow run Release -f
+  # tag=...` without an issue still works — this job just no-ops).
+  # ----------------------------------------------------------------------
+  report-to-issue:
+    name: Report XCTest results to issue
+    runs-on: [self-hosted, macOS, ARM64]
+    needs: [unit-tests, ui-tests]
+    if: always() && inputs.issue_number != ''
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download unit-tests xcresult
+        uses: actions/download-artifact@v4
+        with:
+          name: unit-tests-xcresult
+          path: /tmp/unit-xcresult
+        continue-on-error: true   # bundle may be missing if the test job died before upload
+
+      - name: Download ui-tests xcresult
+        uses: actions/download-artifact@v4
+        with:
+          name: ui-tests-xcresult
+          path: /tmp/ui-xcresult
+        continue-on-error: true
+
+      - name: Parse xcresult bundles into per-class results
+        id: parse
+        run: |
+          # Walk both bundles via `xcrun xcresulttool get test-results
+          # tests --format json` (Xcode 16+ API; the legacy
+          # `--legacy` flag was removed). Output a JSON map
+          # `{<Target>.<Class>: "passed" | "failed"}` plus a per-class
+          # failures section for the comment.
+          python3 .github/workflows/parse_xcresult.py \
+            --bundle "/tmp/unit-xcresult" --target OnymIOSTests \
+            --bundle "/tmp/ui-xcresult"   --target OnymIOSUITests \
+            --results /tmp/results.json \
+            --comment-md /tmp/failure_comment.md
+
+      - name: Tick passed-class checkboxes in issue body
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ inputs.issue_number }}
+        run: |
+          # Pull the current issue body, replace `[ ] <FQN>` with
+          # `[x] <FQN>` for each passed class. Untouched lines are
+          # left as `[ ]` so failing / never-ran classes stay open.
+          # Only edits between the UI_TESTS markers — Manual QA is
+          # never modified.
+          gh issue view "$ISSUE" --json body --jq .body > /tmp/current_body.md
+          python3 .github/workflows/apply_results.py \
+            --body /tmp/current_body.md \
+            --results /tmp/results.json \
+            --out /tmp/updated_body.md
+          gh issue edit "$ISSUE" --body-file /tmp/updated_body.md
+
+      - name: Comment on failures (if any)
+        # Only posts when at least one class failed. The `parse` step
+        # writes an empty file otherwise.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ inputs.issue_number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -s /tmp/failure_comment.md ]; then
+            {
+              echo "❌ XCTest failures for [run ${{ github.run_id }}]($RUN_URL):"
+              echo ""
+              cat /tmp/failure_comment.md
+              echo ""
+              echo "_xcresult bundles attached as run artifacts._"
+            } > /tmp/full_comment.md
+            gh issue comment "$ISSUE" --body-file /tmp/full_comment.md
+          else
+            echo "All discovered XCTestCase classes passed — no comment needed."
+          fi
