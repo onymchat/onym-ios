@@ -142,6 +142,23 @@ struct OnymIOSApp: App {
                     groupRepository: groupRepository
                 )
             },
+            makeJoinFlow: { @MainActor capability in
+                let sender = JoinRequestSender(
+                    identity: repository,
+                    inboxTransport: inboxTransport
+                )
+                return JoinFlow(
+                    capability: capability,
+                    suggestedDisplayLabel: "alice",  // PR-7+: derive from active identity
+                    submitRequest: { cap, label in
+                        await sender.send(
+                            capability: cap,
+                            joinerDisplayLabel: label
+                        )
+                    },
+                    groupRepository: groupRepository
+                )
+            },
             makeChatsFlow: { @MainActor in
                 ChatsFlow(repository: groupRepository)
             },
@@ -263,9 +280,13 @@ struct OnymIOSApp: App {
                     }
                 }
                 .sheet(item: $pendingCapability) { cap in
-                    JoinInviteCapturedPlaceholderView(
-                        capability: cap,
-                        onBack: { pendingCapability = nil }
+                    // PR-7: replace PR-6's placeholder with the real
+                    // join flow. Construct the JoinFlow lazily per
+                    // sheet entry — re-tapping a fresh link should
+                    // start a clean state machine.
+                    JoinView(
+                        flow: dependencies.makeJoinFlow(cap),
+                        onClose: { pendingCapability = nil }
                     )
                 }
         }
