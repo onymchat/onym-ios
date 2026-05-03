@@ -299,6 +299,11 @@ struct CreateGroupInteractor: Sendable {
         //    per-dialog identity.
         let creatorBlsSecret: Data
         do {
+            // Proof witness for `OneOnOne.proveCreate(secretKey0:)` +
+            // `Common.leafHash(secretKey:)`. Same justification as the
+            // Tyranny path — SDK takes the BLS secret directly. Stays
+            // in this stack frame.
+            // onym:allow-secret-read
             creatorBlsSecret = try await identity.blsSecretKey()
         } catch {
             throw CreateGroupError.missingIdentity
