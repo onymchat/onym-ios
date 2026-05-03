@@ -102,7 +102,7 @@ struct OnymMark: View {
     var spinning: Bool = false
     var fillOpacity: Double = 0.92
 
-    @State private var rotation: Double = -90  // -90° lands the dash pattern's first gap near 1:30
+    @State private var rotation: Double = -45  // -45° lands the dash pattern's gaps at 1:00 and 7:00
 
     var body: some View {
         let stroke = size * strokeRatio
