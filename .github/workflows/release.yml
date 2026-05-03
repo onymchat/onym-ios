@@ -83,6 +83,11 @@ jobs:
     runs-on: [self-hosted, macOS, ARM64]
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Asset catalogs (AppIcon, LaunchLogo) are LFS-tracked PNGs.
+          # Without this xcodebuild compiles pointer files into
+          # Assets.car and any test that touches the icon UI fails.
+          lfs: true
 
       - name: Select Xcode 26
         run: sudo xcode-select -s /Applications/Xcode_26.app
@@ -166,6 +171,12 @@ jobs:
     runs-on: [self-hosted, macOS, ARM64]
     steps:
       - uses: actions/checkout@v4
+        with:
+          # See unit-tests checkout — LFS PNGs are needed for the app
+          # under test's Assets.car. Without this, XCUI queries against
+          # icon-bearing buttons miss because Assets.car holds pointer
+          # text instead of pixels.
+          lfs: true
 
       - name: Select Xcode 26
         run: sudo xcode-select -s /Applications/Xcode_26.app
@@ -231,6 +242,11 @@ jobs:
     needs: [lint, create-release, unit-tests, ui-tests]
     steps:
       - uses: actions/checkout@v4
+        with:
+          # AppIcon + LaunchLogo PNGs are LFS-tracked. Without this the
+          # shipped IPA carries pointer files instead of art and the
+          # App Store install will fail icon validation.
+          lfs: true
 
       - name: Select Xcode 26
         run: sudo xcode-select -s /Applications/Xcode_26.app
