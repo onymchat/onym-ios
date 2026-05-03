@@ -149,7 +149,11 @@ jobs:
         # NOTE: do NOT pass CODE_SIGNING_ALLOWED=NO — without the synthesised
         # `application-identifier` entitlement, every Keychain call in the
         # IdentityRepository tests fails with errSecMissingEntitlement (-34018).
+        # The pre-clean is mandatory on self-hosted runners — xcodebuild
+        # refuses to overwrite an existing -resultBundlePath / derivedData
+        # directory and exits 64.
         run: |
+          rm -rf /tmp/onym-ios-release-unit /tmp/onym-ios-unit.xcresult
           xcodebuild test \
             -project OnymIOS.xcodeproj \
             -scheme OnymIOS \
@@ -220,7 +224,10 @@ jobs:
         # Same Keychain-entitlement note as the unit job — keep CODE_SIGNING
         # at the default so XCUIApplication can use the test-isolated
         # keychain service from the App's --ui-testing branch.
+        # The pre-clean is mandatory on self-hosted runners — xcodebuild
+        # exits 64 if the -resultBundlePath / derivedData directory exists.
         run: |
+          rm -rf /tmp/onym-ios-release-ui /tmp/onym-ios-ui.xcresult
           xcodebuild test \
             -project OnymIOS.xcodeproj \
             -scheme OnymIOS \
