@@ -9,6 +9,8 @@ struct OnymIOSApp: App {
     private let groupRepository: GroupRepository
     private let inboxTransport: any InboxTransport
     private let incomingInvitations: IncomingInvitationsRepository
+    private let introKeyStore: any IntroKeyStore
+    private let introRequestStore: any IntroRequestStore
 
     init() {
         let args = ProcessInfo.processInfo.arguments
@@ -90,6 +92,15 @@ struct OnymIOSApp: App {
             (try? SwiftDataInvitationStore()) ?? SwiftDataInvitationStore.inMemory()
         self.incomingInvitations = IncomingInvitationsRepository(store: invitationStore)
 
+        // Per-invite ephemeral X25519 keys for the Level-2 deeplink
+        // invite flow. Keychain-backed in production; survives across
+        // launches so an outstanding invite link can still be served.
+        let introKeyStore = KeychainIntroKeyStore()
+        self.introKeyStore = introKeyStore
+        // Process-lifetime sink for inbound "request to join"
+        // envelopes. The sender-approval UI (PR-5+) consumes this.
+        self.introRequestStore = InMemoryIntroRequestStore()
+
         // Single shared IdentitiesFlow so the toolbar picker on Chats
         // and the Settings → Identities screen observe the same state.
         let identitiesFlow = IdentitiesFlow(repository: repository)
@@ -168,6 +179,11 @@ struct OnymIOSApp: App {
                     for await removed in identityRepository.identityRemoved {
                         await groupRepository.removeForOwner(removed)
                         await incomingInvitations.removeForOwner(removed)
+                        // Cascade-wipe the removed identity's intro
+                        // privkeys so an attacker who restores a
+                        // backup post-removal can't decrypt
+                        // outstanding intro requests.
+                        await introKeyStore.deleteForOwner(removed)
                     }
                 }
                 .task {
@@ -180,6 +196,36 @@ struct OnymIOSApp: App {
                         repository: incomingInvitations
                     )
                     await fanout.run()
+                }
+                .task {
+                    // Level-2 deeplink intro pump. Subscribes to one
+                    // Nostr inbox tag per outstanding invite link
+                    // owned by the current identity; switching identity
+                    // re-balances the subscription set automatically.
+                    // No per-identity dedup map — multiple simultaneous
+                    // identities each get their own pump if they each
+                    // have outstanding invites. We start with the
+                    // current identity only; when the user switches,
+                    // the outer task restarts via .task { } onChange
+                    // semantics in a follow-up. For V1, single-active-
+                    // identity pump is sufficient.
+                    let pump = IntroInboxPump(
+                        inboxTransport: inboxTransport,
+                        store: introRequestStore
+                    )
+                    // Re-resolve the active identity on each emission
+                    // and re-subscribe to its entries stream.
+                    var currentTask: Task<Void, Never>?
+                    for await activeID in identityRepository.currentIdentityID {
+                        currentTask?.cancel()
+                        guard let activeID else {
+                            currentTask = nil
+                            continue
+                        }
+                        let entries = introKeyStore.entriesStream(forOwner: activeID)
+                        currentTask = Task { await pump.run(entries: entries) }
+                    }
+                    currentTask?.cancel()
                 }
         }
     }

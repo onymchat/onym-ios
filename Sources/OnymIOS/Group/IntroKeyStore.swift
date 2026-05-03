@@ -48,4 +48,12 @@ protocol IntroKeyStore: Sendable {
     /// Hooked into `IdentityRepository`'s removal listeners.
     @discardableResult
     func deleteForOwner(_ ownerIdentityID: IdentityID) async -> Int
+
+    /// Hot stream of every entry owned by `ownerIdentityID`. New
+    /// subscribers get the current snapshot first; subsequent
+    /// emissions follow `save` / `revoke` / `deleteForOwner` calls.
+    /// Sorted newest-first by `createdAt`. `IntroInboxPump` subscribes
+    /// here so adding/revoking an invite immediately re-balances the
+    /// transport subscription set.
+    nonisolated func entriesStream(forOwner ownerIdentityID: IdentityID) -> AsyncStream<[IntroKeyEntry]>
 }
