@@ -96,6 +96,7 @@ struct OnymIOSApp: App {
         // invite flow. Keychain-backed in production; survives across
         // launches so an outstanding invite link can still be served.
         let introKeyStore = KeychainIntroKeyStore()
+        let inviteIntroducer = InviteIntroducer(store: introKeyStore)
         self.introKeyStore = introKeyStore
         // Process-lifetime sink for inbound "request to join"
         // envelopes. The sender-approval UI (PR-5+) consumes this.
@@ -126,6 +127,13 @@ struct OnymIOSApp: App {
                     groups: groupRepository,
                     inboxTransport: inboxTransport
                 ))
+            },
+            makeShareInviteFlow: { @MainActor in
+                ShareInviteFlow(
+                    identity: repository,
+                    introducer: inviteIntroducer,
+                    groupRepository: groupRepository
+                )
             },
             makeChatsFlow: { @MainActor in
                 ChatsFlow(repository: groupRepository)

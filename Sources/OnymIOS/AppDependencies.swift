@@ -11,6 +11,7 @@ struct AppDependencies {
     let makeRelayerSettingsFlow: @MainActor () -> RelayerSettingsFlow
     let makeAnchorsPickerFlow: @MainActor () -> AnchorsPickerFlow
     let makeCreateGroupFlow: @MainActor () -> CreateGroupFlow
+    let makeShareInviteFlow: @MainActor () -> ShareInviteFlow
     let makeChatsFlow: @MainActor () -> ChatsFlow
     /// Single shared instance — the toolbar picker on Chats and the
     /// Settings → Identities screen observe the same state, so a

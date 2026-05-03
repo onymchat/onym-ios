@@ -21,9 +21,15 @@ import SwiftUI
 /// `SettingsView.tappedCreateGroup`).
 struct CreateGroupView: View {
     @State var flow: CreateGroupFlow
+    let makeShareInviteFlow: @MainActor () -> ShareInviteFlow
+    @State private var shareInviteFlow: ShareInviteFlow?
 
-    init(flow: CreateGroupFlow) {
+    init(
+        flow: CreateGroupFlow,
+        makeShareInviteFlow: @escaping @MainActor () -> ShareInviteFlow
+    ) {
         _flow = State(wrappedValue: flow)
+        self.makeShareInviteFlow = makeShareInviteFlow
     }
 
     var body: some View {
@@ -44,7 +50,31 @@ struct CreateGroupView: View {
         case .inviteByKey: CreateGroupInviteByKeyView(flow: flow)
         case .creating: CreateGroupCreatingView(flow: flow)
         case .success: CreateGroupSuccessView(flow: flow)
+        case .shareInvite:
+            if let group = flow.createdGroup {
+                shareInviteScreen(group: group)
+            } else {
+                // Defensive: route should only be entered when
+                // `createdGroup` is non-nil (button is disabled
+                // otherwise). Fall back to the success screen.
+                CreateGroupSuccessView(flow: flow)
+            }
         }
+    }
+
+    @ViewBuilder
+    private func shareInviteScreen(group: ChatGroup) -> some View {
+        // Construct the ShareInviteFlow lazily on first appearance and
+        // hold it for the lifetime of the parent. Re-entering the
+        // screen reuses the same flow so its `.failed` state survives
+        // a Done → Back round-trip.
+        let f = shareInviteFlow ?? makeShareInviteFlow()
+        ShareInviteView(
+            groupID: group.id,
+            flow: f,
+            onDone: flow.tappedDone
+        )
+        .onAppear { if shareInviteFlow == nil { shareInviteFlow = f } }
     }
 }
 
@@ -1252,12 +1282,25 @@ private struct CreateGroupSuccessView: View {
 
     private var footer: some View {
         VStack(spacing: 10) {
+            // Level-2 deeplink invite (PR-5 of the deeplink stack).
+            // Only enabled once the group is persisted on chain — the
+            // invite-link mint side-effect needs a real `groupID` and
+            // an active identity.
             OnymPrimaryButton(
-                title: "Done",
-                enabled: true,
+                title: "Share invite link",
+                enabled: flow.createdGroup != nil,
                 accent: accentColor,
-                action: flow.tappedDone
+                action: flow.tappedShareInvite
             )
+            .accessibilityIdentifier("create_group.share_invite_button")
+            Button(action: flow.tappedDone) {
+                Text("Done")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(OnymTokens.text2)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+            }
+            .accessibilityIdentifier("create_group.done_button")
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)

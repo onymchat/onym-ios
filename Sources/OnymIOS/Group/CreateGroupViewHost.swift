@@ -10,6 +10,7 @@ import SwiftUI
 /// shortcuts, etc.) can share the same factory plumbing.
 struct CreateGroupViewHost: View {
     let makeFlow: @MainActor () -> CreateGroupFlow
+    let makeShareInviteFlow: @MainActor () -> ShareInviteFlow
     let onClose: () -> Void
 
     @State private var flow: CreateGroupFlow?
@@ -17,7 +18,7 @@ struct CreateGroupViewHost: View {
     var body: some View {
         Group {
             if let flow {
-                CreateGroupView(flow: flow)
+                CreateGroupView(flow: flow, makeShareInviteFlow: makeShareInviteFlow)
             } else {
                 Color.black.ignoresSafeArea()
             }
