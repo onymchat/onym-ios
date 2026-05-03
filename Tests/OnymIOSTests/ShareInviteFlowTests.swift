@@ -22,7 +22,8 @@ final class ShareInviteFlowTests: XCTestCase {
     func test_mintFor_knownGroupAndIdentity_emitsReadyWithParseableLink() async throws {
         let identity = IdentityRepository(keychain: keychain, selectionStore: .inMemory())
         _ = try await identity.bootstrap()
-        let owner = try XCTUnwrap(await identity.currentSelectedID())
+        let resolved = await identity.currentSelectedID()
+        let owner = try XCTUnwrap(resolved)
 
         let store = TestableInMemoryGroupStore()
         let group = makeGroup(id: String(repeating: "ab", count: 32), name: "Family", owner: owner)
@@ -56,7 +57,8 @@ final class ShareInviteFlowTests: XCTestCase {
     func test_mintFor_unknownGroup_failsWithoutTouchingStore() async throws {
         let identity = IdentityRepository(keychain: keychain, selectionStore: .inMemory())
         _ = try await identity.bootstrap()
-        let owner = try XCTUnwrap(await identity.currentSelectedID())
+        let resolved = await identity.currentSelectedID()
+        let owner = try XCTUnwrap(resolved)
 
         let store = TestableInMemoryGroupStore()
         // No groups seeded.
@@ -83,7 +85,8 @@ final class ShareInviteFlowTests: XCTestCase {
     func test_mintFor_calledTwice_mintsTwoIndependentKeypairs() async throws {
         let identity = IdentityRepository(keychain: keychain, selectionStore: .inMemory())
         _ = try await identity.bootstrap()
-        let owner = try XCTUnwrap(await identity.currentSelectedID())
+        let resolved = await identity.currentSelectedID()
+        let owner = try XCTUnwrap(resolved)
 
         let store = TestableInMemoryGroupStore()
         let group = makeGroup(id: String(repeating: "ab", count: 32), name: "G", owner: owner)
@@ -125,7 +128,8 @@ final class ShareInviteFlowTests: XCTestCase {
     func test_state_transitionsThroughMinting() async throws {
         let identity = IdentityRepository(keychain: keychain, selectionStore: .inMemory())
         _ = try await identity.bootstrap()
-        let owner = try XCTUnwrap(await identity.currentSelectedID())
+        let resolved = await identity.currentSelectedID()
+        let owner = try XCTUnwrap(resolved)
 
         let store = TestableInMemoryGroupStore()
         let group = makeGroup(id: String(repeating: "ab", count: 32), name: "G", owner: owner)
