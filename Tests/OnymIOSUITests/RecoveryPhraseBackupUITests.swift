@@ -92,6 +92,10 @@ final class RecoveryPhraseBackupUITests: XCTestCase {
         let app = AppLauncher.launchFresh(language: "ru")
         defer { app.terminate() }
 
+        // Chats is the default tab — drill into Settings before
+        // asserting the Russian Settings copy exists.
+        SettingsScreen(app: app).tapSettingsTab(timeout: 6)
+
         XCTAssertTrue(
             app.staticTexts["Настройки"].waitForExistence(timeout: 6),
             "Russian Settings nav title never appeared"

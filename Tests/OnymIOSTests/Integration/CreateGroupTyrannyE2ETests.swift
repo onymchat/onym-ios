@@ -224,17 +224,13 @@ final class CreateGroupTyrannyE2ETests: XCTestCase {
     // MARK: - Helpers
 
     private func requireIntegrationGate() throws {
-        // Temporarily disabled — both iOS (here) and Android (PR #32 in
-        // onym-android) hit `Error(Contract, #15) InvalidCommitmentEncoding`
-        // intermittently against the v0.0.5 tyranny contract. Suspecting
-        // an SDK ↔ contract Fr-encoding mismatch; pending investigation.
-        // To re-enable: drop this `XCTSkip` and the gate falls back to the
-        // ONYM_INTEGRATION env-var check below.
-        throw XCTSkip(
-            "E2E temporarily disabled — investigating Error #15 false positive (SDK ↔ contract Fr encoding)."
-        )
-
-        // swiftlint:disable:next unreachable_code
+        // Re-enabled in v0.0.5 after PR #36 landed `randomCanonicalFr()`
+        // — the previous Error #15 was caused by uniformly-random
+        // `groupID` occasionally landing `>= r`, which the contract
+        // rejects by design (sep-tyranny/src/lib.rs:299). Releases now
+        // need this test to pass; locally, set ONYM_INTEGRATION=1 +
+        // ONYM_RELAYER_AUTH_TOKEN to run it. CI's release.yml wires
+        // both via `xcrun simctl spawn booted launchctl setenv`.
         guard ProcessInfo.processInfo.environment["ONYM_INTEGRATION"] == "1" else {
             throw XCTSkip(
                 "Set ONYM_INTEGRATION=1 (and ONYM_RELAYER_AUTH_TOKEN) to run this test."

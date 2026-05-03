@@ -113,6 +113,11 @@ struct CreateGroupInteractor: Sendable {
         // 4. Creator member (BLS pubkey + Poseidon leaf hash).
         let blsSecret: Data
         do {
+            // Proof witness for `Tyranny.proveCreate(adminSecretKey:)` +
+            // `Common.leafHash(secretKey:)`. The SDK takes the BLS
+            // secret directly; no encapsulated equivalent. Stays in
+            // this stack frame and is dropped when the function returns.
+            // onym:allow-secret-read
             blsSecret = try await identity.blsSecretKey()
         } catch {
             throw CreateGroupError.missingIdentity
