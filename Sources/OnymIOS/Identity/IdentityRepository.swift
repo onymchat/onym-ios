@@ -254,6 +254,31 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
     /// envelope decrypts under the right key — even when the receiving
     /// identity isn't the currently-selected one.
     func decryptInvitation(envelopeBytes: Data, asIdentity identityID: IdentityID) throws -> Data {
+        guard let snapshot = try keychain.read(identityID) else {
+            throw InvitationDecryptError.identityNotLoaded
+        }
+        let privateKey = try Self.inboxKeyAgreementPrivateKey(
+            fromNostrSecret: snapshot.nostrSecretKey
+        )
+        return try Self.decryptSealedEnvelope(
+            envelopeBytes: envelopeBytes,
+            recipientX25519PrivateKey: privateKey
+        )
+    }
+
+    /// Static decrypt for callers that already hold the X25519 private
+    /// key — used by `JoinRequestApprover` to open envelopes sealed
+    /// to a per-invite ephemeral introPub (where the matching privkey
+    /// lives in `IntroKeyStore`, not in the identity keychain).
+    ///
+    /// Same wire-format guarantees as `decryptInvitation(envelopeBytes:asIdentity:)`:
+    /// requires `scheme = "x25519-aes-256-gcm-v1"`, verifies the
+    /// optional Ed25519 signature on the ephemeral pubkey when
+    /// present, runs ECDH + HKDF + AES-GCM open.
+    static func decryptSealedEnvelope(
+        envelopeBytes: Data,
+        recipientX25519PrivateKey: Curve25519.KeyAgreement.PrivateKey
+    ) throws -> Data {
         let envelope: SealedEnvelope
         do {
             envelope = try JSONDecoder().decode(SealedEnvelope.self, from: envelopeBytes)
@@ -286,16 +311,9 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
             }
         }
 
-        guard let snapshot = try keychain.read(identityID) else {
-            throw InvitationDecryptError.identityNotLoaded
-        }
-        let privateKey = try Self.inboxKeyAgreementPrivateKey(
-            fromNostrSecret: snapshot.nostrSecretKey
-        )
-
         do {
             let ephPub = try Curve25519.KeyAgreement.PublicKey(rawRepresentation: ephPubData)
-            let sharedSecret = try privateKey.sharedSecretFromKeyAgreement(with: ephPub)
+            let sharedSecret = try recipientX25519PrivateKey.sharedSecretFromKeyAgreement(with: ephPub)
             let key = sharedSecret.hkdfDerivedSymmetricKey(
                 using: SHA256.self,
                 salt: Data("sep-invitation-v1".utf8),

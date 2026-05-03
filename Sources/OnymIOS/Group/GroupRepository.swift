@@ -74,6 +74,17 @@ actor GroupRepository {
         await refreshFromStore()
     }
 
+    /// One-shot read of every cached group across **all** identities.
+    /// Used by `JoinRequestApprover` to look up a group by its raw
+    /// `group_id` bytes — the request can name any group on the
+    /// device, and the lookup must succeed regardless of which
+    /// identity is currently selected. Subscribers prefer
+    /// `snapshots`.
+    func currentGroups() async -> [ChatGroup] {
+        if cached.isEmpty { await refreshFromStore() }
+        return cached
+    }
+
     // MARK: - Subscriptions
 
     nonisolated var snapshots: AsyncStream<[ChatGroup]> {
