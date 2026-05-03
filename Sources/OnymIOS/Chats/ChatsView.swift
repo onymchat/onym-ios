@@ -7,6 +7,7 @@ import SwiftUI
 /// entry point to Create Group post-PR-D wiring.
 struct ChatsView: View {
     let flow: ChatsFlow
+    let identitiesFlow: IdentitiesFlow
     let makeCreateGroupFlow: @MainActor () -> CreateGroupFlow
 
     @State private var showCreateGroup = false
@@ -19,8 +20,13 @@ struct ChatsView: View {
                 groupList
             }
         }
-        .navigationTitle("Chats")
+        .navigationTitle(currentIdentityName)
         .toolbar {
+            // Identity picker — top-bar leading slot. Always shown so
+            // the user can switch identities even from the empty state.
+            ToolbarItem(placement: .topBarLeading) {
+                IdentityPickerMenu(flow: identitiesFlow)
+            }
             // Plus button mirrors iOS Mail / Messages — useful once
             // the user already has at least one chat. Hidden in the
             // empty state because the central CTA already covers it.
@@ -36,12 +42,23 @@ struct ChatsView: View {
             }
         }
         .task { flow.start() }
+        .task { await identitiesFlow.start() }
         .fullScreenCover(isPresented: $showCreateGroup) {
             CreateGroupViewHost(
                 makeFlow: makeCreateGroupFlow,
                 onClose: { showCreateGroup = false }
             )
         }
+    }
+
+    /// "Chats" when no identity exists yet (pre-bootstrap), otherwise
+    /// the active identity's display name. SwiftUI re-renders on every
+    /// `currentID` change because `identitiesFlow` is `@Observable`.
+    private var currentIdentityName: String {
+        guard let id = identitiesFlow.currentID,
+              let summary = identitiesFlow.identities.first(where: { $0.id == id })
+        else { return "Chats" }
+        return summary.name
     }
 
     // MARK: - Empty state

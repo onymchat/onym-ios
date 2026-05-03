@@ -28,6 +28,7 @@ struct RootView: View {
                 NavigationStack {
                     ChatsView(
                         flow: dependencies.makeChatsFlow(),
+                        identitiesFlow: dependencies.identitiesFlow,
                         makeCreateGroupFlow: dependencies.makeCreateGroupFlow
                     )
                 }
@@ -38,7 +39,8 @@ struct RootView: View {
                     SettingsView(
                         makeBackupFlow: dependencies.makeRecoveryPhraseBackupFlow,
                         makeRelayerSettingsFlow: dependencies.makeRelayerSettingsFlow,
-                        makeAnchorsPickerFlow: dependencies.makeAnchorsPickerFlow
+                        makeAnchorsPickerFlow: dependencies.makeAnchorsPickerFlow,
+                        identitiesFlow: dependencies.identitiesFlow
                     )
                 }
             }

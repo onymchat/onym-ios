@@ -90,6 +90,10 @@ struct OnymIOSApp: App {
             (try? SwiftDataInvitationStore()) ?? SwiftDataInvitationStore.inMemory()
         self.incomingInvitations = IncomingInvitationsRepository(store: invitationStore)
 
+        // Single shared IdentitiesFlow so the toolbar picker on Chats
+        // and the Settings → Identities screen observe the same state.
+        let identitiesFlow = IdentitiesFlow(repository: repository)
+
         self.dependencies = AppDependencies(
             makeRecoveryPhraseBackupFlow: { @MainActor in
                 RecoveryPhraseBackupFlow(
@@ -114,7 +118,8 @@ struct OnymIOSApp: App {
             },
             makeChatsFlow: { @MainActor in
                 ChatsFlow(repository: groupRepository)
-            }
+            },
+            identitiesFlow: identitiesFlow
         )
     }
 
