@@ -45,12 +45,48 @@ final class GroupProofGeneratorTests: XCTestCase {
         XCTAssertEqual(result.adminPubkeyCommitment, result.publicInputs[2])
     }
 
-    func test_proveCreate_anarchy_throwsNotYetSupported() {
-        let input = stubInput(groupType: .anarchy)
+    func test_proveCreate_anarchy_returnsRawProofAnd2ElementPI() throws {
+        // Founding ceremony: single-member roster (the creator).
+        // Anarchy uses the membership circuit at epoch 0 — no admin
+        // privileges, no group_id_fr binding.
+        let creatorSecret = fr(1)
+        let creatorMember = try GovernanceMember(
+            publicKeyCompressed: Common.publicKey(secretKey: creatorSecret),
+            leafHash: Common.leafHash(secretKey: creatorSecret)
+        )
+        let input = GroupProofCreateInput(
+            groupType: .anarchy,
+            tier: .small,
+            members: [creatorMember],
+            adminBlsSecretKey: creatorSecret,
+            adminIndex: 0,                  // creator's leaf position
+            groupID: Data(repeating: 0xAB, count: 32),  // not bound into proof
+            salt: Data(repeating: 0xEE, count: 32)
+        )
+        let result = try OnymGroupProofGenerator().proveCreate(input)
+        XCTAssertEqual(result.proof.count, 1601,
+                       "Anarchy returns the same raw 1601-byte plonk proof as Tyranny / 1-on-1")
+        XCTAssertEqual(result.publicInputs.count, 2,
+                       "Anarchy PI = [commitment, Fr(0)] — 2 entries")
+        XCTAssertEqual(result.publicInputs[0].count, 32)
+        XCTAssertEqual(result.publicInputs[1], Data(repeating: 0, count: 32),
+                       "Fr(0) tail must be 32 zero bytes")
+    }
+
+    func test_proveCreate_anarchy_proverIndexOutOfRange_throws() {
+        let input = GroupProofCreateInput(
+            groupType: .anarchy,
+            tier: .small,
+            members: [],   // empty roster — index 0 is out of range
+            adminBlsSecretKey: fr(1),
+            adminIndex: 0,
+            groupID: Data(repeating: 0, count: 32),
+            salt: Data(repeating: 0, count: 32)
+        )
         XCTAssertThrowsError(try OnymGroupProofGenerator().proveCreate(input)) { error in
             XCTAssertEqual(
                 error as? GroupProofGeneratorError,
-                .notYetSupported(.anarchy)
+                .adminIndexOutOfRange(index: 0, count: 0)
             )
         }
     }

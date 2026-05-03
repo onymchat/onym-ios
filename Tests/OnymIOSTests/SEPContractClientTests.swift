@@ -110,6 +110,59 @@ final class SEPContractClientTests: XCTestCase {
                        "OneOnOne create needs 2 PI entries: [commitment, Fr(0)]")
     }
 
+    func test_createGroupAnarchy_sendsCorrectEnvelopeAndPayload() async throws {
+        let recorder = RecordingTransport(
+            response: SEPSubmissionResponse(
+                accepted: true,
+                transactionHash: "anarchytx",
+                message: nil
+            )
+        )
+        let client = SEPContractClient(
+            contractID: testContractID,
+            contractType: .anarchy,
+            network: .testnet,
+            transport: recorder
+        )
+
+        let payload = AnarchyCreateGroupPayload(
+            groupID: Data(repeating: 0xAB, count: 32),
+            commitment: Data(repeating: 0xCD, count: 32),
+            tier: SEPTier.small.rawValue,
+            memberCount: 1,
+            proof: Data(repeating: 0xEE, count: 1601),
+            publicInputs: [
+                Data(repeating: 0xCD, count: 32),
+                Data(repeating: 0x00, count: 32),
+            ]
+        )
+        let response = try await client.createGroupAnarchy(payload)
+
+        XCTAssertTrue(response.accepted)
+        XCTAssertEqual(response.transactionHash, "anarchytx")
+
+        let json = try XCTUnwrap(recorder.lastJSON())
+        XCTAssertEqual(json["function"] as? String, "create_group")
+        XCTAssertEqual(json["contractID"] as? String, testContractID)
+        XCTAssertEqual(json["contractType"] as? String, "anarchy",
+                       "Anarchy contract type wire spelling must match relayer's ContractType enum")
+        XCTAssertEqual(json["network"] as? String, "testnet")
+
+        let payloadJSON = try XCTUnwrap(json["payload"] as? [String: Any])
+        XCTAssertNotNil(payloadJSON["group_id"])
+        XCTAssertNotNil(payloadJSON["commitment"])
+        XCTAssertNotNil(payloadJSON["proof"])
+        XCTAssertEqual((payloadJSON["tier"] as? NSNumber)?.intValue, 0,
+                       "tier ships as raw Int (0=small)")
+        XCTAssertEqual((payloadJSON["member_count"] as? NSNumber)?.intValue, 1,
+                       "member_count is informational but always sent")
+        XCTAssertNil(payloadJSON["admin_pubkey_commitment"],
+                     "Anarchy has no admin field — equal control by design")
+        let publicInputs = try XCTUnwrap(payloadJSON["publicInputs"] as? [String])
+        XCTAssertEqual(publicInputs.count, 2,
+                       "Anarchy create needs 2 PI entries: [commitment, Fr(0)]")
+    }
+
     func test_createGroupTyranny_mainnetSerializesAsPublic() async throws {
         let recorder = RecordingTransport(
             response: SEPSubmissionResponse(accepted: true, transactionHash: nil, message: nil)

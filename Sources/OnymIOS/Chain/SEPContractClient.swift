@@ -99,6 +99,10 @@ struct SEPContractClient: Sendable {
         try await invoke("create_group", payload: payload, responseType: SEPSubmissionResponse.self)
     }
 
+    func createGroupAnarchy(_ payload: AnarchyCreateGroupPayload) async throws -> SEPSubmissionResponse {
+        try await invoke("create_group", payload: payload, responseType: SEPSubmissionResponse.self)
+    }
+
     func getCommitment(groupID: Data) async throws -> SEPCommitmentEntry {
         try await invoke(
             "get_commitment",

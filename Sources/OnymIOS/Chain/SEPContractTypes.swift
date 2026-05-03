@@ -134,6 +134,38 @@ struct OneOnOneCreateGroupPayload: Encodable, Equatable, Sendable {
     }
 }
 
+/// `create_group` payload for the Anarchy contract. Membership-style
+/// 2-element PI like OneOnOne, but adds `tier` (selects the membership
+/// VK + tree depth) and `member_count` (informational — the contract
+/// stores it but doesn't validate; sentinel `0` means "not tracked").
+/// No admin field — Anarchy gives all members equal control.
+///
+/// Relayer handler: `add_create_group_args` → `ContractType::Anarchy`
+/// arm (tier + member_count → `--tier` / `--member-count` CLI flags).
+/// Contract: `sep-anarchy/src/lib.rs::create_group` (lines 347–410).
+struct AnarchyCreateGroupPayload: Encodable, Equatable, Sendable {
+    let groupID: Data
+    let commitment: Data
+    let tier: Int
+    /// Roster size at create time — `1` for a creator-only founding,
+    /// growing later via `update_commitment`. The contract accepts any
+    /// value without validation; we always send the real count.
+    let memberCount: Int
+    /// 1601-byte raw PLONK proof — same constraint as Tyranny / 1-on-1.
+    let proof: Data
+    /// 2 elements × 32 bytes — `[commitment, Fr(0)]`.
+    let publicInputs: [Data]
+
+    enum CodingKeys: String, CodingKey {
+        case groupID = "group_id"
+        case commitment
+        case tier
+        case memberCount = "member_count"
+        case proof
+        case publicInputs
+    }
+}
+
 /// `update_commitment` payload — Tyranny variant. Same 4-element PI
 /// shape as create, but the SDK's `Tyranny.UpdateProof.publicInputs`
 /// is 160 bytes = 5 chunks (`c_old || epoch_old || c_new ||
