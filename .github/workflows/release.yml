@@ -89,6 +89,14 @@ jobs:
           # Assets.car and any test that touches the icon UI fails.
           lfs: true
 
+      - name: Force LFS smudge (self-hosted workspace persists across runs)
+        # actions/checkout@v4 runs `git lfs fetch` but skips the smudge
+        # if the working tree's pointer files match the index — which
+        # they do on a runner whose previous checkout was lfs-less.
+        # `git lfs pull` re-runs fetch + checkout unconditionally and
+        # is cheap once objects are already cached locally.
+        run: git lfs pull
+
       - name: Select Xcode 26
         run: sudo xcode-select -s /Applications/Xcode_26.app
 
@@ -182,6 +190,12 @@ jobs:
           # text instead of pixels.
           lfs: true
 
+      - name: Force LFS smudge (self-hosted workspace persists across runs)
+        # See unit-tests for rationale. Without this the persistent
+        # runner workspace keeps stale pointer files from prior lfs-less
+        # checkouts and xcodebuild compiles them into Assets.car.
+        run: git lfs pull
+
       - name: Select Xcode 26
         run: sudo xcode-select -s /Applications/Xcode_26.app
 
@@ -254,6 +268,10 @@ jobs:
           # shipped IPA carries pointer files instead of art and the
           # App Store install will fail icon validation.
           lfs: true
+
+      - name: Force LFS smudge (self-hosted workspace persists across runs)
+        # See unit-tests for rationale.
+        run: git lfs pull
 
       - name: Select Xcode 26
         run: sudo xcode-select -s /Applications/Xcode_26.app
