@@ -279,17 +279,16 @@ struct AnchorsVersionView: View {
 
     @ViewBuilder
     private func versionRow(release: ContractRelease, isSelected: Bool, isLatest: Bool, last: Bool) -> some View {
-        Button {
-            flow.tappedVersion(key: key, releaseTag: release.release)
-            dismiss()
+        NavigationLink {
+            ContractDetailView(flow: flow, key: key, release: release)
         } label: {
             SettingsRow(
                 title: LocalizedStringKey(release.release),
                 titleMono: true,
                 subtitle: release.publishedAt.formatted(date: .abbreviated, time: .omitted),
-                hasChevron: false,
                 inset: 16,
-                last: last
+                last: last,
+                onTap: {}
             ) {
                 EmptyView()
             } right: {
