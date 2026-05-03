@@ -455,7 +455,7 @@ private struct CreateGroupStep2View: View {
                 Text("\(flow.governance.label). ")
                     .font(.system(size: 12.5, weight: .semibold))
                     .foregroundColor(OnymTokens.text)
-                + Text("You\u{2019}ll be the only admin.")
+                + Text(typeBannerSub)
                     .font(.system(size: 12.5))
                     .foregroundColor(OnymTokens.text2)
             )
@@ -486,10 +486,10 @@ private struct CreateGroupStep2View: View {
                 .font(.system(size: 36, weight: .light))
                 .foregroundStyle(OnymTokens.text3)
                 .padding(.top, 28)
-            Text("No invitees yet")
+            Text(emptyStateTitle)
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(OnymTokens.text)
-            Text("Use \u{201C}Invite by inbox key\u{201D} below to add someone.")
+            Text(emptyStateSubtitle)
                 .font(.system(size: 12.5))
                 .foregroundStyle(OnymTokens.text2)
                 .multilineTextAlignment(.center)
@@ -497,6 +497,30 @@ private struct CreateGroupStep2View: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.bottom, 20)
+    }
+
+    private var emptyStateTitle: String {
+        switch flow.governance {
+        case .oneOnOne: "Add the other person"
+        case .tyranny, .anarchy: "No invitees yet"
+        }
+    }
+
+    private var emptyStateSubtitle: String {
+        switch flow.governance {
+        case .oneOnOne:
+            "Paste their inbox key below to start a private dialog."
+        case .tyranny, .anarchy:
+            "Use \u{201C}Invite by inbox key\u{201D} below to add someone."
+        }
+    }
+
+    private var typeBannerSub: String {
+        switch flow.governance {
+        case .oneOnOne: "Just the two of you. No one else can join."
+        case .tyranny: "You\u{2019}ll be the only admin."
+        case .anarchy: "Everyone has equal control."
+        }
     }
 
     private var inviteesList: some View {
@@ -554,41 +578,43 @@ private struct CreateGroupStep2View: View {
 
     private var footer: some View {
         VStack(spacing: 10) {
-            Button(action: flow.tappedInviteByKey) {
-                HStack(spacing: 12) {
-                    ZStack {
-                        Circle().fill(accentColor.opacity(0.22))
-                        Image(systemName: "key.fill")
+            if flow.canAddMoreInvitees {
+                Button(action: flow.tappedInviteByKey) {
+                    HStack(spacing: 12) {
+                        ZStack {
+                            Circle().fill(accentColor.opacity(0.22))
+                            Image(systemName: "key.fill")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(accentColor)
+                        }
+                        .frame(width: 30, height: 30)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Invite by inbox key")
+                                .font(.system(size: 13.5, weight: .semibold))
+                                .foregroundStyle(OnymTokens.text)
+                            Text("Paste a 64-char key")
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(OnymTokens.text2)
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(accentColor)
+                            .foregroundStyle(OnymTokens.text3)
                     }
-                    .frame(width: 30, height: 30)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Invite by inbox key")
-                            .font(.system(size: 13.5, weight: .semibold))
-                            .foregroundStyle(OnymTokens.text)
-                        Text("Paste a 64-char key")
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(OnymTokens.text2)
-                    }
-                    Spacer(minLength: 0)
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(OnymTokens.text3)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(OnymTokens.surface2)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12).stroke(OnymTokens.hairlineStrong, lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(OnymTokens.surface2)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12).stroke(OnymTokens.hairlineStrong, lineWidth: 1)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
 
             OnymPrimaryButton(
                 title: flow.createCTALabel,
-                enabled: true,
+                enabled: flow.canCreate,
                 accent: accentColor,
                 action: flow.tappedCreate
             )
