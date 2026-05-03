@@ -7,6 +7,8 @@ struct OnymIOSApp: App {
     private let relayerRepository: RelayerRepository
     private let contractsRepository: ContractsRepository
     private let groupRepository: GroupRepository
+    private let inboxTransport: any InboxTransport
+    private let incomingInvitations: IncomingInvitationsRepository
 
     init() {
         let args = ProcessInfo.processInfo.arguments
@@ -79,6 +81,14 @@ struct OnymIOSApp: App {
         let inboxTransport = NostrInboxTransport(
             signerProvider: OnymNostrSignerProvider()
         )
+        self.inboxTransport = inboxTransport
+
+        // Incoming invitations repository — falls back to in-memory if
+        // the on-disk store can't open (same protection-class concerns
+        // as `SwiftDataGroupStore`).
+        let invitationStore: any InvitationStore =
+            (try? SwiftDataInvitationStore()) ?? SwiftDataInvitationStore.inMemory()
+        self.incomingInvitations = IncomingInvitationsRepository(store: invitationStore)
 
         self.dependencies = AppDependencies(
             makeRecoveryPhraseBackupFlow: { @MainActor in
@@ -147,6 +157,17 @@ struct OnymIOSApp: App {
                     for await removed in identityRepository.identityRemoved {
                         await groupRepository.removeForOwner(removed)
                     }
+                }
+                .task {
+                    // PR-4: subscribe to every identity's inbox
+                    // concurrently. Without this, messages addressed
+                    // to a non-current identity drop on the floor.
+                    let fanout = InboxFanoutInteractor(
+                        inboxTransport: inboxTransport,
+                        identityRepository: identityRepository,
+                        repository: incomingInvitations
+                    )
+                    await fanout.run()
                 }
         }
     }
