@@ -41,6 +41,12 @@ struct SettingsScreen {
         app.buttons["settings.backup_recovery_phrase_row"]
     }
 
+    /// Identities NavigationLink — top-of-Security row added by the
+    /// multi-identity stack (PR #56). Drills into `IdentitiesView`.
+    var identitiesRow: XCUIElement {
+        firstMatching("settings.identities_row")
+    }
+
     /// Network → Relayer NavigationLink. Lives behind a chevron row.
     var relayerRow: XCUIElement {
         firstMatching("settings.relayer_row")
@@ -90,6 +96,13 @@ struct SettingsScreen {
         XCTAssertTrue(anchorsRow.waitForExistence(timeout: 5),
                       "settings anchors row never appeared")
         anchorsRow.tap()
+    }
+
+    func tapIdentities() {
+        tapSettingsTab()
+        XCTAssertTrue(identitiesRow.waitForExistence(timeout: 5),
+                      "settings identities row never appeared")
+        identitiesRow.tap()
     }
 
     /// SwiftUI's NavigationLink renders as different XCUIElement types
