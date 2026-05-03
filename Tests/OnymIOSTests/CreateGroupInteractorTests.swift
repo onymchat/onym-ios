@@ -374,11 +374,22 @@ private final class CreateGroupTestEnv {
         )
         try? await contracts.refresh()
 
+        // Pre-bind the group repo to the restored identity so the
+        // multi-identity filter passes the test fixture's groups
+        // through. Without this, snapshots would be filtered to nil
+        // → [] and every "group landed in the repo" assert would
+        // fail.
+        let currentID = await identity.currentSelectedID()
+        let groups = GroupRepository(
+            store: SwiftDataGroupStore.inMemory(),
+            currentIdentityID: currentID
+        )
+
         return CreateGroupTestEnv(
             identity: identity,
             relayers: relayers,
             contracts: contracts,
-            groups: GroupRepository(store: SwiftDataGroupStore.inMemory()),
+            groups: groups,
             inboxTransport: ConfigurableInboxTransport(),
             contractTransport: ConfigurableContractTransport(),
             proofGenerator: StubGroupProofGenerator(),

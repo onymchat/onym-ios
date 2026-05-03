@@ -194,7 +194,14 @@ final class CreateGroupTyrannyE2ETests: XCTestCase {
             )
         }
 
-        let groups = GroupRepository(store: SwiftDataGroupStore.inMemory())
+        // Pre-bind the group repo to the restored identity so the
+        // multi-identity filter passes the test's freshly-anchored
+        // group through into snapshots.
+        let currentID = await identity.currentSelectedID()
+        let groups = GroupRepository(
+            store: SwiftDataGroupStore.inMemory(),
+            currentIdentityID: currentID
+        )
         let networkPreference = StaticNetworkPreference(value: .testnet)
 
         let makeContractTransport: @Sendable (URL) -> any SEPContractTransport = { url in

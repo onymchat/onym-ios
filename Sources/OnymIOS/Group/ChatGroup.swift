@@ -12,6 +12,11 @@ import Foundation
 struct ChatGroup: Identifiable, Equatable, Sendable {
     /// Hex-encoded 32-byte group ID.
     let id: String
+    /// The identity that created this group. Stamped at create time
+    /// from the currently-selected identity; the chats list filters
+    /// by it so switching identities hides the other one's groups.
+    /// Removing an identity wipes every group with a matching owner.
+    let ownerIdentityID: IdentityID
     let name: String
     /// 32-byte shared secret. Used for `topicTag` derivation and message
     /// key HKDF — both still TBD on iOS, but the value must be sealed

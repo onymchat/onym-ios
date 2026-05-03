@@ -24,6 +24,11 @@ import SwiftData
 @Model
 final class PersistedGroup {
     @Attribute(.unique) var id: String
+    /// UUID string of the identity that owns this row. Plain (not
+    /// encrypted) so SwiftData `#Predicate` can filter on it. Owner
+    /// IDs are random per-device UUIDs — no cross-device linkage,
+    /// nothing to leak.
+    var ownerIdentityIDString: String
     var createdAt: Date
     var epoch: Int64
     var tierRaw: Int
@@ -39,6 +44,7 @@ final class PersistedGroup {
 
     init(
         id: String,
+        ownerIdentityIDString: String,
         createdAt: Date,
         epoch: Int64,
         tierRaw: Int,
@@ -52,6 +58,7 @@ final class PersistedGroup {
         encryptedAdminPubkeyHex: Data?
     ) {
         self.id = id
+        self.ownerIdentityIDString = ownerIdentityIDString
         self.createdAt = createdAt
         self.epoch = epoch
         self.tierRaw = tierRaw

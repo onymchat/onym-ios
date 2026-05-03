@@ -154,6 +154,11 @@ struct CreateGroupInteractor: Sendable {
         guard let identitySnapshot = await identity.currentIdentity() else {
             throw CreateGroupError.missingIdentity
         }
+        guard let ownerID = await identity.currentSelectedID() else {
+            // currentIdentity() returned non-nil but currentSelectedID()
+            // returned nil — actor invariant violated, treat as missing.
+            throw CreateGroupError.missingIdentity
+        }
         let creatorMember: GovernanceMember
         do {
             creatorMember = GovernanceMember(
@@ -218,6 +223,7 @@ struct CreateGroupInteractor: Sendable {
             .map { String(format: "%02x", $0) }.joined()
         let group = ChatGroup(
             id: groupIDHex,
+            ownerIdentityID: ownerID,
             name: trimmedName,
             groupSecret: groupSecret,
             createdAt: Date(),
@@ -315,6 +321,9 @@ struct CreateGroupInteractor: Sendable {
         guard let identitySnapshot = await identity.currentIdentity() else {
             throw CreateGroupError.missingIdentity
         }
+        guard let ownerID = await identity.currentSelectedID() else {
+            throw CreateGroupError.missingIdentity
+        }
         // BLS secret keys are canonical Fr by convention. The SDK reduces
         // silently if not, but any future strictness check would silently
         // break us — so generate canonical at the source.
@@ -394,6 +403,7 @@ struct CreateGroupInteractor: Sendable {
         let groupIDHex = groupID.map { String(format: "%02x", $0) }.joined()
         let group = ChatGroup(
             id: groupIDHex,
+            ownerIdentityID: ownerID,
             name: trimmedName,
             groupSecret: groupSecret,
             createdAt: Date(),

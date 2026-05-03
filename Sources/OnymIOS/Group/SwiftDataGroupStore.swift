@@ -12,6 +12,10 @@ actor SwiftDataGroupStore: GroupStore {
     /// Production initializer — on-disk SQLite under
     /// `Application Support/OnymIOS/Groups.store`, with
     /// `FileProtectionType.complete` on the directory.
+    ///
+    /// Per the multi-identity no-backcompat licence, schema-mismatch
+    /// errors at `ModelContainer(...)` init wipe the on-disk store and
+    /// retry once. Pre-1.0 install base, no real users to preserve.
     init() throws {
         let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
@@ -25,7 +29,21 @@ actor SwiftDataGroupStore: GroupStore {
         let url = storeDir.appendingPathComponent("Groups.store")
         let schema = Schema([PersistedGroup.self])
         let config = ModelConfiguration(schema: schema, url: url, cloudKitDatabase: .none)
-        let container = try ModelContainer(for: schema, configurations: [config])
+        let container: ModelContainer
+        do {
+            container = try ModelContainer(for: schema, configurations: [config])
+        } catch {
+            // Schema migration failure — wipe + retry. SwiftData's
+            // SQLite trio (`.store`, `.store-shm`, `.store-wal`) all
+            // need to go.
+            for suffix in ["", "-shm", "-wal"] {
+                try? FileManager.default.removeItem(
+                    at: url.deletingPathExtension().appendingPathExtension("store\(suffix)")
+                )
+            }
+            try? FileManager.default.removeItem(at: url)
+            container = try ModelContainer(for: schema, configurations: [config])
+        }
         self.container = container
         self.context = ModelContext(container)
     }
@@ -62,6 +80,7 @@ actor SwiftDataGroupStore: GroupStore {
             predicate: #Predicate { $0.id == id }
         )
         if let existing = try? context.fetch(descriptor).first {
+            existing.ownerIdentityIDString = encoded.ownerIdentityIDString
             existing.epoch = encoded.epoch
             existing.tierRaw = encoded.tierRaw
             existing.groupTypeRaw = encoded.groupTypeRaw
@@ -104,12 +123,26 @@ actor SwiftDataGroupStore: GroupStore {
         try? context.save()
     }
 
+    /// Delete every row whose `ownerIdentityIDString` matches the
+    /// removed identity. Called from `GroupRepository.removeForOwner`
+    /// in response to `IdentityRepository.identityRemoved`.
+    func deleteOwner(_ ownerIDString: String) {
+        let descriptor = FetchDescriptor<PersistedGroup>(
+            predicate: #Predicate { $0.ownerIdentityIDString == ownerIDString }
+        )
+        if let rows = try? context.fetch(descriptor) {
+            for row in rows { context.delete(row) }
+        }
+        try? context.save()
+    }
+
     // MARK: - Mapping
 
     private static func encode(_ group: ChatGroup) throws -> PersistedGroup {
         let membersJSON = try JSONEncoder().encode(group.members)
         return PersistedGroup(
             id: group.id,
+            ownerIdentityIDString: group.ownerIdentityID.rawValue.uuidString,
             createdAt: group.createdAt,
             epoch: Int64(bitPattern: group.epoch),
             tierRaw: group.tier.rawValue,
@@ -126,6 +159,7 @@ actor SwiftDataGroupStore: GroupStore {
 
     private static func decode(_ row: PersistedGroup) -> ChatGroup? {
         guard
+            let owner = IdentityID(row.ownerIdentityIDString),
             let name = try? StorageEncryption.decryptString(row.encryptedName),
             let groupSecret = try? StorageEncryption.decrypt(row.encryptedGroupSecret),
             let membersJSON = try? StorageEncryption.decrypt(row.encryptedMembersJSON),
@@ -142,6 +176,7 @@ actor SwiftDataGroupStore: GroupStore {
         }
         return ChatGroup(
             id: row.id,
+            ownerIdentityID: owner,
             name: name,
             groupSecret: groupSecret,
             createdAt: row.createdAt,

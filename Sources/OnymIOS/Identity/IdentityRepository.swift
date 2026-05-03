@@ -173,6 +173,13 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
         return cache[currentID]
     }
 
+    /// The currently-selected identity's ID, or nil if none. Used by
+    /// the chain layer to stamp `ChatGroup.ownerIdentityID` at create
+    /// time without reaching back into the keychain.
+    func currentSelectedID() -> IdentityID? {
+        currentID
+    }
+
     /// Snapshot of every identity, ordered by insertion. View-safe
     /// (no secret material).
     func currentIdentities() -> [IdentitySummary] {
