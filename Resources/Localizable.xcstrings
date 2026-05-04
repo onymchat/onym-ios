@@ -1,23 +1,53 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    " — they can find it in " : {
-
-    },
     " · published on Stellar so anyone can verify it’s real." : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : " · published on Stellar so anyone can verify it’s real."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : " · опубликован в Stellar — любой может убедиться, что он настоящий."
+          }
+        }
+      }
     },
-    "—" : {
-
-    },
-    ", or share a QR code from there." : {
-
-    },
-    "·" : {
-
+    " — they can find it in " : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : " — they can find it in "
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : " — они смогут её найти в "
+          }
+        }
+      }
     },
     "\"%@\" is now in your chats list." : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "\"%@\" is now in your chats list."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "«%@» теперь в списке ваших чатов."
+          }
+        }
+      }
     },
     "%@" : {
       "localizations" : {
@@ -35,8 +65,21 @@
         }
       }
     },
-    "%@ · " : {
-
+    "%@ %@ so far" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ %2$@ so far"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "пока %1$@ %2$@"
+          }
+        }
+      }
     },
     "%@ (%@)" : {
       "localizations" : {
@@ -45,54 +88,158 @@
             "state" : "new",
             "value" : "%1$@ (%2$@)"
           }
-        }
-      }
-    },
-    "%@ %@ so far" : {
-      "localizations" : {
-        "en" : {
+        },
+        "ru" : {
           "stringUnit" : {
-            "state" : "new",
-            "value" : "%1$@ %2$@ so far"
+            "state" : "translated",
+            "value" : "%1$@ (%2$@)"
           }
         }
       }
     },
     "%@ is live" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ is live"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ работает"
+          }
+        }
+      }
     },
-    "%@. " : {
-
-    },
-    "%@/64" : {
-
+    "%@ · " : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · "
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · "
+          }
+        }
+      }
     },
     "%@%%" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@%%"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@%%"
+          }
+        }
+      }
     },
-    "© 2026 · Onym Foundation" : {
-
+    "%@. " : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@. "
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@. "
+          }
+        }
+      }
     },
-    "▲" : {
-
+    "%@/64" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@/64"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@/64"
+          }
+        }
+      }
     },
-    "✈" : {
-
-    },
-    "🎉 Hello, builder. Want to contribute?" : {
-
-    },
-    "🐳" : {
-
-    },
-    "Active" : {
-
-    },
-    "Active identity" : {
-
+    ", or share a QR code from there." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : ", or share a QR code from there."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : ", или поделитесь QR-кодом оттуда."
+          }
+        }
+      }
     },
     "ACTIVE IDENTITY" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ACTIVE IDENTITY"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "АКТИВНАЯ ЛИЧНОСТЬ"
+          }
+        }
+      }
+    },
+    "Active" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Active"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Активная"
+          }
+        }
+      }
+    },
+    "Active identity" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Active identity"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Активная личность"
+          }
+        }
+      }
     },
     "Add Custom URL" : {
       "extractionState" : "stale",
@@ -107,6 +254,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Добавить свой URL"
+          }
+        }
+      }
+    },
+    "Add Identity" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add Identity"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Добавить личность"
           }
         }
       }
@@ -128,11 +291,21 @@
         }
       }
     },
-    "Add Identity" : {
-
-    },
     "Address format invalid. Expected 56 chars starting with C." : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Address format invalid. Expected 56 chars starting with C."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Неверный формат адреса. Ожидается 56 символов, начинающихся с C."
+          }
+        }
+      }
     },
     "All published relayers added." : {
       "localizations" : {
@@ -185,7 +358,20 @@
       }
     },
     "Anchor new %@ chats on a Stellar contract you’ve already deployed." : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anchor new %@ chats on a Stellar contract you’ve already deployed."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Привязывайте новые чаты %@ к уже развёрнутому вами контракту в Stellar."
+          }
+        }
+      }
     },
     "Anchors" : {
       "extractionState" : "stale",
@@ -222,7 +408,20 @@
       }
     },
     "Ask for their " : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ask for their "
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Попросите их "
+          }
+        }
+      }
     },
     "Authenticate to reveal your recovery phrase" : {
       "extractionState" : "stale",
@@ -258,6 +457,54 @@
         }
       }
     },
+    "BLS" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BLS"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BLS"
+          }
+        }
+      }
+    },
+    "BLS %@…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BLS %@…"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BLS %@…"
+          }
+        }
+      }
+    },
+    "BLS12-381" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BLS12-381"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BLS12-381"
+          }
+        }
+      }
+    },
     "Back up keys" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -276,7 +523,20 @@
       }
     },
     "Backed up" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Backed up"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сохранено"
+          }
+        }
+      }
     },
     "Backed up %@ · BIP-39 English" : {
       "extractionState" : "stale",
@@ -345,26 +605,85 @@
         }
       }
     },
-    "BLS" : {
-
-    },
-    "BLS %@…" : {
-
-    },
-    "BLS12-381" : {
-
-    },
     "Bring your own contract" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bring your own contract"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Свой контракт"
+          }
+        }
+      }
     },
     "Build & Deploy" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Build & Deploy"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сборка и деплой"
+          }
+        }
+      }
     },
     "Build, deploy, anchor" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Build, deploy, anchor"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Соберите, разверните, привяжите"
+          }
+        }
+      }
     },
     "Built by people who think privacy is a right.\nReleased under the MIT license." : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Built by people who think privacy is a right.\nReleased under the MIT license."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Создано людьми, которые считают приватность правом.\nВыпущено под лицензией MIT."
+          }
+        }
+      }
+    },
+    "CONTRACT · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "CONTRACT · %@"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "КОНТРАКТ · %@"
+          }
+        }
+      }
     },
     "Cancel" : {
       "localizations" : {
@@ -417,7 +736,20 @@
       }
     },
     "Clear" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clear"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Очистить"
+          }
+        }
+      }
     },
     "Compile the %@ contract from source and deploy it to Stellar %@. Onym signs with a one-time deploy key." : {
       "localizations" : {
@@ -425,6 +757,12 @@
           "stringUnit" : {
             "state" : "new",
             "value" : "Compile the %1$@ contract from source and deploy it to Stellar %2$@. Onym signs with a one-time deploy key."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Соберите контракт %1$@ из исходников и разверните его в Stellar %2$@. Onym подпишет одноразовым ключом деплоя."
           }
         }
       }
@@ -462,14 +800,37 @@
         }
       }
     },
-    "CONTRACT · %@" : {
-
-    },
     "Contract deployed" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contract deployed"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Контракт развёрнут"
+          }
+        }
+      }
     },
     "Contract format verified" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contract format verified"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Формат контракта проверен"
+          }
+        }
+      }
     },
     "Copied" : {
       "extractionState" : "stale",
@@ -506,22 +867,100 @@
       }
     },
     "Copy link" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copy link"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Копировать ссылку"
+          }
+        }
+      }
     },
     "Couldn't generate an invite: %@" : {
-
-    },
-    "Create an end-to-end encrypted group anchored on Stellar." : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't generate an invite: %@"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не удалось создать приглашение: %@"
+          }
+        }
+      }
     },
     "Create Group" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Create Group"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Создать группу"
+          }
+        }
+      }
+    },
+    "Create an end-to-end encrypted group anchored on Stellar." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Create an end-to-end encrypted group anchored on Stellar."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Создайте сквозно зашифрованную группу с якорем в Stellar."
+          }
+        }
+      }
     },
     "Create the group, then share the invite link — they can join later without sharing any keys." : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Create the group, then share the invite link — they can join later without sharing any keys."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Создайте группу и поделитесь ссылкой-приглашением — присоединиться можно будет позже, не передавая ключей."
+          }
+        }
+      }
     },
     "Creating %@" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Creating %@"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Создание %@"
+          }
+        }
+      }
     },
     "Democracy" : {
       "extractionState" : "stale",
@@ -541,7 +980,20 @@
       }
     },
     "Deploy onym-relayer from GitHub in 5 minutes" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deploy onym-relayer from GitHub in 5 minutes"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Разверните onym-relayer с GitHub за 5 минут"
+          }
+        }
+      }
     },
     "Deployed %@ · %@" : {
       "localizations" : {
@@ -550,14 +1002,30 @@
             "state" : "new",
             "value" : "Deployed %1$@ · %2$@"
           }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Развёрнут %1$@ · %2$@"
+          }
         }
       }
     },
     "Direct inbox key" : {
-
-    },
-    "Don’t have their key? " : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Direct inbox key"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ключ входящих напрямую"
+          }
+        }
+      }
     },
     "Done" : {
       "localizations" : {
@@ -575,11 +1043,53 @@
         }
       }
     },
+    "Don’t have their key? " : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Don’t have their key? "
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Нет их ключа? "
+          }
+        }
+      }
+    },
     "End-to-end encrypted" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "End-to-end encrypted"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сквозное шифрование"
+          }
+        }
+      }
     },
     "English" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "English"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Английский"
+          }
+        }
+      }
     },
     "Enter a valid https:// URL" : {
       "extractionState" : "stale",
@@ -599,7 +1109,20 @@
       }
     },
     "Everything is encrypted" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Everything is encrypted"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Всё зашифровано"
+          }
+        }
+      }
     },
     "Fetching list…" : {
       "localizations" : {
@@ -618,13 +1141,36 @@
       }
     },
     "Have someone scan this code with Onym to open a private chat with %@." : {
-
-    },
-    "i" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Have someone scan this code with Onym to open a private chat with %@."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Попросите отсканировать этот код в Onym, чтобы открыть приватный чат с %@."
+          }
+        }
+      }
     },
     "I'll do this later" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "I'll do this later"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сделаю позже"
+          }
+        }
+      }
     },
     "I've written it down" : {
       "localizations" : {
@@ -642,29 +1188,117 @@
         }
       }
     },
-    "Inbox %@" : {
-
+    "INVITE KEY" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "INVITE KEY"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "КЛЮЧ ПРИГЛАШЕНИЯ"
+          }
+        }
+      }
     },
-    "inbox key" : {
-
+    "Inbox %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inbox %@"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Входящие %@"
+          }
+        }
+      }
     },
     "Invite" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Invite"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Пригласить"
+          }
+        }
+      }
     },
     "Invite by inbox key" : {
-
-    },
-    "INVITE KEY" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Invite by inbox key"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Пригласить по ключу входящих"
+          }
+        }
+      }
     },
     "Join chat" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Join chat"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Войти в чат"
+          }
+        }
+      }
     },
     "Keep this screen open. The chat will appear automatically once they approve." : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keep this screen open. The chat will appear automatically once they approve."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не закрывайте этот экран. Чат появится автоматически, как только заявку одобрят."
+          }
+        }
+      }
     },
     "LATEST" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LATEST"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ПОСЛЕДНЯЯ"
+          }
+        }
+      }
     },
     "Mainnet" : {
       "extractionState" : "stale",
@@ -684,10 +1318,36 @@
       }
     },
     "Members" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Members"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Участники"
+          }
+        }
+      }
     },
     "Messages, group state, and keys are encrypted on this device. No one — not even Onym — can read your chats." : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Messages, group state, and keys are encrypted on this device. No one — not even Onym — can read your chats."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сообщения, состояние группы и ключи шифруются на этом устройстве. Никто — даже Onym — не может прочесть ваши чаты."
+          }
+        }
+      }
     },
     "Network" : {
       "extractionState" : "stale",
@@ -724,7 +1384,20 @@
       }
     },
     "No chats yet" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No chats yet"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Чатов пока нет"
+          }
+        }
+      }
     },
     "No contract" : {
       "extractionState" : "stale",
@@ -761,7 +1434,20 @@
       }
     },
     "No published relayers yet." : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No published relayers yet."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Опубликованных релееров пока нет."
+          }
+        }
+      }
     },
     "No relayers configured. Add one below." : {
       "localizations" : {
@@ -780,7 +1466,20 @@
       }
     },
     "Nostr (npub)" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nostr (npub)"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nostr (npub)"
+          }
+        }
+      }
     },
     "Not the right word. Check your phrase and try again." : {
       "localizations" : {
@@ -797,9 +1496,6 @@
           }
         }
       }
-    },
-    "npub" : {
-
     },
     "OK" : {
       "extractionState" : "stale",
@@ -853,28 +1549,68 @@
       }
     },
     "Onym" : {
-
-    },
-    "onym · open · anonymous · onchain" : {
-
-    },
-    "onymchat/onym-contracts" : {
-
-    },
-    "onymchat/onym-relayer" : {
-
-    },
-    "open · anonymous · onchain" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Onym"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Onym"
+          }
+        }
+      }
     },
     "Paste 64-char inbox key" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paste 64-char inbox key"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Вставьте 64-символьный ключ входящих"
+          }
+        }
+      }
     },
     "Paste a 64-char key" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paste a 64-char key"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Вставьте 64-символьный ключ"
+          }
+        }
+      }
     },
     "Paste from clipboard" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paste from clipboard"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Вставить из буфера обмена"
+          }
+        }
+      }
     },
     "Pick a random relayer for each request. Useful for spreading load across redundant deployments." : {
       "extractionState" : "stale",
@@ -928,7 +1664,20 @@
       }
     },
     "Published on-chain" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Published on-chain"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Опубликовано в блокчейне"
+          }
+        }
+      }
     },
     "Random" : {
       "extractionState" : "stale",
@@ -948,7 +1697,20 @@
       }
     },
     "Read the docs" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Read the docs"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Открыть документацию"
+          }
+        }
+      }
     },
     "Recovery phrase" : {
       "extractionState" : "stale",
@@ -1001,7 +1763,20 @@
       }
     },
     "Ref" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ref"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ref"
+          }
+        }
+      }
     },
     "Relayer" : {
       "extractionState" : "stale",
@@ -1021,10 +1796,36 @@
       }
     },
     "Remove identity" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove identity"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Удалить личность"
+          }
+        }
+      }
     },
     "Removing **%@** wipes its on-device secrets and every chat created under it. This cannot be undone — the recovery phrase is the only way back in." : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Removing **%@** wipes its on-device secrets and every chat created under it. This cannot be undone — the recovery phrase is the only way back in."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Удаление **%@** стирает её локальные секреты и все чаты, созданные под этой личностью. Отменить это нельзя — вернуться можно только по фразе восстановления."
+          }
+        }
+      }
     },
     "Rename identity" : {
       "localizations" : {
@@ -1060,13 +1861,68 @@
       }
     },
     "Run a relayer for yourself, your team, or your org. End-to-end encryption stays intact — Onym never sees your messages." : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Run a relayer for yourself, your team, or your org. End-to-end encryption stays intact — Onym never sees your messages."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Запустите релеер для себя, своей команды или организации. Сквозное шифрование сохраняется — Onym не видит ваших сообщений."
+          }
+        }
+      }
     },
     "Run your own relayer" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Run your own relayer"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Запустить свой релеер"
+          }
+        }
+      }
+    },
+    "SX" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SX"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SX"
+          }
+        }
+      }
     },
     "Scan with Onym on another device to open a private chat with this identity." : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scan with Onym on another device to open a private chat with this identity."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Отсканируйте в Onym на другом устройстве, чтобы открыть приватный чат с этой личностью."
+          }
+        }
+      }
     },
     "Search" : {
       "extractionState" : "stale",
@@ -1135,13 +1991,52 @@
       }
     },
     "Send a request — the host will see it and decide whether to let you in." : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Send a request — the host will see it and decide whether to let you in."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Отправьте запрос — хост увидит его и решит, впустить ли вас."
+          }
+        }
+      }
     },
     "Send join request" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Send join request"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Отправить запрос на вступление"
+          }
+        }
+      }
     },
     "Sending request…" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sending request…"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Отправляем запрос…"
+          }
+        }
+      }
     },
     "Settings" : {
       "extractionState" : "stale",
@@ -1161,22 +2056,100 @@
       }
     },
     "Settings → Advanced" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Settings → Advanced"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Настройки → Дополнительно"
+          }
+        }
+      }
     },
     "Share" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Share"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Поделиться"
+          }
+        }
+      }
     },
     "Share invite link" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Share invite link"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Поделиться ссылкой-приглашением"
+          }
+        }
+      }
     },
     "Soon" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Soon"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Скоро"
+          }
+        }
+      }
     },
     "Start a chat by scanning" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Start a chat by scanning"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Начните чат, отсканировав"
+          }
+        }
+      }
     },
     "Stellar Soroban contract ID" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stellar Soroban contract ID"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ID контракта Stellar Soroban"
+          }
+        }
+      }
     },
     "Store offline (paper or metal)" : {
       "extractionState" : "stale",
@@ -1212,12 +2185,6 @@
         }
       }
     },
-    "SX" : {
-
-    },
-    "Tap “Use this contract” to anchor new %@ chats here. Existing chats keep their current contract." : {
-
-    },
     "Tap to reveal" : {
       "localizations" : {
         "en" : {
@@ -1230,6 +2197,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Нажмите, чтобы показать"
+          }
+        }
+      }
+    },
+    "Tap “Use this contract” to anchor new %@ chats here. Existing chats keep their current contract." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap “Use this contract” to anchor new %@ chats here. Existing chats keep their current contract."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Нажмите «Использовать этот контракт», чтобы привязывать новые чаты %@ здесь. Существующие чаты сохранят свой текущий контракт."
           }
         }
       }
@@ -1268,10 +2251,20 @@
       }
     },
     "This usually takes a few seconds. It’s safe to close this — we’ll finish in the background." : {
-
-    },
-    "Try again" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This usually takes a few seconds. It’s safe to close this — we’ll finish in the background."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Обычно это занимает несколько секунд. Можно закрыть — мы доделаем в фоне."
+          }
+        }
+      }
     },
     "Try Again" : {
       "extractionState" : "stale",
@@ -1280,6 +2273,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Try Again"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Повторить"
+          }
+        }
+      }
+    },
+    "Try again" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Try again"
           }
         },
         "ru" : {
@@ -1308,7 +2317,20 @@
       }
     },
     "Up to date" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Up to date"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Актуально"
+          }
+        }
+      }
     },
     "Use a private deployment, localhost, or any relayer not in the published list." : {
       "extractionState" : "stale",
@@ -1345,10 +2367,36 @@
       }
     },
     "View on GitHub" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "View on GitHub"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Открыть на GitHub"
+          }
+        }
+      }
     },
     "View on Stellar Expert" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "View on Stellar Expert"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Открыть на Stellar Expert"
+          }
+        }
+      }
     },
     "View your 12-word recovery phrase. You will need it to restore your identity on a new device." : {
       "extractionState" : "stale",
@@ -1368,10 +2416,36 @@
       }
     },
     "Visible to members. You can change this anytime." : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visible to members. You can change this anytime."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Видно участникам. Можно изменить в любой момент."
+          }
+        }
+      }
     },
     "Waiting for the host to approve…" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting for the host to approve…"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ждём одобрения от хоста…"
+          }
+        }
+      }
     },
     "Write down these %@ words in order. You'll confirm three of them on the next screen." : {
       "localizations" : {
@@ -1459,13 +2533,52 @@
       }
     },
     "You · admin" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You · admin"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Вы · админ"
+          }
+        }
+      }
     },
     "You're in!" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You're in!"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Вы внутри!"
+          }
+        }
+      }
     },
     "Your group is ready" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your group is ready"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Группа готова"
+          }
+        }
+      }
     },
     "Your identity, in 12 words" : {
       "localizations" : {
@@ -1500,7 +2613,244 @@
       }
     },
     "Your relayer, your rules" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your relayer, your rules"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ваш релеер — ваши правила"
+          }
+        }
+      }
+    },
+    "i" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "i"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "i"
+          }
+        }
+      }
+    },
+    "inbox key" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "inbox key"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ключ входящих"
+          }
+        }
+      }
+    },
+    "npub" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "npub"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "npub"
+          }
+        }
+      }
+    },
+    "onym · open · anonymous · onchain" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "onym · open · anonymous · onchain"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "onym · открыто · анонимно · в блокчейне"
+          }
+        }
+      }
+    },
+    "onymchat/onym-contracts" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "onymchat/onym-contracts"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "onymchat/onym-contracts"
+          }
+        }
+      }
+    },
+    "onymchat/onym-relayer" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "onymchat/onym-relayer"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "onymchat/onym-relayer"
+          }
+        }
+      }
+    },
+    "open · anonymous · onchain" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "open · anonymous · onchain"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "открыто · анонимно · в блокчейне"
+          }
+        }
+      }
+    },
+    "© 2026 · Onym Foundation" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "© 2026 · Onym Foundation"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "© 2026 · Onym Foundation"
+          }
+        }
+      }
+    },
+    "·" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "·"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "·"
+          }
+        }
+      }
+    },
+    "—" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "—"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "—"
+          }
+        }
+      }
+    },
+    "▲" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "▲"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "▲"
+          }
+        }
+      }
+    },
+    "✈" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "✈"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "✈"
+          }
+        }
+      }
+    },
+    "🎉 Hello, builder. Want to contribute?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "🎉 Hello, builder. Want to contribute?"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "🎉 Привет, разработчик. Хотите помочь проекту?"
+          }
+        }
+      }
+    },
+    "🐳" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "🐳"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "🐳"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
