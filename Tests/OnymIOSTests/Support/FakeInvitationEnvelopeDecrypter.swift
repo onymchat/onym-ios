@@ -21,10 +21,16 @@ actor FakeInvitationEnvelopeDecrypter: InvitationEnvelopeDecrypting {
     }
 
     private let mode: Mode
+    /// Optional Ed25519 sender pubkey returned alongside the
+    /// plaintext from `decryptInvitationWithSender`. Tests asserting
+    /// PR-9 trust-check behavior set this; the default `nil` matches
+    /// pre-PR-9 envelopes that didn't carry a signature block.
+    private let senderEd25519PublicKey: Data?
     private(set) var decryptCalls: [(envelopeBytes: Data, identityID: IdentityID)] = []
 
-    init(mode: Mode) {
+    init(mode: Mode, senderEd25519PublicKey: Data? = nil) {
         self.mode = mode
+        self.senderEd25519PublicKey = senderEd25519PublicKey
     }
 
     func decryptInvitation(envelopeBytes: Data, asIdentity identityID: IdentityID) throws -> Data {
@@ -40,5 +46,19 @@ actor FakeInvitationEnvelopeDecrypter: InvitationEnvelopeDecrypting {
         case .failing(let error):
             throw error
         }
+    }
+
+    func decryptInvitationWithSender(
+        envelopeBytes: Data,
+        asIdentity identityID: IdentityID
+    ) throws -> DecryptedEnvelope {
+        let plaintext = try decryptInvitation(
+            envelopeBytes: envelopeBytes,
+            asIdentity: identityID
+        )
+        return DecryptedEnvelope(
+            plaintext: plaintext,
+            senderEd25519PublicKey: senderEd25519PublicKey
+        )
     }
 }

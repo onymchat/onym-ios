@@ -45,6 +45,10 @@ final class PersistedGroup {
     /// Optional so SwiftData's lightweight migration can land an extra
     /// column on existing rows without a wipe. `nil` decodes to `[:]`.
     var encryptedMemberProfilesJSON: Data?
+    /// Optional Ed25519 pubkey of the admin (PR 9). `nil` on rows
+    /// migrated from pre-PR-9 schema, or for governance models
+    /// without an admin.
+    var encryptedAdminEd25519PubkeyHex: Data?
 
     init(
         id: String,
@@ -60,7 +64,8 @@ final class PersistedGroup {
         encryptedSalt: Data,
         encryptedCommitment: Data?,
         encryptedAdminPubkeyHex: Data?,
-        encryptedMemberProfilesJSON: Data?
+        encryptedMemberProfilesJSON: Data?,
+        encryptedAdminEd25519PubkeyHex: Data?
     ) {
         self.id = id
         self.ownerIdentityIDString = ownerIdentityIDString
@@ -76,5 +81,6 @@ final class PersistedGroup {
         self.encryptedCommitment = encryptedCommitment
         self.encryptedAdminPubkeyHex = encryptedAdminPubkeyHex
         self.encryptedMemberProfilesJSON = encryptedMemberProfilesJSON
+        self.encryptedAdminEd25519PubkeyHex = encryptedAdminEd25519PubkeyHex
     }
 }

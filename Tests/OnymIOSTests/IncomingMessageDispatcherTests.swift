@@ -149,6 +149,196 @@ final class IncomingMessageDispatcherTests: XCTestCase {
                        "redelivery must NOT overwrite an existing profile")
     }
 
+    // MARK: - PR 9: admin Ed25519 trust check
+
+    func test_announcement_acceptedWhenSenderMatchesStoredAdminEd25519() async throws {
+        let groupID = Data(repeating: 0xAB, count: 32)
+        let adminEd25519 = Data(repeating: 0xED, count: 32)
+        let adminEd25519Hex = "ed".repeated(32)
+        await seedGroup(
+            groupID: groupID,
+            memberProfiles: [:],
+            adminEd25519PubkeyHex: adminEd25519Hex
+        )
+
+        let plaintext = try Self.encode(announcement: try Self.makeAnnouncement(
+            groupID: groupID,
+            joinerBlsHex: "bb".repeated(48),
+            joinerInboxByte: 0x33,
+            joinerAlias: "Bob",
+            adminAlias: "Alice"
+        ))
+        let decrypter = FakeInvitationEnvelopeDecrypter(
+            mode: .fixed(plaintext),
+            senderEd25519PublicKey: adminEd25519
+        )
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations
+        )
+        await dispatcher.dispatch(
+            messageID: "msg-trust-ok",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+
+        let after = await groups.currentGroups()
+        let updated = try XCTUnwrap(after.first { $0.groupIDData == groupID })
+        XCTAssertEqual(updated.memberProfiles["bb".repeated(48)]?.alias, "Bob",
+                       "matched-admin announcement is accepted")
+    }
+
+    func test_announcement_rejectedWhenSenderDoesNotMatchStoredAdmin() async throws {
+        let groupID = Data(repeating: 0xAB, count: 32)
+        let adminEd25519Hex = "ed".repeated(32)
+        let imposterEd25519 = Data(repeating: 0xBA, count: 32)
+        await seedGroup(
+            groupID: groupID,
+            memberProfiles: [:],
+            adminEd25519PubkeyHex: adminEd25519Hex
+        )
+
+        let plaintext = try Self.encode(announcement: try Self.makeAnnouncement(
+            groupID: groupID,
+            joinerBlsHex: "ff".repeated(48),
+            joinerInboxByte: 0x99,
+            joinerAlias: "Mallory",
+            adminAlias: "imposter"
+        ))
+        let decrypter = FakeInvitationEnvelopeDecrypter(
+            mode: .fixed(plaintext),
+            senderEd25519PublicKey: imposterEd25519
+        )
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations
+        )
+        await dispatcher.dispatch(
+            messageID: "msg-trust-bad",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+
+        let after = await groups.currentGroups()
+        let updated = try XCTUnwrap(after.first { $0.groupIDData == groupID })
+        XCTAssertNil(updated.memberProfiles["ff".repeated(48)],
+                     "imposter announcement must NOT mutate memberProfiles")
+    }
+
+    func test_announcement_rejectedWhenAdminKnownButEnvelopeUnsigned() async throws {
+        // Group has a stored admin but the envelope didn't carry a
+        // sender pubkey (no signature block). PR 9 rule: when we know
+        // who the admin should be, an unsigned announcement is
+        // dropped — best-effort acceptance only applies to legacy
+        // groups with no stored admin Ed25519.
+        let groupID = Data(repeating: 0xAB, count: 32)
+        await seedGroup(
+            groupID: groupID,
+            memberProfiles: [:],
+            adminEd25519PubkeyHex: "ed".repeated(32)
+        )
+        let plaintext = try Self.encode(announcement: try Self.makeAnnouncement(
+            groupID: groupID,
+            joinerBlsHex: "bb".repeated(48),
+            joinerInboxByte: 0x33,
+            joinerAlias: "Bob",
+            adminAlias: "Alice"
+        ))
+        let decrypter = FakeInvitationEnvelopeDecrypter(
+            mode: .fixed(plaintext),
+            senderEd25519PublicKey: nil
+        )
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations
+        )
+        await dispatcher.dispatch(
+            messageID: "msg-unsigned",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+        let after = await groups.currentGroups()
+        XCTAssertNil(after.first?.memberProfiles["bb".repeated(48)],
+                     "unsigned announcement is dropped when the group has a stored admin")
+    }
+
+    func test_announcement_acceptedForGroupWithoutStoredAdmin_legacyFallback() async throws {
+        // Legacy / pre-PR-9 group materialized without a stored
+        // adminEd25519PubkeyHex. Best-effort acceptance: any
+        // announcement that decrypts cleanly + names the group is
+        // accepted, matching pre-PR-9 behavior.
+        let groupID = Data(repeating: 0xAB, count: 32)
+        await seedGroup(groupID: groupID, memberProfiles: [:], adminEd25519PubkeyHex: nil)
+        let plaintext = try Self.encode(announcement: try Self.makeAnnouncement(
+            groupID: groupID,
+            joinerBlsHex: "bb".repeated(48),
+            joinerInboxByte: 0x33,
+            joinerAlias: "Bob",
+            adminAlias: "Alice"
+        ))
+        let decrypter = FakeInvitationEnvelopeDecrypter(
+            mode: .fixed(plaintext),
+            senderEd25519PublicKey: Data(repeating: 0xAA, count: 32)
+        )
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations
+        )
+        await dispatcher.dispatch(
+            messageID: "msg-legacy-fallback",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+        let after = await groups.currentGroups()
+        XCTAssertEqual(after.first?.memberProfiles["bb".repeated(48)]?.alias, "Bob",
+                       "legacy group accepts announcements (best-effort)")
+    }
+
+    func test_invitation_capturesSenderEd25519AsAdmin() async throws {
+        // PR 9: the materializer stamps the inviting envelope's
+        // senderEd25519PublicKey as the group's adminEd25519PubkeyHex
+        // for Tyranny groups, so subsequent announcements can be
+        // verified against it.
+        let payload = makeInvitationPayload(
+            groupID: Data(repeating: 0x42, count: 32),
+            name: "Family",
+            memberProfiles: nil
+        )
+        let plaintext = try JSONEncoder().encode(payload)
+        let admin = Data(repeating: 0xED, count: 32)
+        let decrypter = FakeInvitationEnvelopeDecrypter(
+            mode: .fixed(plaintext),
+            senderEd25519PublicKey: admin
+        )
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations
+        )
+        await dispatcher.dispatch(
+            messageID: "msg-cap",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+        let after = await groups.currentGroups()
+        XCTAssertEqual(after.first?.adminEd25519PubkeyHex, "ed".repeated(32),
+                       "materializer stamps sender Ed25519 hex on the new group")
+    }
+
     // MARK: - Invitation materialization path
 
     func test_invitation_materializesLocalGroup_withSelfEntry() async throws {
@@ -334,7 +524,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
 
     private func seedGroup(
         groupID: Data,
-        memberProfiles: [String: MemberProfile]
+        memberProfiles: [String: MemberProfile],
+        adminEd25519PubkeyHex: String? = nil
     ) async {
         let group = ChatGroup(
             id: groupID.map { String(format: "%02x", $0) }.joined(),
@@ -350,6 +541,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             tier: .small,
             groupType: .tyranny,
             adminPubkeyHex: nil,
+            adminEd25519PubkeyHex: adminEd25519PubkeyHex,
             isPublishedOnChain: true
         )
         _ = await groups.insert(group)

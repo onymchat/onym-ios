@@ -303,6 +303,36 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
         )
     }
 
+    /// Single-pass decrypt that surfaces the sender's Ed25519 pubkey
+    /// alongside the plaintext. Overrides the protocol's default
+    /// (which would re-decode the envelope twice) — at our volume
+    /// the savings are tiny but it's the right factoring.
+    func decryptInvitationWithSender(
+        envelopeBytes: Data,
+        asIdentity identityID: IdentityID
+    ) throws -> DecryptedEnvelope {
+        guard let snapshot = try keychain.read(identityID) else {
+            throw InvitationDecryptError.identityNotLoaded
+        }
+        let privateKey = try Self.inboxKeyAgreementPrivateKey(
+            fromNostrSecret: snapshot.nostrSecretKey
+        )
+        let envelope: SealedEnvelope
+        do {
+            envelope = try JSONDecoder().decode(SealedEnvelope.self, from: envelopeBytes)
+        } catch {
+            throw InvitationDecryptError.malformedEnvelope
+        }
+        let plaintext = try Self.decryptSealedEnvelope(
+            envelope: envelope,
+            recipientX25519PrivateKey: privateKey
+        )
+        return DecryptedEnvelope(
+            plaintext: plaintext,
+            senderEd25519PublicKey: envelope.senderEd25519PublicKey
+        )
+    }
+
     /// Static decrypt for callers that already hold the X25519 private
     /// key — used by `JoinRequestApprover` to open envelopes sealed
     /// to a per-invite ephemeral introPub (where the matching privkey
@@ -322,6 +352,20 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
         } catch {
             throw InvitationDecryptError.malformedEnvelope
         }
+        return try decryptSealedEnvelope(
+            envelope: envelope,
+            recipientX25519PrivateKey: recipientX25519PrivateKey
+        )
+    }
+
+    /// Same as `decryptSealedEnvelope(envelopeBytes:...)` but operates
+    /// on a pre-decoded envelope. Lets the caller fish out fields like
+    /// `senderEd25519PublicKey` without paying for a second JSON
+    /// decode of the same bytes.
+    static func decryptSealedEnvelope(
+        envelope: SealedEnvelope,
+        recipientX25519PrivateKey: Curve25519.KeyAgreement.PrivateKey
+    ) throws -> Data {
         guard envelope.scheme == "x25519-aes-256-gcm-v1" else {
             throw InvitationDecryptError.unsupportedScheme(envelope.scheme)
         }

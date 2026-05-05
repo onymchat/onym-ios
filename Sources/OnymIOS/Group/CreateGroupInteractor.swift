@@ -223,6 +223,8 @@ struct CreateGroupInteractor: Sendable {
         let groupIDHex = groupID.map { String(format: "%02x", $0) }.joined()
         let adminPubkeyHex = identitySnapshot.blsPublicKey
             .map { String(format: "%02x", $0) }.joined()
+        let adminEd25519PubkeyHex = identitySnapshot.stellarPublicKey
+            .map { String(format: "%02x", $0) }.joined()
         let creatorProfiles = await Self.creatorProfiles(
             from: identitySnapshot,
             identity: identity
@@ -241,6 +243,7 @@ struct CreateGroupInteractor: Sendable {
             tier: tier,
             groupType: .tyranny,
             adminPubkeyHex: adminPubkeyHex,
+            adminEd25519PubkeyHex: adminEd25519PubkeyHex,
             isPublishedOnChain: false
         )
         _ = await groups.insert(group)
@@ -427,6 +430,7 @@ struct CreateGroupInteractor: Sendable {
             tier: .small,
             groupType: .oneOnOne,
             adminPubkeyHex: nil,
+            adminEd25519PubkeyHex: nil,
             isPublishedOnChain: false
         )
         _ = await groups.insert(group)
@@ -606,6 +610,7 @@ struct CreateGroupInteractor: Sendable {
             tier: tier,
             groupType: .anarchy,
             adminPubkeyHex: nil,
+            adminEd25519PubkeyHex: nil,
             isPublishedOnChain: false
         )
         _ = await groups.insert(group)

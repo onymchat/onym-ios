@@ -16,6 +16,42 @@ protocol InvitationEnvelopeDecrypting: Sendable {
     /// the keychain, invalid signature on the ephemeral key (when
     /// present), or AES-GCM tag mismatch.
     func decryptInvitation(envelopeBytes: Data, asIdentity identityID: IdentityID) async throws -> Data
+
+    /// Same as `decryptInvitation` but additionally surfaces the
+    /// sender's Ed25519 pubkey from the outer envelope. Used by
+    /// receivers that need to authenticate the sender (e.g. verify a
+    /// `MemberAnnouncementPayload` came from the group's known admin)
+    /// without doing a second envelope decode. The default
+    /// implementation re-decodes the envelope just to extract the
+    /// sender pubkey — production conformers (`IdentityRepository`)
+    /// override with a single-pass implementation that decodes once.
+    func decryptInvitationWithSender(
+        envelopeBytes: Data,
+        asIdentity identityID: IdentityID
+    ) async throws -> DecryptedEnvelope
+}
+
+extension InvitationEnvelopeDecrypting {
+    /// Default fallback: decrypt via the existing API + decode the
+    /// envelope a second time to fish out the sender pubkey. Test
+    /// stubs that don't care about provenance get this for free.
+    func decryptInvitationWithSender(
+        envelopeBytes: Data,
+        asIdentity identityID: IdentityID
+    ) async throws -> DecryptedEnvelope {
+        let plaintext = try await decryptInvitation(
+            envelopeBytes: envelopeBytes,
+            asIdentity: identityID
+        )
+        let envelope = try? JSONDecoder().decode(
+            SealedEnvelope.self,
+            from: envelopeBytes
+        )
+        return DecryptedEnvelope(
+            plaintext: plaintext,
+            senderEd25519PublicKey: envelope?.senderEd25519PublicKey
+        )
+    }
 }
 
 enum InvitationDecryptError: Error, Equatable, Sendable {
