@@ -123,7 +123,8 @@ struct ApproveRequestsView: View {
     }
 
     private func requestCard(_ request: JoinRequestApprover.PendingRequest) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let inFlight = flow.isInFlight(request.id)
+        return VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(displayAlias(request.joinerDisplayLabel))
                     .font(.system(size: 16, weight: .semibold))
@@ -146,22 +147,39 @@ struct ApproveRequestsView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
                 .accessibilityIdentifier("approve_requests.decline_button.\(request.id)")
-                .disabled(request.groupName == nil)
+                .disabled(request.groupName == nil || inFlight)
                 Button {
                     flow.approve(request.id)
                 } label: {
-                    Text("Approve")
-                        .font(.system(size: 14, weight: .semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 11)
-                        .background(OnymAccent.blue.color)
-                        .foregroundStyle(OnymTokens.onAccent)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                    HStack(spacing: 6) {
+                        if inFlight {
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                                .tint(OnymTokens.onAccent)
+                                .scaleEffect(0.8)
+                        }
+                        Text(inFlight ? "Anchoring on chain\u{2026}" : "Approve")
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 11)
+                    .background(OnymAccent.blue.color.opacity(inFlight ? 0.7 : 1.0))
+                    .foregroundStyle(OnymTokens.onAccent)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
                 .accessibilityIdentifier("approve_requests.approve_button.\(request.id)")
-                .disabled(request.groupName == nil)
+                .disabled(request.groupName == nil || inFlight)
             }
-            if request.groupName == nil {
+            if inFlight {
+                // The on-chain admit ceremony is multi-second
+                // (PLONK proving + relayer roundtrip + Stellar tx
+                // confirmation) — surface that explicitly so the
+                // admin doesn't think the tap was lost.
+                Text("Generating proof and updating the on-chain commitment. This usually takes a few seconds.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(OnymTokens.text2)
+                    .accessibilityIdentifier("approve_requests.in_flight_hint.\(request.id)")
+            } else if request.groupName == nil {
                 Text("This request is for a group that isn\u{2019}t on this device. Decline to clear it.")
                     .font(.system(size: 12))
                     .foregroundStyle(OnymTokens.text2)

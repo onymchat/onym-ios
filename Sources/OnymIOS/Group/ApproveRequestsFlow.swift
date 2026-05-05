@@ -19,12 +19,26 @@ final class ApproveRequestsFlow {
     /// Last failed-approve reason, or nil. Cleared on the next
     /// successful Approve / Decline / dismiss.
     var lastError: String?
+    /// Request IDs whose Approve / Decline call is currently in
+    /// flight. Drives the per-row spinner + disabled-buttons state
+    /// in `ApproveRequestsView`. Necessary because PR 13a turned
+    /// `approve` into a multi-second flow (PLONK prove +
+    /// `update_commitment` HTTP roundtrip + Stellar tx wait) — without
+    /// this signal the UI looks frozen while the proof generates.
+    var inFlightRequestIDs: Set<String> = []
 
     private let approver: any JoinRequestApproving
     private var streamingTask: Task<Void, Never>?
 
     init(approver: any JoinRequestApproving) {
         self.approver = approver
+    }
+
+    /// True when the row for `requestID` should render as
+    /// in-flight (spinner + disabled). Helper so views don't have
+    /// to reach into the `Set` directly.
+    func isInFlight(_ requestID: String) -> Bool {
+        inFlightRequestIDs.contains(requestID)
     }
 
     /// Start the underlying collector + mirror `pending` snapshots
@@ -50,17 +64,28 @@ final class ApproveRequestsFlow {
     }
 
     func approve(_ id: String) {
+        // Debounce: a second tap while the first call is in flight
+        // is a no-op. `approver.approve` is idempotent on requestID
+        // (already-consumed requests return `.unknownRequest`), but
+        // re-entering the proof+chain submission path twice is a
+        // waste of cycles + can confuse `lastError` ordering.
+        guard !inFlightRequestIDs.contains(id) else { return }
+        inFlightRequestIDs.insert(id)
         let approver = self.approver
         Task { @MainActor [weak self] in
             let outcome = await approver.approve(requestId: id)
+            self?.inFlightRequestIDs.remove(id)
             self?.lastError = Self.failureReason(for: outcome)
         }
     }
 
     func decline(_ id: String) {
+        guard !inFlightRequestIDs.contains(id) else { return }
+        inFlightRequestIDs.insert(id)
         let approver = self.approver
         Task { @MainActor [weak self] in
             await approver.decline(requestId: id)
+            self?.inFlightRequestIDs.remove(id)
             self?.lastError = nil
         }
     }

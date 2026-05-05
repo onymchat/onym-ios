@@ -568,6 +568,7 @@
       }
     },
     "Approve" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1360,6 +1361,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Загружаю список…"
+          }
+        }
+      }
+    },
+    "Generating proof and updating the on-chain commitment. This usually takes a few seconds." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Generating proof and updating the on-chain commitment. This usually takes a few seconds."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Генерируется доказательство и обновляется обязательство в блокчейне. Обычно занимает несколько секунд."
+          }
+        }
+      }
+    },
+    "Anchoring on chain…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anchoring on chain…"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Якорим в блокчейне…"
           }
         }
       }
