@@ -16,7 +16,7 @@ import Foundation
 struct InboxFanoutInteractor: Sendable {
     let inboxTransport: any InboxTransport
     let identityRepository: IdentityRepository
-    let repository: IncomingInvitationsRepository
+    let dispatcher: IncomingMessageDispatcher
     /// Coalescing window — multiple identity changes within this many
     /// milliseconds collapse into one re-subscribe.
     let debounceMilliseconds: UInt64
@@ -24,12 +24,12 @@ struct InboxFanoutInteractor: Sendable {
     init(
         inboxTransport: any InboxTransport,
         identityRepository: IdentityRepository,
-        repository: IncomingInvitationsRepository,
+        dispatcher: IncomingMessageDispatcher,
         debounceMilliseconds: UInt64 = 250
     ) {
         self.inboxTransport = inboxTransport
         self.identityRepository = identityRepository
-        self.repository = repository
+        self.dispatcher = dispatcher
         self.debounceMilliseconds = debounceMilliseconds
     }
 
@@ -38,7 +38,7 @@ struct InboxFanoutInteractor: Sendable {
     func run() async {
         let subscriptions = ActiveSubscriptions(
             inboxTransport: inboxTransport,
-            repository: repository
+            dispatcher: dispatcher
         )
 
         // Apply the current identity set immediately on launch (the
@@ -106,12 +106,12 @@ struct InboxFanoutInteractor: Sendable {
 /// ones, no-ops the rest.
 private actor ActiveSubscriptions {
     private let inboxTransport: any InboxTransport
-    private let repository: IncomingInvitationsRepository
+    private let dispatcher: IncomingMessageDispatcher
     private var live: [IdentityID: (tag: TransportInboxID, task: Task<Void, Never>)] = [:]
 
-    init(inboxTransport: any InboxTransport, repository: IncomingInvitationsRepository) {
+    init(inboxTransport: any InboxTransport, dispatcher: IncomingMessageDispatcher) {
         self.inboxTransport = inboxTransport
-        self.repository = repository
+        self.dispatcher = dispatcher
     }
 
     func apply(_ wanted: Set<IdentityID>, tagsByID: [IdentityID: TransportInboxID]) async {
@@ -126,15 +126,15 @@ private actor ActiveSubscriptions {
             guard let tag = tagsByID[id], live[id] == nil else { continue }
             let stream = inboxTransport.subscribe(inbox: tag)
             // Capture the per-subscription identity ID into the Task —
-            // the persisted record stamps `ownerIdentityID = id` so
-            // `decryptInvitation(asIdentity:)` can later route the
-            // envelope to the right per-identity X25519 key, even if
+            // the dispatcher hands `ownerIdentityID = id` to
+            // `InvitationEnvelopeDecrypting` so cross-identity envelopes
+            // decrypt under the right per-identity X25519 key, even if
             // the user has switched to a different identity.
-            let task = Task { [repository, id] in
+            let task = Task { [dispatcher, id] in
                 for await message in stream {
                     if Task.isCancelled { break }
-                    await repository.recordIncoming(
-                        id: message.messageID,
+                    await dispatcher.dispatch(
+                        messageID: message.messageID,
                         ownerIdentityID: id,
                         payload: message.payload,
                         receivedAt: message.receivedAt

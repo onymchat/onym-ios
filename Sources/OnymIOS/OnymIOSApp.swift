@@ -244,10 +244,21 @@ struct OnymIOSApp: App {
                     // PR-4: subscribe to every identity's inbox
                     // concurrently. Without this, messages addressed
                     // to a non-current identity drop on the floor.
+                    //
+                    // Each inbound message is decrypted at receive
+                    // time by the dispatcher; member-roster
+                    // announcements apply directly to
+                    // `GroupRepository.memberProfiles`, everything
+                    // else falls through to the invitations queue.
+                    let dispatcher = IncomingMessageDispatcher(
+                        envelopeDecrypter: identityRepository,
+                        groupRepository: groupRepository,
+                        invitationsRepository: incomingInvitations
+                    )
                     let fanout = InboxFanoutInteractor(
                         inboxTransport: inboxTransport,
                         identityRepository: identityRepository,
-                        repository: incomingInvitations
+                        dispatcher: dispatcher
                     )
                     await fanout.run()
                 }
