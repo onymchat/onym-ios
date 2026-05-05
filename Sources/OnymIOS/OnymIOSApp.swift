@@ -138,7 +138,9 @@ struct OnymIOSApp: App {
             introKeyStore: introKeyStore,
             introRequestStore: self.introRequestStore,
             groupRepository: groupRepository,
-            inboxTransport: inboxTransport
+            inboxTransport: inboxTransport,
+            relayers: relayerRepository,
+            contracts: contractsRepository
         )
         let approveRequestsFlow = ApproveRequestsFlow(approver: joinRequestApprover)
 

@@ -385,6 +385,22 @@
         }
       }
     },
+    "Add" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Добавить"
+          }
+        }
+      }
+    },
     "Add Custom URL" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1154,6 +1170,22 @@
         }
       }
     },
+    "DEFAULT" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DEFAULT"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ПО УМОЛЧАНИЮ"
+          }
+        }
+      }
+    },
     "Democracy" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1769,6 +1801,22 @@
         }
       }
     },
+    "No relays configured. Inbox transport is offline." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No relays configured. Inbox transport is offline."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Нет настроенных релеев. Транспорт входящих сообщений отключён."
+          }
+        }
+      }
+    },
     "Nostr (npub)" : {
       "localizations" : {
         "en" : {
@@ -2096,6 +2144,22 @@
         }
       }
     },
+    "Re-install Onym Official as the only relay." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Re-install Onym Official as the only relay."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Восстановить Onym Official как единственный релей."
+          }
+        }
+      }
+    },
     "Read the docs" : {
       "localizations" : {
         "en" : {
@@ -2256,6 +2320,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Сбросить к значению по умолчанию (последняя версия)"
+          }
+        }
+      }
+    },
+    "Restore default" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Restore default"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сбросить к умолчаниям"
           }
         }
       }
@@ -2613,6 +2693,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Нажмите, чтобы показать"
+          }
+        }
+      }
+    },
+    "TBA" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "TBA"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "СКОРО"
           }
         }
       }

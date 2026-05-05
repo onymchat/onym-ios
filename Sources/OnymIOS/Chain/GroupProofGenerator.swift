@@ -30,11 +30,67 @@ struct GroupCreateProof: Equatable, Sendable {
 
 /// PR-B's chain seam for proof generation. Switches on `groupType` so
 /// that PR-C's interactor doesn't need to import OnymSDK directly. Only
-/// `.tyranny` is wired in this slice — the other governance types
-/// throw `notYetSupported`, which the UI surfaces as a clear "TBD"
-/// message rather than a silent fallback.
+/// `.tyranny` is wired for `proveUpdate` (PR 13a) — joiner admission
+/// is admin-only by contract design.
 protocol GroupProofGenerator: Sendable {
     func proveCreate(_ input: GroupProofCreateInput) throws -> GroupCreateProof
+    /// Generate a Tyranny `update_commitment` proof for adding one
+    /// member to an existing group's tree. Wraps
+    /// `Tyranny.proveUpdate(...)` with the iOS calling convention.
+    /// Throws `notYetSupported` for non-Tyranny group types.
+    func proveUpdate(_ input: GroupProofUpdateInput) throws -> GroupUpdateProof
+}
+
+/// Output of `GroupProofGenerator.proveUpdate`. Same wire-shape
+/// invariant as `GroupCreateProof`: relayer expects the raw
+/// 1601-byte PLONK proof + the SDK's full PI bundle split into
+/// 32-byte chunks. Tyranny update returns 5 chunks
+/// (`c_old || epoch_old_be || c_new || admin_pubkey_commitment ||
+/// group_id_fr`).
+struct GroupUpdateProof: Equatable, Sendable {
+    let proof: Data
+    let publicInputs: [Data]
+
+    /// Bytes 64..96 of the PI bundle — the new commitment the
+    /// contract will store after verifying.
+    var commitmentNew: Data { publicInputs[2] }
+    /// `epoch_old + 1` — the epoch the contract advances to. The
+    /// proof binds `epoch_old` (PI[1]); the new epoch is implicit
+    /// in the contract's `update_commitment` arm.
+    func epochNew(epochOld: UInt64) -> UInt64 { epochOld + 1 }
+}
+
+/// Inputs for a Tyranny update-commitment proof. Mirrors
+/// `Tyranny.proveUpdate(...)`'s SDK shape.
+///
+/// - `oldMembers`: roster as it stands before the join (lex-sorted
+///   by `publicKeyCompressed`). Admin's position determined from
+///   this list.
+/// - `adminBlsSecretKey`: 32-byte BE BLS Fr scalar.
+/// - `adminIndexOld`: position of the admin's leaf in the OLD sorted
+///   roster (the proof witnesses admin membership at that index).
+/// - `epochOld`: current on-chain epoch.
+/// - `memberRootNew`: 32-byte Poseidon root of the NEW tree
+///   (post-join). Computed externally by the caller via
+///   `Common.merkleRoot(...)`.
+/// - `groupID`: 32-byte raw group ID (`group_id_fr` binding).
+/// - `tier`: depth selector — must match the depth used at create
+///   time + at every prior update for the proof to verify against
+///   the correct VK.
+/// - `saltOld` / `saltNew`: 32-byte fresh salts. `saltOld` was used
+///   for the previous commitment; `saltNew` is freshly minted by
+///   the admin per update to bind the new root.
+struct GroupProofUpdateInput: Sendable {
+    let groupType: SEPGroupType
+    let tier: SEPTier
+    let oldMembers: [GovernanceMember]
+    let adminBlsSecretKey: Data
+    let adminIndexOld: Int
+    let epochOld: UInt64
+    let memberRootNew: Data
+    let groupID: Data
+    let saltOld: Data
+    let saltNew: Data
 }
 
 /// Inputs for a create-group proof. Per-type field requirements:
@@ -94,6 +150,64 @@ struct OnymGroupProofGenerator: GroupProofGenerator {
         case .democracy, .oligarchy:
             throw GroupProofGeneratorError.notYetSupported(input.groupType)
         }
+    }
+
+    func proveUpdate(_ input: GroupProofUpdateInput) throws -> GroupUpdateProof {
+        switch input.groupType {
+        case .tyranny:
+            return try proveTyrannyUpdate(input)
+        case .oneOnOne, .anarchy, .democracy, .oligarchy:
+            // Only Tyranny supports admin-driven updates in this
+            // PR. Anarchy will need its own arm later (any-member
+            // update); OneOnOne is fixed 2-party.
+            throw GroupProofGeneratorError.notYetSupported(input.groupType)
+        }
+    }
+
+    private func proveTyrannyUpdate(_ input: GroupProofUpdateInput) throws -> GroupUpdateProof {
+        guard input.adminIndexOld >= 0, input.adminIndexOld < input.oldMembers.count else {
+            throw GroupProofGeneratorError.adminIndexOutOfRange(
+                index: input.adminIndexOld,
+                count: input.oldMembers.count
+            )
+        }
+        var packedOld = Data(capacity: input.oldMembers.count * 32)
+        for member in input.oldMembers {
+            packedOld.append(member.leafHash)
+        }
+
+        let result: Tyranny.UpdateProof
+        do {
+            result = try Tyranny.proveUpdate(
+                depth: input.tier.depth,
+                memberLeafHashesOld: packedOld,
+                adminSecretKey: input.adminBlsSecretKey,
+                adminIndexOld: input.adminIndexOld,
+                epochOld: input.epochOld,
+                memberRootNew: input.memberRootNew,
+                groupIdFr: input.groupID,
+                saltOld: input.saltOld,
+                saltNew: input.saltNew
+            )
+        } catch {
+            throw GroupProofGeneratorError.sdkFailure(String(describing: error))
+        }
+
+        // PI bundle layout (`Tyranny.UpdateProof.publicInputs`, 160 B):
+        //   c_old(32) || epoch_old_be(32) || c_new(32) ||
+        //   admin_pubkey_commitment(32) || group_id_fr(32)
+        // Each 32-byte chunk maps to one `BytesN<32>` in the contract's
+        // 5-element `Vec<BytesN<32>>` public-inputs argument.
+        let bundle = result.publicInputs
+        guard bundle.count == 160 else {
+            throw GroupProofGeneratorError.sdkFailure(
+                "expected 160-byte update PI bundle, got \(bundle.count)"
+            )
+        }
+        let chunks: [Data] = stride(from: 0, to: bundle.count, by: 32).map { offset in
+            Data(bundle[offset..<(offset + 32)])
+        }
+        return GroupUpdateProof(proof: result.proof, publicInputs: chunks)
     }
 
     /// Anarchy create: there's no dedicated `proveCreate` SDK call —

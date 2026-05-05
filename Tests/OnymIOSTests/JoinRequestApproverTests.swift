@@ -18,6 +18,11 @@ final class JoinRequestApproverTests: XCTestCase {
     private var introRequestStore: InMemoryIntroRequestStore!
     private var groups: GroupRepository!
     private var transport: ApproverRecordingInboxTransport!
+    // PR 13a: stubs for the on-chain anchor leg.
+    private var relayers: RelayerRepository!
+    private var contracts: ContractsRepository!
+    private var proofGenerator: ApproverStubProofGenerator!
+    private var contractTransport: ApproverStubContractTransport!
 
     override func setUp() async throws {
         try await super.setUp()
@@ -27,6 +32,43 @@ final class JoinRequestApproverTests: XCTestCase {
         introRequestStore = InMemoryIntroRequestStore()
         groups = GroupRepository(store: SwiftDataGroupStore.inMemory())
         transport = ApproverRecordingInboxTransport()
+
+        relayers = RelayerRepository(
+            fetcher: ApproverNoopRelayerFetcher(),
+            store: ApproverInMemoryRelayerStore()
+        )
+        _ = await relayers.addEndpoint(RelayerEndpoint(
+            name: "test",
+            url: URL(string: "https://relayer.test.example")!,
+            networks: ["testnet"]
+        ))
+        await relayers.setStrategy(.primary)
+        await relayers.setPrimary(url: URL(string: "https://relayer.test.example")!)
+
+        let manifest = ContractsManifest(
+            version: 1,
+            releases: [
+                ContractRelease(
+                    release: "v0.0.3",
+                    publishedAt: Date(timeIntervalSince1970: 1_700_000_000),
+                    contracts: [
+                        ContractEntry(
+                            network: .testnet,
+                            type: .tyranny,
+                            id: "CTYRANNYTEST00000000000000000000000000000000000000000000"
+                        )
+                    ]
+                )
+            ]
+        )
+        contracts = ContractsRepository(
+            fetcher: ApproverFakeContractsFetcher(manifest: manifest),
+            store: ApproverInMemoryContractsStore()
+        )
+        try? await contracts.refresh()
+
+        proofGenerator = ApproverStubProofGenerator()
+        contractTransport = ApproverStubContractTransport()
     }
 
     override func tearDown() async throws {
@@ -37,6 +79,10 @@ final class JoinRequestApproverTests: XCTestCase {
         introRequestStore = nil
         groups = nil
         transport = nil
+        relayers = nil
+        contracts = nil
+        proofGenerator = nil
+        contractTransport = nil
         try await super.tearDown()
     }
 
@@ -152,6 +198,49 @@ final class JoinRequestApproverTests: XCTestCase {
                        "joiner gets exactly one envelope (the invitation), not also a fanout copy")
     }
 
+    // MARK: - PR 13a anchor failure modes
+
+    func test_approve_outdatedJoinerClient_whenLeafHashMissing() async throws {
+        // Joiner shipped without joiner_leaf_hash (pre-PR-13 build).
+        // Admin can't anchor; should return .outdatedJoinerClient
+        // and NOT consume the request.
+        let env = try await seedEnvironment(omitJoinerLeafHash: true)
+        await env.approver.pumpOnce()
+        let outcome = await env.approver.approve(requestId: env.requestID)
+        XCTAssertEqual(outcome, .outdatedJoinerClient)
+        let remaining = await introRequestStore.current()
+        XCTAssertEqual(remaining.count, 1, "outdated request must NOT be consumed")
+        let sends = await transport.sends
+        XCTAssertTrue(sends.isEmpty, "no envelopes shipped on outdated-client failure")
+    }
+
+    func test_approve_anchorRejected_doesNotConsumeRequest() async throws {
+        // Chain returns accepted=false (e.g. proof verification
+        // failed on the contract side). Admin should NOT ship the
+        // invitation, NOT mutate local state, NOT consume the
+        // request. Admin can investigate + retry.
+        contractTransport.nextAccepted = false
+        let env = try await seedEnvironment()
+        await env.approver.pumpOnce()
+        let outcome = await env.approver.approve(requestId: env.requestID)
+        if case .anchorRejected = outcome {
+            // expected
+        } else {
+            XCTFail("expected .anchorRejected, got \(outcome)")
+        }
+        let sends = await transport.sends
+        XCTAssertTrue(sends.isEmpty,
+                      "invitation must NOT ship when chain rejects the proof")
+        let remaining = await introRequestStore.current()
+        XCTAssertEqual(remaining.count, 1,
+                       "rejected request stays in store so admin can retry")
+        // Local group state stayed at the original (epoch unchanged,
+        // members not extended).
+        let after = await groups.currentGroups()
+        XCTAssertEqual(after.first?.epoch, 0,
+                       "epoch must NOT advance when anchor is rejected")
+    }
+
     // MARK: - decline
 
     func test_decline_dropsRequestAndRevokesKey() async throws {
@@ -196,10 +285,14 @@ final class JoinRequestApproverTests: XCTestCase {
     /// approver doesn't care; it operates on cryptographic shape.
     private func seedEnvironment(
         insertGroup: Bool = true,
-        extraMemberProfiles: [String: MemberProfile] = [:]
+        extraMemberProfiles: [String: MemberProfile] = [:],
+        omitJoinerLeafHash: Bool = false
     ) async throws -> Env {
         let active = try await identity.bootstrap()
         let ownerID = try await XCTUnwrapAsync(await identity.currentSelectedID())
+        // onym:allow-secret-read
+        let adminBlsSecret = try await identity.blsSecretKey()
+        let adminLeafHash = try GroupCommitmentBuilder.computeLeafHash(secretKey: adminBlsSecret)
 
         let groupID = Data(repeating: 0x42, count: 32)
         let groupIDHex = groupID.map { String(format: "%02x", $0) }.joined()
@@ -217,13 +310,23 @@ final class JoinRequestApproverTests: XCTestCase {
         ))
 
         // Build JoinRequestPayload + seal to the intro pubkey using
-        // the admin's identity as the signer.
+        // the admin's identity as the signer. In production, joiner
+        // and admin are different identities; this single-identity
+        // collapse is fine because the approver only inspects
+        // cryptographic shape, not party relationship.
+        //
+        // Single-identity collapse means joiner.bls_pub == admin.bls_pub,
+        // which would cause the anchor flow to add a duplicate leaf.
+        // Use a synthetic joiner BLS pubkey here so the new tree is
+        // distinct from the seed.
         let joinerInboxPub = active.inboxPublicKey
-        let joinerBlsPub = active.blsPublicKey
+        let joinerBlsPub = Data(repeating: 0xCC, count: 48)
+        let joinerLeafHash = Data(repeating: 0xDD, count: 32)
         let joinerAlias = "Joiner Bob"
         let joinPayload = try JoinRequestPayload(
             joinerInboxPublicKey: joinerInboxPub,
             joinerBlsPublicKey: joinerBlsPub,
+            joinerLeafHash: omitJoinerLeafHash ? nil : joinerLeafHash,
             joinerDisplayLabel: joinerAlias,
             groupId: groupID
         )
@@ -252,13 +355,20 @@ final class JoinRequestApproverTests: XCTestCase {
                 alias: "Admin",
                 inboxPublicKey: active.inboxPublicKey
             )
+            // Admin must be in the cryptographic roster for the
+            // anchor path to find adminIndexOld. Real groups land
+            // here via CreateGroupInteractor.
+            let adminMember = GovernanceMember(
+                publicKeyCompressed: active.blsPublicKey,
+                leafHash: adminLeafHash
+            )
             let group = ChatGroup(
                 id: groupIDHex,
                 ownerIdentityID: ownerID,
                 name: "Family",
                 groupSecret: Data(repeating: 0x55, count: 32),
                 createdAt: Date(timeIntervalSince1970: 1_700_000_000),
-                members: [],
+                members: [adminMember],
                 memberProfiles: profiles,
                 epoch: 0,
                 salt: Data(repeating: 0x66, count: 32),
@@ -272,12 +382,19 @@ final class JoinRequestApproverTests: XCTestCase {
             _ = await groups.insert(group)
         }
 
+        // Capture the contractTransport for the closure capture.
+        let chainTransport = contractTransport!
         let approver = JoinRequestApprover(
             identity: identity,
             introKeyStore: introKeyStore,
             introRequestStore: introRequestStore,
             groupRepository: groups,
-            inboxTransport: transport
+            inboxTransport: transport,
+            relayers: relayers,
+            contracts: contracts,
+            networkPreference: ApproverStaticNetworkPreference(value: .testnet),
+            proofGenerator: proofGenerator,
+            makeContractTransport: { _ in chainTransport }
         )
 
         return Env(
@@ -355,3 +472,171 @@ private func XCTUnwrapAsync<T>(
 }
 
 private struct XCTUnwrapFailedError: Error {}
+
+// MARK: - PR 13a chain-anchor stubs
+
+/// Returns canned `Tyranny.UpdateProof`-shape outputs (160-byte PI
+/// bundle / 5 chunks) without invoking the real prover. Optional
+/// failure mode for the proof-fails test.
+private actor ApproverStubProofGenerator: GroupProofGenerator {
+    var nextProofShouldFail: Bool = false
+    private(set) var proveUpdateCalls: Int = 0
+
+    func setNextProofShouldFail(_ fail: Bool) { nextProofShouldFail = fail }
+
+    nonisolated func proveCreate(_ input: GroupProofCreateInput) throws -> GroupCreateProof {
+        // Not used in approver tests — return a deterministic create
+        // proof so the protocol conformance is satisfied.
+        let frZero = Data(repeating: 0, count: 32)
+        return GroupCreateProof(
+            proof: Data(repeating: 0xAB, count: 1601),
+            publicInputs: [
+                Data(repeating: 0xCD, count: 32),
+                frZero,
+                Data(repeating: 0xEF, count: 32),
+                input.groupID,
+            ]
+        )
+    }
+
+    nonisolated func proveUpdate(_ input: GroupProofUpdateInput) throws -> GroupUpdateProof {
+        // Synchronous bridge into the actor: read flags via an
+        // unsafe sync hop. For test purposes a tiny race here is
+        // fine — single-test-actor execution serializes calls.
+        return try _proveUpdateSync(input)
+    }
+
+    private nonisolated func _proveUpdateSync(_ input: GroupProofUpdateInput) throws -> GroupUpdateProof {
+        // Use a semaphore to read the flag synchronously. Fine for
+        // tests; the actor's serial executor enforces ordering.
+        let dispatch = DispatchSemaphore(value: 0)
+        var shouldFail = false
+        var calls = 0
+        Task { [self] in
+            shouldFail = await self.nextProofShouldFail
+            calls = await self.proveUpdateCalls
+            await self.bumpProveUpdateCalls()
+            dispatch.signal()
+        }
+        dispatch.wait()
+        _ = calls
+        if shouldFail {
+            throw GroupProofGeneratorError.sdkFailure("stub: forced failure")
+        }
+        // Synthetic 160-byte PI bundle — c_old || epoch_old_be ||
+        // c_new || admin_pubkey_commitment || group_id_fr.
+        var epochOldBe = Data(count: 32)
+        epochOldBe.withUnsafeMutableBytes { buf in
+            let bytes = buf.bindMemory(to: UInt8.self)
+            var v = input.epochOld.bigEndian
+            withUnsafeBytes(of: &v) { src in
+                for i in 0..<8 { bytes[24 + i] = src[i] }
+            }
+        }
+        return GroupUpdateProof(
+            proof: Data(repeating: 0xAB, count: 1601),
+            publicInputs: [
+                Data(repeating: 0xC0, count: 32),  // c_old (synthetic)
+                epochOldBe,
+                Data(repeating: 0xC1, count: 32),  // c_new (synthetic)
+                Data(repeating: 0xAD, count: 32),  // admin_pubkey_commitment
+                input.groupID,                      // group_id_fr
+            ]
+        )
+    }
+
+    private func bumpProveUpdateCalls() {
+        proveUpdateCalls += 1
+    }
+}
+
+/// Stub `SEPContractTransport` — records every invocation, returns
+/// `accepted = true` by default; tests can flip
+/// `nextAccepted` to drive the rejected path.
+private final class ApproverStubContractTransport: SEPContractTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _nextAccepted: Bool = true
+    private var _calls: [String] = []
+
+    var nextAccepted: Bool {
+        get { lock.withLock { _nextAccepted } }
+        set { lock.withLock { _nextAccepted = newValue } }
+    }
+    var calls: [String] {
+        lock.withLock { _calls }
+    }
+
+    func invoke<Payload: Encodable & Sendable, Response: Decodable & Sendable>(
+        _ invocation: SEPContractInvocation<Payload>,
+        responseType: Response.Type
+    ) async throws -> Response {
+        lock.withLock { _calls.append(invocation.function) }
+        let response = SEPSubmissionResponse(
+            accepted: nextAccepted,
+            transactionHash: nextAccepted ? "0xstubhash" : nil,
+            message: nextAccepted ? nil : "stub rejected"
+        )
+        let data = try JSONEncoder().encode(response)
+        return try JSONDecoder().decode(Response.self, from: data)
+    }
+}
+
+/// Static `NetworkPreferenceProviding` for tests.
+private struct ApproverStaticNetworkPreference: NetworkPreferenceProviding, Sendable {
+    let value: AppNetwork
+    func current() -> AppNetwork { value }
+}
+
+/// In-memory `RelayerSelectionStore` so the test fixture can
+/// pre-load a configured endpoint without touching UserDefaults.
+private final class ApproverInMemoryRelayerStore: RelayerSelectionStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private var configuration: RelayerConfiguration = .empty
+    private var cachedKnownList: [RelayerEndpoint] = []
+
+    func loadConfiguration() -> RelayerConfiguration {
+        lock.withLock { configuration }
+    }
+    func saveConfiguration(_ configuration: RelayerConfiguration) {
+        lock.withLock { self.configuration = configuration }
+    }
+    func loadCachedKnownList() -> [RelayerEndpoint] {
+        lock.withLock { cachedKnownList }
+    }
+    func saveCachedKnownList(_ list: [RelayerEndpoint]) {
+        lock.withLock { cachedKnownList = list }
+    }
+}
+
+/// No-op `KnownRelayersFetcher` — the test fixture pre-populates
+/// the configuration via `addEndpoint`, no network needed.
+private struct ApproverNoopRelayerFetcher: KnownRelayersFetcher {
+    func fetchLatest() async throws -> [RelayerEndpoint] { [] }
+}
+
+/// In-memory `AnchorSelectionStore` so the test fixture's
+/// `ContractsRepository` doesn't reach for UserDefaults.
+private final class ApproverInMemoryContractsStore: AnchorSelectionStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private var manifest: ContractsManifest?
+    private var selections: [AnchorSelectionKey: String] = [:]
+
+    func loadSelections() -> [AnchorSelectionKey: String] {
+        lock.withLock { selections }
+    }
+    func saveSelections(_ selections: [AnchorSelectionKey: String]) {
+        lock.withLock { self.selections = selections }
+    }
+    func loadCachedManifest() -> ContractsManifest? {
+        lock.withLock { manifest }
+    }
+    func saveCachedManifest(_ manifest: ContractsManifest) {
+        lock.withLock { self.manifest = manifest }
+    }
+}
+
+/// Returns a fixed manifest from `fetchLatest`.
+private struct ApproverFakeContractsFetcher: ContractsManifestFetcher {
+    let manifest: ContractsManifest
+    func fetchLatest() async throws -> ContractsManifest { manifest }
+}

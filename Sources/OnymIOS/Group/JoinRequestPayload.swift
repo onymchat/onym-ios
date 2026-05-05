@@ -37,12 +37,25 @@ struct JoinRequestPayload: Codable, Equatable, Sendable {
     /// fallback key in `memberProfiles` rather than rejecting the
     /// request.
     let joinerBlsPublicKey: Data?
+    /// 32-byte Poseidon leaf hash — `Poseidon(joiner_bls_secret)`,
+    /// computed by the joiner via `Common.leafHash(secretKey:)`.
+    /// Required for the admin to extend the on-chain Merkle tree at
+    /// approve time (`Tyranny.proveUpdate` needs it as part of the
+    /// new packed leaf set).
+    ///
+    /// Optional on the wire — pre-PR-13 joiner builds shipped
+    /// requests without it. Admins running a PR-13+ build MUST
+    /// reject join requests missing this field for Tyranny groups,
+    /// because the on-chain `update_commitment` proof can't be
+    /// generated without it.
+    let joinerLeafHash: Data?
     let joinerDisplayLabel: String
     let groupId: Data
 
     enum CodingKeys: String, CodingKey {
         case joinerInboxPublicKey = "joiner_inbox_pub"
         case joinerBlsPublicKey = "joiner_bls_pub"
+        case joinerLeafHash = "joiner_leaf_hash"
         case joinerDisplayLabel = "joiner_display_label"
         case groupId = "group_id"
     }
@@ -50,6 +63,7 @@ struct JoinRequestPayload: Codable, Equatable, Sendable {
     init(
         joinerInboxPublicKey: Data,
         joinerBlsPublicKey: Data?,
+        joinerLeafHash: Data?,
         joinerDisplayLabel: String,
         groupId: Data
     ) throws {
@@ -63,6 +77,11 @@ struct JoinRequestPayload: Codable, Equatable, Sendable {
                 "joinerBlsPublicKey: expected 48 bytes, got \(bls.count)"
             )
         }
+        if let leaf = joinerLeafHash, leaf.count != 32 {
+            throw JoinRequestPayloadError.shape(
+                "joinerLeafHash: expected 32 bytes, got \(leaf.count)"
+            )
+        }
         guard groupId.count == 32 else {
             throw JoinRequestPayloadError.shape(
                 "groupId: expected 32 bytes, got \(groupId.count)"
@@ -70,6 +89,7 @@ struct JoinRequestPayload: Codable, Equatable, Sendable {
         }
         self.joinerInboxPublicKey = joinerInboxPublicKey
         self.joinerBlsPublicKey = joinerBlsPublicKey
+        self.joinerLeafHash = joinerLeafHash
         self.joinerDisplayLabel = joinerDisplayLabel
         self.groupId = groupId
     }
@@ -78,6 +98,7 @@ struct JoinRequestPayload: Codable, Equatable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let pub = try c.decode(Data.self, forKey: .joinerInboxPublicKey)
         let bls = try c.decodeIfPresent(Data.self, forKey: .joinerBlsPublicKey)
+        let leaf = try c.decodeIfPresent(Data.self, forKey: .joinerLeafHash)
         let label = try c.decode(String.self, forKey: .joinerDisplayLabel)
         let gid = try c.decode(Data.self, forKey: .groupId)
         guard pub.count == 32 else {
@@ -90,6 +111,11 @@ struct JoinRequestPayload: Codable, Equatable, Sendable {
                 "joinerBlsPublicKey: expected 48 bytes, got \(blsBytes.count)"
             )
         }
+        if let leafBytes = leaf, leafBytes.count != 32 {
+            throw JoinRequestPayloadError.shape(
+                "joinerLeafHash: expected 32 bytes, got \(leafBytes.count)"
+            )
+        }
         guard gid.count == 32 else {
             throw JoinRequestPayloadError.shape(
                 "groupId: expected 32 bytes, got \(gid.count)"
@@ -97,6 +123,7 @@ struct JoinRequestPayload: Codable, Equatable, Sendable {
         }
         self.joinerInboxPublicKey = pub
         self.joinerBlsPublicKey = bls
+        self.joinerLeafHash = leaf
         self.joinerDisplayLabel = label
         self.groupId = gid
     }

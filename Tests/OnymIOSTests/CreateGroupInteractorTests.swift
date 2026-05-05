@@ -565,6 +565,15 @@ private struct StubGroupProofGenerator: GroupProofGenerator {
             throw GroupProofGeneratorError.notYetSupported(input.groupType)
         }
     }
+
+    /// PR 13a: not exercised in CreateGroupInteractor flows
+    /// (CreateGroupInteractor never calls `proveUpdate`), but the
+    /// protocol now requires it. Throws `notYetSupported` for every
+    /// type — the create-side stubs don't need to model the update
+    /// path.
+    func proveUpdate(_ input: GroupProofUpdateInput) throws -> GroupUpdateProof {
+        throw GroupProofGeneratorError.notYetSupported(input.groupType)
+    }
 }
 
 /// Recording inbox transport with a configurable acceptedBy count.
