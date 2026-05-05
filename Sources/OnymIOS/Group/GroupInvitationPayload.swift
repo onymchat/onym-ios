@@ -44,6 +44,19 @@ struct GroupInvitationPayload: Codable, Equatable, Sendable {
     /// Decoded via `decodeIfPresent` so older invitations (and other
     /// group types that never set this field) round-trip cleanly.
     let peerBlsSecret: Data?
+    /// Snapshot of the sender's `ChatGroup.memberProfiles` at the
+    /// moment the invitation was sealed — keyed by lowercase BLS
+    /// pubkey hex, value carries `alias` + `inboxPublicKey`. Lets a
+    /// joiner-side materializer populate the local directory at the
+    /// same time the group lands locally, so existing members appear
+    /// by name without waiting for a follow-up announcement.
+    ///
+    /// Optional + decoded via `decodeIfPresent` so older senders
+    /// without the field still round-trip cleanly. Empty / missing
+    /// at receive time means the receiver renders the roster by
+    /// fingerprint until a future `MemberAnnouncementPayload` fills
+    /// in the aliases.
+    let memberProfiles: [String: MemberProfile]?
 
     enum CodingKeys: String, CodingKey {
         case version
@@ -58,6 +71,7 @@ struct GroupInvitationPayload: Codable, Equatable, Sendable {
         case groupTypeRaw = "group_type_raw"
         case adminPubkeyHex = "admin_pubkey_hex"
         case peerBlsSecret = "peer_bls_secret"
+        case memberProfiles = "member_profiles"
     }
 
     init(
@@ -72,7 +86,8 @@ struct GroupInvitationPayload: Codable, Equatable, Sendable {
         tierRaw: Int,
         groupTypeRaw: String,
         adminPubkeyHex: String?,
-        peerBlsSecret: Data? = nil
+        peerBlsSecret: Data? = nil,
+        memberProfiles: [String: MemberProfile]? = nil
     ) {
         self.version = version
         self.groupID = groupID
@@ -86,6 +101,7 @@ struct GroupInvitationPayload: Codable, Equatable, Sendable {
         self.groupTypeRaw = groupTypeRaw
         self.adminPubkeyHex = adminPubkeyHex
         self.peerBlsSecret = peerBlsSecret
+        self.memberProfiles = memberProfiles
     }
 
     init(from decoder: Decoder) throws {
@@ -102,5 +118,9 @@ struct GroupInvitationPayload: Codable, Equatable, Sendable {
         groupTypeRaw = try c.decode(String.self, forKey: .groupTypeRaw)
         adminPubkeyHex = try c.decodeIfPresent(String.self, forKey: .adminPubkeyHex)
         peerBlsSecret = try c.decodeIfPresent(Data.self, forKey: .peerBlsSecret)
+        memberProfiles = try c.decodeIfPresent(
+            [String: MemberProfile].self,
+            forKey: .memberProfiles
+        )
     }
 }
