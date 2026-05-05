@@ -41,6 +41,7 @@ struct RootView: View {
                     SettingsView(
                         makeBackupFlow: dependencies.makeRecoveryPhraseBackupFlow,
                         makeRelayerSettingsFlow: dependencies.makeRelayerSettingsFlow,
+                        makeNostrRelaySettingsFlow: dependencies.makeNostrRelaySettingsFlow,
                         makeAnchorsPickerFlow: dependencies.makeAnchorsPickerFlow,
                         identitiesFlow: dependencies.identitiesFlow
                     )
