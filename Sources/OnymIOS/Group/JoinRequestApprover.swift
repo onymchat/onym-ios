@@ -187,19 +187,24 @@ actor JoinRequestApprover: JoinRequestApproving {
             return .transportFailed("no relay accepted the invitation")
         }
         // Record the joiner in the local group's view-facing roster
-        // so the admin sees their alias in the UI. Skipped when the
-        // joiner's BLS pubkey isn't on the wire (pre-PR-4 build) —
-        // there's no stable cross-device key to record under, and
-        // PR 5's announcement fanout would skip them anyway. The
-        // sealed invite has already shipped at this point, so a
-        // failure here doesn't leak; we just live with a missing
-        // directory entry until the next message.
+        // so the admin sees their alias in the UI, then announce the
+        // join to every other member's inbox. Both side-effects only
+        // run when the joiner shipped a BLS pubkey (pre-PR-4 builds
+        // skip these — no stable cross-device key, no fanout
+        // possible). The sealed invite already shipped above, so any
+        // failure here is non-fatal; the joiner is still admitted.
         if let blsPub = req.joinerBlsPublicKey {
             await recordJoiner(
                 in: group,
                 blsPub: blsPub,
                 inboxPub: req.joinerInboxPublicKey,
                 alias: req.joinerDisplayLabel
+            )
+            await broadcastJoin(
+                in: group,
+                joinerBlsPub: blsPub,
+                joinerInboxPub: req.joinerInboxPublicKey,
+                joinerAlias: req.joinerDisplayLabel
             )
         }
         // Best-effort cleanup. Both calls run regardless of failures
@@ -232,6 +237,84 @@ actor JoinRequestApprover: JoinRequestApproving {
             inboxPublicKey: inboxPub
         )
         await groupRepository.insert(updated)
+    }
+
+    /// Build a `MemberAnnouncementPayload` for the new joiner and
+    /// fan it out to every existing member's inbox. Recipients =
+    /// `group.memberProfiles ∖ {admin, new joiner}`. The admin
+    /// already knows about the join (just recorded it locally); the
+    /// joiner gets the full `GroupInvitationPayload` instead.
+    ///
+    /// Best-effort per recipient: a per-member transport failure is
+    /// swallowed silently and the loop moves on. The receive-side
+    /// (PR 6) is idempotent on `(groupId, blsPub)` so a future retry
+    /// path could re-broadcast without creating duplicates.
+    ///
+    /// Empty fanout (single-member group, just-created) is a no-op.
+    private func broadcastJoin(
+        in group: ChatGroup,
+        joinerBlsPub: Data,
+        joinerInboxPub: Data,
+        joinerAlias: String
+    ) async {
+        let adminAlias = await identity.currentIdentityName() ?? ""
+        let announced: MemberAnnouncementPayload.AnnouncedMember
+        do {
+            announced = try MemberAnnouncementPayload.AnnouncedMember(
+                blsPub: joinerBlsPub,
+                inboxPub: joinerInboxPub,
+                alias: joinerAlias
+            )
+        } catch {
+            // Wrong-sized BLS pubkey shouldn't happen — we already
+            // built `recordJoiner`'s key from the same bytes — but
+            // skipping fanout is safer than crashing.
+            return
+        }
+        let payload: MemberAnnouncementPayload
+        do {
+            payload = try MemberAnnouncementPayload(
+                version: 1,
+                groupId: group.groupIDData,
+                newMember: announced,
+                adminAlias: adminAlias
+            )
+        } catch {
+            return
+        }
+        let payloadBytes: Data
+        do {
+            payloadBytes = try JSONEncoder().encode(payload)
+        } catch {
+            return
+        }
+
+        let joinerKey = joinerBlsPub.map { String(format: "%02x", $0) }.joined()
+        let adminKey = group.adminPubkeyHex?.lowercased()
+
+        for (memberKey, profile) in group.memberProfiles {
+            // Skip self (admin already knows) + the new joiner
+            // (covered by the GroupInvitationPayload above).
+            if memberKey == joinerKey { continue }
+            if let adminKey, memberKey == adminKey { continue }
+
+            let sealed: Data
+            do {
+                sealed = try await identity.sealInvitation(
+                    payload: payloadBytes,
+                    to: profile.inboxPublicKey
+                )
+            } catch {
+                continue
+            }
+            let tag = TransportInboxID(
+                rawValue: IntroInboxPump.inboxTag(from: profile.inboxPublicKey)
+            )
+            // Throw away the receipt — fanout is best-effort. A
+            // member that misses one announcement will still see the
+            // joiner in any subsequent group activity.
+            _ = try? await inboxTransport.send(sealed, to: tag)
+        }
     }
 
     /// Decline a pending request: drop it + revoke the intro slot.
