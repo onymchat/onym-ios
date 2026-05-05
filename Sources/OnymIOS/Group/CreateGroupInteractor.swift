@@ -223,6 +223,10 @@ struct CreateGroupInteractor: Sendable {
         let groupIDHex = groupID.map { String(format: "%02x", $0) }.joined()
         let adminPubkeyHex = identitySnapshot.blsPublicKey
             .map { String(format: "%02x", $0) }.joined()
+        let creatorProfiles = await Self.creatorProfiles(
+            from: identitySnapshot,
+            identity: identity
+        )
         let group = ChatGroup(
             id: groupIDHex,
             ownerIdentityID: ownerID,
@@ -230,6 +234,7 @@ struct CreateGroupInteractor: Sendable {
             groupSecret: groupSecret,
             createdAt: Date(),
             members: members,
+            memberProfiles: creatorProfiles,
             epoch: 0,
             salt: salt,
             commitment: proof.commitment,
@@ -403,6 +408,10 @@ struct CreateGroupInteractor: Sendable {
 
         // 7. Save locally — no admin in 1-on-1, so adminPubkeyHex stays nil.
         let groupIDHex = groupID.map { String(format: "%02x", $0) }.joined()
+        let creatorProfiles = await Self.creatorProfiles(
+            from: identitySnapshot,
+            identity: identity
+        )
         let group = ChatGroup(
             id: groupIDHex,
             ownerIdentityID: ownerID,
@@ -410,6 +419,7 @@ struct CreateGroupInteractor: Sendable {
             groupSecret: groupSecret,
             createdAt: Date(),
             members: members,
+            memberProfiles: creatorProfiles,
             epoch: 0,
             salt: salt,
             commitment: proof.commitment,
@@ -570,6 +580,10 @@ struct CreateGroupInteractor: Sendable {
 
         // 7. Save locally — no admin in Anarchy, so adminPubkeyHex stays nil.
         let groupIDHex = groupID.map { String(format: "%02x", $0) }.joined()
+        let creatorProfiles = await Self.creatorProfiles(
+            from: identitySnapshot,
+            identity: identity
+        )
         let group = ChatGroup(
             id: groupIDHex,
             ownerIdentityID: ownerID,
@@ -577,6 +591,7 @@ struct CreateGroupInteractor: Sendable {
             groupSecret: groupSecret,
             createdAt: Date(),
             members: members,
+            memberProfiles: creatorProfiles,
             epoch: 0,
             salt: salt,
             commitment: proof.commitment,
@@ -668,6 +683,32 @@ struct CreateGroupInteractor: Sendable {
         await groups.snapshots.first(where: { $0.contains { $0.id == group.id } })?
             .first { $0.id == group.id }
             ?? group
+    }
+
+    // MARK: - Member profiles
+
+    /// Build the single-entry `memberProfiles` map for a freshly-created
+    /// group: just the creator, keyed by their lowercase BLS pubkey
+    /// hex. Alias is read once at create time — a later identity
+    /// rename doesn't backfill historical groups.
+    ///
+    /// Empty alias when the identity has no name resolved (very early
+    /// post-bootstrap window). Renders as a blank label with the BLS
+    /// fingerprint still visible — better than crashing or showing
+    /// stale state.
+    private static func creatorProfiles(
+        from identitySnapshot: Identity,
+        identity: IdentityRepository
+    ) async -> [String: MemberProfile] {
+        let alias = await identity.currentIdentityName() ?? ""
+        let creatorBlsHex = identitySnapshot.blsPublicKey
+            .map { String(format: "%02x", $0) }.joined()
+        return [
+            creatorBlsHex: MemberProfile(
+                alias: alias,
+                inboxPublicKey: identitySnapshot.inboxPublicKey
+            )
+        ]
     }
 
     // MARK: - Helpers

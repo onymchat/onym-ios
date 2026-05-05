@@ -16,6 +16,7 @@ import SwiftData
 /// - `name` — user-supplied; can leak intent.
 /// - `groupSecret` — drives all message-key derivation.
 /// - `membersJSON` — the lex-sorted roster (BLS pubkeys + leaf hashes).
+/// - `memberProfilesJSON` — alias + inbox-key per member (sparse map).
 /// - `salt`, `commitment`, `adminPubkeyHex`.
 ///
 /// Decryption boundary lives in `SwiftDataGroupStore`, not here —
@@ -41,6 +42,9 @@ final class PersistedGroup {
     var encryptedSalt: Data
     var encryptedCommitment: Data?
     var encryptedAdminPubkeyHex: Data?
+    /// Optional so SwiftData's lightweight migration can land an extra
+    /// column on existing rows without a wipe. `nil` decodes to `[:]`.
+    var encryptedMemberProfilesJSON: Data?
 
     init(
         id: String,
@@ -55,7 +59,8 @@ final class PersistedGroup {
         encryptedMembersJSON: Data,
         encryptedSalt: Data,
         encryptedCommitment: Data?,
-        encryptedAdminPubkeyHex: Data?
+        encryptedAdminPubkeyHex: Data?,
+        encryptedMemberProfilesJSON: Data?
     ) {
         self.id = id
         self.ownerIdentityIDString = ownerIdentityIDString
@@ -70,5 +75,6 @@ final class PersistedGroup {
         self.encryptedSalt = encryptedSalt
         self.encryptedCommitment = encryptedCommitment
         self.encryptedAdminPubkeyHex = encryptedAdminPubkeyHex
+        self.encryptedMemberProfilesJSON = encryptedMemberProfilesJSON
     }
 }

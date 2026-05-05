@@ -25,6 +25,14 @@ struct ChatGroup: Identifiable, Equatable, Sendable {
     let createdAt: Date
 
     var members: [GovernanceMember]
+    /// View-facing supplement to `members`, keyed by lowercase BLS
+    /// pubkey hex. Populated for the creator at group-create time and
+    /// extended as new members announce themselves (post-PR fanout).
+    /// May be sparser than `members` — a member without a profile is
+    /// still a valid roster entry, just one we can't render by name
+    /// yet. The reverse must never hold: every key here MUST appear
+    /// in `members`.
+    var memberProfiles: [String: MemberProfile]
     var epoch: UInt64
     var salt: Data
     /// Latest verified Poseidon commitment. `nil` until the first

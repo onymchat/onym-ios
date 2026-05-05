@@ -48,6 +48,42 @@ final class SwiftDataGroupStoreTests: XCTestCase {
         XCTAssertEqual(first.members.count, group.members.count)
         XCTAssertEqual(first.members.first?.publicKeyCompressed,
                        group.members.first?.publicKeyCompressed)
+        XCTAssertEqual(first.memberProfiles, group.memberProfiles)
+    }
+
+    // MARK: - Member profiles
+
+    func test_insertOrUpdate_persistsMemberProfiles() async {
+        let aliceHex = "11".repeated(48)
+        let bobHex = "22".repeated(48)
+        let profiles: [String: MemberProfile] = [
+            aliceHex: MemberProfile(
+                alias: "alice",
+                inboxPublicKey: Data(repeating: 0xAA, count: 32)
+            ),
+            bobHex: MemberProfile(
+                alias: "bob",
+                inboxPublicKey: Data(repeating: 0xBB, count: 32)
+            ),
+        ]
+        let group = makeGroup(
+            id: "ab".repeated(32),
+            name: "Profiled",
+            memberProfiles: profiles
+        )
+        _ = await store.insertOrUpdate(group)
+
+        let listed = await store.list()
+        XCTAssertEqual(listed.count, 1)
+        XCTAssertEqual(listed[0].memberProfiles, profiles)
+    }
+
+    func test_insertOrUpdate_emptyProfilesRoundtripAsEmptyDict() async {
+        let group = makeGroup(id: "cd".repeated(32), name: "No profiles")
+        _ = await store.insertOrUpdate(group)
+
+        let listed = await store.list()
+        XCTAssertEqual(listed[0].memberProfiles, [:])
     }
 
     // MARK: - Idempotence
@@ -128,7 +164,8 @@ final class SwiftDataGroupStoreTests: XCTestCase {
         name: String,
         adminPubkeyHex: String? = nil,
         createdAt: Date = Date(timeIntervalSince1970: 1_700_000_000),
-        ownerIdentityID: IdentityID = IdentityID()
+        ownerIdentityID: IdentityID = IdentityID(),
+        memberProfiles: [String: MemberProfile] = [:]
     ) -> ChatGroup {
         let member = GovernanceMember(
             publicKeyCompressed: Data(repeating: 0x11, count: 48),
@@ -141,6 +178,7 @@ final class SwiftDataGroupStoreTests: XCTestCase {
             groupSecret: Data(repeating: 0x33, count: 32),
             createdAt: createdAt,
             members: [member],
+            memberProfiles: memberProfiles,
             epoch: 0,
             salt: Data(repeating: 0x44, count: 32),
             commitment: Data(repeating: 0x55, count: 32),

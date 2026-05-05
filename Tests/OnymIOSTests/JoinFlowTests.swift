@@ -132,6 +132,7 @@ final class JoinFlowTests: XCTestCase {
             groupSecret: Data(repeating: 0x55, count: 32),
             createdAt: Date(timeIntervalSince1970: 1_700_000_000),
             members: [],
+            memberProfiles: [:],
             epoch: 0,
             salt: Data(repeating: 0x66, count: 32),
             commitment: nil,

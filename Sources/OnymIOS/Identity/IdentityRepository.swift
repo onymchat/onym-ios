@@ -205,6 +205,18 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
         currentID
     }
 
+    /// The currently-selected identity's user-visible alias, or nil
+    /// if no identity is selected. Cheap actor-local read against the
+    /// in-memory `names` cache; callers that stamp the alias into
+    /// outgoing wire payloads (e.g. creator's `MemberProfile` at
+    /// group-create time) read this once at send time and don't
+    /// re-resolve later — a rename after the fact doesn't backfill
+    /// already-shipped state.
+    func currentIdentityName() -> String? {
+        guard let currentID else { return nil }
+        return names[currentID]
+    }
+
     /// Snapshot of every identity, ordered by insertion. View-safe
     /// (no secret material).
     func currentIdentities() -> [IdentitySummary] {
