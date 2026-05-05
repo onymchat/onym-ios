@@ -280,11 +280,16 @@ struct OnymIOSApp: App {
                     // announcements apply directly to
                     // `GroupRepository.memberProfiles`, everything
                     // else falls through to the invitations queue.
+                    let chainStateReader = SEPContractChainStateReader(
+                        relayers: relayerRepository,
+                        contracts: contractsRepository
+                    )
                     let dispatcher = IncomingMessageDispatcher(
                         envelopeDecrypter: identityRepository,
                         identities: identityRepository,
                         groupRepository: groupRepository,
-                        invitationsRepository: incomingInvitations
+                        invitationsRepository: incomingInvitations,
+                        chainState: chainStateReader
                     )
                     let fanout = InboxFanoutInteractor(
                         inboxTransport: inboxTransport,

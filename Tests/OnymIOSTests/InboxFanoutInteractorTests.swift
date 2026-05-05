@@ -41,7 +41,8 @@ final class InboxFanoutInteractorTests: XCTestCase {
             envelopeDecrypter: identity,
             identities: identity,
             groupRepository: groups,
-            invitationsRepository: invitations
+            invitationsRepository: invitations,
+            chainState: FanoutNoChainState()
         )
     }
 
@@ -285,5 +286,15 @@ private actor FanoutInvitationStore: InvitationStore {
 
     func deleteOwner(_ ownerIDString: String) {
         rows = rows.filter { $0.value.ownerIdentityID.rawValue.uuidString != ownerIDString }
+    }
+}
+
+/// PR 13b stub — InboxFanoutInteractorTests don't drive payloads
+/// that need chain verification (the test injects synthetic
+/// envelope-bytes that fail decryption silently and fall through to
+/// the invitations queue), so this stub just throws.
+private struct FanoutNoChainState: ChainStateReading {
+    func tyrannyCommitment(groupID: Data) async throws -> SEPCommitmentEntry {
+        throw ChainReadError.noActiveRelayer
     }
 }

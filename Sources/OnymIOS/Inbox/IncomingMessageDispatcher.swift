@@ -40,6 +40,11 @@ struct IncomingMessageDispatcher: Sendable {
     let identities: any IdentitiesProviding
     let groupRepository: GroupRepository
     let invitationsRepository: IncomingInvitationsRepository
+    /// PR 13b: chain-state reader for verifying inbound payloads
+    /// against the on-chain commitment. Tyranny payloads with a
+    /// `commitment` field fetch the live state via this seam and
+    /// reject on mismatch.
+    let chainState: any ChainStateReading
 
     func dispatch(
         messageID: String,
@@ -141,6 +146,22 @@ struct IncomingMessageDispatcher: Sendable {
               let groupType = SEPGroupType(rawValue: invitation.groupTypeRaw)
         else { return }
 
+        // PR 13b: receiver-side commitment verification. For Tyranny
+        // groups, the payload's `commitment` MUST match the on-chain
+        // state and the recomputed Poseidon root over the wire-shipped
+        // members. Either mismatch is treated as a forged invitation —
+        // drop silently. Non-Tyranny groups skip verification (no
+        // admin-anchored update path; trust falls back to the
+        // sender's Ed25519 signature on the envelope).
+        if groupType == .tyranny {
+            guard await verifyTyrannyInvitation(
+                invitation,
+                tier: tier
+            ) else {
+                return
+            }
+        }
+
         // Build the directory: wire-shipped profiles first, then add
         // self if we can resolve our own identity. The "wire first"
         // ordering means a sender that mistakenly includes us under
@@ -190,6 +211,94 @@ struct IncomingMessageDispatcher: Sendable {
         await groupRepository.insert(group)
     }
 
+    /// PR 13b: validate a Tyranny invitation's commitment against
+    /// both the wire-shipped members list (recomputed Poseidon root)
+    /// and the on-chain state (`SEPContractClient.getCommitment`).
+    ///
+    /// Three failure modes — all return `false`:
+    ///   - Payload omits `commitment` (pre-PR-13a sender, can't
+    ///     verify, refuse).
+    ///   - `Common.merkleRoot(payload.members)` ≠ `payload.commitment`
+    ///     (internally inconsistent — can't be a valid post-update
+    ///     state for the claimed roster).
+    ///   - On-chain `commitment` ≠ `payload.commitment` OR on-chain
+    ///     `epoch` ≠ `payload.epoch` (forged by someone who isn't
+    ///     the admin — chain rejected their proof, but they may
+    ///     still try to ship a fake invitation; receiver catches it
+    ///     here).
+    ///
+    /// Throws on chain-read transport failures are also treated as
+    /// "couldn't verify, reject" — the safe default. Operators
+    /// observe these via the `decryptFailures` counter (out of
+    /// scope for V1).
+    private func verifyTyrannyInvitation(
+        _ invitation: GroupInvitationPayload,
+        tier: SEPTier
+    ) async -> Bool {
+        guard let claimedCommitment = invitation.commitment else {
+            return false
+        }
+        // Internal consistency: recompute root from wire members.
+        let recomputedRoot: Data
+        do {
+            recomputedRoot = try GroupCommitmentBuilder.computeMerkleRoot(
+                members: invitation.members,
+                tier: tier
+            )
+        } catch {
+            return false
+        }
+        guard recomputedRoot == claimedCommitment else { return false }
+        // External anchor: matches what's on chain.
+        let onchain: SEPCommitmentEntry
+        do {
+            onchain = try await chainState.tyrannyCommitment(
+                groupID: invitation.groupID
+            )
+        } catch {
+            return false
+        }
+        guard onchain.commitment == claimedCommitment else { return false }
+        guard onchain.epoch == invitation.epoch else { return false }
+        return true
+    }
+
+    /// PR 13b: validate a Tyranny `MemberAnnouncementPayload`'s
+    /// claimed commitment + epoch against the on-chain state. Same
+    /// failure-modes posture as the invitation verifier — any
+    /// mismatch / missing-field / read-error returns `false` and
+    /// the announcement is dropped.
+    ///
+    /// We DON'T recompute the Poseidon root here because the
+    /// announcement only carries one new member, not the full
+    /// roster. The local `ChatGroup.members` plus the announced
+    /// new member give the full roster, but the receiver might be
+    /// behind by an epoch (e.g. a previous announcement to them
+    /// got dropped). The on-chain commitment + epoch check alone
+    /// is the strong gate — if those match the payload, the
+    /// announcement is from the legitimate admin.
+    private func verifyTyrannyAnnouncement(
+        _ announcement: MemberAnnouncementPayload,
+        on group: ChatGroup
+    ) async -> Bool {
+        // Skip verification for non-Tyranny groups (best-effort).
+        guard group.groupType == .tyranny else { return true }
+        guard let claimedCommitment = announcement.commitment,
+              let claimedEpoch = announcement.epoch
+        else { return false }
+        let onchain: SEPCommitmentEntry
+        do {
+            onchain = try await chainState.tyrannyCommitment(
+                groupID: announcement.groupId
+            )
+        } catch {
+            return false
+        }
+        guard onchain.commitment == claimedCommitment else { return false }
+        guard onchain.epoch == claimedEpoch else { return false }
+        return true
+    }
+
     /// Look up the receiver's own `MemberProfile` entry keyed by
     /// their BLS pubkey hex. Returns `nil` when the identity can't
     /// be resolved (race during identity removal, test stub returns
@@ -235,20 +344,26 @@ struct IncomingMessageDispatcher: Sendable {
             return
         }
 
-        // Trust check: announcement must be signed by the group's
-        // known admin. Skipped (V1 best-effort) when the group has
-        // no stored admin Ed25519 — happens for governance models
-        // without an admin (anarchy / oneOnOne) or pre-PR-9 rows
-        // that materialized before the field existed. We DO require
-        // the envelope to carry SOME sender pubkey though; an
-        // unsigned announcement is rejected outright when the group
-        // has an admin to verify against.
+        // PR 9 trust check: announcement must be signed by the
+        // group's known admin. Skipped (best-effort) when the group
+        // has no stored admin Ed25519 — happens for governance
+        // models without an admin (anarchy / oneOnOne) or pre-PR-9
+        // rows that materialized before the field existed.
         if let storedAdmin = group.adminEd25519PubkeyHex {
             guard let senderEd25519PublicKey else { return }
             let senderHex = senderEd25519PublicKey
                 .map { String(format: "%02x", $0) }.joined()
                 .lowercased()
             guard senderHex == storedAdmin.lowercased() else { return }
+        }
+
+        // PR 13b on-chain check: announcement's claimed commitment +
+        // epoch must match what's actually anchored. Closes the
+        // residual spoof path where Bob (with admin's Ed25519
+        // somehow obtained) ships an announcement with a fake
+        // `commitment`. The chain has the truth; we cross-check.
+        guard await verifyTyrannyAnnouncement(payload, on: group) else {
+            return
         }
 
         let key = payload.newMember.blsPub
