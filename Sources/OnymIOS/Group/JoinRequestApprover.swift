@@ -1,6 +1,17 @@
 import CryptoKit
 import Foundation
 
+/// Test seam used by `ApproveRequestsFlow`. The production conformer
+/// is `JoinRequestApprover` itself; tests inject a stub instead of
+/// standing up the full keychain + transport stack just to exercise
+/// the flow's bookkeeping.
+protocol JoinRequestApproving: Sendable {
+    var pending: AsyncStream<[JoinRequestApprover.PendingRequest]> { get }
+    func start() async
+    func approve(requestId: String) async -> JoinRequestApprover.ApproveOutcome
+    func decline(requestId: String) async
+}
+
 /// Sender-side: turn raw `IntroRequest`s into UI-renderable
 /// pending requests, and on user approval ship the actual sealed
 /// `GroupInvitationPayload` to the joiner.
@@ -20,7 +31,7 @@ import Foundation
 ///     tag within one emission window.
 ///  4. On Decline → drop the request, revoke the intro key. No
 ///     NACK to the joiner; their JoinScreen times out gracefully.
-actor JoinRequestApprover {
+actor JoinRequestApprover: JoinRequestApproving {
 
     /// UI-renderable view of one decrypted, awaiting-action request.
     struct PendingRequest: Equatable, Sendable, Identifiable {
