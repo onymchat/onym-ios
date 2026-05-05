@@ -25,13 +25,18 @@ struct ChatGroup: Identifiable, Equatable, Sendable {
     let createdAt: Date
 
     var members: [GovernanceMember]
-    /// View-facing supplement to `members`, keyed by lowercase BLS
-    /// pubkey hex. Populated for the creator at group-create time and
-    /// extended as new members announce themselves (post-PR fanout).
-    /// May be sparser than `members` — a member without a profile is
-    /// still a valid roster entry, just one we can't render by name
-    /// yet. The reverse must never hold: every key here MUST appear
-    /// in `members`.
+    /// View-facing directory of people the local user has interacted
+    /// with through this group, keyed by lowercase BLS pubkey hex.
+    /// Populated for the creator at group-create time and extended as
+    /// joiners are admitted (post-PR fanout).
+    ///
+    /// Independent of `members`: V1 group rosters are static
+    /// on-chain (`update_commitment` is post-V1 in the SEP
+    /// contracts), so a joiner is "in the group" at the app level —
+    /// receiving messages, listed in the chat detail — without yet
+    /// being a `GovernanceMember` in the cryptographic Merkle tree.
+    /// `members` is the on-chain truth; `memberProfiles` is the
+    /// app-level "who am I talking to" directory. They may diverge.
     var memberProfiles: [String: MemberProfile]
     var epoch: UInt64
     var salt: Data
