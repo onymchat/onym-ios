@@ -11,6 +11,7 @@ final class JoinRequestPayloadTests: XCTestCase {
     func test_roundtrip_preservesAllFields() throws {
         let original = try JoinRequestPayload(
             joinerInboxPublicKey: Data(repeating: 0xAA, count: 32),
+            joinerBlsPublicKey: Data(repeating: 0xBB, count: 48),
             joinerDisplayLabel: "Bob",
             groupId: Data(repeating: 0x42, count: 32)
         )
@@ -25,12 +26,14 @@ final class JoinRequestPayloadTests: XCTestCase {
         // sealed-then-decoded round-trip to work.
         let payload = try JoinRequestPayload(
             joinerInboxPublicKey: Data(repeating: 0, count: 32),
+            joinerBlsPublicKey: Data(repeating: 0, count: 48),
             joinerDisplayLabel: "Bob",
             groupId: Data(repeating: 0, count: 32)
         )
         let encoded = try JSONEncoder().encode(payload)
         let obj = try JSONSerialization.jsonObject(with: encoded) as? [String: Any]
         XCTAssertNotNil(obj?["joiner_inbox_pub"])
+        XCTAssertNotNil(obj?["joiner_bls_pub"])
         XCTAssertNotNil(obj?["joiner_display_label"])
         XCTAssertNotNil(obj?["group_id"])
         XCTAssertEqual(obj?["joiner_display_label"] as? String, "Bob")
@@ -39,6 +42,7 @@ final class JoinRequestPayloadTests: XCTestCase {
     func test_constructor_rejectsWrongSizedKeys() {
         XCTAssertThrowsError(try JoinRequestPayload(
             joinerInboxPublicKey: Data(repeating: 0, count: 31),
+            joinerBlsPublicKey: nil,
             joinerDisplayLabel: "x",
             groupId: Data(repeating: 0, count: 32)
         )) { error in
@@ -46,8 +50,17 @@ final class JoinRequestPayloadTests: XCTestCase {
         }
         XCTAssertThrowsError(try JoinRequestPayload(
             joinerInboxPublicKey: Data(repeating: 0, count: 32),
+            joinerBlsPublicKey: nil,
             joinerDisplayLabel: "x",
             groupId: Data(repeating: 0, count: 33)
+        )) { error in
+            XCTAssertTrue(error is JoinRequestPayloadError)
+        }
+        XCTAssertThrowsError(try JoinRequestPayload(
+            joinerInboxPublicKey: Data(repeating: 0, count: 32),
+            joinerBlsPublicKey: Data(repeating: 0, count: 47),
+            joinerDisplayLabel: "x",
+            groupId: Data(repeating: 0, count: 32)
         )) { error in
             XCTAssertTrue(error is JoinRequestPayloadError)
         }
@@ -61,5 +74,22 @@ final class JoinRequestPayloadTests: XCTestCase {
         XCTAssertThrowsError(try JSONDecoder().decode(JoinRequestPayload.self, from: bytes)) { error in
             XCTAssertTrue(error is JoinRequestPayloadError)
         }
+    }
+
+    func test_decoder_acceptsLegacyPayloadWithoutBlsPub() throws {
+        // Older onym-android / pre-PR-4 builds ship requests without
+        // joiner_bls_pub. The wire format must round-trip those into
+        // a payload with `joinerBlsPublicKey == nil` so the approver
+        // can still ship the invitation back; only the local roster
+        // update is skipped.
+        let inbox = Data(repeating: 0, count: 32).base64EncodedString()
+        let gid = Data(repeating: 0, count: 32).base64EncodedString()
+        let legacy = #"""
+        {"joiner_inbox_pub":"\#(inbox)","joiner_display_label":"Bob","group_id":"\#(gid)"}
+        """#
+        let bytes = legacy.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(JoinRequestPayload.self, from: bytes)
+        XCTAssertNil(decoded.joinerBlsPublicKey)
+        XCTAssertEqual(decoded.joinerDisplayLabel, "Bob")
     }
 }

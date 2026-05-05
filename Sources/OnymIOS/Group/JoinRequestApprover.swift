@@ -39,6 +39,12 @@ actor JoinRequestApprover: JoinRequestApproving {
         /// as the dedupe key.
         let id: String
         let joinerInboxPublicKey: Data
+        /// 48-byte BLS pubkey when the joiner sent it (current
+        /// builds always do). `nil` when the request came from a
+        /// pre-PR-4 client; the approver still ships the invitation
+        /// back, but skips the local roster update because there's
+        /// no stable cross-device key to record under.
+        let joinerBlsPublicKey: Data?
         let joinerDisplayLabel: String
         let groupId: Data
         /// Looked up from the local `GroupRepository`. nil if the
@@ -180,6 +186,22 @@ actor JoinRequestApprover: JoinRequestApproving {
         guard receipt.acceptedBy >= 1 else {
             return .transportFailed("no relay accepted the invitation")
         }
+        // Record the joiner in the local group's view-facing roster
+        // so the admin sees their alias in the UI. Skipped when the
+        // joiner's BLS pubkey isn't on the wire (pre-PR-4 build) —
+        // there's no stable cross-device key to record under, and
+        // PR 5's announcement fanout would skip them anyway. The
+        // sealed invite has already shipped at this point, so a
+        // failure here doesn't leak; we just live with a missing
+        // directory entry until the next message.
+        if let blsPub = req.joinerBlsPublicKey {
+            await recordJoiner(
+                in: group,
+                blsPub: blsPub,
+                inboxPub: req.joinerInboxPublicKey,
+                alias: req.joinerDisplayLabel
+            )
+        }
         // Best-effort cleanup. Both calls run regardless of failures
         // because the request is conceptually consumed at this point;
         // a leaked intro key is benign.
@@ -188,6 +210,28 @@ actor JoinRequestApprover: JoinRequestApproving {
         }
         await introRequestStore.consume(id: requestId)
         return .sent
+    }
+
+    /// Insert/update the joiner's `MemberProfile` on the local
+    /// group. Idempotent — a second approval for the same joiner
+    /// (e.g. they re-tap the link before the inviter notices the
+    /// first request) overwrites the existing entry with the latest
+    /// alias + inbox-pub. Re-inserting through `GroupRepository`
+    /// goes through `SwiftDataGroupStore.insertOrUpdate`, which
+    /// updates the row in place rather than minting a new one.
+    private func recordJoiner(
+        in group: ChatGroup,
+        blsPub: Data,
+        inboxPub: Data,
+        alias: String
+    ) async {
+        let key = blsPub.map { String(format: "%02x", $0) }.joined()
+        var updated = group
+        updated.memberProfiles[key] = MemberProfile(
+            alias: alias,
+            inboxPublicKey: inboxPub
+        )
+        await groupRepository.insert(updated)
     }
 
     /// Decline a pending request: drop it + revoke the intro slot.
@@ -269,6 +313,7 @@ actor JoinRequestApprover: JoinRequestApproving {
         return PendingRequest(
             id: raw.id,
             joinerInboxPublicKey: payload.joinerInboxPublicKey,
+            joinerBlsPublicKey: payload.joinerBlsPublicKey,
             joinerDisplayLabel: payload.joinerDisplayLabel,
             groupId: payload.groupId,
             groupName: groupName
