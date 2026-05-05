@@ -147,6 +147,8 @@ final class ApproveRequestsFlow {
             return "No chain relayer configured. Set one in Settings \u{2192} Network \u{2192} Relayer."
         case .noContractBinding:
             return "No Tyranny contract selected for this network. Pick one in Settings \u{2192} Network \u{2192} Anchors."
+        case .notAdminOfThisGroup:
+            return "The active identity isn\u{2019}t this group\u{2019}s admin. Switch to the identity that created the group, then try again."
         case .proofFailed(let reason):
             return "Couldn\u{2019}t generate proof: \(reason)"
         case .anchorRejected(let reason):

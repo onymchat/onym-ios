@@ -79,6 +79,14 @@ actor JoinRequestApprover: JoinRequestApproving {
         /// user hasn't picked a deployed Tyranny contract for the
         /// active network in Settings → Anchors.
         case noContractBinding
+        /// The active identity isn't this group's admin: the BLS
+        /// pubkey derived from the keychain's secret doesn't match
+        /// the admin pubkey baked into the local group state. Most
+        /// common cause: user switched to a different identity
+        /// between group create-time and approve-time, or restored
+        /// from a different recovery phrase. Catches cleanly what
+        /// would otherwise surface as a cryptic SDK proof failure.
+        case notAdminOfThisGroup
         /// `Tyranny.proveUpdate` failed — usually means a corrupted
         /// roster, wrong tier depth, or SDK FFI error. Diagnostic
         /// detail in the associated string.
@@ -377,6 +385,26 @@ actor JoinRequestApprover: JoinRequestApproving {
             blsSecret = try await identity.blsSecretKey()
         } catch {
             return .failed(.transportFailed("bls_secret: \(error)"))
+        }
+
+        // Pre-flight: confirm the active identity actually IS the
+        // admin of this group before handing the secret to the
+        // prover. Catches the common "Alice has switched identities,
+        // her current keychain secret doesn't match the group's
+        // stored admin BLS pubkey" case cleanly — without this check
+        // the SDK would surface the same problem as a cryptic
+        // `Poseidon(admin_secret_key) ≠ supplied leaf hash` error
+        // ~3-5s later (after the prover's pre-witness checks fail).
+        let activePubFromSecret: Data
+        do {
+            activePubFromSecret = try GroupCommitmentBuilder.computePublicKey(
+                secretKey: blsSecret
+            )
+        } catch {
+            return .failed(.transportFailed("derive_pub: \(error)"))
+        }
+        guard activePubFromSecret == group.members[adminIndexOld].publicKeyCompressed else {
+            return .failed(.notAdminOfThisGroup)
         }
         let proofInput = GroupProofUpdateInput(
             groupType: .tyranny,
