@@ -13,7 +13,6 @@ final class MemberAnnouncementPayloadTests: XCTestCase {
     func test_roundtrip_preservesAllFields() throws {
         let member = try MemberAnnouncementPayload.AnnouncedMember(
             blsPub: Data(repeating: 0x11, count: 48),
-            leafHash: Data(repeating: 0x22, count: 32),
             inboxPub: Data(repeating: 0x33, count: 32),
             alias: "Bob"
         )
@@ -36,7 +35,6 @@ final class MemberAnnouncementPayloadTests: XCTestCase {
     func test_snake_case_keys_match_android_parity() throws {
         let member = try MemberAnnouncementPayload.AnnouncedMember(
             blsPub: Data(repeating: 0, count: 48),
-            leafHash: Data(repeating: 0, count: 32),
             inboxPub: Data(repeating: 0, count: 32),
             alias: "Bob"
         )
@@ -55,9 +53,10 @@ final class MemberAnnouncementPayloadTests: XCTestCase {
         XCTAssertEqual(obj?["admin_alias"] as? String, "Alice")
         let memberObj = obj?["new_member"] as? [String: Any]
         XCTAssertNotNil(memberObj?["bls_pub"])
-        XCTAssertNotNil(memberObj?["leaf_hash"])
         XCTAssertNotNil(memberObj?["inbox_pub"])
         XCTAssertNotNil(memberObj?["alias"])
+        XCTAssertNil(memberObj?["leaf_hash"],
+                     "leaf_hash is intentionally absent in v1")
         XCTAssertEqual(memberObj?["alias"] as? String, "Bob")
     }
 
@@ -66,7 +65,6 @@ final class MemberAnnouncementPayloadTests: XCTestCase {
     func test_constructor_rejectsWrongSizedGroupId() {
         let member = try! MemberAnnouncementPayload.AnnouncedMember(
             blsPub: Data(repeating: 0, count: 48),
-            leafHash: Data(repeating: 0, count: 32),
             inboxPub: Data(repeating: 0, count: 32),
             alias: "x"
         )
@@ -83,18 +81,6 @@ final class MemberAnnouncementPayloadTests: XCTestCase {
     func test_announcedMember_constructor_rejectsWrongSizedBlsPub() {
         XCTAssertThrowsError(try MemberAnnouncementPayload.AnnouncedMember(
             blsPub: Data(repeating: 0, count: 47),
-            leafHash: Data(repeating: 0, count: 32),
-            inboxPub: Data(repeating: 0, count: 32),
-            alias: "x"
-        )) { error in
-            XCTAssertTrue(error is MemberAnnouncementPayloadError)
-        }
-    }
-
-    func test_announcedMember_constructor_rejectsWrongSizedLeafHash() {
-        XCTAssertThrowsError(try MemberAnnouncementPayload.AnnouncedMember(
-            blsPub: Data(repeating: 0, count: 48),
-            leafHash: Data(repeating: 0, count: 31),
             inboxPub: Data(repeating: 0, count: 32),
             alias: "x"
         )) { error in
@@ -105,7 +91,6 @@ final class MemberAnnouncementPayloadTests: XCTestCase {
     func test_announcedMember_constructor_rejectsWrongSizedInboxPub() {
         XCTAssertThrowsError(try MemberAnnouncementPayload.AnnouncedMember(
             blsPub: Data(repeating: 0, count: 48),
-            leafHash: Data(repeating: 0, count: 32),
             inboxPub: Data(repeating: 0, count: 31),
             alias: "x"
         )) { error in
@@ -117,7 +102,7 @@ final class MemberAnnouncementPayloadTests: XCTestCase {
 
     func test_decoder_rejectsWrongSizedGroupId() {
         let bad = #"""
-        {"version":1,"group_id":"AAA=","new_member":{"bls_pub":"\#(base64Zeros(48))","leaf_hash":"\#(base64Zeros(32))","inbox_pub":"\#(base64Zeros(32))","alias":"x"},"admin_alias":"y"}
+        {"version":1,"group_id":"AAA=","new_member":{"bls_pub":"\#(base64Zeros(48))","inbox_pub":"\#(base64Zeros(32))","alias":"x"},"admin_alias":"y"}
         """#
         let bytes = bad.data(using: .utf8)!
         XCTAssertThrowsError(
@@ -129,7 +114,7 @@ final class MemberAnnouncementPayloadTests: XCTestCase {
 
     func test_decoder_rejectsWrongSizedBlsPub() {
         let bad = #"""
-        {"version":1,"group_id":"\#(base64Zeros(32))","new_member":{"bls_pub":"AAA=","leaf_hash":"\#(base64Zeros(32))","inbox_pub":"\#(base64Zeros(32))","alias":"x"},"admin_alias":"y"}
+        {"version":1,"group_id":"\#(base64Zeros(32))","new_member":{"bls_pub":"AAA=","inbox_pub":"\#(base64Zeros(32))","alias":"x"},"admin_alias":"y"}
         """#
         let bytes = bad.data(using: .utf8)!
         XCTAssertThrowsError(
@@ -137,6 +122,21 @@ final class MemberAnnouncementPayloadTests: XCTestCase {
         ) { error in
             XCTAssertTrue(error is MemberAnnouncementPayloadError)
         }
+    }
+
+    func test_decoder_ignoresUnknownLeafHashField_forForwardCompat() throws {
+        // V2 receivers may add `leaf_hash`; V1 receivers MUST decode
+        // payloads carrying it, ignoring the unknown field.
+        let v2Shape = #"""
+        {"version":2,"group_id":"\#(base64Zeros(32))","new_member":{"bls_pub":"\#(base64Zeros(48))","leaf_hash":"\#(base64Zeros(32))","inbox_pub":"\#(base64Zeros(32))","alias":"x"},"admin_alias":"y"}
+        """#
+        let bytes = v2Shape.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(
+            MemberAnnouncementPayload.self,
+            from: bytes
+        )
+        XCTAssertEqual(decoded.version, 2)
+        XCTAssertEqual(decoded.newMember.alias, "x")
     }
 
     // MARK: - Helpers

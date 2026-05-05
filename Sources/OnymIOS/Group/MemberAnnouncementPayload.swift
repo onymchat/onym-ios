@@ -53,16 +53,23 @@ struct MemberAnnouncementPayload: Codable, Equatable, Sendable {
     /// strictly local-state-free this way).
     let adminAlias: String
 
-    /// One member's full directory entry — both the cryptographic
-    /// material the receiver needs to extend their roster and the
-    /// view-facing alias / inbox key that lets the local UI render
-    /// "X joined" + the local store remember how to fan out to X
-    /// in future announcements.
+    /// One member's directory entry. App-level only — the
+    /// cryptographic Poseidon leaf hash is intentionally absent.
+    /// V1 group rosters are static on-chain (the joiner is not yet a
+    /// member of the Merkle tree; `update_commitment` is post-V1
+    /// scope in the SEP contracts), so the leaf hash is meaningless
+    /// to ship today. When on-chain joiner ceremonies land, a
+    /// `leaf_hash` field can return via a non-failing
+    /// `decodeIfPresent` decoder without breaking older receivers.
+    ///
+    /// `blsPub` is still carried as the **stable cross-device
+    /// identifier**: it's HKDF-derived from the joiner's identity
+    /// secret, so the same pubkey persists across recovery-phrase
+    /// restores and forms the dedup key in
+    /// `ChatGroup.memberProfiles`.
     struct AnnouncedMember: Codable, Equatable, Sendable {
         /// 48-byte arkworks-compressed BLS12-381 G1 pubkey.
         let blsPub: Data
-        /// 32-byte Poseidon leaf hash.
-        let leafHash: Data
         /// 32-byte X25519 raw inbox public key.
         let inboxPub: Data
         /// Self-asserted display alias.
@@ -70,15 +77,13 @@ struct MemberAnnouncementPayload: Codable, Equatable, Sendable {
 
         enum CodingKeys: String, CodingKey {
             case blsPub = "bls_pub"
-            case leafHash = "leaf_hash"
             case inboxPub = "inbox_pub"
             case alias
         }
 
-        init(blsPub: Data, leafHash: Data, inboxPub: Data, alias: String) throws {
-            try Self.validate(blsPub: blsPub, leafHash: leafHash, inboxPub: inboxPub)
+        init(blsPub: Data, inboxPub: Data, alias: String) throws {
+            try Self.validate(blsPub: blsPub, inboxPub: inboxPub)
             self.blsPub = blsPub
-            self.leafHash = leafHash
             self.inboxPub = inboxPub
             self.alias = alias
         }
@@ -86,25 +91,18 @@ struct MemberAnnouncementPayload: Codable, Equatable, Sendable {
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             let bls = try c.decode(Data.self, forKey: .blsPub)
-            let leaf = try c.decode(Data.self, forKey: .leafHash)
             let inbox = try c.decode(Data.self, forKey: .inboxPub)
             let alias = try c.decode(String.self, forKey: .alias)
-            try Self.validate(blsPub: bls, leafHash: leaf, inboxPub: inbox)
+            try Self.validate(blsPub: bls, inboxPub: inbox)
             self.blsPub = bls
-            self.leafHash = leaf
             self.inboxPub = inbox
             self.alias = alias
         }
 
-        private static func validate(blsPub: Data, leafHash: Data, inboxPub: Data) throws {
+        private static func validate(blsPub: Data, inboxPub: Data) throws {
             guard blsPub.count == 48 else {
                 throw MemberAnnouncementPayloadError.shape(
                     "blsPub: expected 48 bytes, got \(blsPub.count)"
-                )
-            }
-            guard leafHash.count == 32 else {
-                throw MemberAnnouncementPayloadError.shape(
-                    "leafHash: expected 32 bytes, got \(leafHash.count)"
                 )
             }
             guard inboxPub.count == 32 else {
