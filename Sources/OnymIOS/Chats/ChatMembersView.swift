@@ -42,13 +42,16 @@ struct ChatMembersView: View {
         .navigationBarTitleDisplayMode(.inline)
         .background(OnymTokens.bg)
         .toolbar {
-            // Only the local owner of the group can mint a useful
-            // invite link — joiners' invites would point requests at
-            // their own intro inbox, where they can't actually admit
-            // anyone (admin approval is what materializes the group
-            // for the new joiner). Showing the entry-point only on
-            // owner-side groups removes a footgun.
-            if isLocalOwner {
+            // Only the cryptographic admin can mint a useful invite
+            // link — non-admin members minting invites would surface
+            // join requests in their own intro inbox, but the
+            // approver's PR-13 anchor flow would short-circuit with
+            // `.notAdminOfThisGroup` because they don't hold the
+            // admin BLS secret. Hiding the entry-point removes the
+            // footgun + matches the cryptographic constraint
+            // already enforced on chain (sep-tyranny rejects
+            // `update_commitment` proofs from non-admins).
+            if canShareInvite {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         shareInviteFlow = makeShareInviteFlow()
@@ -81,17 +84,32 @@ struct ChatMembersView: View {
         chatsFlow.groups.first { $0.id == groupID }
     }
 
-    /// True iff the active identity owns this group locally — i.e.
-    /// they're the device that created it. Used to gate the
-    /// "Share invite" entry-point: only the owner's intro inbox can
-    /// usefully receive join requests, since approval requires the
-    /// admin's keys.
-    private var isLocalOwner: Bool {
+    /// True iff the active identity is the cryptographic admin of
+    /// this group — i.e. their BLS pubkey hex matches
+    /// `group.adminPubkeyHex`. Gates the "Share invite" toolbar
+    /// entry-point.
+    ///
+    /// Why not `group.ownerIdentityID == activeID`? `ownerIdentityID`
+    /// is per-device; for a joiner-side group materialized from an
+    /// invitation, it gets stamped as the joiner's local identity
+    /// (so the chats-list filter routes it to the right tab). That
+    /// would falsely report "you own this" for every joiner — the
+    /// stronger BLS-pubkey-matches-stored-admin check is the right
+    /// one. For Anarchy / OneOnOne we hide regardless: anarchy
+    /// admit ceremonies aren't wired in V1, OneOnOne is fixed
+    /// 2-party.
+    private var canShareInvite: Bool {
         guard
             let group = currentGroup,
-            let activeID = identitiesFlow.currentID
+            group.groupType == .tyranny,
+            let storedAdminHex = group.adminPubkeyHex?.lowercased(),
+            let activeID = identitiesFlow.currentID,
+            let activeSummary = identitiesFlow.identities.first(where: { $0.id == activeID })
         else { return false }
-        return group.ownerIdentityID == activeID
+        let activeHex = activeSummary.blsPublicKey
+            .map { String(format: "%02x", $0) }.joined()
+            .lowercased()
+        return activeHex == storedAdminHex
     }
 
     private var activeBlsHex: String? {
