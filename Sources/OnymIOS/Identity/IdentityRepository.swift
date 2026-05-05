@@ -23,7 +23,7 @@ import OnymSDK
 /// Single actor — every mutation is serialised on its executor. Keychain
 /// reads/writes, PBKDF2, HKDF, and FFI calls into OnymSDK all run here.
 /// Views interact via `await` from a `Task` (typically a SwiftUI `.task`).
-actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealing {
+actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealing, IdentitiesProviding {
     static let shared = IdentityRepository()
 
     private let keychain: IdentityKeychainStore

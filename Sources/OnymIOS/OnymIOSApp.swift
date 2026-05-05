@@ -252,6 +252,7 @@ struct OnymIOSApp: App {
                     // else falls through to the invitations queue.
                     let dispatcher = IncomingMessageDispatcher(
                         envelopeDecrypter: identityRepository,
+                        identities: identityRepository,
                         groupRepository: groupRepository,
                         invitationsRepository: incomingInvitations
                     )

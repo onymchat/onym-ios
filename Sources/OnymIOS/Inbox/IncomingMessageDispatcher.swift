@@ -6,35 +6,38 @@ import Foundation
 ///
 ///   - `MemberAnnouncementPayload` → applied directly to the
 ///     matching local `ChatGroup.memberProfiles`. Never lands in the
-///     invitations queue; existing members just need their roster
-///     directory updated.
-///   - Anything else (current build: `GroupInvitationPayload` or
-///     unknown / undecryptable) → persisted as an opaque
-///     `IncomingInvitation` for later display via
-///     `InvitationDecryptor`. This preserves today's behavior for
-///     true invitations and for ciphertext we can't open at receive
-///     time (wrong recipient, corrupted envelope, etc.).
+///     invitations queue.
+///   - `GroupInvitationPayload` → materializes a local `ChatGroup`
+///     under the recipient identity, populating `memberProfiles`
+///     from the wire payload (PR 8a) and adding the receiver's own
+///     entry. The invitation is consumed at this point — no need to
+///     also queue it for manual acceptance.
+///   - Anything else (unknown / undecryptable plaintext) → persisted
+///     as an opaque `IncomingInvitation` for the legacy display
+///     pipeline. This is the safety-net: ciphertext we can't open
+///     at receive time (wrong recipient, corrupted envelope) still
+///     gets a chance via `InvitationDecryptor` later.
 ///
 /// ## V1 trust model
 ///
 /// The outer `SealedEnvelope`'s Ed25519 signature is verified by
 /// `decryptInvitation` (when `senderEd25519PublicKey` is present).
 /// We do **not** yet cross-check the signer against the group's
-/// admin Ed25519 pubkey because the receiver-side group
-/// materialization isn't wired — joiners process announcements as
-/// no-ops (no local `ChatGroup`) and the admin already knows about
-/// the join (no spoofing risk inside their own loop). When
-/// joiner-side group materialization lands, this dispatcher should
-/// gain an `assert senderEd25519 == storedAdminEd25519` check.
+/// admin Ed25519 pubkey because the joiner-side path doesn't have
+/// a stored admin Ed25519 to compare against (the wire only carries
+/// `admin_pubkey_hex`, which is the BLS pub). A future PR can wire
+/// the SealedEnvelope's `senderEd25519PublicKey` through to the
+/// materialized `ChatGroup` and use it on subsequent announcements.
 ///
 /// ## Cost
 ///
 /// Every inbound message is decrypted at receive time (one extra
 /// X25519/AES-GCM op per message). For the low-volume Onym inbox
 /// this is negligible; the simplification gain — never leaking an
-/// announcement into the invitation list — is worth it.
+/// announcement or a stale invitation into the queue — is worth it.
 struct IncomingMessageDispatcher: Sendable {
     let envelopeDecrypter: any InvitationEnvelopeDecrypting
+    let identities: any IdentitiesProviding
     let groupRepository: GroupRepository
     let invitationsRepository: IncomingInvitationsRepository
 
@@ -44,28 +47,141 @@ struct IncomingMessageDispatcher: Sendable {
         payload: Data,
         receivedAt: Date
     ) async {
-        // Fast path: try to interpret as a `MemberAnnouncementPayload`.
-        // A successful decode + group-match consumes the message and
-        // skips the invitation store. Anything else falls through.
-        if let plaintext = try? await envelopeDecrypter.decryptInvitation(
+        // Decrypt once at receive time — both fast paths below need
+        // the plaintext; the safety-net path only needs to know
+        // decryption failed.
+        guard let plaintext = try? await envelopeDecrypter.decryptInvitation(
             envelopeBytes: payload,
             asIdentity: ownerIdentityID
-        ),
-           let announcement = try? JSONDecoder().decode(
-               MemberAnnouncementPayload.self,
-               from: plaintext
-           ) {
+        ) else {
+            await fallThrough(
+                messageID: messageID,
+                ownerIdentityID: ownerIdentityID,
+                payload: payload,
+                receivedAt: receivedAt
+            )
+            return
+        }
+
+        // Fast path 1: MemberAnnouncementPayload — incremental roster
+        // delta for an existing local group.
+        if let announcement = try? JSONDecoder().decode(
+            MemberAnnouncementPayload.self,
+            from: plaintext
+        ) {
             await applyAnnouncement(announcement)
             return
         }
-        // Fall-through: store opaque ciphertext for the invitations
-        // pipeline to handle (matches pre-PR-6 behavior).
+
+        // Fast path 2: GroupInvitationPayload — materialize a local
+        // group under `ownerIdentityID`. Skips the invitations queue
+        // because the group is now visible in the chat list.
+        if let invitation = try? JSONDecoder().decode(
+            GroupInvitationPayload.self,
+            from: plaintext
+        ) {
+            await materializeGroup(invitation, ownerIdentityID: ownerIdentityID)
+            return
+        }
+
+        // Plaintext didn't match any known payload — fall through.
+        await fallThrough(
+            messageID: messageID,
+            ownerIdentityID: ownerIdentityID,
+            payload: payload,
+            receivedAt: receivedAt
+        )
+    }
+
+    private func fallThrough(
+        messageID: String,
+        ownerIdentityID: IdentityID,
+        payload: Data,
+        receivedAt: Date
+    ) async {
         await invitationsRepository.recordIncoming(
             id: messageID,
             ownerIdentityID: ownerIdentityID,
             payload: payload,
             receivedAt: receivedAt
         )
+    }
+
+    /// Materialize a local `ChatGroup` from an inbound
+    /// `GroupInvitationPayload`. Idempotent on `groupID` —
+    /// `GroupRepository.insert` delegates to `insertOrUpdate`, so a
+    /// re-delivery of the same invitation overwrites in place rather
+    /// than minting a duplicate row.
+    ///
+    /// The `memberProfiles` directory is the union of:
+    ///   - whatever the sender shipped on the wire (PR 8a)
+    ///   - the receiver's own profile, looked up from
+    ///     `IdentitiesProviding`. We add this locally because the
+    ///     sender doesn't know us by alias yet — the producer-side
+    ///     `recordJoiner` runs after the invite ships.
+    ///
+    /// Skipped when `tier_raw` / `group_type_raw` don't decode (older
+    /// or future wire versions) — better to drop the message than
+    /// materialize a partial group.
+    private func materializeGroup(
+        _ invitation: GroupInvitationPayload,
+        ownerIdentityID: IdentityID
+    ) async {
+        guard let tier = SEPTier(rawValue: invitation.tierRaw),
+              let groupType = SEPGroupType(rawValue: invitation.groupTypeRaw)
+        else { return }
+
+        // Build the directory: wire-shipped profiles first, then add
+        // self if we can resolve our own identity. The "wire first"
+        // ordering means a sender that mistakenly includes us under
+        // our own BLS key gets overwritten by our locally-trusted
+        // alias + inbox pub — the receiver's view of itself wins.
+        var profiles = invitation.memberProfiles ?? [:]
+        if let selfEntry = await selfMemberProfileEntry(for: ownerIdentityID) {
+            profiles[selfEntry.key] = selfEntry.value
+        }
+
+        let groupIDHex = invitation.groupID
+            .map { String(format: "%02x", $0) }.joined()
+        let group = ChatGroup(
+            id: groupIDHex,
+            ownerIdentityID: ownerIdentityID,
+            name: invitation.name,
+            groupSecret: invitation.groupSecret,
+            createdAt: Date(),
+            members: invitation.members,
+            memberProfiles: profiles,
+            epoch: invitation.epoch,
+            salt: invitation.salt,
+            commitment: invitation.commitment,
+            tier: tier,
+            groupType: groupType,
+            adminPubkeyHex: invitation.adminPubkeyHex,
+            // Sender already anchored before sending the invite, so
+            // by the time it lands the group is on chain.
+            isPublishedOnChain: true
+        )
+        await groupRepository.insert(group)
+    }
+
+    /// Look up the receiver's own `MemberProfile` entry keyed by
+    /// their BLS pubkey hex. Returns `nil` when the identity can't
+    /// be resolved (race during identity removal, test stub returns
+    /// empty, etc.) — caller leaves the directory wire-only.
+    private func selfMemberProfileEntry(
+        for identityID: IdentityID
+    ) async -> (key: String, value: MemberProfile)? {
+        let summaries = await identities.currentIdentities()
+        guard let me = summaries.first(where: { $0.id == identityID }) else {
+            return nil
+        }
+        let key = me.blsPublicKey
+            .map { String(format: "%02x", $0) }.joined()
+        let profile = MemberProfile(
+            alias: me.name,
+            inboxPublicKey: me.inboxPublicKey
+        )
+        return (key, profile)
     }
 
     /// Idempotent merge of one announced member into the matching

@@ -54,6 +54,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
         let decrypter = FakeInvitationEnvelopeDecrypter(mode: .fixed(plaintext))
         let dispatcher = IncomingMessageDispatcher(
             envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
             groupRepository: groups,
             invitationsRepository: invitations
         )
@@ -87,6 +88,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
         let decrypter = FakeInvitationEnvelopeDecrypter(mode: .fixed(plaintext))
         let dispatcher = IncomingMessageDispatcher(
             envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
             groupRepository: groups,
             invitationsRepository: invitations
         )
@@ -129,6 +131,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
         let decrypter = FakeInvitationEnvelopeDecrypter(mode: .fixed(plaintext))
         let dispatcher = IncomingMessageDispatcher(
             envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
             groupRepository: groups,
             invitationsRepository: invitations
         )
@@ -146,6 +149,135 @@ final class IncomingMessageDispatcherTests: XCTestCase {
                        "redelivery must NOT overwrite an existing profile")
     }
 
+    // MARK: - Invitation materialization path
+
+    func test_invitation_materializesLocalGroup_withSelfEntry() async throws {
+        // Joiner-side: receive a fresh invitation for a group that
+        // doesn't exist locally. Dispatcher materializes a ChatGroup
+        // and adds the receiver's own profile to memberProfiles.
+        let creatorBlsHex = "11".repeated(48)
+        let creatorProfile = MemberProfile(
+            alias: "Alice",
+            inboxPublicKey: Data(repeating: 0xAA, count: 32)
+        )
+        let payload = makeInvitationPayload(
+            groupID: Data(repeating: 0x42, count: 32),
+            name: "Family",
+            memberProfiles: [creatorBlsHex: creatorProfile]
+        )
+        let plaintext = try JSONEncoder().encode(payload)
+        let decrypter = FakeInvitationEnvelopeDecrypter(mode: .fixed(plaintext))
+
+        // Self has a different BLS pubkey from the creator — receiver
+        // is the joiner, not the admin.
+        let selfBlsHex = "22".repeated(48)
+        let selfSummary = IdentitySummary(
+            id: owner,
+            name: "Bob",
+            blsPublicKey: Data(repeating: 0x22, count: 48),
+            inboxPublicKey: Data(repeating: 0xBB, count: 32)
+        )
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: [selfSummary]),
+            groupRepository: groups,
+            invitationsRepository: invitations
+        )
+
+        await dispatcher.dispatch(
+            messageID: "msg-mat",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+
+        let after = await groups.currentGroups()
+        let materialized = try XCTUnwrap(after.first)
+        XCTAssertEqual(materialized.name, "Family")
+        XCTAssertEqual(materialized.ownerIdentityID, owner)
+        XCTAssertEqual(materialized.memberProfiles.count, 2,
+                       "creator (from wire) + self (from identity provider)")
+        XCTAssertEqual(materialized.memberProfiles[creatorBlsHex]?.alias, "Alice")
+        XCTAssertEqual(materialized.memberProfiles[selfBlsHex]?.alias, "Bob")
+        XCTAssertTrue(materialized.isPublishedOnChain,
+                      "sender already anchored before sending the invite")
+        let storedCount = await invitationsStore.count
+        XCTAssertEqual(storedCount, 0,
+                       "materialized invitations must NOT also queue as pending")
+    }
+
+    func test_invitation_withoutMemberProfiles_materializesWithSelfOnly() async throws {
+        // Legacy / pre-PR-8a sender — no member_profiles on the wire.
+        // Receiver still materializes; directory carries just self.
+        let payload = makeInvitationPayload(
+            groupID: Data(repeating: 0x99, count: 32),
+            name: "Legacy",
+            memberProfiles: nil
+        )
+        let plaintext = try JSONEncoder().encode(payload)
+        let decrypter = FakeInvitationEnvelopeDecrypter(mode: .fixed(plaintext))
+
+        let selfSummary = IdentitySummary(
+            id: owner,
+            name: "Carol",
+            blsPublicKey: Data(repeating: 0x33, count: 48),
+            inboxPublicKey: Data(repeating: 0xCC, count: 32)
+        )
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: [selfSummary]),
+            groupRepository: groups,
+            invitationsRepository: invitations
+        )
+
+        await dispatcher.dispatch(
+            messageID: "msg-legacy",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+
+        let after = await groups.currentGroups()
+        XCTAssertEqual(after.first?.memberProfiles.count, 1,
+                       "wire didn't carry profiles, but self entry still gets added")
+        XCTAssertEqual(after.first?.memberProfiles["33".repeated(48)]?.alias, "Carol")
+    }
+
+    func test_invitation_unresolvableSelf_materializesWithoutSelfEntry() async throws {
+        // Identity provider returns an empty list (race during
+        // identity removal, fresh wipe, etc.). Materializer must not
+        // crash and must still create the group with the wire-shipped
+        // directory only.
+        let creatorBlsHex = "44".repeated(48)
+        let payload = makeInvitationPayload(
+            groupID: Data(repeating: 0xEE, count: 32),
+            name: "Race",
+            memberProfiles: [creatorBlsHex: MemberProfile(
+                alias: "Alice",
+                inboxPublicKey: Data(repeating: 0x44, count: 32)
+            )]
+        )
+        let plaintext = try JSONEncoder().encode(payload)
+        let decrypter = FakeInvitationEnvelopeDecrypter(mode: .fixed(plaintext))
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations
+        )
+
+        await dispatcher.dispatch(
+            messageID: "msg-race",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+
+        let after = await groups.currentGroups()
+        XCTAssertEqual(after.first?.memberProfiles.count, 1,
+                       "wire-shipped directory survives even without self resolution")
+    }
+
     // MARK: - Fall-through path
 
     func test_undecodableJSON_fallsThroughToInvitations() async throws {
@@ -154,6 +286,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
         let decrypter = FakeInvitationEnvelopeDecrypter(mode: .fixed(plaintext))
         let dispatcher = IncomingMessageDispatcher(
             envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
             groupRepository: groups,
             invitationsRepository: invitations
         )
@@ -180,6 +313,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
         )
         let dispatcher = IncomingMessageDispatcher(
             envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
             groupRepository: groups,
             invitationsRepository: invitations
         )
@@ -245,6 +379,40 @@ final class IncomingMessageDispatcherTests: XCTestCase {
     private static func encode(announcement: MemberAnnouncementPayload) throws -> Data {
         try JSONEncoder().encode(announcement)
     }
+
+    private func makeInvitationPayload(
+        groupID: Data,
+        name: String,
+        memberProfiles: [String: MemberProfile]?
+    ) -> GroupInvitationPayload {
+        GroupInvitationPayload(
+            version: 1,
+            groupID: groupID,
+            groupSecret: Data(repeating: 0x55, count: 32),
+            name: name,
+            members: [],
+            epoch: 0,
+            salt: Data(repeating: 0x66, count: 32),
+            commitment: Data(repeating: 0x77, count: 32),
+            tierRaw: SEPTier.small.rawValue,
+            groupTypeRaw: SEPGroupType.tyranny.rawValue,
+            adminPubkeyHex: nil,
+            peerBlsSecret: nil,
+            memberProfiles: memberProfiles
+        )
+    }
+}
+
+// MARK: - Stub identity provider
+
+private actor StubIdentities: IdentitiesProviding {
+    private let summaries: [IdentitySummary]
+
+    init(summaries: [IdentitySummary]) {
+        self.summaries = summaries
+    }
+
+    func currentIdentities() -> [IdentitySummary] { summaries }
 }
 
 // MARK: - String / hex helpers (test scope)
