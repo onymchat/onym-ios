@@ -1,0 +1,363 @@
+name: QA Build
+
+# Manually-dispatched ad-hoc IPA build of the current branch's HEAD,
+# signed via fastlane match and published to onym.app/qa/ for OTA
+# install via itms-services://. Distinct from `release.yml`, which is
+# tag-gated + runs the full unit/UI test suite. This one prioritises
+# iteration speed: build -> sign -> manifest -> upload, no test gates.
+#
+# To dispatch:
+#   gh workflow run "QA Build" --ref <branch> \
+#     -f description="Fix login crash on iPad" \
+#     -f issue=42
+#
+# Required secrets:
+#   org-wide:
+#     DEPLOY_SSH_KEY        -- private ed25519 for root@droplet
+#     DEPLOY_HOST           -- onym.app
+#   repo-local (same as release.yml):
+#     MATCH_GIT_URL         -- fastlane-match cert/profile vault repo
+#     MATCH_DEPLOY_KEY      -- SSH read key for the match vault
+#     MATCH_TEAM_ID         -- Apple Developer team ID
+#     MATCH_PASSWORD        -- match encryption password
+#     RELAYER_AUTH_TOKEN    -- bundled into Resources/RelayerSecrets.json
+#
+# OTA install flow:
+#   tester taps the dashboard's "Install on iOS" button on a device
+#   that's been UDID-registered to the team's ad-hoc provisioning
+#   profile (see lead@onym.app instructions on /qa/) -> Safari hands
+#   off the itms-services:// URL -> iOS fetches manifest.plist over
+#   HTTPS -> downloads the IPA referenced inside -> installs.
+#
+# Note on cross-repo action access: this workflow calls
+# `onymchat/onym-website/.github/actions/deploy@main`. That repo must
+# be public, or this workflow's runner must have access to it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      description:
+        description: 'What changed in this build (shown in the QA Dashboard)'
+        required: true
+        type: string
+      issue:
+        description: 'Linked GitHub issue number (optional, e.g. 42)'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  issues: read   # gh issue view -> resolve issue title for the dashboard entry
+
+# Serialize concurrent QA dispatches so two runs don't race against
+# the same builds.json on the droplet.
+concurrency:
+  group: qa-build-ios
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build & publish to QA Dashboard
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # AppIcon / LaunchLogo PNGs are LFS-tracked. Without this
+          # xcodebuild compiles pointer files into Assets.car. Same
+          # rationale as release.yml.
+          lfs: true
+          # `git describe --match=v*` for the version step + the
+          # generate-xcodeproj.sh fallback path. Belt + braces.
+          fetch-depth: 0
+
+      - name: Force LFS smudge (self-hosted workspace persists across runs)
+        # `actions/checkout@v4` skips the LFS smudge if pointer files
+        # already match the index. `git lfs pull` re-runs unconditionally
+        # and is cheap once objects are cached locally.
+        run: git lfs pull
+
+      - name: Select Xcode 26
+        run: sudo xcode-select -s /Applications/Xcode_26.app
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Compute version
+        id: ver
+        run: |
+          set -eu
+          commit=$(git rev-parse HEAD)
+          commit_short=$(git rev-parse --short=5 HEAD)
+          branch="${GITHUB_REF_NAME}"
+
+          # Most recent v*-tag reachable from HEAD (empty if none).
+          tag=$(git describe --tags --abbrev=0 --match='v*' 2>/dev/null || echo "")
+
+          # If HEAD is exactly the tag commit, this is a "tag build".
+          # Otherwise it's a branch build, decorated with the commit:
+          # v0.0.14-ab4cd. Same shape as onym-android.
+          if [ -n "$tag" ] && [ "$(git rev-parse "$tag")" = "$commit" ]; then
+            kind="tag"
+            version="$tag"
+          else
+            kind="branch"
+            base="${tag:-v0.0.0}"
+            version="${base}-${commit_short}"
+          fi
+
+          {
+            echo "commit=$commit"
+            echo "commit_short=$commit_short"
+            echo "branch=$branch"
+            echo "tag=$tag"
+            echo "kind=$kind"
+            echo "version=$version"
+          } >> "$GITHUB_OUTPUT"
+          echo "::notice::Building $version (kind=$kind, branch=$branch, commit=$commit_short)"
+
+      - name: Bundle relayer auth token
+        # `Resources/RelayerSecrets.json` is gitignored. Same template
+        # release.yml uses -- if RELAYER_AUTH_TOKEN is unset the IPA
+        # still builds but every relayer call 401s. Surfaces clearly
+        # to the user instead of silently failing.
+        env:
+          RELAYER_AUTH_TOKEN: ${{ secrets.RELAYER_AUTH_TOKEN }}
+        run: |
+          mkdir -p Resources
+          cat > Resources/RelayerSecrets.json <<EOF
+          { "authToken": "${RELAYER_AUTH_TOKEN}" }
+          EOF
+
+      - name: Generate Xcode project
+        # `RELEASE_VERSION` is consumed by `scripts/resolve-release-version.sh`
+        # (sourced from `generate-xcodeproj.sh`) -> bundle's CFBundleShortVersionString
+        # ends up matching the dashboard's `version` field exactly.
+        env:
+          RELEASE_VERSION: ${{ steps.ver.outputs.version }}
+        run: ./generate-xcodeproj.sh
+
+      - name: Configure SSH for Match (job-isolated, no global mutation)
+        # See release.yml for rationale -- avoids polluting the
+        # self-hosted runner user's ~/.ssh/config across runs.
+        env:
+          MATCH_DEPLOY_KEY: ${{ secrets.MATCH_DEPLOY_KEY }}
+        run: |
+          umask 077
+          echo "$MATCH_DEPLOY_KEY" > /tmp/match_key
+          ssh-keyscan github.com > /tmp/match_known_hosts
+
+      - name: Install Fastlane
+        run: |
+          bundle config set --local path 'vendor/bundle'
+          bundle install
+
+      - name: Build ad-hoc IPA
+        # Reuses the same `ios release` lane release.yml uses -- match
+        # in readonly mode + gym with manual signing. Output:
+        # build/ios/adhoc/OnymIOS.ipa
+        env:
+          MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
+          MATCH_TEAM_ID: ${{ secrets.MATCH_TEAM_ID }}
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          GIT_SSH_COMMAND: 'ssh -i /tmp/match_key -o IdentitiesOnly=yes -F /dev/null -o UserKnownHostsFile=/tmp/match_known_hosts -o StrictHostKeyChecking=accept-new'
+        run: bundle exec fastlane ios release
+
+      - name: Clean up match key
+        if: always()
+        run: rm -f /tmp/match_key /tmp/match_known_hosts
+
+      - name: Stage IPA + generate manifest.plist
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          set -eu
+          IPA="build/ios/adhoc/OnymIOS.ipa"
+          [ -f "$IPA" ] || { echo "expected IPA at $IPA" >&2; exit 1; }
+
+          mkdir -p "dist/qa/ios/${VERSION}"
+          cp "$IPA" "dist/qa/ios/${VERSION}/OnymIOS.ipa"
+
+          # bundle-version in the plist must be a numeric-ish string
+          # iOS will render -- the dashboard's display version ("v0.0.14-ab4cd")
+          # works fine here; iOS only uses it to detect upgrades.
+          MARKETING="${VERSION#v}"
+
+          # OTA manifest. iOS Safari hands this to the system installer
+          # when the user taps the itms-services:// link. The IPA's
+          # Info.plist must carry the same bundle-identifier ("chat.onym.ios")
+          # that match's ad-hoc profile is provisioned for, otherwise
+          # the install fails with "unable to install".
+          cat > "dist/qa/ios/${VERSION}/manifest.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>items</key>
+            <array>
+              <dict>
+                <key>assets</key>
+                <array>
+                  <dict>
+                    <key>kind</key>
+                    <string>software-package</string>
+                    <key>url</key>
+                    <string>https://${HOST}/qa/ios/${VERSION}/OnymIOS.ipa</string>
+                  </dict>
+                </array>
+                <key>metadata</key>
+                <dict>
+                  <key>bundle-identifier</key>
+                  <string>chat.onym.ios</string>
+                  <key>bundle-version</key>
+                  <string>${MARKETING}</string>
+                  <key>kind</key>
+                  <string>software</string>
+                  <key>title</key>
+                  <string>Onym</string>
+                </dict>
+              </dict>
+            </array>
+          </dict>
+          </plist>
+          EOF
+
+          # macOS stat: -f%z (BSD). Linux uses -c%s.
+          echo "IPA_SIZE=$(stat -f%z dist/qa/ios/${VERSION}/OnymIOS.ipa)" >> "$GITHUB_ENV"
+
+      - name: Build dashboard entry + merge into builds.json
+        env:
+          VERSION:      ${{ steps.ver.outputs.version }}
+          KIND:         ${{ steps.ver.outputs.kind }}
+          BRANCH:       ${{ steps.ver.outputs.branch }}
+          TAG:          ${{ steps.ver.outputs.tag }}
+          COMMIT:       ${{ steps.ver.outputs.commit }}
+          COMMIT_SHORT: ${{ steps.ver.outputs.commit_short }}
+          DESCRIPTION:  ${{ inputs.description }}
+          ISSUE:        ${{ inputs.issue }}
+          REPO:         ${{ github.repository }}
+          RUN_ID:       ${{ github.run_id }}
+          HOST:         ${{ secrets.DEPLOY_HOST }}
+          GH_TOKEN:     ${{ github.token }}
+        run: |
+          set -eu
+          BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          # Resolve issue title (best-effort; gh failure -> empty title)
+          ISSUE_OBJ='null'
+          if [ -n "$ISSUE" ]; then
+            TITLE=$(gh issue view "$ISSUE" --repo "$REPO" --json title -q .title 2>/dev/null || echo "")
+            ISSUE_OBJ=$(jq -n \
+              --arg n "$ISSUE" --arg t "$TITLE" \
+              --arg url "https://github.com/$REPO/issues/$ISSUE" \
+              '{number: ($n|tonumber), title: $t, url: $url}')
+          fi
+
+          # Schema -- see public/qa/index.html in onym-website. Keep
+          # field names in sync with the Android entry shape.
+          jq -n \
+            --arg platform "ios" \
+            --arg version "$VERSION" \
+            --arg kind "$KIND" \
+            --arg branch "$BRANCH" \
+            --arg tag "$TAG" \
+            --arg commit "$COMMIT" \
+            --arg commit_short "$COMMIT_SHORT" \
+            --arg built_at "$BUILT_AT" \
+            --arg description "$DESCRIPTION" \
+            --argjson issue "$ISSUE_OBJ" \
+            --arg install_url  "itms-services://?action=download-manifest&url=https://${HOST}/qa/ios/${VERSION}/manifest.plist" \
+            --arg ipa_url      "https://${HOST}/qa/ios/${VERSION}/OnymIOS.ipa" \
+            --arg manifest_url "https://${HOST}/qa/ios/${VERSION}/manifest.plist" \
+            --argjson size_bytes "${IPA_SIZE}" \
+            --arg commit_url   "https://github.com/$REPO/commit/$COMMIT" \
+            --arg workflow_url "https://github.com/$REPO/actions/runs/$RUN_ID" \
+            '{
+              platform: $platform,
+              version: $version,
+              kind: $kind,
+              branch: (if $kind == "branch" then $branch else null end),
+              tag:    (if $tag != "" then $tag else null end),
+              commit: $commit,
+              commit_short: $commit_short,
+              built_at: $built_at,
+              description: $description,
+              issue: $issue,
+              install_url: $install_url,
+              ipa_url: $ipa_url,
+              manifest_url: $manifest_url,
+              size_bytes: $size_bytes,
+              commit_url: $commit_url,
+              workflow_url: $workflow_url
+            }' > /tmp/new-entry.json
+
+          echo "::group::New dashboard entry"
+          cat /tmp/new-entry.json
+          echo "::endgroup::"
+
+          # Fetch the live builds.json. 404 (no file yet) -> empty skeleton.
+          if curl -sf -o /tmp/current.json "https://${HOST}/qa/builds.json"; then
+            echo "::notice::Fetched current builds.json from https://${HOST}/qa/builds.json"
+          else
+            echo "::notice::No existing builds.json -- starting fresh"
+            echo '{"schema_version":1,"builds":[]}' > /tmp/current.json
+          fi
+
+          # Merge:
+          #  1. Drop scaffold sample (is_sample:true) -- first real publish wins.
+          #  2. Prepend our entry, dedupe by platform+version (newer wins),
+          #     sort by built_at desc, cap 50.
+          #  3. Strip is_sample, refresh generated_at.
+          jq --slurpfile new /tmp/new-entry.json '
+            (if .is_sample == true then .builds = [] else . end)
+            | .builds = (
+                [$new[0]] + (.builds // [])
+                | unique_by(.platform + "@" + .version)
+                | sort_by(.built_at) | reverse
+                | .[0:50]
+              )
+            | del(.is_sample)
+            | .schema_version = 1
+            | .generated_at = (now | todate)
+          ' /tmp/current.json > dist/qa/builds.json
+
+          echo "::group::Merged builds.json (head)"
+          jq '{schema_version, generated_at, total: (.builds|length), builds: (.builds[0:5])}' dist/qa/builds.json
+          echo "::endgroup::"
+
+      - name: Publish to onym.app/qa/
+        # delete_stale: false to preserve Android uploads under
+        # /var/www/onym/qa/android/ and previous iOS builds under
+        # /var/www/onym/qa/ios/<other>/.
+        uses: onymchat/onym-website/.github/actions/deploy@main
+        with:
+          source_path: dist/qa
+          target_subpath: qa
+          ssh_key: ${{ secrets.DEPLOY_SSH_KEY }}
+          host: ${{ secrets.DEPLOY_HOST }}
+          delete_stale: false
+
+      - name: Summary
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          KIND:    ${{ steps.ver.outputs.kind }}
+          BRANCH:  ${{ steps.ver.outputs.branch }}
+          HOST:    ${{ secrets.DEPLOY_HOST }}
+        run: |
+          {
+            echo "## QA build published"
+            echo
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Version | \`$VERSION\` |"
+            echo "| Kind | $KIND |"
+            echo "| Branch | \`$BRANCH\` |"
+            echo "| IPA | https://${HOST}/qa/ios/${VERSION}/OnymIOS.ipa |"
+            echo "| Manifest | https://${HOST}/qa/ios/${VERSION}/manifest.plist |"
+            echo "| Install | \`itms-services://?action=download-manifest&url=https://${HOST}/qa/ios/${VERSION}/manifest.plist\` |"
+            echo "| Dashboard | https://${HOST}/qa/?platform=ios |"
+            echo
+            echo "Tester device must be UDID-registered to the team ad-hoc provisioning profile -- otherwise install fails."
+          } >> "$GITHUB_STEP_SUMMARY"
