@@ -2,7 +2,7 @@ name: OnymIOS
 options:
   bundleIdPrefix: chat.onym
   deploymentTarget:
-    iOS: "26.0"
+    iOS: "18.0"
   xcodeVersion: "26.0"
   generateEmptyDirectories: true
   developmentLanguage: en
