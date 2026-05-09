@@ -3,10 +3,9 @@ import Observation
 
 /// Stateless interactor for the Chats tab. Drains
 /// `GroupRepository.snapshots` into `state.groups`; the view reads
-/// from `state` and re-renders on every push. No mutating intents
-/// today — the row UI is read-only and the only action is
-/// "open Create Group", which is owned by the view's
-/// `.fullScreenCover`.
+/// from `state` and re-renders on every push. The only mutating
+/// intent is `delete(groupID:)`; the create-group entry point is
+/// owned by the view's `.fullScreenCover`.
 ///
 /// Mirrors `AnchorsPickerFlow`'s shape: own a `snapshotTask`,
 /// idempotent `start()`, plain `stop()`.
@@ -36,5 +35,12 @@ final class ChatsFlow {
     func stop() {
         snapshotTask?.cancel()
         snapshotTask = nil
+    }
+
+    /// Delete a group from the on-device store. The repository emits a
+    /// fresh snapshot, so the view drops the row reactively without
+    /// needing an optimistic local edit.
+    func delete(groupID: String) {
+        Task { await repository.delete(id: groupID) }
     }
 }

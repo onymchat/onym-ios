@@ -12,6 +12,7 @@ struct ChatsView: View {
     let makeShareInviteFlow: @MainActor () -> ShareInviteFlow
 
     @State private var showCreateGroup = false
+    @State private var pendingDeletion: ChatGroup?
 
     var body: some View {
         Group {
@@ -50,6 +51,24 @@ struct ChatsView: View {
                 makeShareInviteFlow: makeShareInviteFlow,
                 onClose: { showCreateGroup = false }
             )
+        }
+        .confirmationDialog(
+            "Delete group?",
+            isPresented: Binding(
+                get: { pendingDeletion != nil },
+                set: { if !$0 { pendingDeletion = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingDeletion
+        ) { group in
+            Button("Delete Group", role: .destructive) {
+                flow.delete(groupID: group.id)
+                pendingDeletion = nil
+            }
+            .accessibilityIdentifier("chats.delete_group_confirm")
+            Button("Cancel", role: .cancel) { pendingDeletion = nil }
+        } message: { group in
+            Text("“\(group.name.isEmpty ? "Unnamed" : group.name)” will be removed from this device. This cannot be undone.")
         }
     }
 
@@ -105,9 +124,26 @@ struct ChatsView: View {
     // MARK: - Populated list
 
     private var groupList: some View {
-        List(flow.groups) { group in
-            ChatsRow(group: group)
-                .listRowSeparator(.visible)
+        List {
+            ForEach(flow.groups) { group in
+                ChatsRow(group: group)
+                    .listRowSeparator(.visible)
+                    .swipeActions(edge: .trailing) {
+                        Button(role: .destructive) {
+                            pendingDeletion = group
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                        .accessibilityIdentifier("chats.row.\(group.id).delete")
+                    }
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            pendingDeletion = group
+                        } label: {
+                            Label("Delete Group", systemImage: "trash")
+                        }
+                    }
+            }
         }
         .listStyle(.plain)
     }
