@@ -114,10 +114,19 @@ struct ChatsView: View {
 
     private var groupList: some View {
         List(flow.groups) { group in
-            ChatsRow(group: group)
-                .listRowSeparator(.visible)
+            NavigationLink(value: group.id) {
+                ChatsRow(group: group)
+            }
+            .listRowSeparator(.visible)
         }
         .listStyle(.plain)
+        .navigationDestination(for: String.self) { groupID in
+            ChatMembersView(
+                groupID: groupID,
+                chatsFlow: flow,
+                identitiesFlow: identitiesFlow
+            )
+        }
     }
 }
 
@@ -167,10 +176,15 @@ private struct ChatsRow: View {
     }
 
     private var subtitle: String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
-        let relative = formatter.localizedString(for: group.createdAt, relativeTo: Date())
-        return "\(group.groupType.label.capitalized) · created \(relative)"
+        let count = group.memberProfiles.count
+        let memberText: String?
+        switch count {
+        case 0:  memberText = nil
+        case 1:  memberText = "1 member"
+        default: memberText = "\(count) members"
+        }
+        let parts = [group.groupType.label.capitalized, memberText].compactMap { $0 }
+        return parts.joined(separator: " · ")
     }
 }
 
