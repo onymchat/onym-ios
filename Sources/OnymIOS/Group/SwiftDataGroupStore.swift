@@ -92,6 +92,7 @@ actor SwiftDataGroupStore: GroupStore {
             existing.encryptedCommitment = encoded.encryptedCommitment
             existing.encryptedAdminPubkeyHex = encoded.encryptedAdminPubkeyHex
             existing.encryptedMemberProfilesJSON = encoded.encryptedMemberProfilesJSON
+            existing.encryptedAdminEd25519PubkeyHex = encoded.encryptedAdminEd25519PubkeyHex
             try? context.save()
             return false
         }
@@ -164,7 +165,8 @@ actor SwiftDataGroupStore: GroupStore {
             encryptedSalt: try StorageEncryption.encrypt(group.salt),
             encryptedCommitment: try group.commitment.map(StorageEncryption.encrypt),
             encryptedAdminPubkeyHex: try group.adminPubkeyHex.map(StorageEncryption.encrypt),
-            encryptedMemberProfilesJSON: encryptedProfilesJSON
+            encryptedMemberProfilesJSON: encryptedProfilesJSON,
+            encryptedAdminEd25519PubkeyHex: try group.adminEd25519PubkeyHex.map(StorageEncryption.encrypt)
         )
     }
 
@@ -183,6 +185,9 @@ actor SwiftDataGroupStore: GroupStore {
         }
         let commitment = row.encryptedCommitment.flatMap { try? StorageEncryption.decrypt($0) }
         let adminPubkeyHex = row.encryptedAdminPubkeyHex.flatMap {
+            try? StorageEncryption.decryptString($0)
+        }
+        let adminEd25519PubkeyHex = row.encryptedAdminEd25519PubkeyHex.flatMap {
             try? StorageEncryption.decryptString($0)
         }
         // Missing column / decode failure → empty directory. Profiles
@@ -206,6 +211,7 @@ actor SwiftDataGroupStore: GroupStore {
             tier: tier,
             groupType: groupType,
             adminPubkeyHex: adminPubkeyHex,
+            adminEd25519PubkeyHex: adminEd25519PubkeyHex,
             isPublishedOnChain: row.isPublishedOnChain
         )
     }

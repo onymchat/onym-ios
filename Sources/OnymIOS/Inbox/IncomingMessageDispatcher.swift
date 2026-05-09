@@ -47,10 +47,12 @@ struct IncomingMessageDispatcher: Sendable {
         payload: Data,
         receivedAt: Date
     ) async {
-        // Decrypt once at receive time — both fast paths below need
-        // the plaintext; the safety-net path only needs to know
-        // decryption failed.
-        guard let plaintext = try? await envelopeDecrypter.decryptInvitation(
+        // Decrypt once at receive time and grab the sender's Ed25519
+        // pubkey at the same hop — both fast paths use it for
+        // provenance (announcement: verify against stored admin;
+        // invitation: stamp into the materialized group). The
+        // safety-net path only needs to know decryption failed.
+        guard let envelope = try? await envelopeDecrypter.decryptInvitationWithSender(
             envelopeBytes: payload,
             asIdentity: ownerIdentityID
         ) else {
@@ -67,9 +69,12 @@ struct IncomingMessageDispatcher: Sendable {
         // delta for an existing local group.
         if let announcement = try? JSONDecoder().decode(
             MemberAnnouncementPayload.self,
-            from: plaintext
+            from: envelope.plaintext
         ) {
-            await applyAnnouncement(announcement)
+            await applyAnnouncement(
+                announcement,
+                senderEd25519PublicKey: envelope.senderEd25519PublicKey
+            )
             return
         }
 
@@ -78,9 +83,13 @@ struct IncomingMessageDispatcher: Sendable {
         // because the group is now visible in the chat list.
         if let invitation = try? JSONDecoder().decode(
             GroupInvitationPayload.self,
-            from: plaintext
+            from: envelope.plaintext
         ) {
-            await materializeGroup(invitation, ownerIdentityID: ownerIdentityID)
+            await materializeGroup(
+                invitation,
+                ownerIdentityID: ownerIdentityID,
+                senderEd25519PublicKey: envelope.senderEd25519PublicKey
+            )
             return
         }
 
@@ -125,7 +134,8 @@ struct IncomingMessageDispatcher: Sendable {
     /// materialize a partial group.
     private func materializeGroup(
         _ invitation: GroupInvitationPayload,
-        ownerIdentityID: IdentityID
+        ownerIdentityID: IdentityID,
+        senderEd25519PublicKey: Data?
     ) async {
         guard let tier = SEPTier(rawValue: invitation.tierRaw),
               let groupType = SEPGroupType(rawValue: invitation.groupTypeRaw)
@@ -139,6 +149,21 @@ struct IncomingMessageDispatcher: Sendable {
         var profiles = invitation.memberProfiles ?? [:]
         if let selfEntry = await selfMemberProfileEntry(for: ownerIdentityID) {
             profiles[selfEntry.key] = selfEntry.value
+        }
+
+        // Stamp the inviting envelope's Ed25519 pubkey as the
+        // group's admin signing key. PR 9 uses this on every
+        // subsequent MemberAnnouncementPayload to verify the sender
+        // is the same admin we received the invitation from. Empty
+        // for `.anarchy` / `.oneOnOne` (no admin), and `nil` when
+        // the envelope shipped without a signature block.
+        let adminEd25519PubkeyHex: String?
+        switch groupType {
+        case .anarchy, .oneOnOne:
+            adminEd25519PubkeyHex = nil
+        default:
+            adminEd25519PubkeyHex = senderEd25519PublicKey
+                .map { $0.map { String(format: "%02x", $0) }.joined() }
         }
 
         let groupIDHex = invitation.groupID
@@ -157,6 +182,7 @@ struct IncomingMessageDispatcher: Sendable {
             tier: tier,
             groupType: groupType,
             adminPubkeyHex: invitation.adminPubkeyHex,
+            adminEd25519PubkeyHex: adminEd25519PubkeyHex,
             // Sender already anchored before sending the invite, so
             // by the time it lands the group is on chain.
             isPublishedOnChain: true
@@ -190,17 +216,41 @@ struct IncomingMessageDispatcher: Sendable {
     ///   - The group isn't on this device (joiner whose local
     ///     materialization hasn't shipped, or stale announcement
     ///     for an unrelated group).
+    ///   - The sender's Ed25519 pubkey doesn't match the group's
+    ///     stored `adminEd25519PubkeyHex` (forged announcement, or
+    ///     announcement for a Tyranny group from a non-admin
+    ///     member). PR 9 trust check.
     ///   - The member is already known under the same BLS pubkey
     ///     hex key (re-delivery, or the admin's own approve loop
     ///     re-broadcasting).
     ///
     /// Dedup key is BLS pubkey hex, mirroring the producer-side
     /// dictionary key in `JoinRequestApprover.recordJoiner`.
-    private func applyAnnouncement(_ payload: MemberAnnouncementPayload) async {
+    private func applyAnnouncement(
+        _ payload: MemberAnnouncementPayload,
+        senderEd25519PublicKey: Data?
+    ) async {
         let groups = await groupRepository.currentGroups()
         guard let group = groups.first(where: { $0.groupIDData == payload.groupId }) else {
             return
         }
+
+        // Trust check: announcement must be signed by the group's
+        // known admin. Skipped (V1 best-effort) when the group has
+        // no stored admin Ed25519 — happens for governance models
+        // without an admin (anarchy / oneOnOne) or pre-PR-9 rows
+        // that materialized before the field existed. We DO require
+        // the envelope to carry SOME sender pubkey though; an
+        // unsigned announcement is rejected outright when the group
+        // has an admin to verify against.
+        if let storedAdmin = group.adminEd25519PubkeyHex {
+            guard let senderEd25519PublicKey else { return }
+            let senderHex = senderEd25519PublicKey
+                .map { String(format: "%02x", $0) }.joined()
+                .lowercased()
+            guard senderHex == storedAdmin.lowercased() else { return }
+        }
+
         let key = payload.newMember.blsPub
             .map { String(format: "%02x", $0) }.joined()
         if group.memberProfiles[key] != nil { return }

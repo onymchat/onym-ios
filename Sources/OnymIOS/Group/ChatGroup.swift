@@ -48,6 +48,21 @@ struct ChatGroup: Identifiable, Equatable, Sendable {
     /// Hex (lowercase, 96 chars) BLS pubkey of the single Tyranny admin.
     /// `nil` for `.anarchy` / `.oneOnOne` (no privileged member).
     var adminPubkeyHex: String?
+    /// Hex (lowercase, 64 chars) Ed25519 pubkey of the admin —
+    /// HKDF-derived from their nostr secret on the admin's device.
+    /// Captured at materialize time from the inviting envelope's
+    /// `senderEd25519PublicKey`, or stamped at create time from the
+    /// creator's own `Identity.stellarPublicKey`. Used by the
+    /// receive-side dispatcher to verify that an inbound
+    /// `MemberAnnouncementPayload` was actually signed by the
+    /// known admin (and not a peer who happens to know the
+    /// recipient's inbox pubkey).
+    ///
+    /// `nil` for `.anarchy` / `.oneOnOne` (no admin) or when a
+    /// pre-PR-9 group was materialized before the field existed —
+    /// announcements for such groups fall back to V1 best-effort
+    /// (decrypt-only verification).
+    var adminEd25519PubkeyHex: String?
     /// Flips to `true` once the relayer's `create_group_v2` returns
     /// `accepted = true`. Persisted-but-not-anchored groups can be
     /// retried.

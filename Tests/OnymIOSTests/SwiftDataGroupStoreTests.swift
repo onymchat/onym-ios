@@ -185,6 +185,7 @@ final class SwiftDataGroupStoreTests: XCTestCase {
             tier: .small,
             groupType: .tyranny,
             adminPubkeyHex: adminPubkeyHex,
+            adminEd25519PubkeyHex: nil,
             isPublishedOnChain: false
         )
     }

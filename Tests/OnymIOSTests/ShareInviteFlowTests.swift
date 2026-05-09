@@ -164,6 +164,7 @@ final class ShareInviteFlowTests: XCTestCase {
             tier: .small,
             groupType: .tyranny,
             adminPubkeyHex: nil,
+            adminEd25519PubkeyHex: nil,
             isPublishedOnChain: false
         )
     }
