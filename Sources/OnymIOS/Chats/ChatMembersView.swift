@@ -21,6 +21,10 @@ struct ChatMembersView: View {
     let groupID: String
     @Bindable var chatsFlow: ChatsFlow
     @Bindable var identitiesFlow: IdentitiesFlow
+    let makeShareInviteFlow: @MainActor () -> ShareInviteFlow
+
+    @State private var showShareInvite = false
+    @State private var shareInviteFlow: ShareInviteFlow?
 
     var body: some View {
         Group {
@@ -37,12 +41,57 @@ struct ChatMembersView: View {
         .navigationTitle(currentGroup?.name ?? "Members")
         .navigationBarTitleDisplayMode(.inline)
         .background(OnymTokens.bg)
+        .toolbar {
+            // Only the local owner of the group can mint a useful
+            // invite link — joiners' invites would point requests at
+            // their own intro inbox, where they can't actually admit
+            // anyone (admin approval is what materializes the group
+            // for the new joiner). Showing the entry-point only on
+            // owner-side groups removes a footgun.
+            if isLocalOwner {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        shareInviteFlow = makeShareInviteFlow()
+                        showShareInvite = true
+                    } label: {
+                        Image(systemName: "person.crop.circle.badge.plus")
+                    }
+                    .accessibilityLabel("Share invite link")
+                    .accessibilityIdentifier("members.share_invite_button")
+                }
+            }
+        }
+        .sheet(isPresented: $showShareInvite) {
+            if let flow = shareInviteFlow {
+                ShareInviteView(
+                    groupID: groupID,
+                    flow: flow,
+                    onDone: {
+                        showShareInvite = false
+                        shareInviteFlow = nil
+                    }
+                )
+            }
+        }
     }
 
     // MARK: - State
 
     private var currentGroup: ChatGroup? {
         chatsFlow.groups.first { $0.id == groupID }
+    }
+
+    /// True iff the active identity owns this group locally — i.e.
+    /// they're the device that created it. Used to gate the
+    /// "Share invite" entry-point: only the owner's intro inbox can
+    /// usefully receive join requests, since approval requires the
+    /// admin's keys.
+    private var isLocalOwner: Bool {
+        guard
+            let group = currentGroup,
+            let activeID = identitiesFlow.currentID
+        else { return false }
+        return group.ownerIdentityID == activeID
     }
 
     private var activeBlsHex: String? {

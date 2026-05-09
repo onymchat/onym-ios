@@ -124,7 +124,8 @@ struct ChatsView: View {
             ChatMembersView(
                 groupID: groupID,
                 chatsFlow: flow,
-                identitiesFlow: identitiesFlow
+                identitiesFlow: identitiesFlow,
+                makeShareInviteFlow: makeShareInviteFlow
             )
         }
     }
