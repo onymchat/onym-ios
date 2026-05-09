@@ -157,6 +157,7 @@ final class ShareInviteFlowTests: XCTestCase {
             groupSecret: Data(repeating: 0x33, count: 32),
             createdAt: Date(timeIntervalSince1970: 1_700_000_000),
             members: [],
+            memberProfiles: [:],
             epoch: 0,
             salt: Data(repeating: 0x44, count: 32),
             commitment: nil,

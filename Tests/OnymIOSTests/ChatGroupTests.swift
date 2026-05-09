@@ -29,6 +29,7 @@ final class ChatGroupTests: XCTestCase {
             groupSecret: Data(repeating: 0, count: 32),
             createdAt: Date(timeIntervalSince1970: 0),
             members: [],
+            memberProfiles: [:],
             epoch: 0,
             salt: Data(repeating: 0, count: 32),
             commitment: nil,

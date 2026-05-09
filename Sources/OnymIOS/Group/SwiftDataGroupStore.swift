@@ -91,6 +91,7 @@ actor SwiftDataGroupStore: GroupStore {
             existing.encryptedSalt = encoded.encryptedSalt
             existing.encryptedCommitment = encoded.encryptedCommitment
             existing.encryptedAdminPubkeyHex = encoded.encryptedAdminPubkeyHex
+            existing.encryptedMemberProfilesJSON = encoded.encryptedMemberProfilesJSON
             try? context.save()
             return false
         }
@@ -140,6 +141,15 @@ actor SwiftDataGroupStore: GroupStore {
 
     private static func encode(_ group: ChatGroup) throws -> PersistedGroup {
         let membersJSON = try JSONEncoder().encode(group.members)
+        // Empty profile maps stay nil on disk so existing rows can
+        // migrate in without forcing a JSON-encoded empty dict.
+        let encryptedProfilesJSON: Data?
+        if group.memberProfiles.isEmpty {
+            encryptedProfilesJSON = nil
+        } else {
+            let profilesJSON = try JSONEncoder().encode(group.memberProfiles)
+            encryptedProfilesJSON = try StorageEncryption.encrypt(profilesJSON)
+        }
         return PersistedGroup(
             id: group.id,
             ownerIdentityIDString: group.ownerIdentityID.rawValue.uuidString,
@@ -153,7 +163,8 @@ actor SwiftDataGroupStore: GroupStore {
             encryptedMembersJSON: try StorageEncryption.encrypt(membersJSON),
             encryptedSalt: try StorageEncryption.encrypt(group.salt),
             encryptedCommitment: try group.commitment.map(StorageEncryption.encrypt),
-            encryptedAdminPubkeyHex: try group.adminPubkeyHex.map(StorageEncryption.encrypt)
+            encryptedAdminPubkeyHex: try group.adminPubkeyHex.map(StorageEncryption.encrypt),
+            encryptedMemberProfilesJSON: encryptedProfilesJSON
         )
     }
 
@@ -174,6 +185,13 @@ actor SwiftDataGroupStore: GroupStore {
         let adminPubkeyHex = row.encryptedAdminPubkeyHex.flatMap {
             try? StorageEncryption.decryptString($0)
         }
+        // Missing column / decode failure → empty directory. Profiles
+        // are advisory; losing the map only costs us friendly rendering
+        // until the next member-announcement message arrives.
+        let memberProfiles: [String: MemberProfile] = row.encryptedMemberProfilesJSON
+            .flatMap { try? StorageEncryption.decrypt($0) }
+            .flatMap { try? JSONDecoder().decode([String: MemberProfile].self, from: $0) }
+            ?? [:]
         return ChatGroup(
             id: row.id,
             ownerIdentityID: owner,
@@ -181,6 +199,7 @@ actor SwiftDataGroupStore: GroupStore {
             groupSecret: groupSecret,
             createdAt: row.createdAt,
             members: members,
+            memberProfiles: memberProfiles,
             epoch: UInt64(bitPattern: row.epoch),
             salt: salt,
             commitment: commitment,
