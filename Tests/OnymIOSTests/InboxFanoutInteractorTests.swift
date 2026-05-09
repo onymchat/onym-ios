@@ -12,6 +12,7 @@ final class InboxFanoutInteractorTests: XCTestCase {
     private var identity: IdentityRepository!
     private var invitationsStore: FanoutInvitationStore!
     private var invitations: IncomingInvitationsRepository!
+    private var groups: GroupRepository!
 
     override func setUp() async throws {
         try await super.setUp()
@@ -22,6 +23,7 @@ final class InboxFanoutInteractorTests: XCTestCase {
         )
         invitationsStore = FanoutInvitationStore()
         invitations = IncomingInvitationsRepository(store: invitationsStore)
+        groups = GroupRepository(store: SwiftDataGroupStore.inMemory())
     }
 
     override func tearDown() async throws {
@@ -30,7 +32,16 @@ final class InboxFanoutInteractorTests: XCTestCase {
         identity = nil
         invitationsStore = nil
         invitations = nil
+        groups = nil
         try await super.tearDown()
+    }
+
+    private func makeDispatcher() -> IncomingMessageDispatcher {
+        IncomingMessageDispatcher(
+            envelopeDecrypter: identity,
+            groupRepository: groups,
+            invitationsRepository: invitations
+        )
     }
 
     // MARK: - Initial subscription set
@@ -46,7 +57,7 @@ final class InboxFanoutInteractorTests: XCTestCase {
         let fanout = InboxFanoutInteractor(
             inboxTransport: transport,
             identityRepository: identity,
-            repository: invitations,
+            dispatcher: makeDispatcher(),
             debounceMilliseconds: 1   // tight for tests
         )
         let runTask = Task { await fanout.run() }
@@ -70,7 +81,7 @@ final class InboxFanoutInteractorTests: XCTestCase {
         let fanout = InboxFanoutInteractor(
             inboxTransport: transport,
             identityRepository: identity,
-            repository: invitations,
+            dispatcher: makeDispatcher(),
             debounceMilliseconds: 1
         )
         let runTask = Task { await fanout.run() }
@@ -96,7 +107,7 @@ final class InboxFanoutInteractorTests: XCTestCase {
         let fanout = InboxFanoutInteractor(
             inboxTransport: transport,
             identityRepository: identity,
-            repository: invitations,
+            dispatcher: makeDispatcher(),
             debounceMilliseconds: 1
         )
         let runTask = Task { await fanout.run() }
@@ -128,7 +139,7 @@ final class InboxFanoutInteractorTests: XCTestCase {
         let fanout = InboxFanoutInteractor(
             inboxTransport: transport,
             identityRepository: identity,
-            repository: invitations,
+            dispatcher: makeDispatcher(),
             debounceMilliseconds: 1
         )
         let runTask = Task { await fanout.run() }
