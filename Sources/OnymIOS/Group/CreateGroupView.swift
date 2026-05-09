@@ -158,6 +158,24 @@ private struct OnymQuietButton: View {
     }
 }
 
+/// Top-left close affordance — 32pt tap target rendering an ✕ glyph
+/// in `text2`. Mirrors the Android `IconButton(Icons.Close)` used at
+/// the start of the Create Group top bar.
+private struct OnymTopBarCloseButton: View {
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "xmark")
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(OnymTokens.text2)
+                .frame(width: 32, height: 32)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 // MARK: - Step 1: name + accent + governance
 
 private struct CreateGroupStep1View: View {
@@ -166,7 +184,12 @@ private struct CreateGroupStep1View: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            OnymNavTitle(title: "New Group", subtitle: "Step 1 of 2")
+            ZStack(alignment: .leading) {
+                OnymNavTitle(title: "New Group", subtitle: "Step 1 of 2")
+                OnymTopBarCloseButton(action: flow.onClose)
+                    .padding(.leading, 8)
+                    .accessibilityIdentifier("create_group.step1.close")
+            }
             ScrollView {
                 VStack(spacing: 0) {
                     avatar
@@ -176,8 +199,6 @@ private struct CreateGroupStep1View: View {
                     accentRow
                     OnymSectionLabel(text: "How it\u{2019}s run")
                     governancePicker
-                    selectedExplanation
-                    encryptedFooterCard
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 16)
@@ -220,13 +241,20 @@ private struct CreateGroupStep1View: View {
                 .tint(accentColor)
                 .textInputAutocapitalization(.sentences)
                 .autocorrectionDisabled()
+                .submitLabel(.done)
                 .focused($nameFocused)
                 .onChange(of: nameFocused) { _, isFocused in
                     if isFocused { flow.tappedNameFieldFocused() }
                 }
                 .onChange(of: flow.name) { _, new in
+                    // Strip any embedded newlines so paste from a
+                    // multi-line source still resolves to a single
+                    // line, then enforce the 32-char cap.
+                    let stripped = new.replacingOccurrences(of: "\n", with: "")
+                    if stripped != new { flow.name = stripped; return }
                     if new.count > 32 { flow.name = String(new.prefix(32)) }
                 }
+                .onSubmit { nameFocused = false }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
@@ -379,70 +407,13 @@ private struct CreateGroupStep1View: View {
         }
     }
 
-    private var selectedExplanation: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Capsule()
-                .fill(accentColor.opacity(0.85))
-                .frame(width: 6)
-            VStack(alignment: .leading, spacing: 0) {
-                (
-                    Text("\(flow.governance.sub). ")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(OnymTokens.text)
-                    + Text(flow.governance.tooltip)
-                        .font(.system(size: 13))
-                        .foregroundColor(OnymTokens.text2)
-                )
-                .lineSpacing(1.5)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(accentColor.opacity(0.08))
-        .background(OnymTokens.surface2)
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(accentColor.opacity(0.22), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .padding(.top, 12)
-    }
-
-    private var encryptedFooterCard: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "lock.fill")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(OnymTokens.text2)
-            (
-                Text("End-to-end encrypted").foregroundColor(OnymTokens.text)
-                + Text(" \u{00B7} published on Stellar so anyone can verify it\u{2019}s real.")
-                    .foregroundColor(OnymTokens.text2)
-            )
-            .font(.system(size: 12.5))
-            .lineSpacing(1.4)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(OnymTokens.surface)
-        .overlay(
-            RoundedRectangle(cornerRadius: 14).stroke(OnymTokens.hairline, lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .padding(.top, 18)
-    }
-
     private var footer: some View {
-        VStack(spacing: 4) {
-            OnymPrimaryButton(
-                title: flow.canAdvanceToStep2 ? "Next \u{00B7} Add people" : "Name your group to continue",
-                enabled: flow.canAdvanceToStep2,
-                accent: accentColor,
-                action: flow.tappedNext
-            )
-            OnymQuietButton(title: "Cancel", action: flow.onClose)
-        }
+        OnymPrimaryButton(
+            title: flow.canAdvanceToStep2 ? "Next \u{00B7} Add people" : "Name your group to continue",
+            enabled: flow.canAdvanceToStep2,
+            accent: accentColor,
+            action: flow.tappedNext
+        )
         .padding(.horizontal, 16)
         .padding(.top, 12)
         .padding(.bottom, 22)
