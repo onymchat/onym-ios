@@ -550,11 +550,17 @@ struct CreateGroupInteractor: Sendable {
             network: activeNetwork.sepNetwork,
             transport: transport
         )
+        // `member_count` is informational and the contract accepts `0`
+        // as the documented "not tracked" sentinel (per `sep-anarchy`'s
+        // `create_group` doc — "Operators who don't want to publish a
+        // count pass `0`"). Pass the sentinel so chain observers see
+        // only the tier, not the exact roster size at create time.
+        // The accurate count lives in the local model.
         let payload = AnarchyCreateGroupPayload(
             groupID: groupID,
             commitment: proof.commitment,
             tier: tier.rawValue,
-            memberCount: members.count,
+            memberCount: 0,
             proof: proof.proof,
             publicInputs: proof.publicInputs
         )
