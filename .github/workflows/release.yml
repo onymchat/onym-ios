@@ -54,11 +54,14 @@ env:
 
 jobs:
   lint:
-    name: Lint (no off-repo secret reads)
+    name: Lint (secret-handling discipline)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: python3 scripts/lint-secrets.py
+      - name: No off-repo secret reads
+        run: python3 scripts/lint-secrets.py
+      - name: No secrets reach transport
+        run: python3 scripts/lint-no-secret-transport.py
 
   create-release:
     runs-on: ubuntu-latest
