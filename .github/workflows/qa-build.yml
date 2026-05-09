@@ -48,7 +48,8 @@ on:
 
 permissions:
   contents: read
-  issues: read   # gh issue view -> resolve issue title for the dashboard entry
+  issues: read           # gh issue view -> resolve issue title for the dashboard entry
+  pull-requests: write   # post the "QA build published" comment back on the originating PR
 
 # Serialize concurrent QA dispatches so two runs don't race against
 # the same builds.json on the droplet.
@@ -361,3 +362,63 @@ jobs:
             echo
             echo "Tester device must be UDID-registered to the team ad-hoc provisioning profile -- otherwise install fails."
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Comment on linked PR
+        # Drop a one-liner on the originating PR pointing testers at the
+        # QA dashboard. PR is discovered in two ways, in order:
+        #   1. `inputs.issue` -- the manager bot passes the PR number
+        #      here when /build is invoked from a PR conversation
+        #      (PRs and issues share number space, and the dashboard
+        #      already treats this as a generic linked-issue field).
+        #   2. Open PRs whose head is this commit -- fallback for runs
+        #      dispatched without `issue`.
+        # Best-effort: failing to comment never fails the build. Posts
+        # as github-actions[bot] (the default ${{ github.token }}
+        # identity), which is the agreed tradeoff for not having to
+        # plumb a separate PAT through the workflow.
+        if: success()
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          COMMIT:  ${{ steps.ver.outputs.commit }}
+          ISSUE:   ${{ inputs.issue }}
+          REPO:    ${{ github.repository }}
+          HOST:    ${{ secrets.DEPLOY_HOST }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          target_pr=""
+
+          if [ -n "$ISSUE" ]; then
+            is_pr=$(gh api "repos/$REPO/issues/$ISSUE" \
+                      --jq '.pull_request != null' 2>/dev/null || echo "false")
+            if [ "$is_pr" = "true" ]; then
+              target_pr="$ISSUE"
+            fi
+          fi
+
+          if [ -z "$target_pr" ]; then
+            target_pr=$(gh api "repos/$REPO/commits/$COMMIT/pulls" \
+                          -H "Accept: application/vnd.github+json" \
+                          --jq '[.[] | select(.state=="open")] | .[0].number // empty' \
+                          2>/dev/null || true)
+          fi
+
+          if [ -z "$target_pr" ]; then
+            echo "::notice::No open PR linked to commit $COMMIT -- skipping PR comment."
+            exit 0
+          fi
+
+          INSTALL_URL="itms-services://?action=download-manifest&url=https://${HOST}/qa/ios/${VERSION}/manifest.plist"
+          BODY_FILE=$(mktemp)
+          cat > "$BODY_FILE" <<MSG
+          QA build \`${VERSION}\` published.
+
+          - Install on a UDID-registered iPhone: \`${INSTALL_URL}\`
+          - Dashboard: https://${HOST}/qa/?platform=ios
+          - IPA: https://${HOST}/qa/ios/${VERSION}/OnymIOS.ipa
+          MSG
+
+          if ! gh pr comment "$target_pr" --repo "$REPO" --body-file "$BODY_FILE"; then
+            echo "::warning::Failed to post QA-build comment on PR #$target_pr (build itself succeeded)."
+          fi
+          rm -f "$BODY_FILE"
