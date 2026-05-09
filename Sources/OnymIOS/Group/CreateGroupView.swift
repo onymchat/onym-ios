@@ -189,23 +189,12 @@ private struct CreateGroupStep1View: View {
     private var accentColor: Color { flow.accent.color }
 
     private var avatar: some View {
-        ZStack(alignment: .bottomTrailing) {
-            OnymGroupAvatar(size: 92, accent: accentColor)
-            ZStack {
-                Circle()
-                    .fill(accentColor)
-                    .frame(width: 28, height: 28)
-                    .overlay(
-                        Circle().stroke(OnymTokens.bg, lineWidth: 2)
-                    )
-                Image(systemName: "camera.fill")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(OnymTokens.onAccent)
-            }
-            .offset(x: 4, y: 4)
-        }
-        .padding(.top, 10)
-        .padding(.bottom, 18)
+        // Custom group avatars aren't shipped yet (see OnymGroupAvatar /
+        // ChatGroup notes), so no camera badge — the badge implied a
+        // tappable upload affordance that didn't exist.
+        OnymGroupAvatar(size: 92, accent: accentColor)
+            .padding(.top, 10)
+            .padding(.bottom, 18)
     }
 
     private var nameField: some View {
