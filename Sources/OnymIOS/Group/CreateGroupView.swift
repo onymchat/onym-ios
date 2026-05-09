@@ -644,7 +644,7 @@ private struct CreateGroupStep2View: View {
 
             OnymPrimaryButton(
                 title: flow.createCTALabel,
-                enabled: flow.canCreate,
+                enabled: flow.canTapPrimaryCTA,
                 accent: accentColor,
                 action: flow.tappedCreate
             )

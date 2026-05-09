@@ -155,6 +155,15 @@ final class CreateGroupFlow {
         }
     }
 
+    /// Whether the Step2 primary CTA should be tappable. Differs from
+    /// `canCreate` in 1-on-1 mode with no invitees: the button stays
+    /// enabled so the user has a clear path forward — tapping it
+    /// routes to the Invite-by-key screen (see `tappedCreate`).
+    var canTapPrimaryCTA: Bool {
+        if governance == .oneOnOne && invitees.isEmpty { return true }
+        return canCreate
+    }
+
     /// Whether the Step2 "Invite by inbox key" entry point should be
     /// shown. 1-on-1 caps at one peer, so once the user has added the
     /// peer we hide the row to avoid implying they can add more.
@@ -220,6 +229,15 @@ final class CreateGroupFlow {
     // MARK: - Submit
 
     func tappedCreate() {
+        // 1-on-1 needs exactly one peer. If the user hasn't added
+        // anyone yet, repurpose the primary CTA as a shortcut to the
+        // Invite-by-key screen — the label already reads "Add the
+        // other person", so the button does what it says rather than
+        // sitting disabled with no explanation.
+        if governance == .oneOnOne && invitees.isEmpty {
+            tappedInviteByKey()
+            return
+        }
         Task { await submit() }
     }
 

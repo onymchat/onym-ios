@@ -202,6 +202,23 @@ final class CreateGroupFlowTests: XCTestCase {
         XCTAssertFalse(flow.canCreate, "1-on-1 with 2 invitees can't create")
     }
 
+    func test_oneOnOne_primaryCTA_isTappableWithNoInvitees_andRoutesToInviteByKey() async throws {
+        // Issue #104: when 1-on-1 has no invitees, the primary CTA
+        // must stay enabled so the user has a clear way forward.
+        // Tapping it should open the Invite-by-key screen instead of
+        // submitting an empty roster.
+        let flow = await makeFlow()
+        flow.governance = .oneOnOne
+        flow.route = .step2
+        XCTAssertTrue(flow.invitees.isEmpty)
+        XCTAssertFalse(flow.canCreate, "1-on-1 still can't actually submit with 0 invitees")
+        XCTAssertTrue(flow.canTapPrimaryCTA,
+                      "but the primary CTA should be tappable so the user isn't stuck")
+        flow.tappedCreate()
+        XCTAssertEqual(flow.route, .inviteByKey,
+                       "tap routes to the Invite-by-key screen, matching the CTA label")
+    }
+
     func test_oneOnOne_canAddMoreInvitees_capsAtOne() async throws {
         let flow = await makeFlow()
         flow.governance = .oneOnOne
