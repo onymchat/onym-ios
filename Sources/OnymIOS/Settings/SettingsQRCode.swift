@@ -45,12 +45,17 @@ struct SettingsQRCode: View {
     }
 }
 
-/// Build the deeplink-style invite URL for an identity's BLS public
-/// key. Mirrors the format the design uses — `https://onym.chat?payload=…`
-/// with the truncated key as the payload prefix. Real production
-/// invitee links live in the Group flow's `IntroCapability` — this is
-/// the per-identity equivalent surfaced from Settings.
+/// Build the deeplink-style invite URL for an identity's 32-byte X25519
+/// inbox public key. Mirrors the format the design uses —
+/// `https://onym.chat?payload=<64-hex>` with the **full** key as the
+/// payload. Truncating would leave the QR purely decorative:
+/// `CreateGroupFlow.canonicalizeInviteKey` extracts the `payload`
+/// query value verbatim and the InviteByKey paste validator requires
+/// 64 hex chars (32-byte X25519 key), so a shorter prefix would never
+/// pass validation on the scanning device. Real production invitee
+/// links live in the Group flow's `IntroCapability` — this is the
+/// per-identity equivalent surfaced from Settings.
 func settingsInviteURL(blsPublicKey: Data) -> String {
-    let hex = blsPublicKey.prefix(22).map { String(format: "%02x", $0) }.joined()
+    let hex = blsPublicKey.map { String(format: "%02x", $0) }.joined()
     return "https://onym.chat?payload=\(hex)"
 }
