@@ -95,6 +95,7 @@ final class ApproveRequestsFlowTests: XCTestCase {
         JoinRequestApprover.PendingRequest(
             id: id,
             joinerInboxPublicKey: Data(repeating: 0xAA, count: 32),
+            joinerBlsPublicKey: Data(repeating: 0xCC, count: 48),
             joinerDisplayLabel: alias,
             groupId: Data(repeating: 0xBB, count: 32),
             groupName: "Family"

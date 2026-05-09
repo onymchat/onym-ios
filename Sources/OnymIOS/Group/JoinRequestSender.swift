@@ -46,6 +46,7 @@ actor JoinRequestSender {
         do {
             payload = try JoinRequestPayload(
                 joinerInboxPublicKey: active.inboxPublicKey,
+                joinerBlsPublicKey: active.blsPublicKey,
                 joinerDisplayLabel: joinerDisplayLabel,
                 groupId: capability.groupId
             )
