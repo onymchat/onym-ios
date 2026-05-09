@@ -241,6 +241,40 @@ final class JoinRequestApproverTests: XCTestCase {
                        "epoch must NOT advance when anchor is rejected")
     }
 
+    func test_approve_notAdminOfThisGroup_whenStoredAdminPubkeyDoesntMatchActiveIdentity() async throws {
+        // Simulate the "Alice switched to a different identity, but
+        // the group was created by the original Alice" case. The
+        // approver's pre-flight should catch this before the SDK
+        // proof attempt, surfacing as `.notAdminOfThisGroup` (the
+        // user-meaningful error) rather than `.proofFailed` with the
+        // cryptic `Poseidon(admin_secret_key) ≠ supplied leaf hash`
+        // message.
+        let env = try await seedEnvironment()
+        // Mutate the persisted group so its first member's BLS
+        // pubkey is NOT what the active identity's secret hashes to.
+        var groups = await groups.currentGroups()
+        guard var group = groups.first(where: { $0.id == env.groupID.map { String(format: "%02x", $0) }.joined() }) else {
+            XCTFail("test fixture didn't insert the group"); return
+        }
+        let bogusAdminMember = GovernanceMember(
+            publicKeyCompressed: Data(repeating: 0xEE, count: 48),
+            leafHash: Data(repeating: 0xFF, count: 32)
+        )
+        group.members = [bogusAdminMember]
+        group.adminPubkeyHex = bogusAdminMember.publicKeyCompressed
+            .map { String(format: "%02x", $0) }.joined()
+        _ = await self.groups.insert(group)
+
+        await env.approver.pumpOnce()
+        let outcome = await env.approver.approve(requestId: env.requestID)
+        XCTAssertEqual(outcome, .notAdminOfThisGroup,
+                       "pre-flight must catch identity mismatch before invoking the prover")
+
+        let sends = await transport.sends
+        XCTAssertTrue(sends.isEmpty,
+                      "no envelopes shipped when admin pre-flight fails")
+    }
+
     // MARK: - decline
 
     func test_decline_dropsRequestAndRevokesKey() async throws {
