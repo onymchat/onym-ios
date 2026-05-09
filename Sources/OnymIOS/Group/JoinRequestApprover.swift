@@ -157,7 +157,14 @@ actor JoinRequestApprover: JoinRequestApproving {
             commitment: group.commitment,
             tierRaw: group.tier.rawValue,
             groupTypeRaw: group.groupType.rawValue,
-            adminPubkeyHex: group.adminPubkeyHex
+            adminPubkeyHex: group.adminPubkeyHex,
+            // Ship the directory-as-known so the joiner sees existing
+            // peers + admin by name from the moment they land. The
+            // joiner won't see themselves here — recordJoiner runs
+            // after the invite ships — and that's fine: the joiner-
+            // side materializer can backfill self from the active
+            // identity.
+            memberProfiles: group.memberProfiles.isEmpty ? nil : group.memberProfiles
         )
         let payloadBytes: Data
         do {

@@ -260,7 +260,8 @@ struct CreateGroupInteractor: Sendable {
                 commitment: proof.commitment,
                 tierRaw: tier.rawValue,
                 groupTypeRaw: SEPGroupType.tyranny.rawValue,
-                adminPubkeyHex: adminPubkeyHex
+                adminPubkeyHex: adminPubkeyHex,
+                memberProfiles: creatorProfiles
             )
             try await sendInvitations(invitePayload, to: invitees)
         }
@@ -445,7 +446,8 @@ struct CreateGroupInteractor: Sendable {
             tierRaw: SEPTier.small.rawValue,
             groupTypeRaw: SEPGroupType.oneOnOne.rawValue,
             adminPubkeyHex: nil,
-            peerBlsSecret: peerBlsSecret
+            peerBlsSecret: peerBlsSecret,
+            memberProfiles: creatorProfiles
         )
         try await sendInvitations(invitePayload, to: [peerInboxKey])
 
@@ -626,7 +628,8 @@ struct CreateGroupInteractor: Sendable {
                 commitment: proof.commitment,
                 tierRaw: tier.rawValue,
                 groupTypeRaw: SEPGroupType.anarchy.rawValue,
-                adminPubkeyHex: nil
+                adminPubkeyHex: nil,
+                memberProfiles: creatorProfiles
             )
             try await sendInvitations(invitePayload, to: invitees)
         }
