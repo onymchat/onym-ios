@@ -39,6 +39,7 @@ final class InboxFanoutInteractorTests: XCTestCase {
     private func makeDispatcher() -> IncomingMessageDispatcher {
         IncomingMessageDispatcher(
             envelopeDecrypter: identity,
+            identities: identity,
             groupRepository: groups,
             invitationsRepository: invitations
         )
