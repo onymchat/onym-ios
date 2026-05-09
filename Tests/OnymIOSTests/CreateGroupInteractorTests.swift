@@ -274,7 +274,8 @@ final class CreateGroupInteractorTests: XCTestCase {
         let payload = try XCTUnwrap(body["payload"] as? [String: Any])
         XCTAssertNil(payload["admin_pubkey_commitment"], "no admin field on Anarchy wire")
         XCTAssertEqual((payload["tier"] as? NSNumber)?.intValue, 0, "tier=small=0")
-        XCTAssertEqual((payload["member_count"] as? NSNumber)?.intValue, 1)
+        XCTAssertEqual((payload["member_count"] as? NSNumber)?.intValue, 0,
+                       "Anarchy create publishes the documented \"not tracked\" sentinel; the chain learns tier, never the exact roster size at create.")
         let publicInputs = try XCTUnwrap(payload["publicInputs"] as? [String])
         XCTAssertEqual(publicInputs.count, 2, "Anarchy ships [commitment, Fr(0)]")
 
