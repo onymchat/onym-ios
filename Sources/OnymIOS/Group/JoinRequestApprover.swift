@@ -45,6 +45,13 @@ actor JoinRequestApprover: JoinRequestApproving {
         /// back, but skips the local roster update because there's
         /// no stable cross-device key to record under.
         let joinerBlsPublicKey: Data?
+        /// 32-byte Poseidon leaf hash. Required for Tyranny approve:
+        /// the admin can't generate the on-chain `update_commitment`
+        /// proof without it (it's the joiner's leaf in the new tree).
+        /// `nil` when the joiner shipped a pre-PR-13 request — those
+        /// requests can't be approved on-chain and surface as
+        /// `.outdatedJoinerClient`.
+        let joinerLeafHash: Data?
         let joinerDisplayLabel: String
         let groupId: Data
         /// Looked up from the local `GroupRepository`. nil if the
@@ -60,6 +67,25 @@ actor JoinRequestApprover: JoinRequestApproving {
         case unknownRequest
         case noIdentityLoaded
         case transportFailed(String)
+        /// Joiner shipped a pre-PR-13 request without `joiner_leaf_hash`.
+        /// Admin can't extend the on-chain tree without it; user must
+        /// ask the joiner to upgrade their client.
+        case outdatedJoinerClient
+        /// `RelayerRepository.selectURL()` returned nil — the user has
+        /// no chain relayer configured. Different from the Nostr-relays
+        /// path; admin-anchoring needs the HTTPS contract relayer.
+        case noActiveRelayer
+        /// `ContractsRepository.binding(for:)` returned nil — the
+        /// user hasn't picked a deployed Tyranny contract for the
+        /// active network in Settings → Anchors.
+        case noContractBinding
+        /// `Tyranny.proveUpdate` failed — usually means a corrupted
+        /// roster, wrong tier depth, or SDK FFI error. Diagnostic
+        /// detail in the associated string.
+        case proofFailed(String)
+        /// Relayer accepted the POST but the contract rejected the
+        /// proof (admin pubkey mismatch, replay, etc.).
+        case anchorRejected(String)
     }
 
     private let identity: IdentityRepository
@@ -67,6 +93,11 @@ actor JoinRequestApprover: JoinRequestApproving {
     private let introRequestStore: any IntroRequestStore
     private let groupRepository: GroupRepository
     private let inboxTransport: any InboxTransport
+    private let relayers: RelayerRepository
+    private let contracts: ContractsRepository
+    private let networkPreference: any NetworkPreferenceProviding
+    private let proofGenerator: any GroupProofGenerator
+    private let makeContractTransport: @Sendable (URL) -> any SEPContractTransport
 
     private var pendingValue: [PendingRequest] = []
     private var pendingContinuations: [UUID: AsyncStream<[PendingRequest]>.Continuation] = [:]
@@ -78,13 +109,28 @@ actor JoinRequestApprover: JoinRequestApproving {
         introKeyStore: any IntroKeyStore,
         introRequestStore: any IntroRequestStore,
         groupRepository: GroupRepository,
-        inboxTransport: any InboxTransport
+        inboxTransport: any InboxTransport,
+        relayers: RelayerRepository,
+        contracts: ContractsRepository,
+        networkPreference: any NetworkPreferenceProviding = UserDefaultsNetworkPreference(),
+        proofGenerator: any GroupProofGenerator = OnymGroupProofGenerator(),
+        makeContractTransport: @escaping @Sendable (URL) -> any SEPContractTransport = { url in
+            URLSessionSEPContractTransport(
+                endpoint: url,
+                authToken: RelayerSecrets.authToken
+            )
+        }
     ) {
         self.identity = identity
         self.introKeyStore = introKeyStore
         self.introRequestStore = introRequestStore
         self.groupRepository = groupRepository
         self.inboxTransport = inboxTransport
+        self.relayers = relayers
+        self.contracts = contracts
+        self.networkPreference = networkPreference
+        self.proofGenerator = proofGenerator
+        self.makeContractTransport = makeContractTransport
     }
 
     /// Hot stream of decoded pending requests. Replays the current
@@ -131,40 +177,80 @@ actor JoinRequestApprover: JoinRequestApproving {
         await refresh(from: raw)
     }
 
-    /// Approve a pending request: build the `GroupInvitationPayload`
-    /// from the local group state, seal to the joiner's inbox key,
-    /// ship via Nostr, then revoke the intro slot + drop the
-    /// pending entry.
+    /// Approve a pending request. Tyranny-only on-chain anchor flow:
+    ///
+    ///   1. Verify joiner shipped both `bls_pub` + `leaf_hash`.
+    ///   2. Build new sorted member list = current ∪ joiner.
+    ///   3. Compute new Poseidon root via `Common.merkleRoot`.
+    ///   4. Mint a fresh `salt_new`.
+    ///   5. Generate `Tyranny.proveUpdate` with admin's BLS secret.
+    ///   6. POST `update_commitment` to the chain relayer.
+    ///   7. Only on `accepted == true`: update local `ChatGroup`
+    ///      (members, commitment, epoch, salt), seal + ship the
+    ///      `GroupInvitationPayload` (with new state) to the joiner,
+    ///      fanout `MemberAnnouncementPayload` (also with new state)
+    ///      to existing members, revoke intro key + consume request.
+    ///
+    /// Failures at the proof / anchor steps return without mutating
+    /// any local state or consuming the request, so the admin can
+    /// retry. Failures at seal+ship after a successful anchor leave
+    /// the on-chain state advanced but the joiner uninformed —
+    /// out-of-band recovery is required (rare in practice).
+    ///
+    /// Non-Tyranny groups fall back to the pre-PR-13 ship-only flow
+    /// (no chain anchor) because there's no admin-driven update path
+    /// in `OneOnOne` / `Anarchy`. PR-13b's receiver verification
+    /// gates announcements to Tyranny groups specifically; other
+    /// types stay best-effort.
     func approve(requestId: String) async -> ApproveOutcome {
         guard let req = pendingValue.first(where: { $0.id == requestId }) else {
             return .unknownRequest
         }
-        guard await identity.currentIdentity() != nil else {
+        guard let activeIdentity = await identity.currentIdentity() else {
             return .noIdentityLoaded
         }
         let groups = await groupRepository.currentGroups()
         guard let group = groups.first(where: { $0.groupIDData == req.groupId }) else {
             return .unknownGroup
         }
+
+        // PR-13a admin-anchor path is Tyranny-only. Other types fall
+        // through to the pre-PR-13 ship-only flow at the bottom.
+        var anchored = group
+        if group.groupType == .tyranny {
+            switch await anchorTyrannyJoin(
+                req: req,
+                group: group,
+                activeIdentity: activeIdentity
+            ) {
+            case .failed(let outcome):
+                return outcome
+            case .ok(let updated):
+                anchored = updated
+                // Persist the advanced state immediately so a
+                // subsequent crash before seal+ship doesn't lose the
+                // chain transition.
+                await groupRepository.insert(anchored)
+            }
+        }
+
         let invite = GroupInvitationPayload(
             version: 1,
-            groupID: group.groupIDData,
-            groupSecret: group.groupSecret,
-            name: group.name,
-            members: group.members,
-            epoch: group.epoch,
-            salt: group.salt,
-            commitment: group.commitment,
-            tierRaw: group.tier.rawValue,
-            groupTypeRaw: group.groupType.rawValue,
-            adminPubkeyHex: group.adminPubkeyHex,
+            groupID: anchored.groupIDData,
+            groupSecret: anchored.groupSecret,
+            name: anchored.name,
+            members: anchored.members,
+            epoch: anchored.epoch,
+            salt: anchored.salt,
+            commitment: anchored.commitment,
+            tierRaw: anchored.tier.rawValue,
+            groupTypeRaw: anchored.groupType.rawValue,
+            adminPubkeyHex: anchored.adminPubkeyHex,
             // Ship the directory-as-known so the joiner sees existing
             // peers + admin by name from the moment they land. The
-            // joiner won't see themselves here — recordJoiner runs
-            // after the invite ships — and that's fine: the joiner-
-            // side materializer can backfill self from the active
-            // identity.
-            memberProfiles: group.memberProfiles.isEmpty ? nil : group.memberProfiles
+            // joiner's own profile gets backfilled by the receiver's
+            // materializer from their active identity.
+            memberProfiles: anchored.memberProfiles.isEmpty ? nil : anchored.memberProfiles
         )
         let payloadBytes: Data
         do {
@@ -194,34 +280,158 @@ actor JoinRequestApprover: JoinRequestApproving {
             return .transportFailed("no relay accepted the invitation")
         }
         // Record the joiner in the local group's view-facing roster
-        // so the admin sees their alias in the UI, then announce the
-        // join to every other member's inbox. Both side-effects only
-        // run when the joiner shipped a BLS pubkey (pre-PR-4 builds
-        // skip these — no stable cross-device key, no fanout
-        // possible). The sealed invite already shipped above, so any
-        // failure here is non-fatal; the joiner is still admitted.
+        // (alias / inbox-pub) so the admin sees their alias in the
+        // UI. The cryptographic roster (`anchored.members`) was
+        // already updated by the anchor step. Both side-effects only
+        // run when the joiner shipped a BLS pubkey.
         if let blsPub = req.joinerBlsPublicKey {
             await recordJoiner(
-                in: group,
+                in: anchored,
                 blsPub: blsPub,
                 inboxPub: req.joinerInboxPublicKey,
                 alias: req.joinerDisplayLabel
             )
             await broadcastJoin(
-                in: group,
+                in: anchored,
                 joinerBlsPub: blsPub,
                 joinerInboxPub: req.joinerInboxPublicKey,
                 joinerAlias: req.joinerDisplayLabel
             )
         }
-        // Best-effort cleanup. Both calls run regardless of failures
-        // because the request is conceptually consumed at this point;
-        // a leaked intro key is benign.
+        // Best-effort cleanup.
         if let introPub = await findIntroPub(forRequestID: requestId) {
             await introKeyStore.revoke(introPublicKey: introPub)
         }
         await introRequestStore.consume(id: requestId)
         return .sent
+    }
+
+    /// Outcome shape for the anchor helper. `Result` is unergonomic
+    /// here because `ApproveOutcome` doesn't conform to `Error`.
+    private enum AnchorOutcome {
+        case ok(ChatGroup)
+        case failed(ApproveOutcome)
+    }
+
+    /// On-chain anchor leg of `approve` — Tyranny only. Returns the
+    /// updated `ChatGroup` (post-anchor) on success, or an
+    /// `ApproveOutcome` describing the failure on any short-circuit.
+    /// Pure: never mutates local state. Caller persists.
+    private func anchorTyrannyJoin(
+        req: PendingRequest,
+        group: ChatGroup,
+        activeIdentity: Identity
+    ) async -> AnchorOutcome {
+        guard let joinerBlsPub = req.joinerBlsPublicKey,
+              let joinerLeafHash = req.joinerLeafHash
+        else {
+            return .failed(.outdatedJoinerClient)
+        }
+        guard let adminPubkeyHex = group.adminPubkeyHex else {
+            // Tyranny group without a stored admin pubkey shouldn't
+            // exist (CreateGroupInteractor stamps it at create time).
+            // Reject defensively.
+            return .failed(.transportFailed("group missing adminPubkeyHex"))
+        }
+        guard let relayerURL = await relayers.selectURL() else {
+            return .failed(.noActiveRelayer)
+        }
+        let activeNetwork = networkPreference.current()
+        let key = AnchorSelectionKey(network: activeNetwork.contractNetwork, type: .tyranny)
+        guard let binding = await contracts.binding(for: key) else {
+            return .failed(.noContractBinding)
+        }
+
+        // Resolve admin's index in the OLD member roster.
+        let adminBytes = ChatGroup.bytes(fromHex: adminPubkeyHex)
+        guard let adminIndexOld = group.members.firstIndex(
+            where: { $0.publicKeyCompressed == adminBytes }
+        ) else {
+            return .failed(.transportFailed("admin not in members roster"))
+        }
+
+        // Build new sorted member list including the joiner. Compute
+        // the new Poseidon root over the new tree.
+        let joinerMember = GovernanceMember(
+            publicKeyCompressed: joinerBlsPub,
+            leafHash: joinerLeafHash
+        )
+        let newMembers = (group.members + [joinerMember]).sorted { lhs, rhs in
+            lhs.publicKeyCompressed.lexicographicallyPrecedes(rhs.publicKeyCompressed)
+        }
+        let memberRootNew: Data
+        do {
+            memberRootNew = try GroupCommitmentBuilder.computeMerkleRoot(
+                members: newMembers,
+                tier: group.tier
+            )
+        } catch {
+            return .failed(.proofFailed("merkle_root: \(error)"))
+        }
+        let saltNew = GroupCommitmentBuilder.generateSalt()
+
+        // Generate the update proof.
+        let blsSecret: Data
+        do {
+            // onym:allow-secret-read
+            blsSecret = try await identity.blsSecretKey()
+        } catch {
+            return .failed(.transportFailed("bls_secret: \(error)"))
+        }
+        let proofInput = GroupProofUpdateInput(
+            groupType: .tyranny,
+            tier: group.tier,
+            oldMembers: group.members,
+            adminBlsSecretKey: blsSecret,
+            adminIndexOld: adminIndexOld,
+            epochOld: group.epoch,
+            memberRootNew: memberRootNew,
+            groupID: group.groupIDData,
+            saltOld: group.salt,
+            saltNew: saltNew
+        )
+        let proof: GroupUpdateProof
+        do {
+            proof = try proofGenerator.proveUpdate(proofInput)
+        } catch let err as GroupProofGeneratorError {
+            return .failed(.proofFailed(err.localizedDescription))
+        } catch {
+            return .failed(.proofFailed(String(describing: error)))
+        }
+
+        // Submit to chain.
+        let transport = makeContractTransport(relayerURL)
+        let client = SEPContractClient(
+            contractID: binding.contractID,
+            contractType: .tyranny,
+            network: activeNetwork.sepNetwork,
+            transport: transport
+        )
+        let payload = TyrannyUpdateCommitmentPayload(
+            groupID: group.groupIDData,
+            proof: proof.proof,
+            publicInputs: proof.publicInputs
+        )
+        let response: SEPSubmissionResponse
+        do {
+            response = try await client.updateCommitmentTyranny(payload)
+        } catch {
+            return .failed(.transportFailed("anchor: \(error)"))
+        }
+        guard response.accepted else {
+            return .failed(.anchorRejected(response.message ?? "(no message)"))
+        }
+
+        // Build the updated local ChatGroup. `commitment` becomes
+        // the proof's c_new (PI[2]); `epoch` advances by 1; `salt`
+        // becomes saltNew; `members` becomes newMembers.
+        let newEpoch = group.epoch + 1
+        var updated = group
+        updated.members = newMembers
+        updated.commitment = proof.commitmentNew
+        updated.epoch = newEpoch
+        updated.salt = saltNew
+        return .ok(updated)
     }
 
     /// Insert/update the joiner's `MemberProfile` on the local
@@ -284,7 +494,15 @@ actor JoinRequestApprover: JoinRequestApproving {
                 version: 1,
                 groupId: group.groupIDData,
                 newMember: announced,
-                adminAlias: adminAlias
+                adminAlias: adminAlias,
+                // PR-13a: ship the post-anchor commitment + epoch
+                // so PR-13b's receivers can verify against
+                // `SEPContractClient.getCommitment`. nil only when
+                // the calling group hasn't been anchored (legacy
+                // / non-Tyranny path) — receivers fall back to
+                // best-effort acceptance in that case.
+                commitment: group.commitment,
+                epoch: group.epoch
             )
         } catch {
             return
@@ -404,6 +622,7 @@ actor JoinRequestApprover: JoinRequestApproving {
             id: raw.id,
             joinerInboxPublicKey: payload.joinerInboxPublicKey,
             joinerBlsPublicKey: payload.joinerBlsPublicKey,
+            joinerLeafHash: payload.joinerLeafHash,
             joinerDisplayLabel: payload.joinerDisplayLabel,
             groupId: payload.groupId,
             groupName: groupName

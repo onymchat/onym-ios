@@ -12,6 +12,7 @@ final class JoinRequestPayloadTests: XCTestCase {
         let original = try JoinRequestPayload(
             joinerInboxPublicKey: Data(repeating: 0xAA, count: 32),
             joinerBlsPublicKey: Data(repeating: 0xBB, count: 48),
+            joinerLeafHash: Data(repeating: 0xCC, count: 32),
             joinerDisplayLabel: "Bob",
             groupId: Data(repeating: 0x42, count: 32)
         )
@@ -27,6 +28,7 @@ final class JoinRequestPayloadTests: XCTestCase {
         let payload = try JoinRequestPayload(
             joinerInboxPublicKey: Data(repeating: 0, count: 32),
             joinerBlsPublicKey: Data(repeating: 0, count: 48),
+            joinerLeafHash: Data(repeating: 0, count: 32),
             joinerDisplayLabel: "Bob",
             groupId: Data(repeating: 0, count: 32)
         )
@@ -43,6 +45,7 @@ final class JoinRequestPayloadTests: XCTestCase {
         XCTAssertThrowsError(try JoinRequestPayload(
             joinerInboxPublicKey: Data(repeating: 0, count: 31),
             joinerBlsPublicKey: nil,
+            joinerLeafHash: nil,
             joinerDisplayLabel: "x",
             groupId: Data(repeating: 0, count: 32)
         )) { error in
@@ -51,6 +54,7 @@ final class JoinRequestPayloadTests: XCTestCase {
         XCTAssertThrowsError(try JoinRequestPayload(
             joinerInboxPublicKey: Data(repeating: 0, count: 32),
             joinerBlsPublicKey: nil,
+            joinerLeafHash: nil,
             joinerDisplayLabel: "x",
             groupId: Data(repeating: 0, count: 33)
         )) { error in
@@ -59,6 +63,17 @@ final class JoinRequestPayloadTests: XCTestCase {
         XCTAssertThrowsError(try JoinRequestPayload(
             joinerInboxPublicKey: Data(repeating: 0, count: 32),
             joinerBlsPublicKey: Data(repeating: 0, count: 47),
+            joinerLeafHash: nil,
+            joinerDisplayLabel: "x",
+            groupId: Data(repeating: 0, count: 32)
+        )) { error in
+            XCTAssertTrue(error is JoinRequestPayloadError)
+        }
+        // Wrong-sized leaf hash also rejected.
+        XCTAssertThrowsError(try JoinRequestPayload(
+            joinerInboxPublicKey: Data(repeating: 0, count: 32),
+            joinerBlsPublicKey: Data(repeating: 0, count: 48),
+            joinerLeafHash: Data(repeating: 0, count: 31),
             joinerDisplayLabel: "x",
             groupId: Data(repeating: 0, count: 32)
         )) { error in

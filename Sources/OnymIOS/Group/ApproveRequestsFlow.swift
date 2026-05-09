@@ -80,6 +80,16 @@ final class ApproveRequestsFlow {
             return "Sign in first."
         case .transportFailed(let reason):
             return "Couldn\u{2019}t send: \(reason)"
+        case .outdatedJoinerClient:
+            return "Joiner is on an outdated app. Ask them to update."
+        case .noActiveRelayer:
+            return "No chain relayer configured. Set one in Settings \u{2192} Network \u{2192} Relayer."
+        case .noContractBinding:
+            return "No Tyranny contract selected for this network. Pick one in Settings \u{2192} Network \u{2192} Anchors."
+        case .proofFailed(let reason):
+            return "Couldn\u{2019}t generate proof: \(reason)"
+        case .anchorRejected(let reason):
+            return "Chain rejected the proof: \(reason)"
         }
     }
 }

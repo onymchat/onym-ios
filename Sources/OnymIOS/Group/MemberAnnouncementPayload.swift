@@ -52,6 +52,23 @@ struct MemberAnnouncementPayload: Codable, Equatable, Sendable {
     /// (which the receiver does have, but rendering becomes
     /// strictly local-state-free this way).
     let adminAlias: String
+    /// 32-byte Poseidon commitment of the new tree (post-admit).
+    /// PR-13a (admin side): admin runs `update_commitment` BEFORE
+    /// fanning out the announcement and stamps the new commitment
+    /// here. PR-13b (receiver side): the dispatcher fetches the
+    /// on-chain commitment via `SEPContractClient.getCommitment(...)`
+    /// and rejects announcements where these don't match.
+    ///
+    /// Optional on the wire — pre-PR-13 senders shipped
+    /// announcements without this field. Receivers running PR-13b+
+    /// MUST reject Tyranny announcements missing this field
+    /// (best-effort acceptance is no longer safe once the trust
+    /// model upgrades to on-chain anchoring).
+    let commitment: Data?
+    /// New epoch number after the on-chain `update_commitment`
+    /// (i.e. `epoch_old + 1`). Optional for the same reason as
+    /// `commitment`.
+    let epoch: UInt64?
 
     /// One member's directory entry. App-level only — the
     /// cryptographic Poseidon leaf hash is intentionally absent.
@@ -118,18 +135,34 @@ struct MemberAnnouncementPayload: Codable, Equatable, Sendable {
         case groupId = "group_id"
         case newMember = "new_member"
         case adminAlias = "admin_alias"
+        case commitment
+        case epoch
     }
 
-    init(version: Int, groupId: Data, newMember: AnnouncedMember, adminAlias: String) throws {
+    init(
+        version: Int,
+        groupId: Data,
+        newMember: AnnouncedMember,
+        adminAlias: String,
+        commitment: Data? = nil,
+        epoch: UInt64? = nil
+    ) throws {
         guard groupId.count == 32 else {
             throw MemberAnnouncementPayloadError.shape(
                 "groupId: expected 32 bytes, got \(groupId.count)"
+            )
+        }
+        if let c = commitment, c.count != 32 {
+            throw MemberAnnouncementPayloadError.shape(
+                "commitment: expected 32 bytes, got \(c.count)"
             )
         }
         self.version = version
         self.groupId = groupId
         self.newMember = newMember
         self.adminAlias = adminAlias
+        self.commitment = commitment
+        self.epoch = epoch
     }
 
     init(from decoder: Decoder) throws {
@@ -141,10 +174,18 @@ struct MemberAnnouncementPayload: Codable, Equatable, Sendable {
                 "groupId: expected 32 bytes, got \(gid.count)"
             )
         }
+        let commitment = try c.decodeIfPresent(Data.self, forKey: .commitment)
+        if let comm = commitment, comm.count != 32 {
+            throw MemberAnnouncementPayloadError.shape(
+                "commitment: expected 32 bytes, got \(comm.count)"
+            )
+        }
         self.version = v
         self.groupId = gid
         self.newMember = try c.decode(AnnouncedMember.self, forKey: .newMember)
         self.adminAlias = try c.decode(String.self, forKey: .adminAlias)
+        self.commitment = commitment
+        self.epoch = try c.decodeIfPresent(UInt64.self, forKey: .epoch)
     }
 }
 

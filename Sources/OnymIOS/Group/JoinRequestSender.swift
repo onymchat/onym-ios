@@ -42,11 +42,28 @@ actor JoinRequestSender {
         guard let active = await identity.currentIdentity() else {
             return .noIdentityLoaded
         }
+        // Compute leaf_hash = Poseidon(joiner_bls_secret) so the
+        // admin can extend the Merkle tree at approve time without
+        // ever seeing the joiner's BLS secret.
+        let blsSecret: Data
+        do {
+            // onym:allow-secret-read
+            blsSecret = try await identity.blsSecretKey()
+        } catch {
+            return .noIdentityLoaded
+        }
+        let leafHash: Data
+        do {
+            leafHash = try GroupCommitmentBuilder.computeLeafHash(secretKey: blsSecret)
+        } catch {
+            return .transportFailed("leaf_hash: \(error)")
+        }
         let payload: JoinRequestPayload
         do {
             payload = try JoinRequestPayload(
                 joinerInboxPublicKey: active.inboxPublicKey,
                 joinerBlsPublicKey: active.blsPublicKey,
+                joinerLeafHash: leafHash,
                 joinerDisplayLabel: joinerDisplayLabel,
                 groupId: capability.groupId
             )
