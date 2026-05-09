@@ -176,14 +176,23 @@ struct OnymIOSApp: App {
                     groupRepository: groupRepository
                 )
             },
-            makeJoinFlow: { @MainActor capability in
+            makeJoinFlow: { @MainActor [identitiesFlow] capability in
                 let sender = JoinRequestSender(
                     identity: repository,
                     inboxTransport: inboxTransport
                 )
+                // Pre-fill with the active identity's alias so the
+                // joiner sees a sensible default. Empty string when
+                // `identitiesFlow` hasn't populated yet (cold-start
+                // race) — JoinView's TextField placeholder + the
+                // disabled Send button prompt the user to type
+                // something in.
+                let activeName = identitiesFlow.identities
+                    .first { $0.id == identitiesFlow.currentID }?
+                    .name ?? ""
                 return JoinFlow(
                     capability: capability,
-                    suggestedDisplayLabel: "alice",  // PR-7+: derive from active identity
+                    suggestedDisplayLabel: activeName,
                     submitRequest: { cap, label in
                         await sender.send(
                             capability: cap,
@@ -213,6 +222,12 @@ struct OnymIOSApp: App {
                     // operation that needs identity will surface a clear
                     // error to the user.
                     _ = try? await identityRepository.bootstrap()
+                    // Eagerly populate the shared identities flow so a
+                    // cold-start deeplink (which constructs JoinFlow
+                    // before any tab's `.task` has fired) can read the
+                    // active identity's alias for `suggestedDisplayLabel`.
+                    // Idempotent — Chats / Settings tabs call this too.
+                    await dependencies.identitiesFlow.start()
                     // Start the approver collector eagerly so the
                     // Chats toolbar badge reflects pending requests
                     // from the moment the app is on screen, even
