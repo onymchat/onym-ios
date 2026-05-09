@@ -212,20 +212,28 @@ struct IncomingMessageDispatcher: Sendable {
     }
 
     /// PR 13b: validate a Tyranny invitation's commitment against
-    /// both the wire-shipped members list (recomputed Poseidon root)
+    /// both the wire-shipped state (recomputed Poseidon commitment)
     /// and the on-chain state (`SEPContractClient.getCommitment`).
+    ///
+    /// The commitment is `Poseidon(Poseidon(merkle_root, epoch), salt)`
+    /// — NOT just the merkle root. The original PR 13b verifier got
+    /// this wrong and rejected every legitimate invitation because
+    /// `merkle_root != commitment`. Bug fix landed here.
     ///
     /// Three failure modes — all return `false`:
     ///   - Payload omits `commitment` (pre-PR-13a sender, can't
     ///     verify, refuse).
-    ///   - `Common.merkleRoot(payload.members)` ≠ `payload.commitment`
-    ///     (internally inconsistent — can't be a valid post-update
-    ///     state for the claimed roster).
+    ///   - Recomputed `Poseidon(Poseidon(merkle_root(members),
+    ///     epoch), salt)` ≠ `payload.commitment` (internally
+    ///     inconsistent — sender can't have run a valid
+    ///     `update_commitment` for the claimed `(members, epoch,
+    ///     salt)` triple, OR they fabricated `members` while
+    ///     copying a real on-chain commitment).
     ///   - On-chain `commitment` ≠ `payload.commitment` OR on-chain
-    ///     `epoch` ≠ `payload.epoch` (forged by someone who isn't
-    ///     the admin — chain rejected their proof, but they may
-    ///     still try to ship a fake invitation; receiver catches it
-    ///     here).
+    ///     `epoch` ≠ `payload.epoch` (forged commitment that
+    ///     doesn't match what's anchored — chain rejected the
+    ///     sender's proof, they may still try to ship a fake
+    ///     invitation; receiver catches it here).
     ///
     /// Throws on chain-read transport failures are also treated as
     /// "couldn't verify, reject" — the safe default. Operators
@@ -238,17 +246,28 @@ struct IncomingMessageDispatcher: Sendable {
         guard let claimedCommitment = invitation.commitment else {
             return false
         }
-        // Internal consistency: recompute root from wire members.
-        let recomputedRoot: Data
+        // Internal consistency: recompute the FULL Poseidon
+        // commitment from (members, epoch, salt) and compare. The
+        // commitment is the Poseidon hash of (root, epoch, salt) —
+        // not just the root. Both sides of this check land on the
+        // same byte string only when the sender ran a valid
+        // `update_commitment` (or `create_group`) for these exact
+        // inputs.
+        let recomputed: Data
         do {
-            recomputedRoot = try GroupCommitmentBuilder.computeMerkleRoot(
+            let root = try GroupCommitmentBuilder.computeMerkleRoot(
                 members: invitation.members,
                 tier: tier
+            )
+            recomputed = try GroupCommitmentBuilder.computePoseidonCommitment(
+                poseidonRoot: root,
+                epoch: invitation.epoch,
+                salt: invitation.salt
             )
         } catch {
             return false
         }
-        guard recomputedRoot == claimedCommitment else { return false }
+        guard recomputed == claimedCommitment else { return false }
         // External anchor: matches what's on chain.
         let onchain: SEPCommitmentEntry
         do {

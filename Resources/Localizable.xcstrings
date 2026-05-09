@@ -533,6 +533,23 @@
         }
       }
     },
+    "Anchoring on chain…" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anchoring on chain…"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Якорим в блокчейне…"
+          }
+        }
+      }
+    },
     "Anchors" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -580,6 +597,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Принять"
+          }
+        }
+      }
+    },
+    "Approved on chain" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Approved on chain"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Закреплено в блокчейне"
           }
         }
       }
@@ -1377,22 +1410,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Генерируется доказательство и обновляется обязательство в блокчейне. Обычно занимает несколько секунд."
-          }
-        }
-      }
-    },
-    "Anchoring on chain…" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Anchoring on chain…"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Якорим в блокчейне…"
           }
         }
       }

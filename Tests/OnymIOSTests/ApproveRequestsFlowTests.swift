@@ -83,6 +83,9 @@ final class ApproveRequestsFlowTests: XCTestCase {
         let flow = ApproveRequestsFlow(approver: stub)
         await stub.setHoldApprove(true)
         await stub.setNextOutcome(.sent)
+        await stub.emit([Self.makeRequest(id: "req-flight", alias: "Bob")])
+        await flow.start()
+        try await waitFor { flow.pending.map(\.id).contains("req-flight") }
 
         flow.approve("req-flight")
         // Synchronously after the intent fires, the ID should be
@@ -93,6 +96,39 @@ final class ApproveRequestsFlowTests: XCTestCase {
         await stub.releaseApprove()
         try await waitFor { !flow.isInFlight("req-flight") }
         XCTAssertNil(flow.lastError, ".sent outcome must clear lastError")
+        // PR 15: success banner shows the joiner's alias.
+        XCTAssertEqual(flow.lastSuccessMessage, "Bob is now in the group.")
+    }
+
+    func test_approve_successBanner_autoDismissesAfter3s() async throws {
+        let stub = StubApprover()
+        let flow = ApproveRequestsFlow(approver: stub)
+        await stub.setNextOutcome(.sent)
+        await stub.emit([Self.makeRequest(id: "req-toast", alias: "Bob")])
+        await flow.start()
+        try await waitFor { flow.pending.map(\.id).contains("req-toast") }
+
+        flow.approve("req-toast")
+        try await waitFor { flow.lastSuccessMessage != nil }
+        // Wait a touch over 3s for the auto-dismiss task.
+        try await Task.sleep(nanoseconds: 3_200_000_000)
+        XCTAssertNil(flow.lastSuccessMessage,
+                     "success banner must auto-dismiss after ~3s")
+    }
+
+    func test_approve_failureClearsAnyPriorSuccessBanner() async throws {
+        let stub = StubApprover()
+        let flow = ApproveRequestsFlow(approver: stub)
+        flow.lastSuccessMessage = "stale success"
+        await stub.emit([Self.makeRequest(id: "req-fail-bus", alias: "Bob")])
+        await flow.start()
+        try await waitFor { flow.pending.map(\.id).contains("req-fail-bus") }
+        await stub.setNextOutcome(.anchorRejected("test"))
+
+        flow.approve("req-fail-bus")
+        try await waitFor { flow.lastError != nil }
+        XCTAssertNil(flow.lastSuccessMessage,
+                     "failure must clear any leftover success banner")
     }
 
     func test_approve_secondTapWhileInFlight_isNoop() async throws {

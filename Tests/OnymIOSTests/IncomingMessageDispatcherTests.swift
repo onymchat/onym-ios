@@ -322,22 +322,26 @@ final class IncomingMessageDispatcherTests: XCTestCase {
         // for Tyranny groups, so subsequent announcements can be
         // verified against it.
         //
-        // PR 13b: Tyranny invitations now also require the wire
-        // `commitment` to match `Common.merkleRoot(members)` AND
-        // the on-chain commitment. Compute the real root from the
-        // (empty) test member list, seed the chain stub to match.
+        // PR 13b (post-fix): Tyranny invitations require the wire
+        // `commitment` to match Poseidon(Poseidon(merkle_root, epoch),
+        // salt) AND the on-chain commitment. Compute the real
+        // commitment from the (empty) test member list + the salt
+        // that makeInvitationPayload uses, seed the chain stub.
         let groupID = Data(repeating: 0x42, count: 32)
-        let realRoot = try GroupCommitmentBuilder.computeMerkleRoot(
+        let salt = Data(repeating: 0x66, count: 32)  // matches makeInvitationPayload
+        let realCommitment = try Self.makeRealTyrannyCommitment(
             members: [],
+            epoch: 0,
+            salt: salt,
             tier: .small
         )
-        chainState.setNext(commitment: realRoot, epoch: 0)
+        chainState.setNext(commitment: realCommitment, epoch: 0)
         let payload = makeInvitationPayload(
             groupID: groupID,
             name: "Family",
             memberProfiles: nil,
             groupType: .tyranny,
-            commitment: realRoot
+            commitment: realCommitment
         )
         let plaintext = try JSONEncoder().encode(payload)
         let admin = Data(repeating: 0xED, count: 32)
@@ -398,24 +402,28 @@ final class IncomingMessageDispatcherTests: XCTestCase {
     }
 
     func test_invitation_tyranny_rejectsWhenOnchainCommitmentMismatch() async throws {
-        // The dispatcher recomputes the Poseidon root from the wire
-        // members and verifies the resulting root matches BOTH the
+        // The dispatcher recomputes Poseidon(Poseidon(root, epoch),
+        // salt) from the wire and verifies it matches BOTH the
         // payload's commitment AND the on-chain state. If on-chain
-        // disagrees (because the sender forged a fake commitment),
-        // reject the invitation.
+        // disagrees (the sender forged a fake commitment that
+        // happens to be self-consistent), reject the invitation.
         let groupID = Data(repeating: 0x42, count: 32)
-        let internallyConsistentRoot = try GroupCommitmentBuilder.computeMerkleRoot(
+        let salt = Data(repeating: 0x66, count: 32)
+        let internallyConsistent = try Self.makeRealTyrannyCommitment(
             members: [],
+            epoch: 0,
+            salt: salt,
             tier: .small
         )
-        // Payload claims this root; chain says something different.
+        // Payload's commitment is internally consistent; chain
+        // says something different.
         chainState.setNext(commitment: Data(repeating: 0xFF, count: 32), epoch: 0)
         let payload = makeInvitationPayload(
             groupID: groupID,
             name: "Family",
             memberProfiles: nil,
             groupType: .tyranny,
-            commitment: internallyConsistentRoot
+            commitment: internallyConsistent
         )
         let plaintext = try JSONEncoder().encode(payload)
         let decrypter = FakeInvitationEnvelopeDecrypter(mode: .fixed(plaintext))
@@ -767,6 +775,27 @@ final class IncomingMessageDispatcherTests: XCTestCase {
 
     private static func encode(announcement: MemberAnnouncementPayload) throws -> Data {
         try JSONEncoder().encode(announcement)
+    }
+
+    /// Compute the real Tyranny commitment for a given (members,
+    /// epoch, salt) — i.e. `Poseidon(Poseidon(merkle_root, epoch),
+    /// salt)`. Tests that exercise PR 13b's verifier need this so
+    /// the dispatcher's recompute matches the wire-shipped value.
+    static func makeRealTyrannyCommitment(
+        members: [GovernanceMember],
+        epoch: UInt64,
+        salt: Data,
+        tier: SEPTier
+    ) throws -> Data {
+        let root = try GroupCommitmentBuilder.computeMerkleRoot(
+            members: members,
+            tier: tier
+        )
+        return try GroupCommitmentBuilder.computePoseidonCommitment(
+            poseidonRoot: root,
+            epoch: epoch,
+            salt: salt
+        )
     }
 
     private func makeInvitationPayload(

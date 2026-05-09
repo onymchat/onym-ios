@@ -17,6 +17,9 @@ struct ApproveRequestsView: View {
     var body: some View {
         VStack(spacing: 0) {
             topBar
+            if let success = flow.lastSuccessMessage {
+                successBanner(success)
+            }
             if let error = flow.lastError {
                 errorBanner(error)
             }
@@ -27,6 +30,34 @@ struct ApproveRequestsView: View {
             }
         }
         .background(OnymTokens.bg)
+    }
+
+    // MARK: - Success
+
+    private func successBanner(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(OnymTokens.green)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Approved on chain")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(OnymTokens.text)
+                Text(message)
+                    .font(.system(size: 12))
+                    .foregroundStyle(OnymTokens.text2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(12)
+        .background(OnymTokens.surface2)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(OnymTokens.green.opacity(0.4), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
+        .accessibilityIdentifier("approve_requests.success_banner")
     }
 
     // MARK: - Top bar
