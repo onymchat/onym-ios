@@ -118,17 +118,24 @@ jobs:
           echo "::notice::Building $version (kind=$kind, branch=$branch, commit=$commit_short)"
 
       - name: Bundle relayer auth token
-        # `Resources/RelayerSecrets.json` is gitignored. Same template
-        # release.yml uses -- if RELAYER_AUTH_TOKEN is unset the IPA
-        # still builds but every relayer call 401s. Surfaces clearly
-        # to the user instead of silently failing.
+        # `Resources/RelayerSecrets.json` is gitignored. Hard-fail if
+        # the secret is unset/empty: a QA IPA with an empty bundled
+        # token silently 401s on every create-group call (issue #102) —
+        # testers get "Authorization header required" with no path to
+        # recovery. Better to fail the build here so the secret gets
+        # fixed before publishing to the QA dashboard. Use jq for the
+        # JSON write so a token with `"`, `\`, or a newline doesn't
+        # corrupt the file (which would parse as nil → same 401).
         env:
           RELAYER_AUTH_TOKEN: ${{ secrets.RELAYER_AUTH_TOKEN }}
         run: |
+          if [ -z "${RELAYER_AUTH_TOKEN}" ]; then
+            echo "::error::RELAYER_AUTH_TOKEN secret is empty/unset — refusing to publish a QA IPA that will 401 on every relayer call. Set the secret in repo settings and re-run." >&2
+            exit 1
+          fi
           mkdir -p Resources
-          cat > Resources/RelayerSecrets.json <<EOF
-          { "authToken": "${RELAYER_AUTH_TOKEN}" }
-          EOF
+          jq -n --arg t "${RELAYER_AUTH_TOKEN}" '{authToken: $t}' \
+            > Resources/RelayerSecrets.json
 
       - name: Generate Xcode project
         # `RELEASE_VERSION` is consumed by `scripts/resolve-release-version.sh`

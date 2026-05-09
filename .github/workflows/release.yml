@@ -21,8 +21,12 @@ name: Release
 #                          launchd before unit tests so
 #                          `CreateGroupTyrannyE2ETests` actually
 #                          exercises the chain instead of skipping.
-#                          If unset, the IPA still builds but relayer
-#                          calls 401, and the E2E test skips silently.
+#                          REQUIRED — the build job hard-fails if it's
+#                          unset (issue #102: a release IPA without a
+#                          token silently 401s on every create-group).
+#                          The E2E unit-test step still tolerates an
+#                          unset value (skips silently) — only the IPA
+#                          bundling step is strict.
 #
 # (TestFlight upload is intentionally skipped, so ASC API keys aren't needed.)
 
@@ -314,13 +318,23 @@ jobs:
         run: |
           # Resources/RelayerSecrets.json is gitignored — written here
           # from the repo's RELAYER_AUTH_TOKEN secret so the IPA ships
-          # with the right Bearer token for the deployed relayer. If the
-          # secret is unset, write an empty token; the IPA will build
-          # but every relayer call will 401 — surfaces clearly to the
-          # user instead of silently failing.
-          cat > Resources/RelayerSecrets.json <<EOF
-          { "authToken": "${RELAYER_AUTH_TOKEN}" }
-          EOF
+          # with the right Bearer token for the deployed relayer.
+          #
+          # Hard-fail if the secret is unset/empty: a release IPA with
+          # an empty bundled token silently 401s on every create-group
+          # call (issue #102) — the user sees "Authorization header
+          # required" with no path to recovery. Better to fail the
+          # release here so the secret gets fixed before shipping.
+          if [ -z "${RELAYER_AUTH_TOKEN}" ]; then
+            echo "::error::RELAYER_AUTH_TOKEN secret is empty/unset — refusing to ship a release IPA that will 401 on every relayer call. Set the secret in repo settings and re-run." >&2
+            exit 1
+          fi
+          # Use jq to encode the value safely — a token containing `"`,
+          # `\`, or a newline would break the previous heredoc-based
+          # write and yield malformed JSON, which RelayerSecrets.swift
+          # then parses as nil (same 401 outcome).
+          jq -n --arg t "${RELAYER_AUTH_TOKEN}" '{authToken: $t}' \
+            > Resources/RelayerSecrets.json
 
       - name: Generate Xcode project
         run: ./generate-xcodeproj.sh
