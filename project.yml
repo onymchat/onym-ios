@@ -83,6 +83,12 @@ targets:
             CFBundleURLName: chat.onym.ios.join
             CFBundleURLSchemes:
               - onym
+        # Camera access is requested only when the user taps "Scan QR"
+        # on the Create Group → Invite by Inbox Key screen
+        # (`QRCodeScannerView`). The camera frame is decoded on-device
+        # via AVFoundation's QR metadata output and never leaves the
+        # process; we only consume the decoded string payload.
+        NSCameraUsageDescription: Onym uses the camera to scan invite-key QR codes when you add someone to a group.
     entitlements:
       path: OnymIOS.entitlements
       properties:

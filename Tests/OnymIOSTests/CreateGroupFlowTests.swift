@@ -136,6 +136,66 @@ final class CreateGroupFlowTests: XCTestCase {
         XCTAssertEqual(flow.invitees.count, 1)
     }
 
+    // MARK: - Scanned QR payload canonicalisation
+
+    func test_canonicalizeInviteKey_bareHex_returnsUnchanged() {
+        let hex = String(repeating: "ab", count: 32)
+        XCTAssertEqual(CreateGroupFlow.canonicalizeInviteKey(hex), hex)
+    }
+
+    func test_canonicalizeInviteKey_trimsSurroundingWhitespace() {
+        let hex = String(repeating: "ab", count: 32)
+        XCTAssertEqual(
+            CreateGroupFlow.canonicalizeInviteKey("  \n\(hex)\t "),
+            hex
+        )
+    }
+
+    func test_canonicalizeInviteKey_legacyPayloadURL_extractsHex() {
+        let hex = String(repeating: "ab", count: 32)
+        let url = "https://onym.chat?payload=\(hex)"
+        XCTAssertEqual(CreateGroupFlow.canonicalizeInviteKey(url), hex)
+    }
+
+    func test_canonicalizeInviteKey_androidIdentityURL_decodesBase64ToHex() {
+        // Mirrors `IdentityInviteUrl.kt` — URL-safe base64 of a 32-byte
+        // X25519 pubkey, no padding.
+        let bytes = Data((0..<32).map { UInt8($0) })
+        let expectedHex = bytes.map { String(format: "%02x", $0) }.joined()
+        var b64 = bytes.base64EncodedString()
+        b64 = b64.replacingOccurrences(of: "+", with: "-")
+        b64 = b64.replacingOccurrences(of: "/", with: "_")
+        while b64.hasSuffix("=") { b64.removeLast() }
+        let url = "https://onym.chat/i?k=\(b64)"
+        XCTAssertEqual(CreateGroupFlow.canonicalizeInviteKey(url), expectedHex)
+    }
+
+    func test_canonicalizeInviteKey_unknownPayload_returnsTrimmedRaw() {
+        // Garbage in → garbage out (trimmed). Validation downstream
+        // surfaces the inline "doesn't look like a valid inbox key"
+        // error so the user sees what was scanned.
+        XCTAssertEqual(CreateGroupFlow.canonicalizeInviteKey(" hello world "), "hello world")
+    }
+
+    func test_tappedScannedKey_validURL_endToEnd_addsInvitee() async throws {
+        let flow = await makeFlow()
+        flow.route = .inviteByKey
+        let hex = String(repeating: "cd", count: 32)
+        flow.tappedScannedKey("https://onym.chat?payload=\(hex)")
+        XCTAssertEqual(flow.inviteeInput, hex)
+        XCTAssertNil(flow.inviteeError)
+        flow.tappedAddInvitee()
+        XCTAssertEqual(flow.invitees.count, 1)
+        XCTAssertEqual(flow.invitees[0].inboxPublicKey, Data(repeating: 0xCD, count: 32))
+    }
+
+    func test_tappedScannedKey_clearsStaleInviteeError() async throws {
+        let flow = await makeFlow()
+        flow.inviteeError = "stale"
+        flow.tappedScannedKey("anything")
+        XCTAssertNil(flow.inviteeError)
+    }
+
     func test_removeInvitee_removesByIndex() async throws {
         let flow = await makeFlow()
         flow.inviteeInput = String(repeating: "aa", count: 32)
