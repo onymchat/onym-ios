@@ -12,6 +12,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
     private var invitationsStore: DispatcherInvitationStore!
     private var invitations: IncomingInvitationsRepository!
     private var owner: IdentityID!
+    private var chainState: DispatcherStubChainState!
 
     override func setUp() async throws {
         try await super.setUp()
@@ -20,6 +21,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
         invitations = IncomingInvitationsRepository(store: invitationsStore)
         owner = IdentityID()
         await groups.setCurrentIdentity(owner)
+        chainState = DispatcherStubChainState()
     }
 
     override func tearDown() async throws {
@@ -27,6 +29,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
         invitations = nil
         invitationsStore = nil
         owner = nil
+        chainState = nil
         try await super.tearDown()
     }
 
@@ -56,7 +59,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             envelopeDecrypter: decrypter,
             identities: StubIdentities(summaries: []),
             groupRepository: groups,
-            invitationsRepository: invitations
+            invitationsRepository: invitations,
+            chainState: chainState
         )
 
         await dispatcher.dispatch(
@@ -90,7 +94,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             envelopeDecrypter: decrypter,
             identities: StubIdentities(summaries: []),
             groupRepository: groups,
-            invitationsRepository: invitations
+            invitationsRepository: invitations,
+            chainState: chainState
         )
 
         await dispatcher.dispatch(
@@ -133,7 +138,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             envelopeDecrypter: decrypter,
             identities: StubIdentities(summaries: []),
             groupRepository: groups,
-            invitationsRepository: invitations
+            invitationsRepository: invitations,
+            chainState: chainState
         )
 
         await dispatcher.dispatch(
@@ -176,7 +182,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             envelopeDecrypter: decrypter,
             identities: StubIdentities(summaries: []),
             groupRepository: groups,
-            invitationsRepository: invitations
+            invitationsRepository: invitations,
+            chainState: chainState
         )
         await dispatcher.dispatch(
             messageID: "msg-trust-ok",
@@ -216,7 +223,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             envelopeDecrypter: decrypter,
             identities: StubIdentities(summaries: []),
             groupRepository: groups,
-            invitationsRepository: invitations
+            invitationsRepository: invitations,
+            chainState: chainState
         )
         await dispatcher.dispatch(
             messageID: "msg-trust-bad",
@@ -258,7 +266,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             envelopeDecrypter: decrypter,
             identities: StubIdentities(summaries: []),
             groupRepository: groups,
-            invitationsRepository: invitations
+            invitationsRepository: invitations,
+            chainState: chainState
         )
         await dispatcher.dispatch(
             messageID: "msg-unsigned",
@@ -293,7 +302,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             envelopeDecrypter: decrypter,
             identities: StubIdentities(summaries: []),
             groupRepository: groups,
-            invitationsRepository: invitations
+            invitationsRepository: invitations,
+            chainState: chainState
         )
         await dispatcher.dispatch(
             messageID: "msg-legacy-fallback",
@@ -311,10 +321,23 @@ final class IncomingMessageDispatcherTests: XCTestCase {
         // senderEd25519PublicKey as the group's adminEd25519PubkeyHex
         // for Tyranny groups, so subsequent announcements can be
         // verified against it.
+        //
+        // PR 13b: Tyranny invitations now also require the wire
+        // `commitment` to match `Common.merkleRoot(members)` AND
+        // the on-chain commitment. Compute the real root from the
+        // (empty) test member list, seed the chain stub to match.
+        let groupID = Data(repeating: 0x42, count: 32)
+        let realRoot = try GroupCommitmentBuilder.computeMerkleRoot(
+            members: [],
+            tier: .small
+        )
+        chainState.setNext(commitment: realRoot, epoch: 0)
         let payload = makeInvitationPayload(
-            groupID: Data(repeating: 0x42, count: 32),
+            groupID: groupID,
             name: "Family",
-            memberProfiles: nil
+            memberProfiles: nil,
+            groupType: .tyranny,
+            commitment: realRoot
         )
         let plaintext = try JSONEncoder().encode(payload)
         let admin = Data(repeating: 0xED, count: 32)
@@ -326,7 +349,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             envelopeDecrypter: decrypter,
             identities: StubIdentities(summaries: []),
             groupRepository: groups,
-            invitationsRepository: invitations
+            invitationsRepository: invitations,
+            chainState: chainState
         )
         await dispatcher.dispatch(
             messageID: "msg-cap",
@@ -337,6 +361,169 @@ final class IncomingMessageDispatcherTests: XCTestCase {
         let after = await groups.currentGroups()
         XCTAssertEqual(after.first?.adminEd25519PubkeyHex, "ed".repeated(32),
                        "materializer stamps sender Ed25519 hex on the new group")
+    }
+
+    // MARK: - PR 13b on-chain commitment verification
+
+    func test_invitation_tyranny_rejectsWhenCommitmentMissing() async throws {
+        // Pre-PR-13a sender shipped a Tyranny invitation without
+        // commitment. PR 13b receivers MUST reject — without the
+        // commitment we can't verify against the chain.
+        let groupID = Data(repeating: 0x42, count: 32)
+        let payload = makeInvitationPayload(
+            groupID: groupID,
+            name: "Family",
+            memberProfiles: nil,
+            groupType: .tyranny,
+            commitment: nil
+        )
+        let plaintext = try JSONEncoder().encode(payload)
+        let decrypter = FakeInvitationEnvelopeDecrypter(mode: .fixed(plaintext))
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState
+        )
+        await dispatcher.dispatch(
+            messageID: "msg-no-commitment",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+        let after = await groups.currentGroups()
+        XCTAssertTrue(after.isEmpty,
+                      "Tyranny invitation without commitment must be rejected")
+    }
+
+    func test_invitation_tyranny_rejectsWhenOnchainCommitmentMismatch() async throws {
+        // The dispatcher recomputes the Poseidon root from the wire
+        // members and verifies the resulting root matches BOTH the
+        // payload's commitment AND the on-chain state. If on-chain
+        // disagrees (because the sender forged a fake commitment),
+        // reject the invitation.
+        let groupID = Data(repeating: 0x42, count: 32)
+        let internallyConsistentRoot = try GroupCommitmentBuilder.computeMerkleRoot(
+            members: [],
+            tier: .small
+        )
+        // Payload claims this root; chain says something different.
+        chainState.setNext(commitment: Data(repeating: 0xFF, count: 32), epoch: 0)
+        let payload = makeInvitationPayload(
+            groupID: groupID,
+            name: "Family",
+            memberProfiles: nil,
+            groupType: .tyranny,
+            commitment: internallyConsistentRoot
+        )
+        let plaintext = try JSONEncoder().encode(payload)
+        let decrypter = FakeInvitationEnvelopeDecrypter(mode: .fixed(plaintext))
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState
+        )
+        await dispatcher.dispatch(
+            messageID: "msg-onchain-mismatch",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+        let after = await groups.currentGroups()
+        XCTAssertTrue(after.isEmpty,
+                      "Tyranny invitation must be rejected when on-chain commitment doesn't match")
+    }
+
+    func test_invitation_tyranny_rejectsWhenInternalRecomputeMismatch() async throws {
+        // Payload claims a commitment that doesn't equal
+        // Common.merkleRoot(payload.members). Internally inconsistent;
+        // reject regardless of what's on chain.
+        let groupID = Data(repeating: 0x42, count: 32)
+        let bogusCommitment = Data(repeating: 0xC1, count: 32)
+        // Even if the chain agrees with the bogus commitment, the
+        // internal-recompute check must catch the lie.
+        chainState.setNext(commitment: bogusCommitment, epoch: 0)
+        let payload = makeInvitationPayload(
+            groupID: groupID,
+            name: "Family",
+            memberProfiles: nil,
+            groupType: .tyranny,
+            commitment: bogusCommitment
+        )
+        let plaintext = try JSONEncoder().encode(payload)
+        let decrypter = FakeInvitationEnvelopeDecrypter(mode: .fixed(plaintext))
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState
+        )
+        await dispatcher.dispatch(
+            messageID: "msg-internal-mismatch",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+        let after = await groups.currentGroups()
+        XCTAssertTrue(after.isEmpty,
+                      "Tyranny invitation must be rejected when recomputed root != claimed commitment")
+    }
+
+    func test_announcement_tyranny_rejectsWhenOnchainMismatch() async throws {
+        // Tyranny announcement carries a claimed commitment +
+        // epoch. If on-chain disagrees, drop the announcement
+        // (forged by someone other than admin, or stale).
+        let groupID = Data(repeating: 0xAB, count: 32)
+        let adminEd25519Hex = "ed".repeated(32)
+        await seedGroup(
+            groupID: groupID,
+            memberProfiles: [:],
+            adminEd25519PubkeyHex: adminEd25519Hex,
+            groupType: .tyranny
+        )
+
+        let claimedCommitment = Data(repeating: 0xC1, count: 32)
+        // Chain disagrees.
+        chainState.setNext(commitment: Data(repeating: 0xFF, count: 32), epoch: 1)
+
+        let member = try MemberAnnouncementPayload.AnnouncedMember(
+            blsPub: Data(repeating: 0xBB, count: 48),
+            inboxPub: Data(repeating: 0x33, count: 32),
+            alias: "Bob"
+        )
+        let payload = try MemberAnnouncementPayload(
+            version: 1,
+            groupId: groupID,
+            newMember: member,
+            adminAlias: "Alice",
+            commitment: claimedCommitment,
+            epoch: 1
+        )
+        let plaintext = try JSONEncoder().encode(payload)
+        let decrypter = FakeInvitationEnvelopeDecrypter(
+            mode: .fixed(plaintext),
+            senderEd25519PublicKey: Data(repeating: 0xED, count: 32)
+        )
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState
+        )
+        await dispatcher.dispatch(
+            messageID: "msg-announce-mismatch",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+        let after = await groups.currentGroups()
+        XCTAssertNil(after.first?.memberProfiles["bb".repeated(48)],
+                     "Tyranny announcement must be rejected when on-chain commitment doesn't match")
     }
 
     // MARK: - Invitation materialization path
@@ -371,7 +558,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             envelopeDecrypter: decrypter,
             identities: StubIdentities(summaries: [selfSummary]),
             groupRepository: groups,
-            invitationsRepository: invitations
+            invitationsRepository: invitations,
+            chainState: chainState
         )
 
         await dispatcher.dispatch(
@@ -417,7 +605,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             envelopeDecrypter: decrypter,
             identities: StubIdentities(summaries: [selfSummary]),
             groupRepository: groups,
-            invitationsRepository: invitations
+            invitationsRepository: invitations,
+            chainState: chainState
         )
 
         await dispatcher.dispatch(
@@ -453,7 +642,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             envelopeDecrypter: decrypter,
             identities: StubIdentities(summaries: []),
             groupRepository: groups,
-            invitationsRepository: invitations
+            invitationsRepository: invitations,
+            chainState: chainState
         )
 
         await dispatcher.dispatch(
@@ -478,7 +668,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             envelopeDecrypter: decrypter,
             identities: StubIdentities(summaries: []),
             groupRepository: groups,
-            invitationsRepository: invitations
+            invitationsRepository: invitations,
+            chainState: chainState
         )
 
         await dispatcher.dispatch(
@@ -505,7 +696,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             envelopeDecrypter: decrypter,
             identities: StubIdentities(summaries: []),
             groupRepository: groups,
-            invitationsRepository: invitations
+            invitationsRepository: invitations,
+            chainState: chainState
         )
 
         await dispatcher.dispatch(
@@ -525,8 +717,13 @@ final class IncomingMessageDispatcherTests: XCTestCase {
     private func seedGroup(
         groupID: Data,
         memberProfiles: [String: MemberProfile],
-        adminEd25519PubkeyHex: String? = nil
+        adminEd25519PubkeyHex: String? = nil,
+        groupType: SEPGroupType = .anarchy
     ) async {
+        // Default to .anarchy so the existing dispatcher tests skip
+        // PR 13b's Tyranny-only on-chain commitment verification.
+        // Tests that specifically exercise Tyranny verification opt
+        // in via the parameter and seed `chainState` accordingly.
         let group = ChatGroup(
             id: groupID.map { String(format: "%02x", $0) }.joined(),
             ownerIdentityID: owner,
@@ -539,7 +736,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             salt: Data(repeating: 0x66, count: 32),
             commitment: nil,
             tier: .small,
-            groupType: .tyranny,
+            groupType: groupType,
             adminPubkeyHex: nil,
             adminEd25519PubkeyHex: adminEd25519PubkeyHex,
             isPublishedOnChain: true
@@ -575,7 +772,9 @@ final class IncomingMessageDispatcherTests: XCTestCase {
     private func makeInvitationPayload(
         groupID: Data,
         name: String,
-        memberProfiles: [String: MemberProfile]?
+        memberProfiles: [String: MemberProfile]?,
+        groupType: SEPGroupType = .anarchy,
+        commitment: Data? = nil
     ) -> GroupInvitationPayload {
         GroupInvitationPayload(
             version: 1,
@@ -585,9 +784,9 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             members: [],
             epoch: 0,
             salt: Data(repeating: 0x66, count: 32),
-            commitment: Data(repeating: 0x77, count: 32),
+            commitment: commitment,
             tierRaw: SEPTier.small.rawValue,
-            groupTypeRaw: SEPGroupType.tyranny.rawValue,
+            groupTypeRaw: groupType.rawValue,
             adminPubkeyHex: nil,
             peerBlsSecret: nil,
             memberProfiles: memberProfiles
@@ -663,5 +862,44 @@ private actor DispatcherInvitationStore: InvitationStore {
 
     func deleteOwner(_ ownerIDString: String) {
         rows = rows.filter { $0.value.ownerIdentityID.rawValue.uuidString != ownerIDString }
+    }
+}
+
+// MARK: - PR 13b chain-state stub
+
+/// Stub `ChainStateReading`. Tests configure `nextResult` per call
+/// to drive accept / reject paths. Default = throws (which the
+/// dispatcher treats as "couldn't verify, reject" — the safe
+/// default for tests that don't care about the chain leg).
+final class DispatcherStubChainState: ChainStateReading, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _nextResult: Result<SEPCommitmentEntry, Error> = .failure(
+        ChainReadError.noActiveRelayer
+    )
+    private var _calls: [Data] = []
+
+    var calls: [Data] { lock.withLock { _calls } }
+
+    func setNext(commitment: Data, epoch: UInt64) {
+        let entry = SEPCommitmentEntry(
+            commitment: commitment,
+            epoch: epoch,
+            timestamp: 0,
+            tier: 0,
+            active: nil
+        )
+        lock.withLock { _nextResult = .success(entry) }
+    }
+
+    func setNextThrows(_ error: Error) {
+        lock.withLock { _nextResult = .failure(error) }
+    }
+
+    func tyrannyCommitment(groupID: Data) async throws -> SEPCommitmentEntry {
+        let result: Result<SEPCommitmentEntry, Error> = lock.withLock {
+            _calls.append(groupID)
+            return _nextResult
+        }
+        return try result.get()
     }
 }
