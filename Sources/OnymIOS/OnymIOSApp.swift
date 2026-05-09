@@ -113,6 +113,21 @@ struct OnymIOSApp: App {
         // and the Settings → Identities screen observe the same state.
         let identitiesFlow = IdentitiesFlow(repository: repository)
 
+        // Single shared JoinRequestApprover + ApproveRequestsFlow.
+        // The collector inside the approver subscribes to
+        // `IntroRequestStore` once and keeps a decoded snapshot in
+        // memory; the @Observable flow mirrors that snapshot so the
+        // toolbar badge on Chats and the modal request list see the
+        // same state without re-running decryption.
+        let joinRequestApprover = JoinRequestApprover(
+            identity: repository,
+            introKeyStore: introKeyStore,
+            introRequestStore: self.introRequestStore,
+            groupRepository: groupRepository,
+            inboxTransport: inboxTransport
+        )
+        let approveRequestsFlow = ApproveRequestsFlow(approver: joinRequestApprover)
+
         self.dependencies = AppDependencies(
             makeRecoveryPhraseBackupFlow: { @MainActor in
                 RecoveryPhraseBackupFlow(
@@ -162,7 +177,8 @@ struct OnymIOSApp: App {
             makeChatsFlow: { @MainActor in
                 ChatsFlow(repository: groupRepository)
             },
-            identitiesFlow: identitiesFlow
+            identitiesFlow: identitiesFlow,
+            approveRequestsFlow: approveRequestsFlow
         )
     }
 
@@ -178,6 +194,12 @@ struct OnymIOSApp: App {
                     // operation that needs identity will surface a clear
                     // error to the user.
                     _ = try? await identityRepository.bootstrap()
+                    // Start the approver collector eagerly so the
+                    // Chats toolbar badge reflects pending requests
+                    // from the moment the app is on screen, even
+                    // before the user opens the modal request list.
+                    // Idempotent — `ChatsView.task` calls it too.
+                    await dependencies.approveRequestsFlow.start()
                     // Kick off both GitHub Releases fetches as soon as the
                     // app is on screen. Failures are silent; the user can
                     // still enter a custom relayer URL / pick an older

@@ -29,6 +29,7 @@ struct RootView: View {
                     ChatsView(
                         flow: dependencies.makeChatsFlow(),
                         identitiesFlow: dependencies.identitiesFlow,
+                        approveRequestsFlow: dependencies.approveRequestsFlow,
                         makeCreateGroupFlow: dependencies.makeCreateGroupFlow,
                         makeShareInviteFlow: dependencies.makeShareInviteFlow
                     )

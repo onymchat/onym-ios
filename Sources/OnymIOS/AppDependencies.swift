@@ -18,4 +18,9 @@ struct AppDependencies {
     /// Settings → Identities screen observe the same state, so a
     /// factory closure here would split them.
     let identitiesFlow: IdentitiesFlow
+    /// Single shared instance — the toolbar badge on Chats and the
+    /// modal `ApproveRequestsView` observe the same `pending` list,
+    /// and the underlying collector should run for the app's
+    /// lifetime regardless of which surface is mounted.
+    let approveRequestsFlow: ApproveRequestsFlow
 }

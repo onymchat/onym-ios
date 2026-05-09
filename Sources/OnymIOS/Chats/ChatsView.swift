@@ -8,6 +8,7 @@ import SwiftUI
 struct ChatsView: View {
     let flow: ChatsFlow
     let identitiesFlow: IdentitiesFlow
+    let approveRequestsFlow: ApproveRequestsFlow
     let makeCreateGroupFlow: @MainActor () -> CreateGroupFlow
     let makeShareInviteFlow: @MainActor () -> ShareInviteFlow
 
@@ -28,6 +29,12 @@ struct ChatsView: View {
             ToolbarItem(placement: .topBarLeading) {
                 IdentityPickerMenu(flow: identitiesFlow)
             }
+            // Pending join requests — always rendered so the surface
+            // is discoverable even before the first request lands;
+            // the badge only appears when `pending.count > 0`.
+            ToolbarItem(placement: .topBarTrailing) {
+                ApproveRequestsToolbarButton(flow: approveRequestsFlow)
+            }
             // Plus button mirrors iOS Mail / Messages — useful once
             // the user already has at least one chat. Hidden in the
             // empty state because the central CTA already covers it.
@@ -44,6 +51,7 @@ struct ChatsView: View {
         }
         .task { flow.start() }
         .task { await identitiesFlow.start() }
+        .task { await approveRequestsFlow.start() }
         .fullScreenCover(isPresented: $showCreateGroup) {
             CreateGroupViewHost(
                 makeFlow: makeCreateGroupFlow,
