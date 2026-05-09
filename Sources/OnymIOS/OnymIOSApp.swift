@@ -8,6 +8,7 @@ struct OnymIOSApp: App {
     private let contractsRepository: ContractsRepository
     private let groupRepository: GroupRepository
     private let inboxTransport: any InboxTransport
+    private let nostrRelaysRepository: NostrRelaysRepository
     private let incomingInvitations: IncomingInvitationsRepository
     private let introKeyStore: any IntroKeyStore
     private let introRequestStore: any IntroRequestStore
@@ -85,12 +86,25 @@ struct OnymIOSApp: App {
         }
         self.groupRepository = groupRepository
 
-        // Inbox transport for invitation send. Connects on first use
-        // via `RootView.task`.
+        // Inbox transport for invitation send. The endpoint list comes
+        // from `NostrRelaysRepository` — read at app boot in the
+        // WindowGroup .task before the fanout interactor starts. The
+        // transport itself is just a Nostr-WebSocket client; nothing
+        // here picks the URL.
         let inboxTransport = NostrInboxTransport(
             signerProvider: OnymNostrSignerProvider()
         )
         self.inboxTransport = inboxTransport
+
+        // Nostr-relays config — drives the inbox transport's
+        // connections + the Settings → Transport → Nostr screen.
+        // First-launch path inside the actor seeds with the Onym
+        // Official relay; subsequent launches honor the user's
+        // persisted list.
+        let nostrRelaysRepository = NostrRelaysRepository(
+            store: UserDefaultsNostrRelaysSelectionStore()
+        )
+        self.nostrRelaysRepository = nostrRelaysRepository
 
         // Incoming invitations repository — falls back to in-memory if
         // the on-disk store can't open (same protection-class concerns
@@ -137,6 +151,9 @@ struct OnymIOSApp: App {
             },
             makeRelayerSettingsFlow: { @MainActor in
                 RelayerSettingsFlow(repository: relayerRepository)
+            },
+            makeNostrRelaySettingsFlow: { @MainActor in
+                NostrRelaySettingsFlow(repository: nostrRelaysRepository)
             },
             makeAnchorsPickerFlow: { @MainActor in
                 AnchorsPickerFlow(repository: contractsRepository)
@@ -241,6 +258,17 @@ struct OnymIOSApp: App {
                     }
                 }
                 .task {
+                    // Connect the Nostr inbox transport to every
+                    // configured relay BEFORE the fanout interactor
+                    // attempts to subscribe. Without this, both legs
+                    // of the inbox are silently dead: subscribe()
+                    // no-ops on an empty connections dict and send()
+                    // throws TransportError.notConnected.
+                    let endpoints = await nostrRelaysRepository
+                        .currentEndpoints()
+                        .map { TransportEndpoint(url: $0.url) }
+                    await inboxTransport.connect(to: endpoints)
+
                     // PR-4: subscribe to every identity's inbox
                     // concurrently. Without this, messages addressed
                     // to a non-current identity drop on the floor.

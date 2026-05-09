@@ -12,6 +12,7 @@ import SwiftUI
 struct SettingsView: View {
     let makeBackupFlow: @MainActor () -> RecoveryPhraseBackupFlow
     let makeRelayerSettingsFlow: @MainActor () -> RelayerSettingsFlow
+    let makeNostrRelaySettingsFlow: @MainActor () -> NostrRelaySettingsFlow
     let makeAnchorsPickerFlow: @MainActor () -> AnchorsPickerFlow
     let identitiesFlow: IdentitiesFlow
 
@@ -110,6 +111,48 @@ struct SettingsView: View {
                             .tint(OnymTokens.green)
                             .accessibilityIdentifier("settings.use_mainnet_toggle")
                     }
+                }
+
+                SettingsSectionLabel("TRANSPORT")
+                SettingsCard {
+                    NavigationLink {
+                        NostrRelaySettingsView(flow: makeNostrRelaySettingsFlow())
+                    } label: {
+                        SettingsRow(
+                            title: "Nostr Relays",
+                            subtitle: "Inbox + invitation transport"
+                        ) {
+                            SettingsIconTile(
+                                symbol: "antenna.radiowaves.left.and.right.circle.fill",
+                                bg: SettingsTile.indigo
+                            )
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("settings.nostr_relays_row")
+
+                    SettingsRow(
+                        title: "Tor (Hidden Service)",
+                        subtitle: "Coming soon",
+                        hasChevron: false,
+                        last: true
+                    ) {
+                        SettingsIconTile(
+                            symbol: "shield.lefthalf.filled",
+                            bg: SettingsTile.gray
+                        )
+                    } right: {
+                        Text("TBA")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(OnymTokens.text3)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(
+                                OnymTokens.surface3,
+                                in: RoundedRectangle(cornerRadius: 4)
+                            )
+                    }
+                    .accessibilityIdentifier("settings.tor_row")
                 }
 
                 SettingsSectionLabel("APP")

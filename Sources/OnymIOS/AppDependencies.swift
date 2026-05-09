@@ -9,6 +9,7 @@ import Foundation
 struct AppDependencies {
     let makeRecoveryPhraseBackupFlow: @MainActor () -> RecoveryPhraseBackupFlow
     let makeRelayerSettingsFlow: @MainActor () -> RelayerSettingsFlow
+    let makeNostrRelaySettingsFlow: @MainActor () -> NostrRelaySettingsFlow
     let makeAnchorsPickerFlow: @MainActor () -> AnchorsPickerFlow
     let makeCreateGroupFlow: @MainActor () -> CreateGroupFlow
     let makeShareInviteFlow: @MainActor () -> ShareInviteFlow
