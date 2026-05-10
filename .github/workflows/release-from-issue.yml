@@ -63,50 +63,44 @@ jobs:
         # gh needs both vars at the failure-comment step
         # (set here so the env propagates to the failure path too).
 
-      - name: Discover XCTestCase classes
+      - name: Discover XCTestCase classes + tests
         id: discover
         run: |
-          # Grep both test targets for `final class X: XCTestCase` and
-          # the bare `class X: XCTestCase` form. Emit `<Target>.<Class>`
-          # so the in-issue checklist is unambiguous when unit + UI
-          # targets ever share a class name.
+          # `discover_tests.py` walks both test targets, finds every
+          # XCTestCase subclass + its `test_*` methods, extracts `///`
+          # doc comments, and emits the markdown checklist:
+          #   - [ ] <Target>.<Class> — <first sentence of class doc>
+          #     - <first sentence of test doc>   (only when authored)
           #
           # Swift Testing (`@Test`) is intentionally NOT discovered —
           # the test targets are XCTest-only as of v0.0.9. When/if Swift
-          # Testing lands, extend this grep.
-          discover() {
-            local dir="$1" target="$2"
-            grep -rhE '^[[:space:]]*(final[[:space:]]+)?class[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*:[[:space:]]*XCTestCase' "$dir" \
-              | sed -E "s/^[[:space:]]*(final[[:space:]]+)?class[[:space:]]+([A-Za-z_][A-Za-z0-9_]*).*/${target}.\2/" \
-              | sort -u
-          }
-          {
-            discover Tests/OnymIOSTests   OnymIOSTests
-            discover Tests/OnymIOSUITests OnymIOSUITests
-          } > /tmp/classes.txt
-          COUNT=$(wc -l < /tmp/classes.txt | tr -d ' ')
-          if [ "$COUNT" -eq 0 ]; then
+          # Testing lands, extend the script.
+          COUNT=$(python3 .github/workflows/discover_tests.py \
+                    --root . \
+                    --out /tmp/classes_section.md)
+          if [ -z "$COUNT" ] || [ "$COUNT" -eq 0 ]; then
             echo "::error::No XCTestCase classes found — discovery regex broke?"
             exit 1
           fi
           echo "Discovered $COUNT classes"
-          cat /tmp/classes.txt
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+          cat /tmp/classes_section.md
 
       - name: Hydrate UI_TESTS section in issue body
         env:
           BODY: ${{ github.event.issue.body }}
           ISSUE: ${{ github.event.issue.number }}
+          COUNT: ${{ steps.discover.outputs.count }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Build the new section: one `- [ ] <FQN>` per class. The
-          # report-to-issue job in `Release` flips boxes to `[x]` after
-          # xcodebuild finishes.
+          # Prepend a one-line summary to the discovered checklist. The
+          # report-to-issue job in `Release` flips per-class boxes to
+          # `[x]` after xcodebuild finishes; `apply_results.py`
+          # preserves the trailing ` — <description>` verbatim.
           {
-            echo "_Discovered $(wc -l < /tmp/classes.txt | tr -d ' ') XCTestCase classes — boxes flip to \`[x]\` once \`Release\` finishes._"
+            echo "_Discovered ${COUNT} XCTestCase classes — boxes flip to \`[x]\` once \`Release\` finishes._"
             echo ""
-            while IFS= read -r CLASS; do
-              echo "- [ ] $CLASS"
-            done < /tmp/classes.txt
+            cat /tmp/classes_section.md
           } > /tmp/ui_tests_section.md
 
           # Sed-friendly extraction: replace everything between the two
