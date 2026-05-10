@@ -104,12 +104,15 @@ final class JoinRequestApproverTests: XCTestCase {
         XCTAssertNotNil(toJoiner,
                         "approve must send to the joiner's inbox tag")
 
-        // Request consumed + intro key revoked.
+        // Request consumed; intro key stays alive so the same QR
+        // can welcome additional invitees (issue #111). Inviter
+        // re-mints from the Share Invite screen to rotate.
         let remaining = await introRequestStore.current()
         XCTAssertTrue(remaining.isEmpty,
                       "approved request must be consumed from the store")
         let intro = await introKeyStore.find(introPublicKey: env.introPub)
-        XCTAssertNil(intro, "intro key must be revoked after approve")
+        XCTAssertNotNil(intro,
+                        "intro key must survive approve so simultaneous-scan and share-to-many flows still work")
     }
 
     // MARK: - approve unknown group
@@ -277,7 +280,7 @@ final class JoinRequestApproverTests: XCTestCase {
 
     // MARK: - decline
 
-    func test_decline_dropsRequestAndRevokesKey() async throws {
+    func test_decline_dropsRequestButLeavesIntroKeyAlive() async throws {
         let env = try await seedEnvironment()
         await env.approver.pumpOnce()
 
@@ -287,7 +290,8 @@ final class JoinRequestApproverTests: XCTestCase {
         XCTAssertTrue(remaining.isEmpty,
                       "declined request must be consumed")
         let intro = await introKeyStore.find(introPublicKey: env.introPub)
-        XCTAssertNil(intro, "intro key revoked even on decline")
+        XCTAssertNotNil(intro,
+                        "intro key must survive decline so a stranger's scan doesn't burn the slot for intended recipients (issue #111)")
         let sends = await transport.sends
         XCTAssertTrue(sends.isEmpty,
                       "decline ships no envelopes")

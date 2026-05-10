@@ -26,11 +26,15 @@ protocol JoinRequestApproving: Sendable {
 ///     Approve?" prompts.
 ///  3. On Approve → seals the existing `GroupInvitationPayload`
 ///     (built from the local `ChatGroup`) to the joiner's identity
-///     inbox key, ships via `inboxTransport.send`, revokes the
-///     intro key. The pump from PR-3 stops listening on that intro
-///     tag within one emission window.
-///  4. On Decline → drop the request, revoke the intro key. No
-///     NACK to the joiner; their JoinScreen times out gracefully.
+///     inbox key, ships via `inboxTransport.send`, consumes the
+///     request from the store. The intro key stays alive so the
+///     same shared QR can welcome additional invitees — admin
+///     re-mints (or, future, the 24h TTL prunes) when they want
+///     the link rotated.
+///  4. On Decline → drop the request only. The intro key stays
+///     alive: a stranger scanning a leaked link doesn't burn the
+///     slot for the inviter's intended recipients. No NACK to the
+///     joiner; their JoinScreen times out gracefully.
 actor JoinRequestApprover: JoinRequestApproving {
 
     /// UI-renderable view of one decrypted, awaiting-action request.
@@ -306,10 +310,13 @@ actor JoinRequestApprover: JoinRequestApproving {
                 joinerAlias: req.joinerDisplayLabel
             )
         }
-        // Best-effort cleanup.
-        if let introPub = await findIntroPub(forRequestID: requestId) {
-            await introKeyStore.revoke(introPublicKey: introPub)
-        }
+        // Consume the request so we don't act on it twice. Leave the
+        // intro key in place: the same QR is meant to welcome more
+        // than one invitee, and silently revoking it after the first
+        // approve makes simultaneous-scan and "share-to-three-kids"
+        // flows fail with no UI feedback (issue #111). Manual re-mint
+        // on the Share Invite screen still rotates the link when the
+        // inviter wants a fresh one.
         await introRequestStore.consume(id: requestId)
         return .sent
     }
@@ -570,12 +577,12 @@ actor JoinRequestApprover: JoinRequestApproving {
         }
     }
 
-    /// Decline a pending request: drop it + revoke the intro slot.
-    /// No NACK to the joiner — their JoinScreen times out.
+    /// Decline a pending request: drop it. The intro key stays alive
+    /// so a stranger's scan of a leaked link doesn't burn the slot
+    /// for the inviter's intended recipients (issue #111). Admin
+    /// rotates manually if they suspect the link has leaked. No NACK
+    /// to the joiner — their JoinScreen times out.
     func decline(requestId: String) async {
-        if let introPub = await findIntroPub(forRequestID: requestId) {
-            await introKeyStore.revoke(introPublicKey: introPub)
-        }
         await introRequestStore.consume(id: requestId)
     }
 
@@ -655,12 +662,5 @@ actor JoinRequestApprover: JoinRequestApproving {
             groupId: payload.groupId,
             groupName: groupName
         )
-    }
-
-    /// `PendingRequest` doesn't carry the introPub (intentional —
-    /// UI never needs it). Resolve via the raw store on demand.
-    private func findIntroPub(forRequestID id: String) async -> Data? {
-        let raw = await introRequestStore.current()
-        return raw.first { $0.id == id }?.targetIntroPublicKey
     }
 }
