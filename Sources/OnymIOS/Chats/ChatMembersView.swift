@@ -23,7 +23,6 @@ struct ChatMembersView: View {
     @Bindable var identitiesFlow: IdentitiesFlow
     let makeShareInviteFlow: @MainActor () -> ShareInviteFlow
 
-    @State private var showShareInvite = false
     @State private var shareInviteFlow: ShareInviteFlow?
 
     var body: some View {
@@ -55,7 +54,6 @@ struct ChatMembersView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         shareInviteFlow = makeShareInviteFlow()
-                        showShareInvite = true
                     } label: {
                         Image(systemName: "person.crop.circle.badge.plus")
                     }
@@ -64,17 +62,12 @@ struct ChatMembersView: View {
                 }
             }
         }
-        .sheet(isPresented: $showShareInvite) {
-            if let flow = shareInviteFlow {
-                ShareInviteView(
-                    groupID: groupID,
-                    flow: flow,
-                    onDone: {
-                        showShareInvite = false
-                        shareInviteFlow = nil
-                    }
-                )
-            }
+        .sheet(item: $shareInviteFlow) { flow in
+            ShareInviteView(
+                groupID: groupID,
+                flow: flow,
+                onDone: { shareInviteFlow = nil }
+            )
         }
     }
 
