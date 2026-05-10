@@ -246,14 +246,19 @@ jobs:
           set -eu
           BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-          # Resolve issue title (best-effort; gh failure -> empty title)
+          # Resolve issue title + body (best-effort; gh failure -> empty
+          # strings). `body` powers the Test Plan section on the build
+          # details page (public/qa/build/ in onym-website) without the
+          # page having to hit the GitHub API at view time.
           ISSUE_OBJ='null'
           if [ -n "$ISSUE" ]; then
-            TITLE=$(gh issue view "$ISSUE" --repo "$REPO" --json title -q .title 2>/dev/null || echo "")
+            ISSUE_JSON=$(gh issue view "$ISSUE" --repo "$REPO" --json title,body 2>/dev/null || echo '{}')
+            TITLE=$(printf '%s' "$ISSUE_JSON" | jq -r '.title // ""')
+            BODY=$(printf  '%s' "$ISSUE_JSON" | jq -r '.body  // ""')
             ISSUE_OBJ=$(jq -n \
-              --arg n "$ISSUE" --arg t "$TITLE" \
+              --arg n "$ISSUE" --arg t "$TITLE" --arg b "$BODY" \
               --arg url "https://github.com/$REPO/issues/$ISSUE" \
-              '{number: ($n|tonumber), title: $t, url: $url}')
+              '{number: ($n|tonumber), title: $t, url: $url, body: $b}')
           fi
 
           # Schema -- see public/qa/index.html in onym-website. Keep
@@ -358,6 +363,7 @@ jobs:
             echo "| IPA | https://${HOST}/qa/ios/${VERSION}/OnymIOS.ipa |"
             echo "| Manifest | https://${HOST}/qa/ios/${VERSION}/manifest.plist |"
             echo "| Install | \`itms-services://?action=download-manifest&url=https://${HOST}/qa/ios/${VERSION}/manifest.plist\` |"
+            echo "| Build details | https://${HOST}/qa/build/?platform=ios&version=${VERSION} |"
             echo "| Dashboard | https://${HOST}/qa/?platform=ios |"
             echo
             echo "Tester device must be UDID-registered to the team ad-hoc provisioning profile -- otherwise install fails."
@@ -414,7 +420,7 @@ jobs:
           QA build \`${VERSION}\` published.
 
           - Install on a UDID-registered iPhone: \`${INSTALL_URL}\`
-          - Dashboard: https://${HOST}/qa/?platform=ios
+          - Build details (test plan, install, metadata): https://${HOST}/qa/build/?platform=ios&version=${VERSION}
           - IPA: https://${HOST}/qa/ios/${VERSION}/OnymIOS.ipa
           MSG
 

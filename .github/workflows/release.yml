@@ -468,17 +468,22 @@ jobs:
           BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           COMMIT_SHORT=$(printf '%s' "$COMMIT" | cut -c1-5)
 
-          # Resolve the originating release issue's title (best-effort;
-          # gh failure -> empty title). Issue number is plumbed in by
-          # release-from-issue.yml; manual `gh workflow run Release`
-          # dispatches without it leave the field null.
+          # Resolve the originating release issue's title + body
+          # (best-effort; gh failure -> empty strings). Issue number is
+          # plumbed in by release-from-issue.yml; manual `gh workflow run
+          # Release` dispatches without it leave the field null. `body`
+          # powers the Test Plan section on the build details page
+          # (public/qa/build/ in onym-website) without the page having
+          # to hit the GitHub API at view time.
           ISSUE_OBJ='null'
           if [ -n "$ISSUE" ]; then
-            TITLE=$(gh issue view "$ISSUE" --repo "$REPO" --json title -q .title 2>/dev/null || echo "")
+            ISSUE_JSON=$(gh issue view "$ISSUE" --repo "$REPO" --json title,body 2>/dev/null || echo '{}')
+            TITLE=$(printf '%s' "$ISSUE_JSON" | jq -r '.title // ""')
+            BODY=$(printf  '%s' "$ISSUE_JSON" | jq -r '.body  // ""')
             ISSUE_OBJ=$(jq -n \
-              --arg n "$ISSUE" --arg t "$TITLE" \
+              --arg n "$ISSUE" --arg t "$TITLE" --arg b "$BODY" \
               --arg url "https://github.com/$REPO/issues/$ISSUE" \
-              '{number: ($n|tonumber), title: $t, url: $url}')
+              '{number: ($n|tonumber), title: $t, url: $url, body: $b}')
           fi
 
           # Schema must match `qa-build.yml`'s entry shape — the
@@ -578,6 +583,7 @@ jobs:
             echo "| IPA | https://${HOST}/qa/ios/${VERSION}/OnymIOS.ipa |"
             echo "| Manifest | https://${HOST}/qa/ios/${VERSION}/manifest.plist |"
             echo "| Install (UDID-registered iPhone) | \`itms-services://?action=download-manifest&url=https://${HOST}/qa/ios/${VERSION}/manifest.plist\` |"
+            echo "| Build details | https://${HOST}/qa/build/?platform=ios&version=${VERSION} |"
             echo "| Dashboard | https://${HOST}/qa/?platform=ios |"
             echo
             echo "Tester device must be UDID-registered to the team ad-hoc provisioning profile -- otherwise install fails."
@@ -598,7 +604,7 @@ jobs:
           QA build \`${VERSION}\` published to the dashboard.
 
           - Install on a UDID-registered iPhone: \`itms-services://?action=download-manifest&url=https://${HOST}/qa/ios/${VERSION}/manifest.plist\`
-          - Dashboard: https://${HOST}/qa/?platform=ios
+          - Build details (test plan, install, metadata): https://${HOST}/qa/build/?platform=ios&version=${VERSION}
           - IPA: https://${HOST}/qa/ios/${VERSION}/OnymIOS.ipa
           MSG
           if ! gh issue comment "$ISSUE" --repo "$REPO" --body-file "$BODY_FILE"; then
