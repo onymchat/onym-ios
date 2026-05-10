@@ -8,11 +8,11 @@ import SwiftUI
 struct IdentitiesView: View {
     @Bindable var flow: IdentitiesFlow
     @State private var showAddSheet = false
-    /// Sum of measured row heights, fed by `IdentityRowsHeightKey`.
-    /// Starts at 0; replaced by the actual rendered total on the first
-    /// layout pass — this is what lets the List grow with Dynamic Type
-    /// instead of clipping at a fixed row count × 64pt.
-    @State private var measuredRowsHeight: CGFloat = 0
+    /// Per-row height, scaled with Dynamic Type via `UIFontMetrics`.
+    /// 64 is the baseline at default size (matches `SettingsRow`'s
+    /// padding + dual-line label); AX1+/XL settings scale it up
+    /// automatically so the inner List frame grows in step.
+    @ScaledMetric private var rowHeight: CGFloat = 64
 
     var body: some View {
         ScrollView {
@@ -77,14 +77,9 @@ struct IdentitiesView: View {
     /// swipe-to-Remove, so the rows live inside a `List` with system
     /// chrome suppressed: `.listStyle(.plain)`, transparent
     /// `scrollContentBackground`, hidden separators (we draw our own),
-    /// and `.scrollDisabled` + a measured frame so the outer
-    /// `ScrollView` still drives scrolling.
-    ///
-    /// Row height is measured via `IdentityRowsHeightKey` (each row
-    /// publishes its rendered height through a hidden `GeometryReader`,
-    /// the parent sums them) so the frame grows with Dynamic Type /
-    /// AX1+ sizes — matching the natural growth `SettingsCard`'s VStack
-    /// would otherwise give.
+    /// and `.scrollDisabled` + a `rowHeight × count` frame so the outer
+    /// `ScrollView` still drives scrolling. `rowHeight` is `@ScaledMetric`
+    /// so the frame grows with Dynamic Type / AX1+ sizes.
     @ViewBuilder
     private var identitiesList: some View {
         let summaries = flow.identities
@@ -121,7 +116,6 @@ struct IdentitiesView: View {
                         }
                     }
                     .buttonStyle(.plain)
-                    .background(rowHeightProbe)
                     .accessibilityIdentifier("identities.row.\(summary.id)")
                     .swipeActions(edge: .trailing) {
                         Button(role: .destructive) {
@@ -145,47 +139,10 @@ struct IdentitiesView: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .scrollDisabled(true)
-            // Two-floor frame: the per-count estimate is the baseline,
-            // so growing the list (e.g. Add Identity) gets enough room
-            // immediately even if the previous measurement reflected a
-            // smaller row count. The measured value only kicks in when
-            // it exceeds the estimate — i.e. at AX1+ where SettingsRow
-            // wraps to a taller layout. Cheaper than invalidating the
-            // measurement on count change and avoids a flicker.
-            .frame(height: max(CGFloat(summaries.count) * estimatedRowHeight,
-                               measuredRowsHeight))
-            .onPreferenceChange(IdentityRowsHeightKey.self) { measuredRowsHeight = $0 }
+            .frame(height: CGFloat(summaries.count) * rowHeight)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .padding(.horizontal, 16)
         }
-    }
-
-    /// First-paint estimate before rows publish their measured height.
-    /// Tuned to the default Dynamic Type size; AX1+ rows are taller and
-    /// will trigger a single re-layout pass via `onPreferenceChange`.
-    private var estimatedRowHeight: CGFloat { 64 }
-
-    /// Hidden GeometryReader that publishes a row's rendered height
-    /// into `IdentityRowsHeightKey`. Stays as `.background` so it
-    /// participates in layout without affecting the row's intrinsic
-    /// size or hit-testing.
-    private var rowHeightProbe: some View {
-        GeometryReader { proxy in
-            Color.clear
-                .preference(key: IdentityRowsHeightKey.self,
-                            value: proxy.size.height)
-        }
-    }
-}
-
-/// Sum-reducing preference key: each identity row contributes its
-/// rendered height; the parent reads the total via
-/// `onPreferenceChange` and resizes the embedded List frame to match.
-/// Mirrors what `SettingsCard`'s VStack does intrinsically.
-private struct IdentityRowsHeightKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value += nextValue()
     }
 }
 
