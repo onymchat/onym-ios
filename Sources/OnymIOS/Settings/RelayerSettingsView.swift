@@ -64,6 +64,10 @@ struct RelayerSettingsView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("relayer.strategy.\(s.rawValue)")
+                    // Plain Buttons don't expose `.isSelected` like a
+                    // SwiftUI `Picker` would — XCUI's `isSelected` reads
+                    // this trait, so set it on the active segment.
+                    .accessibilityAddTraits(current == s ? .isSelected : [])
                 }
             }
             .padding(2)

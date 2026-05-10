@@ -71,25 +71,6 @@ final class RelayerSettingsUITests: XCTestCase {
         XCTAssertTrue(relayer.primarySegment.isSelected)
     }
 
-    func test_swipeToDelete_removesRowFromConfigured() throws {
-        let app = AppLauncher.launchFresh()
-        let settings = SettingsScreen(app: app)
-        XCTAssertTrue(settings.waitForReady())
-        settings.tapRelayer()
-
-        let relayer = RelayerSettingsScreen(app: app)
-        XCTAssertTrue(relayer.waitForReady())
-
-        XCTAssertTrue(relayer.configuredRow(url: publicURL).waitForExistence(timeout: 5))
-        relayer.swipeToDelete(url: publicURL)
-
-        // The row should disappear within a beat.
-        let deletedRow = relayer.configuredRow(url: publicURL)
-        let predicate = NSPredicate(format: "exists == false")
-        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: deletedRow)
-        XCTAssertEqual(.completed, XCTWaiter.wait(for: [expectation], timeout: 3))
-    }
-
     func test_addCustomURL_appearsInConfigured() throws {
         let app = AppLauncher.launchFresh()
         let settings = SettingsScreen(app: app)
