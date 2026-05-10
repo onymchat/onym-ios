@@ -28,6 +28,9 @@ final class RecoveryPhraseBackupUITests: XCTestCase {
 
     // MARK: - Happy path
 
+    /// Full happy path: open Backup → tap Reveal → see a 12-word phrase →
+    /// answer all three verification rounds correctly → land on the Done
+    /// screen.
     func test_happyPath_endToEnd() {
         let app = AppLauncher.launchFresh(language: "en")
         defer { app.terminate() }
@@ -63,6 +66,9 @@ final class RecoveryPhraseBackupUITests: XCTestCase {
 
     // MARK: - Wrong word
 
+    /// Picking a wrong word during verification keeps the user on the
+    /// same round and surfaces the inline error message — no silent
+    /// advance, no false-positive completion.
     func test_wrongWordPicked_keepsRound_andShowsError() {
         let app = AppLauncher.launchFresh(language: "en")
         defer { app.terminate() }
@@ -88,6 +94,9 @@ final class RecoveryPhraseBackupUITests: XCTestCase {
 
     // MARK: - Russian locale
 
+    /// Launching with `language: "ru"` renders Russian copy on Settings
+    /// (nav title + Backup row) and on the recovery-phrase Intro screen —
+    /// confirms the localized catalog wires through end to end.
     func test_russianLocale_rendersRussianStrings() {
         let app = AppLauncher.launchFresh(language: "ru")
         defer { app.terminate() }
@@ -117,6 +126,9 @@ final class RecoveryPhraseBackupUITests: XCTestCase {
 
     // MARK: - Fresh launch
 
+    /// A fresh-keychain launch generates a valid 12-word phrase: every
+    /// word is non-empty, all-lowercase letters, and the phrase has at
+    /// least 6 unique words (a sanity guard against a stuck/zeroed seed).
     func test_freshLaunch_generates12WordPhrase() {
         let app = AppLauncher.launchFresh(language: "en")
         defer { app.terminate() }

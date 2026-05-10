@@ -28,8 +28,12 @@ import sys
 START = "<!-- UI_TESTS_START -->"
 END = "<!-- UI_TESTS_END -->"
 
-# Match `- [ ] <FQN>` or `- [x] <FQN>` and capture the box state + FQN.
-LINE_RE = re.compile(r"^(?P<prefix>\s*-\s*\[)(?P<box>[ xX])(?P<mid>\]\s+)(?P<fqn>\S+)\s*$")
+# Match `- [ ] <FQN>` (with optional trailing ` — <description>` that
+# `discover_tests.py` may append). Capture box + FQN; preserve `rest`
+# verbatim on rewrite so the description survives box-flipping.
+LINE_RE = re.compile(
+    r"^(?P<prefix>\s*-\s*\[)(?P<box>[ xX])(?P<mid>\]\s+)(?P<fqn>\S+)(?P<rest>.*)$"
+)
 
 
 def rewrite_section(section: str, results: dict[str, str]) -> str:
@@ -47,7 +51,7 @@ def rewrite_section(section: str, results: dict[str, str]) -> str:
             box = " "
         else:
             box = m.group("box")  # leave as-is
-        out_lines.append(f"{m.group('prefix')}{box}{m.group('mid')}{fqn}")
+        out_lines.append(f"{m.group('prefix')}{box}{m.group('mid')}{fqn}{m.group('rest')}")
     return "\n".join(out_lines) + ("\n" if section.endswith("\n") else "")
 
 

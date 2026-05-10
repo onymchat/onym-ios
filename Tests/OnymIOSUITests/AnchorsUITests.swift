@@ -6,6 +6,8 @@ import XCTest
 /// and Testnet drilling-down works for every governance type.
 final class AnchorsUITests: XCTestCase {
 
+    /// When the manifest publishes no Mainnet contracts, the Mainnet row
+    /// renders disabled (no NavigationLink) while Testnet stays tappable.
     func test_mainnet_isDisabled_whenNoContractsPublished() throws {
         let app = AppLauncher.launchFresh()
         let settings = SettingsScreen(app: app)

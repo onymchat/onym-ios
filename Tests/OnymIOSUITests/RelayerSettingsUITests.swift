@@ -19,6 +19,9 @@ final class RelayerSettingsUITests: XCTestCase {
 
     // MARK: - first launch
 
+    /// On a clean first launch, the Configured-relayers list pre-populates
+    /// from the published manifest fixture (testnet + mainnet rows visible
+    /// without any user action).
     func test_firstLaunch_configuredListAutoPopulatedFromManifest() throws {
         let app = AppLauncher.launchFresh()
         let settings = SettingsScreen(app: app)
@@ -34,6 +37,8 @@ final class RelayerSettingsUITests: XCTestCase {
                       "first launch should auto-populate the mainnet fixture too")
     }
 
+    /// On a clean first launch, the relayer-selection strategy defaults to
+    /// Random — the segmented control's "Random" segment is the selected one.
     func test_firstLaunch_strategyDefaultsToRandom() throws {
         let app = AppLauncher.launchFresh()
         let settings = SettingsScreen(app: app)
@@ -50,6 +55,9 @@ final class RelayerSettingsUITests: XCTestCase {
 
     // MARK: - mutators
 
+    /// Tapping a row's star to mark it primary, then switching the strategy
+    /// segment from Random to Primary, persists through the UI: the Primary
+    /// segment is the selected one when the dust settles.
     func test_setPrimary_thenSwitchToPrimary_persistsViaUI() throws {
         let app = AppLauncher.launchFresh()
         let settings = SettingsScreen(app: app)
@@ -71,6 +79,8 @@ final class RelayerSettingsUITests: XCTestCase {
         XCTAssertTrue(relayer.primarySegment.isSelected)
     }
 
+    /// Typing a URL into the custom-relayer field and tapping Add makes
+    /// the new row appear in the Configured list.
     func test_addCustomURL_appearsInConfigured() throws {
         let app = AppLauncher.launchFresh()
         let settings = SettingsScreen(app: app)
