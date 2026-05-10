@@ -16,51 +16,7 @@ struct IdentitiesView: View {
                 SettingsFootnote("Tap an identity to open it. Each identity has its own keys, chats, and recovery phrase.")
 
                 SettingsSectionLabel("YOUR IDENTITIES")
-                SettingsCard {
-                    let summaries = flow.identities
-                    ForEach(Array(summaries.enumerated()), id: \.element.id) { idx, summary in
-                        NavigationLink {
-                            IdentityDetailView(flow: flow, summary: summary)
-                        } label: {
-                            SettingsRow(
-                                title: LocalizedStringKey(summary.name),
-                                subtitle: "BLS \(flow.blsPrefix(of: summary))…",
-                                subtitleMono: true,
-                                inset: 68,
-                                last: idx == summaries.count - 1
-                            ) {
-                                IdentityRingTile(active: summary.id == flow.currentID, size: 40)
-                            } right: {
-                                if summary.id == flow.currentID {
-                                    Text("Active")
-                                        .font(.system(size: 11, weight: .semibold))
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 3)
-                                        .background(OnymTokens.green.opacity(0.18),
-                                                    in: Capsule())
-                                        .foregroundStyle(OnymTokens.green)
-                                        .accessibilityIdentifier("identities.active_badge.\(summary.id)")
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("identities.row.\(summary.id)")
-                        .swipeActions(edge: .trailing) {
-                            Button(role: .destructive) {
-                                flow.startRemoval(of: summary)
-                            } label: {
-                                Label("Remove", systemImage: "trash")
-                            }
-                        }
-                        .contextMenu {
-                            Button(role: .destructive) {
-                                flow.startRemoval(of: summary)
-                            } label: {
-                                Label("Remove", systemImage: "trash")
-                            }
-                        }
-                    }
-                }
+                identitiesList
 
                 Button {
                     showAddSheet = true
@@ -106,6 +62,74 @@ struct IdentitiesView: View {
                 RemoveIdentitySheet(flow: flow, summary: summary)
             }
         }
+    }
+
+    // MARK: - Identities list
+
+    /// SwiftUI `.swipeActions` is a List-only modifier — applying it to a
+    /// `VStack`/`SettingsCard` row is silently inert. We want both the
+    /// SettingsCard look (rounded card, custom hairlines) and native
+    /// swipe-to-Remove, so the rows live inside a `List` with system
+    /// chrome suppressed: `.listStyle(.plain)`, transparent
+    /// `scrollContentBackground`, hidden separators (we draw our own),
+    /// and `.scrollDisabled` + a measured frame so the outer
+    /// `ScrollView` still drives scrolling.
+    private var identitiesList: some View {
+        let summaries = flow.identities
+        let rowHeight: CGFloat = 64  // matches SettingsRow padding + dual-line label
+        return List {
+            ForEach(Array(summaries.enumerated()), id: \.element.id) { idx, summary in
+                NavigationLink {
+                    IdentityDetailView(flow: flow, summary: summary)
+                } label: {
+                    SettingsRow(
+                        title: LocalizedStringKey(summary.name),
+                        subtitle: "BLS \(flow.blsPrefix(of: summary))…",
+                        subtitleMono: true,
+                        inset: 68,
+                        last: idx == summaries.count - 1
+                    ) {
+                        IdentityRingTile(active: summary.id == flow.currentID, size: 40)
+                    } right: {
+                        if summary.id == flow.currentID {
+                            Text("Active")
+                                .font(.system(size: 11, weight: .semibold))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(OnymTokens.green.opacity(0.18),
+                                            in: Capsule())
+                                .foregroundStyle(OnymTokens.green)
+                                .accessibilityIdentifier("identities.active_badge.\(summary.id)")
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("identities.row.\(summary.id)")
+                .swipeActions(edge: .trailing) {
+                    Button(role: .destructive) {
+                        flow.startRemoval(of: summary)
+                    } label: {
+                        Label("Remove", systemImage: "trash")
+                    }
+                }
+                .contextMenu {
+                    Button(role: .destructive) {
+                        flow.startRemoval(of: summary)
+                    } label: {
+                        Label("Remove", systemImage: "trash")
+                    }
+                }
+                .listRowBackground(OnymTokens.surface2)
+                .listRowInsets(EdgeInsets())
+                .listRowSeparator(.hidden)
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .scrollDisabled(true)
+        .frame(height: max(rowHeight, CGFloat(summaries.count) * rowHeight))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(.horizontal, 16)
     }
 }
 
