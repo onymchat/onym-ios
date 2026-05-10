@@ -8,6 +8,11 @@ import SwiftUI
 struct IdentitiesView: View {
     @Bindable var flow: IdentitiesFlow
     @State private var showAddSheet = false
+    /// Per-row height, scaled with Dynamic Type via `UIFontMetrics`.
+    /// 64 is the baseline at default size (matches `SettingsRow`'s
+    /// padding + dual-line label); AX1+/XL settings scale it up
+    /// automatically so the inner List frame grows in step.
+    @ScaledMetric private var rowHeight: CGFloat = 64
 
     var body: some View {
         ScrollView {
@@ -16,51 +21,7 @@ struct IdentitiesView: View {
                 SettingsFootnote("Tap an identity to open it. Each identity has its own keys, chats, and recovery phrase.")
 
                 SettingsSectionLabel("YOUR IDENTITIES")
-                SettingsCard {
-                    let summaries = flow.identities
-                    ForEach(Array(summaries.enumerated()), id: \.element.id) { idx, summary in
-                        NavigationLink {
-                            IdentityDetailView(flow: flow, summary: summary)
-                        } label: {
-                            SettingsRow(
-                                title: LocalizedStringKey(summary.name),
-                                subtitle: "BLS \(flow.blsPrefix(of: summary))…",
-                                subtitleMono: true,
-                                inset: 68,
-                                last: idx == summaries.count - 1
-                            ) {
-                                IdentityRingTile(active: summary.id == flow.currentID, size: 40)
-                            } right: {
-                                if summary.id == flow.currentID {
-                                    Text("Active")
-                                        .font(.system(size: 11, weight: .semibold))
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 3)
-                                        .background(OnymTokens.green.opacity(0.18),
-                                                    in: Capsule())
-                                        .foregroundStyle(OnymTokens.green)
-                                        .accessibilityIdentifier("identities.active_badge.\(summary.id)")
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("identities.row.\(summary.id)")
-                        .swipeActions(edge: .trailing) {
-                            Button(role: .destructive) {
-                                flow.startRemoval(of: summary)
-                            } label: {
-                                Label("Remove", systemImage: "trash")
-                            }
-                        }
-                        .contextMenu {
-                            Button(role: .destructive) {
-                                flow.startRemoval(of: summary)
-                            } label: {
-                                Label("Remove", systemImage: "trash")
-                            }
-                        }
-                    }
-                }
+                identitiesList
 
                 Button {
                     showAddSheet = true
@@ -105,6 +66,82 @@ struct IdentitiesView: View {
             if let summary = flow.pendingRemoval {
                 RemoveIdentitySheet(flow: flow, summary: summary)
             }
+        }
+    }
+
+    // MARK: - Identities list
+
+    /// SwiftUI `.swipeActions` is a List-only modifier — applying it to a
+    /// `VStack`/`SettingsCard` row is silently inert. We want both the
+    /// SettingsCard look (rounded card, custom hairlines) and native
+    /// swipe-to-Remove, so the rows live inside a `List` with system
+    /// chrome suppressed: `.listStyle(.plain)`, transparent
+    /// `scrollContentBackground`, hidden separators (we draw our own),
+    /// and `.scrollDisabled` + a `rowHeight × count` frame so the outer
+    /// `ScrollView` still drives scrolling. `rowHeight` is `@ScaledMetric`
+    /// so the frame grows with Dynamic Type / AX1+ sizes.
+    @ViewBuilder
+    private var identitiesList: some View {
+        let summaries = flow.identities
+        if summaries.isEmpty {
+            // Avoid reserving a phantom row strip when the list is empty.
+            // Today bootstrapping guarantees ≥1 identity, but the empty
+            // branch keeps the layout honest if that ever loosens.
+            EmptyView()
+        } else {
+            List {
+                ForEach(Array(summaries.enumerated()), id: \.element.id) { idx, summary in
+                    NavigationLink {
+                        IdentityDetailView(flow: flow, summary: summary)
+                    } label: {
+                        SettingsRow(
+                            title: LocalizedStringKey(summary.name),
+                            subtitle: "BLS \(flow.blsPrefix(of: summary))…",
+                            subtitleMono: true,
+                            inset: 68,
+                            last: idx == summaries.count - 1
+                        ) {
+                            IdentityRingTile(active: summary.id == flow.currentID, size: 40)
+                        } right: {
+                            if summary.id == flow.currentID {
+                                Text("Active")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(OnymTokens.green.opacity(0.18),
+                                                in: Capsule())
+                                    .foregroundStyle(OnymTokens.green)
+                                    .accessibilityIdentifier("identities.active_badge.\(summary.id)")
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("identities.row.\(summary.id)")
+                    .swipeActions(edge: .trailing) {
+                        Button(role: .destructive) {
+                            flow.startRemoval(of: summary)
+                        } label: {
+                            Label("Remove", systemImage: "trash")
+                        }
+                    }
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            flow.startRemoval(of: summary)
+                        } label: {
+                            Label("Remove", systemImage: "trash")
+                        }
+                    }
+                    .listRowBackground(OnymTokens.surface2)
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
+                }
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .scrollDisabled(true)
+            .frame(height: CGFloat(summaries.count) * rowHeight)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(.horizontal, 16)
         }
     }
 }
