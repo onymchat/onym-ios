@@ -192,8 +192,7 @@ struct SettingsView: View {
             .padding(.bottom, 32)
         }
         .background(OnymTokens.surface.ignoresSafeArea())
-        .navigationTitle("Settings")
-        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .navigationBar)
         .task { await identitiesFlow.start() }
         .sheet(isPresented: $showRecoveryPhrase) {
             RecoveryPhraseBackupView(flow: makeBackupFlow())
