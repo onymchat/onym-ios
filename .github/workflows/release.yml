@@ -621,6 +621,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Clear stale xcresult download dirs
+        # /tmp persists across runs on the self-hosted runner, and
+        # `actions/download-artifact@v4` extracts INTO the destination
+        # path without first cleaning it. Leftover blobs from a prior
+        # run (or an entire stale `.xcresult` subdirectory) can sit
+        # alongside the fresh download, so `xcresulttool` surfaces an
+        # older test-suite payload — confirmed in run 25623336567 where
+        # `parse_xcresult.py` reported failures for `test_drilldown_…`,
+        # a test deleted in #119, even though the freshly-uploaded
+        # artifact only contained passing test names. Wipe both before
+        # the downloads so each run sees only its own bundles.
+        run: rm -rf /tmp/unit-xcresult /tmp/ui-xcresult
+
       - name: Download unit-tests xcresult
         uses: actions/download-artifact@v4
         with:
