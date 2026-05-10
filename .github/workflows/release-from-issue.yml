@@ -75,9 +75,11 @@ jobs:
               TAG="v0.0.1"
               echo "::notice::No existing v* tags; defaulting to $TAG"
             else
-              IFS='.' read -r MAJOR MINOR PATCH <<EOF
-${LATEST#v}
-EOF
+              # Here-string instead of a heredoc — a multi-line heredoc
+              # would force `EOF` to column 0, which breaks YAML's
+              # `run: |` block scalar indentation rules. `<<<` is a
+              # single-line construct safe at any column.
+              IFS='.' read -r MAJOR MINOR PATCH <<<"${LATEST#v}"
               TAG="v${MAJOR}.${MINOR}.$((PATCH + 1))"
               echo "::notice::Tag field blank; auto-bumping ${LATEST} → ${TAG}"
             fi
