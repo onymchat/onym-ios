@@ -22,23 +22,28 @@ actor KeychainIntroKeyStore: IntroKeyStore {
     static let account = "blob"
 
     private let service: String
+    private let now: @Sendable () -> Date
     /// Per-owner subscriber continuations. Mutations re-emit the
     /// filtered+sorted snapshot to every subscriber whose owner
     /// matches.
     private var continuations: [IdentityID: [UUID: AsyncStream<[IntroKeyEntry]>.Continuation]] = [:]
 
-    init(testNamespace: String? = nil) {
+    init(
+        testNamespace: String? = nil,
+        now: @escaping @Sendable () -> Date = { Date() }
+    ) {
         if let testNamespace, !testNamespace.isEmpty {
             self.service = "\(Self.serviceDefault).\(testNamespace)"
         } else {
             self.service = Self.serviceDefault
         }
+        self.now = now
     }
 
     // MARK: - IntroKeyStore
 
     func save(_ entry: IntroKeyEntry) async {
-        var current = loadAll()
+        var current = loadActive()
         // Idempotent on introPublicKey.
         current.removeAll { $0.introPub == entry.introPublicKey }
         current.append(StoredIntroKey(from: entry))
@@ -47,20 +52,20 @@ actor KeychainIntroKeyStore: IntroKeyStore {
     }
 
     func find(introPublicKey: Data) async -> IntroKeyEntry? {
-        loadAll()
+        loadActive()
             .first { $0.introPub == introPublicKey }
             .flatMap { $0.toEntry() }
     }
 
     func listForOwner(_ ownerIdentityID: IdentityID) async -> [IntroKeyEntry] {
-        loadAll()
+        loadActive()
             .filter { $0.ownerIdentityID == ownerIdentityID.rawValue.uuidString }
             .sorted { $0.createdAtMillis > $1.createdAtMillis }
             .compactMap { $0.toEntry() }
     }
 
     func revoke(introPublicKey: Data) async {
-        var current = loadAll()
+        var current = loadActive()
         let removedRows = current.filter { $0.introPub == introPublicKey }
         current.removeAll { $0.introPub == introPublicKey }
         if !removedRows.isEmpty {
@@ -72,7 +77,7 @@ actor KeychainIntroKeyStore: IntroKeyStore {
 
     @discardableResult
     func deleteForOwner(_ ownerIdentityID: IdentityID) async -> Int {
-        var current = loadAll()
+        var current = loadActive()
         let before = current.count
         current.removeAll { $0.ownerIdentityID == ownerIdentityID.rawValue.uuidString }
         let removed = before - current.count
@@ -111,11 +116,40 @@ actor KeychainIntroKeyStore: IntroKeyStore {
 
     private func publish(forOwner owner: IdentityID) {
         guard let bucket = continuations[owner] else { return }
-        let snapshot = loadAll()
+        let snapshot = loadActive()
             .filter { $0.ownerIdentityID == owner.rawValue.uuidString }
             .sorted { $0.createdAtMillis > $1.createdAtMillis }
             .compactMap { $0.toEntry() }
         for cont in bucket.values { cont.yield(snapshot) }
+    }
+
+    /// Load the blob, drop rows older than `IntroKeyEntry.lifetime`,
+    /// and rewrite if anything was pruned. Every read funnels through
+    /// here so expired keys are invisible to callers and the blob
+    /// stays bounded without a background timer. Owners with at
+    /// least one pruned row get a stream re-emit so the
+    /// `IntroInboxPump` can cancel their relayer subscriptions.
+    private func loadActive() -> [StoredIntroKey] {
+        let all = loadAll()
+        let cutoffMillis = Int64(now().timeIntervalSince1970 * 1000)
+            - Int64(IntroKeyEntry.lifetime * 1000)
+        let active = all.filter { $0.createdAtMillis > cutoffMillis }
+        if active.count != all.count {
+            writeAll(active)
+            let prunedOwners = Set(
+                all.filter { $0.createdAtMillis <= cutoffMillis }
+                    .compactMap { IdentityID($0.ownerIdentityID) }
+            )
+            for owner in prunedOwners {
+                guard let bucket = continuations[owner] else { continue }
+                let snapshot = active
+                    .filter { $0.ownerIdentityID == owner.rawValue.uuidString }
+                    .sorted { $0.createdAtMillis > $1.createdAtMillis }
+                    .compactMap { $0.toEntry() }
+                for cont in bucket.values { cont.yield(snapshot) }
+            }
+        }
+        return active
     }
 
     /// Test helper — drop the blob entirely. No-op if it's already

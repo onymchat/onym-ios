@@ -127,8 +127,11 @@ final class InviteIntroducerTests: XCTestCase {
     }
 
     func test_mint_clockProvider_stampsCreatedAt() async throws {
-        let store = InMemoryIntroKeyStore()
         let frozen = Date(timeIntervalSince1970: 1_700_000_000)
+        // Sync the store's clock with the introducer's so the lazy
+        // expiry sweep doesn't drop a freshly-minted 2023-dated
+        // entry against today's wall clock (issue #111).
+        let store = InMemoryIntroKeyStore(now: { frozen })
         let introducer = InviteIntroducer(store: store, now: { frozen })
 
         let cap = try await introducer.mint(ownerIdentityID: alice, groupId: sampleGroupId)

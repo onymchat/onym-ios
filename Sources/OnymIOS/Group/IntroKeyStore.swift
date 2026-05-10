@@ -20,6 +20,12 @@ import Foundation
 /// identity cascades a `deleteForOwner` so we don't leak intro
 /// privkeys past the identity that minted them — wired in PR-3 via
 /// `IdentityRepository`'s removal listeners.
+///
+/// Time-based expiry: entries older than `IntroKeyEntry.lifetime`
+/// (24h) are treated as revoked at this boundary — `find` returns
+/// nil for them, `listForOwner` and the entries stream omit them.
+/// Implementations lazy-purge expired rows on each read so the
+/// underlying blob stays bounded without a background sweeper.
 protocol IntroKeyStore: Sendable {
     /// Persist a freshly-minted intro entry. Idempotent on
     /// `IntroKeyEntry.introPublicKey` — re-mint with the same pub
@@ -29,13 +35,15 @@ protocol IntroKeyStore: Sendable {
 
     /// Look up an entry by its public key. Returns nil when the
     /// pubkey is unknown — happens when an old entry was
-    /// `revoke`d, or when a request envelope targets a pubkey
-    /// this device never minted (probably a forged link).
+    /// `revoke`d, has aged past `IntroKeyEntry.lifetime`, or when
+    /// a request envelope targets a pubkey this device never
+    /// minted (probably a forged link).
     func find(introPublicKey: Data) async -> IntroKeyEntry?
 
-    /// Every entry minted by `ownerIdentityID`. Sorted newest
-    /// first by `IntroKeyEntry.createdAt`. UI's "Active invites"
-    /// list reads here.
+    /// Every entry minted by `ownerIdentityID` that has not aged
+    /// past `IntroKeyEntry.lifetime`. Sorted newest first by
+    /// `IntroKeyEntry.createdAt`. UI's "Active invites" list reads
+    /// here.
     func listForOwner(_ ownerIdentityID: IdentityID) async -> [IntroKeyEntry]
 
     /// Single-entry deletion. Called after a request is accepted +

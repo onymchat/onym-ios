@@ -15,9 +15,17 @@ import Foundation
 /// - `groupId` is the on-chain `group_id` the invite is for —
 ///   needed when the inviter's app surfaces "Bob wants to join
 ///   <group>?" so it can render the group's name.
-/// - `createdAt` drives optional expiration UI (later PRs may
-///   prune invites older than N days).
+/// - `createdAt` drives time-based expiry. Entries older than
+///   `IntroKeyEntry.lifetime` are treated as revoked at the
+///   `IntroKeyStore` boundary (`find` returns nil, `listForOwner`
+///   and the entries stream omit them) and lazily purged on the
+///   next read.
 struct IntroKeyEntry: Equatable, Sendable {
+    /// How long an invite link is honored after minting. Issue #111:
+    /// rotate every 24 hours to shrink the leak window of a forwarded
+    /// or screenshotted link.
+    static let lifetime: TimeInterval = 24 * 60 * 60
+
     let introPublicKey: Data
     let introPrivateKey: Data
     let ownerIdentityID: IdentityID
@@ -42,5 +50,9 @@ struct IntroKeyEntry: Equatable, Sendable {
         self.ownerIdentityID = ownerIdentityID
         self.groupId = groupId
         self.createdAt = createdAt
+    }
+
+    func isExpired(at instant: Date, lifetime: TimeInterval = IntroKeyEntry.lifetime) -> Bool {
+        instant.timeIntervalSince(createdAt) >= lifetime
     }
 }

@@ -9,23 +9,31 @@ import Foundation
 actor InMemoryIntroKeyStore: IntroKeyStore {
 
     private var entries: [IntroKeyEntry] = []
+    private let now: @Sendable () -> Date
     /// Per-owner subscriber continuations. Mutations re-emit the
     /// filtered+sorted snapshot to every subscriber whose owner
     /// matches.
     private var continuations: [IdentityID: [UUID: AsyncStream<[IntroKeyEntry]>.Continuation]] = [:]
 
+    init(now: @escaping @Sendable () -> Date = { Date() }) {
+        self.now = now
+    }
+
     func save(_ entry: IntroKeyEntry) async {
+        purgeExpired()
         entries.removeAll { $0.introPublicKey == entry.introPublicKey }
         entries.append(entry)
         publish(forOwner: entry.ownerIdentityID)
     }
 
     func find(introPublicKey: Data) async -> IntroKeyEntry? {
-        entries.first { $0.introPublicKey == introPublicKey }
+        purgeExpired()
+        return entries.first { $0.introPublicKey == introPublicKey }
     }
 
     func listForOwner(_ ownerIdentityID: IdentityID) async -> [IntroKeyEntry] {
-        snapshotForOwner(ownerIdentityID)
+        purgeExpired()
+        return snapshotForOwner(ownerIdentityID)
     }
 
     func revoke(introPublicKey: Data) async {
@@ -60,6 +68,7 @@ actor InMemoryIntroKeyStore: IntroKeyStore {
         id: UUID,
         continuation: AsyncStream<[IntroKeyEntry]>.Continuation
     ) {
+        purgeExpired()
         continuations[owner, default: [:]][id] = continuation
         continuation.yield(snapshotForOwner(owner))
     }
@@ -81,5 +90,19 @@ actor InMemoryIntroKeyStore: IntroKeyStore {
         entries
             .filter { $0.ownerIdentityID == owner }
             .sorted { $0.createdAt > $1.createdAt }
+    }
+
+    /// Drop entries whose `createdAt` is older than
+    /// `IntroKeyEntry.lifetime` relative to the injected clock and
+    /// re-emit per affected owner so the `IntroInboxPump` reconciler
+    /// can cancel relayer subscriptions for expired slots.
+    private func purgeExpired() {
+        let instant = now()
+        let prunedOwners = Set(
+            entries.filter { $0.isExpired(at: instant) }.map(\.ownerIdentityID)
+        )
+        guard !prunedOwners.isEmpty else { return }
+        entries.removeAll { $0.isExpired(at: instant) }
+        for owner in prunedOwners { publish(forOwner: owner) }
     }
 }
