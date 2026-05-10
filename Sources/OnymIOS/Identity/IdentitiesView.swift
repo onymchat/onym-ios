@@ -26,25 +26,26 @@ struct IdentitiesView: View {
                 Button {
                     showAddSheet = true
                 } label: {
-                    HStack(spacing: 10) {
-                        Circle().fill(OnymAccent.blue.color).frame(width: 22, height: 22)
-                            .overlay(Image(systemName: "plus")
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundStyle(OnymTokens.onAccent))
-                        Text("Add Identity")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(OnymAccent.blue.color)
-                        Spacer()
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 13)
-                    .background(OnymTokens.surface2,
-                                in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .padding(.horizontal, 16)
-                    .padding(.top, 12)
+                    actionCardLabel(
+                        title: "Add Identity",
+                        symbol: "plus",
+                        tint: OnymAccent.blue.color
+                    )
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("identities.add_button")
+
+                NavigationLink {
+                    RestoreIdentityView(flow: flow)
+                } label: {
+                    actionCardLabel(
+                        title: "Restore from recovery phrase",
+                        symbol: "arrow.counterclockwise",
+                        tint: OnymTokens.green
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("identities.restore_button")
 
                 SettingsFootnote("Only the active identity’s chats are visible. Switch between identities to see different inboxes.")
             }
@@ -67,6 +68,35 @@ struct IdentitiesView: View {
                 RemoveIdentitySheet(flow: flow, summary: summary)
             }
         }
+    }
+
+    // MARK: - Action card label
+
+    /// Shared row chrome for the "Add Identity" / "Restore from recovery
+    /// phrase" cards. Same shape as the prior inline "Add Identity"
+    /// button — coloured circular badge, label, full-width SettingsCard
+    /// surface — so the two cards stack as visual siblings.
+    private func actionCardLabel(
+        title: LocalizedStringKey,
+        symbol: String,
+        tint: Color
+    ) -> some View {
+        HStack(spacing: 10) {
+            Circle().fill(tint).frame(width: 22, height: 22)
+                .overlay(Image(systemName: symbol)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(OnymTokens.onAccent))
+            Text(title)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(tint)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 13)
+        .background(OnymTokens.surface2,
+                    in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
     }
 
     // MARK: - Identities list
@@ -173,22 +203,7 @@ private struct AddIdentitySheet: View {
                             .padding(.vertical, 12)
                             .accessibilityIdentifier("add_identity.name_field")
                     }
-                    SettingsFootnote("Defaults to “Identity N” if left blank.")
-
-                    SettingsSectionLabel("RESTORE FROM RECOVERY PHRASE")
-                    SettingsCard {
-                        TextEditor(text: $flow.pendingMnemonic)
-                            .frame(minHeight: 96)
-                            .font(.system(size: 15, design: .monospaced))
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                            .scrollContentBackground(.hidden)
-                            .background(Color.clear)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .accessibilityIdentifier("add_identity.mnemonic_field")
-                    }
-                    SettingsFootnote("Leave blank to mint a fresh BIP-39 identity. Paste a 12 or 24-word phrase to restore.")
+                    SettingsFootnote("Defaults to “Identity N” if left blank. To bring back an existing identity, use “Restore from recovery phrase” instead.")
 
                     if let error = flow.addError {
                         Text(error)

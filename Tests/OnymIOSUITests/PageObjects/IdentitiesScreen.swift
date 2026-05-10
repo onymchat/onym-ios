@@ -15,6 +15,11 @@ struct IdentitiesScreen {
         firstMatching("identities.add_button")
     }
 
+    /// Sibling action card that pushes `RestoreIdentityView` (issue #99).
+    var restoreButton: XCUIElement {
+        firstMatching("identities.restore_button")
+    }
+
     /// Row for the identity whose summary `id` (an UUID string)
     /// matches. Identifier shape: `identities.row.<UUID>`.
     func row(forID idString: String) -> XCUIElement {
@@ -83,6 +88,38 @@ struct IdentitiesScreen {
         XCTAssertTrue(addSubmitButton.waitForExistence(timeout: 5),
                       "Add Identity submit button never appeared")
         addSubmitButton.tap()
+    }
+
+    // MARK: - Restore Identity screen (issue #99)
+
+    var restorePhraseField: XCUIElement {
+        // SwiftUI's TextEditor renders as a textView in XCUI.
+        app.textViews["restore_identity.phrase_field"]
+    }
+    var restoreAliasField: XCUIElement {
+        app.textFields["restore_identity.alias_field"]
+    }
+    var restoreSubmitButton: XCUIElement {
+        firstMatching("restore_identity.submit_button")
+    }
+    var restoreHintValid: XCUIElement {
+        app.staticTexts["restore_identity.hint_valid"]
+    }
+    var restoreHintInvalid: XCUIElement {
+        app.staticTexts["restore_identity.hint_invalid"]
+    }
+
+    func tapRestore() {
+        XCTAssertTrue(restoreButton.waitForExistence(timeout: 5),
+                      "Restore from recovery phrase button never appeared")
+        restoreButton.tap()
+    }
+
+    func typeRestorePhrase(_ phrase: String) {
+        XCTAssertTrue(restorePhraseField.waitForExistence(timeout: 5),
+                      "Restore phrase field never appeared")
+        restorePhraseField.tap()
+        restorePhraseField.typeText(phrase)
     }
 
     // MARK: - Remove Identity confirm sheet

@@ -29,6 +29,27 @@ final class IdentitiesFlow {
     /// mnemonic or repository failures.
     var addError: String?
 
+    // MARK: - Restore-flow state
+
+    /// Bound to `RestoreIdentityView`'s phrase TextEditor. Live-validated
+    /// against the BIP39 wordlist + checksum (`Bip39.isValidMnemonic`)
+    /// so the Restore button only enables when the phrase is genuinely
+    /// recoverable, not just 12-words-ish.
+    var restorePhrase: String = ""
+    /// Bound to `RestoreIdentityView`'s optional alias TextField. Blank
+    /// → repository assigns "Identity N" via the standard slot fallback.
+    var restoreAlias: String = ""
+    /// Inline error shown beneath the restore form on repository failure.
+    var restoreError: String?
+
+    /// True when `restorePhrase` parses as a valid BIP39 phrase. Drives
+    /// the green/red hint and the Restore button's `.disabled` state.
+    var restoreIsValid: Bool {
+        let trimmed = restorePhrase.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        return Bip39.isValidMnemonic(trimmed)
+    }
+
     // MARK: - Remove-flow state
 
     /// The identity currently being confirmed for removal, if any.
@@ -123,6 +144,49 @@ final class IdentitiesFlow {
         pendingName = ""
         pendingMnemonic = ""
         addError = nil
+    }
+
+    // MARK: - Restore
+
+    /// Restore an identity from `restorePhrase` and add it alongside any
+    /// existing identities (no wipe — that's what `IdentityRepository.restore`
+    /// does, which is a different surface). The new identity becomes the
+    /// active selection so the user can immediately use it after a
+    /// reinstall / device migration.
+    ///
+    /// Returns `true` on success so the view can pop. On failure leaves
+    /// `restoreError` populated and the form intact.
+    @discardableResult
+    func submitRestore() async -> Bool {
+        let phrase = restorePhrase.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard Bip39.isValidMnemonic(phrase) else {
+            restoreError = "Invalid phrase"
+            return false
+        }
+        let alias = restoreAlias
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nonEmptyOrNil
+        do {
+            let id = try await repository.add(name: alias, mnemonic: phrase)
+            try? await repository.select(id)
+            restorePhrase = ""
+            restoreAlias = ""
+            restoreError = nil
+            return true
+        } catch IdentityError.invalidMnemonic {
+            restoreError = "Invalid phrase"
+            return false
+        } catch {
+            restoreError = String(describing: error)
+            return false
+        }
+    }
+
+    /// Cancel the Restore screen. Clears the pending state.
+    func cancelRestore() {
+        restorePhrase = ""
+        restoreAlias = ""
+        restoreError = nil
     }
 
     // MARK: - Remove

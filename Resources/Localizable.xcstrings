@@ -451,6 +451,198 @@
         }
       }
     },
+    "Alias (optional)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alias (optional)"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Псевдоним (необязательно)"
+          }
+        }
+      }
+    },
+    "ALIAS (OPTIONAL)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ALIAS (OPTIONAL)"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ПСЕВДОНИМ (НЕОБЯЗАТЕЛЬНО)"
+          }
+        }
+      }
+    },
+    "Defaults to “Identity N” if left blank." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Defaults to “Identity N” if left blank."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "По умолчанию «Личность N», если поле пустое."
+          }
+        }
+      }
+    },
+    "Defaults to “Identity N” if left blank. To bring back an existing identity, use “Restore from recovery phrase” instead." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Defaults to “Identity N” if left blank. To bring back an existing identity, use “Restore from recovery phrase” instead."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "По умолчанию «Личность N», если поле пустое. Чтобы вернуть существующую личность, используйте «Восстановить по фразе»."
+          }
+        }
+      }
+    },
+    "Enter your 12 or 24-word recovery phrase." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enter your 12 or 24-word recovery phrase."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Введите 12- или 24-словную фразу восстановления."
+          }
+        }
+      }
+    },
+    "Import an existing identity using your 12 or 24-word recovery phrase. The restored identity is added alongside your current ones." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import an existing identity using your 12 or 24-word recovery phrase. The restored identity is added alongside your current ones."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Импортируйте существующую личность по 12- или 24-словной фразе. Восстановленная личность добавится рядом с текущими."
+          }
+        }
+      }
+    },
+    "Invalid phrase" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Invalid phrase"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Недействительная фраза"
+          }
+        }
+      }
+    },
+    "RECOVERY PHRASE" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RECOVERY PHRASE"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ФРАЗА ВОССТАНОВЛЕНИЯ"
+          }
+        }
+      }
+    },
+    "Restore" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Restore"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Восстановить"
+          }
+        }
+      }
+    },
+    "Restore from recovery phrase" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Restore from recovery phrase"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Восстановить по фразе"
+          }
+        }
+      }
+    },
+    "Restore identity" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Restore identity"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Восстановление личности"
+          }
+        }
+      }
+    },
+    "Valid phrase" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Valid phrase"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Фраза действительна"
+          }
+        }
+      }
+    },
     "Address format invalid. Expected 56 chars starting with C." : {
       "localizations" : {
         "en" : {

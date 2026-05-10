@@ -66,6 +66,126 @@ final class IdentitiesFlowTests: XCTestCase {
         XCTAssertEqual(flow.identities.count, 1, "no identity added on failure")
     }
 
+    // MARK: - Restore (issue #99)
+
+    func test_restoreIsValid_isFalseForEmptyAndGarbage_andTrueForFreshPhrase() async throws {
+        _ = try await repo.bootstrap()
+        await flow.start()
+
+        // Empty / whitespace → not valid (also: hint stays neutral so a
+        // fresh visit isn't immediately red).
+        flow.restorePhrase = ""
+        XCTAssertFalse(flow.restoreIsValid)
+        flow.restorePhrase = "   \n  "
+        XCTAssertFalse(flow.restoreIsValid)
+
+        // Garbage with right wordcount → not valid (checksum fails).
+        flow.restorePhrase = Array(repeating: "abandon", count: 12).joined(separator: " ")
+        XCTAssertFalse(flow.restoreIsValid,
+                       "12 × 'abandon' has bad checksum and must not validate")
+
+        // Round-trip a freshly generated phrase — the canonical happy
+        // path. We can't hardcode a vector here without leaking a phrase
+        // into the repo; `Bip39.generateMnemonic()` is deterministic
+        // per-call only in shape (12 random words + valid checksum).
+        let valid = Bip39.generateMnemonic()
+        flow.restorePhrase = valid
+        XCTAssertTrue(flow.restoreIsValid,
+                      "freshly-minted BIP-39 phrase must round-trip as valid")
+    }
+
+    func test_submitRestore_validPhrase_addsAndSelectsAlongsideExisting() async throws {
+        _ = try await repo.bootstrap()
+        await flow.start()
+        XCTAssertEqual(flow.identities.count, 1)
+        let originalID = try XCTUnwrap(flow.currentID)
+
+        // Use a fresh BIP-39 phrase. After restore: there must be TWO
+        // identities (the bootstrap is preserved, NOT wiped — that's
+        // the legacy `IdentityRepository.restore` semantics, which is
+        // explicitly NOT what this flow uses), and the new one is
+        // active.
+        flow.restorePhrase = Bip39.generateMnemonic()
+        flow.restoreAlias = "Restored"
+
+        let success = await flow.submitRestore()
+        XCTAssertTrue(success, "valid phrase + repo.add must succeed")
+
+        // Stream propagation is async — wait for the identities list to
+        // catch up to the post-add state before asserting.
+        try await waitFor { await self.flow.identities.count >= 2 }
+
+        XCTAssertEqual(flow.identities.count, 2,
+                       "restore must add alongside existing identities, not wipe them")
+        let restored = try XCTUnwrap(
+            flow.identities.first(where: { $0.id != originalID })
+        )
+        XCTAssertEqual(restored.name, "Restored")
+        try await waitFor { await self.flow.currentID == restored.id }
+        XCTAssertEqual(flow.currentID, restored.id,
+                       "restored identity must become the active selection")
+
+        // Form clears on success.
+        XCTAssertTrue(flow.restorePhrase.isEmpty)
+        XCTAssertTrue(flow.restoreAlias.isEmpty)
+        XCTAssertNil(flow.restoreError)
+
+        // Bootstrap survives.
+        XCTAssertNotNil(flow.identities.first(where: { $0.id == originalID }),
+                        "bootstrapped identity must survive restore")
+    }
+
+    /// Cross-platform interop check (the issue's "BLS public key matches
+    /// the original identity's" item): the same phrase must derive the
+    /// same BLS keypair across two `submitRestore` calls. Different
+    /// IdentityIDs but identical key material.
+    func test_submitRestore_samePhrase_yieldsSameBLSKey() async throws {
+        _ = try await repo.bootstrap()
+        await flow.start()
+
+        let phrase = Bip39.generateMnemonic()
+        flow.restorePhrase = phrase
+        XCTAssertTrue(await flow.submitRestore())
+        try await waitFor { await self.flow.identities.count >= 2 }
+        let firstID = try XCTUnwrap(flow.currentID)
+        let firstBLS = try XCTUnwrap(
+            flow.identities.first(where: { $0.id == firstID })?.blsPublicKey
+        )
+
+        flow.restorePhrase = phrase
+        XCTAssertTrue(await flow.submitRestore())
+        try await waitFor { await self.flow.identities.count >= 3 }
+        try await waitFor { await self.flow.currentID != firstID }
+        let secondID = try XCTUnwrap(flow.currentID)
+        XCTAssertNotEqual(firstID, secondID, "each restore mints a fresh IdentityID")
+        let secondBLS = try XCTUnwrap(
+            flow.identities.first(where: { $0.id == secondID })?.blsPublicKey
+        )
+        XCTAssertEqual(firstBLS, secondBLS,
+                       "same phrase must derive the same BLS keypair (cross-device interop)")
+    }
+
+    func test_submitRestore_invalidPhrase_setsErrorAndDoesNotAdd() async throws {
+        _ = try await repo.bootstrap()
+        await flow.start()
+
+        flow.restorePhrase = "not a real phrase at all definitely garbage"
+        let success = await flow.submitRestore()
+        XCTAssertFalse(success)
+        XCTAssertEqual(flow.identities.count, 1, "no identity added on failure")
+        XCTAssertNotNil(flow.restoreError)
+    }
+
+    func test_cancelRestore_clearsState() async throws {
+        flow.restorePhrase = "some text"
+        flow.restoreAlias = "alice"
+        flow.restoreError = "boom"
+        flow.cancelRestore()
+        XCTAssertTrue(flow.restorePhrase.isEmpty)
+        XCTAssertTrue(flow.restoreAlias.isEmpty)
+        XCTAssertNil(flow.restoreError)
+    }
+
     // MARK: - Select
 
     func test_select_switchesCurrentID() async throws {
