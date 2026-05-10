@@ -15,14 +15,14 @@ name: Release
 #   MATCH_PASSWORD       — encryption password for the match vault
 #   RELAYER_AUTH_TOKEN   — Bearer token for the deployed relayer
 #                          (matches one of the relayer's RELAYER_AUTH_TOKENS).
-#                          Used twice: bundled into
-#                          Resources/RelayerSecrets.json at IPA build
-#                          time, AND injected into the simulator's
-#                          launchd before unit tests so
-#                          `CreateGroupTyrannyE2ETests` actually
-#                          exercises the chain instead of skipping.
-#                          If unset, the IPA still builds but relayer
-#                          calls 401, and the E2E test skips silently.
+#                          Bundled into Resources/RelayerSecrets.json at
+#                          IPA build time. If unset, the IPA still
+#                          builds but relayer calls 401.
+#                          (E2E integration tests under Tests/.../Integration/
+#                          self-skip via XCTSkip when ONYM_INTEGRATION is
+#                          not set — and CI no longer sets it. Run them
+#                          locally if needed; see the test files for
+#                          the env vars.)
 #
 # (TestFlight upload is intentionally skipped, so ASC API keys aren't needed.)
 
@@ -157,24 +157,6 @@ jobs:
           xcrun simctl bootstatus "$UDID" -b
           echo "Using simulator: $NAME ($UDID)"
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
-
-      - name: Inject E2E env into simulator
-        # Wires `CreateGroupTyrannyE2ETests` into the release pipeline:
-        # the test gates on these vars and skips silently if they're
-        # unset. xcodebuild's `TEST_RUNNER_*` and shell-level env don't
-        # reach the test process on iOS Simulator — `launchctl setenv`
-        # at the booted simulator's launchd does, because the test
-        # runner inherits from there.
-        env:
-          # Bearer token the deployed onym-relayer requires. If unset
-          # (forks, manual reruns without secrets), launchctl writes
-          # an empty value and the test skips with a clear message
-          # rather than running and 401-ing.
-          RELAYER_AUTH_TOKEN: ${{ secrets.RELAYER_AUTH_TOKEN }}
-        run: |
-          xcrun simctl spawn booted launchctl setenv ONYM_INTEGRATION 1
-          xcrun simctl spawn booted launchctl setenv ONYM_RELAYER_URL https://relayer.onym.chat
-          xcrun simctl spawn booted launchctl setenv ONYM_RELAYER_AUTH_TOKEN "$RELAYER_AUTH_TOKEN"
 
       - name: xcodebuild test (unit)
         # NOTE: do NOT pass CODE_SIGNING_ALLOWED=NO — without the synthesised

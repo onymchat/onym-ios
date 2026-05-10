@@ -59,19 +59,6 @@ struct RelayerSettingsScreen {
         segment.tap()
     }
 
-    /// Swipe left on the row at `url` to reveal the system Delete
-    /// affordance, then tap it.
-    func swipeToDelete(url: String) {
-        let row = configuredRow(url: url)
-        XCTAssertTrue(row.waitForExistence(timeout: 5),
-                      "expected a configured row for \(url) before swiping")
-        row.swipeLeft()
-        let deleteButton = app.buttons["Delete"]
-        XCTAssertTrue(deleteButton.waitForExistence(timeout: 3),
-                      "system Delete button never appeared after swipe")
-        deleteButton.tap()
-    }
-
     private func firstMatching(_ identifier: String) -> XCUIElement {
         for query in [app.buttons, app.cells, app.otherElements] {
             let element = query[identifier]
