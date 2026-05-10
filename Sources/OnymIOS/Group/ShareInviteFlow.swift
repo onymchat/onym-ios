@@ -15,13 +15,19 @@ import Observation
 /// Mirrors onym-android's `ShareInviteViewModel.kt`.
 @MainActor
 @Observable
-final class ShareInviteFlow {
+final class ShareInviteFlow: Identifiable {
     enum State: Equatable, Sendable {
         case idle
         case minting
         case ready(link: String, groupName: String?)
         case failed(reason: String)
     }
+
+    /// Drives `.sheet(item:)` from a single source of truth.
+    /// `.sheet(isPresented:)` paired with a separate optional-flow
+    /// `@State` raced on first present — the content closure read
+    /// `nil` and rendered an empty sheet (#107).
+    nonisolated var id: ObjectIdentifier { ObjectIdentifier(self) }
 
     private(set) var state: State = .idle
 
