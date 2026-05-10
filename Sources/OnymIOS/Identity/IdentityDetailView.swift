@@ -98,6 +98,12 @@ struct IdentityDetailView: View {
                 ShareKeyView(identity: summary, blsPrefix: flow.blsPrefix(of: summary))
             }
         }
+        // Pop back to the identities list once this identity is gone —
+        // the remove sheet is presented from the parent, so its dismiss
+        // alone leaves us stranded on a stale detail screen.
+        .onChange(of: flow.identities.contains(where: { $0.id == summary.id })) { _, stillExists in
+            if !stillExists { dismiss() }
+        }
     }
 
     private var hero: some View {
