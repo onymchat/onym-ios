@@ -9,8 +9,10 @@ import SwiftUI
 ///   pill — they ship in a follow-up slice.
 /// - The "Add People" screen replaces the design's Contacts list with
 ///   a paste-only invitee list (Contacts framework is out of scope).
-/// - The "Invite by Inbox Key" screen drops the Scan QR button (no
-///   camera entitlement in the MVP).
+/// - The "Invite by Inbox Key" screen offers Paste from clipboard and
+///   Scan QR code. Scanning resolves Onym invite-key URLs (legacy
+///   `?payload=…` and the cross-platform `/i?k=…` shape) into a 64-
+///   char hex inbox key, then runs the same validation as paste.
 /// - The Creating screen wires its step list to real
 ///   `CreateGroupProgress` events from the interactor.
 /// - The Success screen replaces "Open" + "Invite more" with a single
@@ -593,7 +595,7 @@ private struct CreateGroupStep2View: View {
                             Text("Invite by inbox key")
                                 .font(.system(size: 13.5, weight: .semibold))
                                 .foregroundStyle(OnymTokens.text)
-                            Text("Paste a 64-char key")
+                            Text("Paste or scan a QR")
                                 .font(.system(size: 11.5))
                                 .foregroundStyle(OnymTokens.text2)
                         }
@@ -635,6 +637,7 @@ private struct CreateGroupStep2View: View {
 private struct CreateGroupInviteByKeyView: View {
     @Bindable var flow: CreateGroupFlow
     @FocusState private var fieldFocused: Bool
+    @State private var showScanner = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -649,7 +652,11 @@ private struct CreateGroupInviteByKeyView: View {
                     if let err = flow.inviteeError {
                         errorPill(err)
                     }
-                    pasteButton
+                    HStack(spacing: 10) {
+                        pasteButton
+                        scanButton
+                    }
+                    .padding(.top, 12)
                     helper
                 }
                 .padding(.horizontal, 16)
@@ -658,6 +665,16 @@ private struct CreateGroupInviteByKeyView: View {
             footer
         }
         .onAppear { fieldFocused = true }
+        .fullScreenCover(isPresented: $showScanner) {
+            QRCodeScannerView(
+                onScanned: { value in
+                    flow.tappedScannedKey(value)
+                    showScanner = false
+                    fieldFocused = false
+                },
+                onCancel: { showScanner = false }
+            )
+        }
     }
 
     private var accentColor: Color { flow.accent.color }
@@ -763,7 +780,7 @@ private struct CreateGroupInviteByKeyView: View {
             HStack(spacing: 8) {
                 Image(systemName: "doc.on.clipboard")
                     .font(.system(size: 13, weight: .semibold))
-                Text("Paste from clipboard")
+                Text("Paste")
                     .font(.system(size: 14.5, weight: .semibold))
             }
             .frame(maxWidth: .infinity, minHeight: 46)
@@ -775,7 +792,29 @@ private struct CreateGroupInviteByKeyView: View {
             .clipShape(RoundedRectangle(cornerRadius: 14))
         }
         .buttonStyle(.plain)
-        .padding(.top, 12)
+        .accessibilityIdentifier("invite_by_key.paste_button")
+    }
+
+    private var scanButton: some View {
+        Button {
+            showScanner = true
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "qrcode.viewfinder")
+                    .font(.system(size: 13, weight: .semibold))
+                Text("Scan QR")
+                    .font(.system(size: 14.5, weight: .semibold))
+            }
+            .frame(maxWidth: .infinity, minHeight: 46)
+            .foregroundStyle(accentColor)
+            .background(OnymTokens.surface2)
+            .overlay(
+                RoundedRectangle(cornerRadius: 14).stroke(OnymTokens.hairlineStrong, lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("invite_by_key.scan_button")
     }
 
     private var helper: some View {

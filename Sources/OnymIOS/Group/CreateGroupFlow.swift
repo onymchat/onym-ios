@@ -202,6 +202,49 @@ final class CreateGroupFlow {
         route = .step2
     }
 
+    /// Drop a scanned QR payload into `inviteeInput`. Strips known URL
+    /// wrappers so the user sees the raw 64-char hex (or whatever the
+    /// payload canonicalises to) and can review before tapping
+    /// "Add to group". Validation is left to the existing pipeline —
+    /// a malformed scan surfaces the same inline error as a malformed
+    /// paste.
+    func tappedScannedKey(_ raw: String) {
+        inviteeInput = Self.canonicalizeInviteKey(raw)
+        inviteeError = nil
+    }
+
+    /// Pull a candidate inbox key out of a raw scanned/pasted string.
+    /// Recognises:
+    ///  - bare hex (returned unchanged, lowercased)
+    ///  - `https://onym.chat?payload=<hex>` (legacy iOS settings QR)
+    ///  - `https://onym.chat/i?k=<urlsafe-base64>` (Android identity
+    ///    invite — `IdentityInviteUrl.kt`)
+    /// Falls back to the trimmed raw input otherwise so the existing
+    /// validation surfaces a meaningful error.
+    static func canonicalizeInviteKey(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let comps = URLComponents(string: trimmed),
+           let items = comps.queryItems {
+            if let payload = items.first(where: { $0.name == "payload" })?.value,
+               !payload.isEmpty {
+                return payload.lowercased()
+            }
+            if let k = items.first(where: { $0.name == "k" })?.value,
+               let bytes = urlSafeBase64Decode(k) {
+                return bytes.map { String(format: "%02x", $0) }.joined()
+            }
+        }
+        return trimmed
+    }
+
+    private static func urlSafeBase64Decode(_ s: String) -> Data? {
+        var t = s.replacingOccurrences(of: "-", with: "+")
+        t = t.replacingOccurrences(of: "_", with: "/")
+        let pad = (4 - t.count % 4) % 4
+        t.append(String(repeating: "=", count: pad))
+        return Data(base64Encoded: t)
+    }
+
     /// Live char count for the InviteByKey field — matches the
     /// design's `(43/64)` chip.
     var inviteeInputCleanedLength: Int {
