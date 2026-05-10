@@ -33,14 +33,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Need the v* tag history so the auto-bump step can resolve
+          # the latest patch version when the issue's Tag field is left
+          # blank. `fetch-tags` is lighter than `fetch-depth: 0`.
+          fetch-tags: true
 
-      - name: Extract tag from issue body
+      - name: Resolve release tag
         id: tag
         env:
           BODY: ${{ github.event.issue.body }}
+          ISSUE: ${{ github.event.issue.number }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           # Issue-form `Tag` field renders as `### Tag\n\n<value>\n` in
-          # the body. Grab the first vX.Y.Z that follows that heading
+          # the body. Grab the first non-empty line after that heading
           # (regex-anchored so we don't pick up a tag mentioned later
           # in release notes or manual-QA prose).
           TAG=$(printf '%s' "$BODY" \
@@ -49,19 +56,53 @@ jobs:
                 found && NF { print; exit }
               ' \
             | tr -d '[:space:]')
-          if [ -z "$TAG" ]; then
-            echo "::error::No tag found under '### Tag' in issue body"
-            exit 1
+          # GitHub renders empty optional issue-form fields as the
+          # placeholder "_No response_". After whitespace strip that
+          # collapses to `_Noresponse_` — treat as missing.
+          if [ "$TAG" = "_Noresponse_" ]; then
+            TAG=""
           fi
+
+          if [ -z "$TAG" ]; then
+            # Auto-bump patch from the latest reachable v-tag. `git tag
+            # --sort=-v:refname` puts highest first; filter to vX.Y.Z to
+            # ignore stray rc/build tags.
+            LATEST=$(git tag --sort=-v:refname \
+                       | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+                       | head -1)
+            if [ -z "$LATEST" ]; then
+              # First-ever release on a fresh repo — start at v0.0.1.
+              TAG="v0.0.1"
+              echo "::notice::No existing v* tags; defaulting to $TAG"
+            else
+              IFS='.' read -r MAJOR MINOR PATCH <<EOF
+${LATEST#v}
+EOF
+              TAG="v${MAJOR}.${MINOR}.$((PATCH + 1))"
+              echo "::notice::Tag field blank; auto-bumping ${LATEST} → ${TAG}"
+            fi
+            echo "auto_bumped=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "auto_bumped=0" >> "$GITHUB_OUTPUT"
+          fi
+
           if ! printf '%s' "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "::error::Tag '$TAG' is not vX.Y.Z"
             gh issue comment "$ISSUE" --body "❌ Tag \`$TAG\` is not in \`vX.Y.Z\` format. Edit the issue and retry, or close + open a new one."
             exit 1
           fi
+
+          # Refuse to dispatch on a tag that already exists. This is the
+          # only check that catches a manually-typed tag colliding with
+          # a previous release; the auto-bump path can't hit it.
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "::error::Tag '$TAG' already exists"
+            gh issue comment "$ISSUE" --body "❌ Tag \`$TAG\` already exists on the repo. Pick a higher patch version or leave the Tag field blank to auto-bump."
+            exit 1
+          fi
+
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Extracted tag: $TAG"
-        # gh needs both vars at the failure-comment step
-        # (set here so the env propagates to the failure path too).
+          echo "Resolved tag: $TAG"
 
       - name: Discover XCTestCase classes + tests
         id: discover
@@ -86,11 +127,13 @@ jobs:
           echo "count=$COUNT" >> "$GITHUB_OUTPUT"
           cat /tmp/classes_section.md
 
-      - name: Hydrate UI_TESTS section in issue body
+      - name: Hydrate Tag + UI_TESTS sections in issue body
         env:
           BODY: ${{ github.event.issue.body }}
           ISSUE: ${{ github.event.issue.number }}
           COUNT: ${{ steps.discover.outputs.count }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          AUTO_BUMPED: ${{ steps.tag.outputs.auto_bumped }}
           GH_TOKEN: ${{ github.token }}
         run: |
           # Prepend a one-line summary to the discovered checklist. The
@@ -103,28 +146,53 @@ jobs:
             cat /tmp/classes_section.md
           } > /tmp/ui_tests_section.md
 
-          # Sed-friendly extraction: replace everything between the two
-          # marker comments with the new content. Uses python for safe
-          # multi-line replacement (sed cross-platform multiline is a
-          # mess).
-          python3 - <<'PY' "$BODY" /tmp/ui_tests_section.md /tmp/new_body.md
+          # Two body rewrites in one edit:
+          #   1. Replace the `### Tag` section's value with the resolved
+          #      tag (idempotent when the user typed it; meaningful when
+          #      it was auto-bumped from `_No response_`).
+          #   2. Replace everything between the UI_TESTS markers with the
+          #      hydrated checklist.
+          # Single python invocation so we make exactly one `gh issue
+          # edit` call afterwards.
+          python3 - <<'PY' "$BODY" /tmp/ui_tests_section.md "$TAG" /tmp/new_body.md
           import re, sys, pathlib
           body = sys.argv[1]
           new_section = pathlib.Path(sys.argv[2]).read_text()
-          out_path = pathlib.Path(sys.argv[3])
+          tag = sys.argv[3]
+          out_path = pathlib.Path(sys.argv[4])
+
+          # Rewrite `### Tag\n\n<old>\n` → `### Tag\n\n<tag>\n`. The
+          # `<old>` runs from the blank line under the heading to the
+          # next blank line (issue forms separate fields with one blank
+          # line). Captures `### Tag` followed by exactly one blank line
+          # then a single non-empty line (issue forms render single-line
+          # `input` fields that way; `_No response_` is also one line).
+          tag_pattern = re.compile(
+              r"^(### Tag\s*\n\n)([^\n]+)$",
+              re.MULTILINE,
+          )
+          if not tag_pattern.search(body):
+              sys.exit("FATAL: '### Tag' heading + value line not found in body")
+          body = tag_pattern.sub(rf"\g<1>{tag}", body, count=1)
 
           start = "<!-- UI_TESTS_START -->"
           end = "<!-- UI_TESTS_END -->"
-          pattern = re.compile(
+          ui_pattern = re.compile(
               re.escape(start) + r".*?" + re.escape(end),
               re.DOTALL,
           )
           replacement = f"{start}\n{new_section}\n{end}"
-          if not pattern.search(body):
+          if not ui_pattern.search(body):
               sys.exit(f"FATAL: markers {start!r}/{end!r} not found in issue body")
-          out_path.write_text(pattern.sub(replacement, body))
+          body = ui_pattern.sub(replacement, body)
+
+          out_path.write_text(body)
           PY
           gh issue edit "$ISSUE" --body-file /tmp/new_body.md
+
+          if [ "$AUTO_BUMPED" = "1" ]; then
+            gh issue comment "$ISSUE" --body "ℹ️ Tag field was blank — auto-bumped to \`${TAG}\` (next patch after the latest \`v*\` tag). Edit the issue and re-open if you want a different version."
+          fi
 
       - name: Dispatch Release workflow
         env:

@@ -16,12 +16,16 @@ body:
     id: tag
     attributes:
       label: Tag
-      description: Semver, prefixed with `v` (e.g. `v0.0.10`). The workflow refuses anything else.
-      placeholder: v0.0.10
+      description: |
+        Semver, prefixed with `v` (e.g. `v0.0.10`). Leave blank to auto-bump
+        the patch version from the latest existing `v*` tag — the
+        `release-from-issue` workflow rewrites this field in the issue body
+        with the resolved tag before dispatching `Release`.
+      placeholder: v0.0.10 (or leave blank to auto-bump)
     validations:
-      required: true
-      # Issue forms accept a regex on `pattern`; the workflow re-validates
-      # server-side as a defence-in-depth check.
+      required: false
+      # Issue forms validate non-empty values against this pattern; the
+      # workflow re-validates + auto-bumps when the field is empty.
       pattern: '^v[0-9]+\.[0-9]+\.[0-9]+$'
 
   - type: textarea
