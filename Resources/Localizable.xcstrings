@@ -2048,7 +2048,20 @@
       }
     },
     "Paste" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paste"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Вставить"
+          }
+        }
+      }
     },
     "Paste 64-char inbox key" : {
       "localizations" : {
@@ -2101,7 +2114,20 @@
       }
     },
     "Paste or scan a QR" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paste or scan a QR"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Вставьте или отсканируйте QR-код"
+          }
+        }
+      }
     },
     "People who tap one of your invite links show up here." : {
       "localizations" : {
@@ -2137,7 +2163,20 @@
       }
     },
     "Point your camera at an Onym invite QR code." : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Point your camera at an Onym invite QR code."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Наведите камеру на QR-код приглашения Onym."
+          }
+        }
+      }
     },
     "Primary" : {
       "extractionState" : "stale",
@@ -2435,7 +2474,20 @@
       }
     },
     "Scan QR" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scan QR"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сканировать QR"
+          }
+        }
+      }
     },
     "Scan with Onym on another device to open a private chat with this identity." : {
       "localizations" : {
