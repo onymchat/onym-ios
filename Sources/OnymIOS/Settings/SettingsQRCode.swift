@@ -55,7 +55,11 @@ struct SettingsQRCode: View {
 /// pass validation on the scanning device. Real production invitee
 /// links live in the Group flow's `IntroCapability` — this is the
 /// per-identity equivalent surfaced from Settings.
-func settingsInviteURL(blsPublicKey: Data) -> String {
-    let hex = blsPublicKey.map { String(format: "%02x", $0) }.joined()
+///
+/// Note: this is the X25519 **inbox** key, not the BLS12-381 governance
+/// key. See `IdentitySummary.swift:11-21` for the distinction — both are
+/// `Data`, so the type system doesn't catch a wrong-key call site.
+func settingsInviteURL(inboxPublicKey: Data) -> String {
+    let hex = inboxPublicKey.map { String(format: "%02x", $0) }.joined()
     return "https://onym.chat?payload=\(hex)"
 }

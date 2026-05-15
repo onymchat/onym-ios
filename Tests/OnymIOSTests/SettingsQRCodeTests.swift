@@ -16,7 +16,7 @@ final class SettingsQRCodeTests: XCTestCase {
         // field expects (validator requires 64 hex chars). 32 bytes
         // → 64 hex chars; anything shorter is decorative.
         let key = Data((0..<32).map { UInt8($0) })
-        let url = settingsInviteURL(blsPublicKey: key)
+        let url = settingsInviteURL(inboxPublicKey: key)
         XCTAssertTrue(url.hasPrefix("https://onym.chat?payload="))
         let payload = url.replacingOccurrences(of: "https://onym.chat?payload=", with: "")
         XCTAssertEqual(payload.count, 64, "32 bytes should serialise to 64 hex chars")
@@ -34,7 +34,7 @@ final class SettingsQRCodeTests: XCTestCase {
         // change.
         let key = Data((0..<32).map { UInt8($0 ^ 0x5A) })
         let expectedHex = key.map { String(format: "%02x", $0) }.joined()
-        let url = settingsInviteURL(blsPublicKey: key)
+        let url = settingsInviteURL(inboxPublicKey: key)
         XCTAssertEqual(CreateGroupFlow.canonicalizeInviteKey(url), expectedHex)
     }
 }

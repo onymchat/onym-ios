@@ -11,7 +11,7 @@ struct ShareKeyView: View {
     @Environment(\.dismiss) private var dismiss
 
     private var inviteURL: String {
-        settingsInviteURL(blsPublicKey: identity.inboxPublicKey)
+        settingsInviteURL(inboxPublicKey: identity.inboxPublicKey)
     }
 
     var body: some View {

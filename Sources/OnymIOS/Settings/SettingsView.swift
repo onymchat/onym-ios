@@ -277,7 +277,7 @@ struct SettingsView: View {
         } label: {
             HStack(spacing: 16) {
                 let payload = activeSummary?.inboxPublicKey ?? Data(count: 16)
-                SettingsQRCode(value: settingsInviteURL(blsPublicKey: payload), size: 92)
+                SettingsQRCode(value: settingsInviteURL(inboxPublicKey: payload), size: 92)
                     .padding(8)
                     .background(OnymTokens.surface2,
                                 in: RoundedRectangle(cornerRadius: 14, style: .continuous))

@@ -152,7 +152,7 @@ struct IdentityDetailView: View {
             SettingsCard {
                 VStack(spacing: 14) {
                     SettingsQRCode(
-                        value: settingsInviteURL(blsPublicKey: summary.inboxPublicKey),
+                        value: settingsInviteURL(inboxPublicKey: summary.inboxPublicKey),
                         size: 200
                     )
                     .padding(12)
@@ -168,7 +168,7 @@ struct IdentityDetailView: View {
                         .lineSpacing(2)
                         .frame(maxWidth: 280)
 
-                    Text(settingsInviteURL(blsPublicKey: summary.inboxPublicKey))
+                    Text(settingsInviteURL(inboxPublicKey: summary.inboxPublicKey))
                         .font(.system(size: 11.5, design: .monospaced))
                         .foregroundStyle(OnymTokens.text2)
                         .lineLimit(1).truncationMode(.middle)
@@ -190,13 +190,13 @@ struct IdentityDetailView: View {
                         foreground: OnymAccent.blue.color
                     ) {
                         UIPasteboard.general.string =
-                            settingsInviteURL(blsPublicKey: summary.inboxPublicKey)
+                            settingsInviteURL(inboxPublicKey: summary.inboxPublicKey)
                     }
                     .accessibilityIdentifier("identity.copy_link.\(summary.id)")
 
                     Rectangle().fill(OnymTokens.hairlineStrong).frame(width: 0.5)
 
-                    ShareLink(item: settingsInviteURL(blsPublicKey: summary.inboxPublicKey)) {
+                    ShareLink(item: settingsInviteURL(inboxPublicKey: summary.inboxPublicKey)) {
                         HStack(spacing: 6) {
                             Image(systemName: "square.and.arrow.up")
                             Text("Share").font(.system(size: 15, weight: .medium))

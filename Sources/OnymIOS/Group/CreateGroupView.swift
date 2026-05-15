@@ -682,10 +682,10 @@ private struct CreateGroupInviteByKeyView: View {
     private var explanation: some View {
         (
             Text("Ask for their ").foregroundColor(OnymTokens.text2)
-            + Text("inbox key").font(.system(size: 13, weight: .semibold)).foregroundColor(OnymTokens.text)
-            + Text(" \u{2014} they can find it in ").foregroundColor(OnymTokens.text2)
-            + Text("Settings \u{2192} Advanced").font(.system(size: 13, weight: .semibold)).foregroundColor(OnymTokens.text)
-            + Text(", or share a QR code from there.").foregroundColor(OnymTokens.text2)
+            + Text("invite key").font(.system(size: 13, weight: .semibold)).foregroundColor(OnymTokens.text)
+            + Text(" \u{2014} they can tap the ").foregroundColor(OnymTokens.text2)
+            + Text("QR icon on their Chats screen").font(.system(size: 13, weight: .semibold)).foregroundColor(OnymTokens.text)
+            + Text(", then share the QR or copy the link.").foregroundColor(OnymTokens.text2)
         )
         .font(.system(size: 13))
         .lineSpacing(1.5)

@@ -13,6 +13,7 @@ struct ChatsView: View {
     let makeShareInviteFlow: @MainActor () -> ShareInviteFlow
 
     @State private var showCreateGroup = false
+    @State private var showShareKey = false
 
     var body: some View {
         Group {
@@ -34,6 +35,21 @@ struct ChatsView: View {
             // the badge only appears when `pending.count > 0`.
             ToolbarItem(placement: .topBarTrailing) {
                 ApproveRequestsToolbarButton(flow: approveRequestsFlow)
+            }
+            // Show invite QR — primary discovery point for the
+            // user's own invite key. Hidden pre-bootstrap (no active
+            // identity yet); shown in both empty and populated
+            // states because surfacing one's invite is at least as
+            // useful before the first chat exists.
+            if activeSummary != nil {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showShareKey = true
+                    } label: {
+                        Image(systemName: "qrcode")
+                    }
+                    .accessibilityIdentifier("chats.share_invite_qr")
+                }
             }
             // Plus button mirrors iOS Mail / Messages — useful once
             // the user already has at least one chat. Hidden in the
@@ -59,6 +75,21 @@ struct ChatsView: View {
                 onClose: { showCreateGroup = false }
             )
         }
+        .sheet(isPresented: $showShareKey) {
+            if let active = activeSummary {
+                NavigationStack {
+                    ShareKeyView(identity: active, blsPrefix: identitiesFlow.blsPrefix(of: active))
+                }
+            }
+        }
+    }
+
+    /// Active identity, mirroring `SettingsView.activeSummary` — used
+    /// both to gate the invite-QR toolbar item and to feed
+    /// `ShareKeyView` when the sheet presents.
+    private var activeSummary: IdentitySummary? {
+        guard let id = identitiesFlow.currentID else { return nil }
+        return identitiesFlow.identities.first { $0.id == id }
     }
 
     /// "Chats" when no identity exists yet (pre-bootstrap), otherwise
