@@ -683,9 +683,9 @@ private struct CreateGroupInviteByKeyView: View {
         (
             Text("Ask for their ").foregroundColor(OnymTokens.text2)
             + Text("inbox key").font(.system(size: 13, weight: .semibold)).foregroundColor(OnymTokens.text)
-            + Text(" \u{2014} they can find it in ").foregroundColor(OnymTokens.text2)
-            + Text("Settings \u{2192} Advanced").font(.system(size: 13, weight: .semibold)).foregroundColor(OnymTokens.text)
-            + Text(", or share a QR code from there.").foregroundColor(OnymTokens.text2)
+            + Text(" \u{2014} they can copy it from the ").foregroundColor(OnymTokens.text2)
+            + Text("QR icon on Chats").font(.system(size: 13, weight: .semibold)).foregroundColor(OnymTokens.text)
+            + Text(", or share their QR code from there.").foregroundColor(OnymTokens.text2)
         )
         .font(.system(size: 13))
         .lineSpacing(1.5)

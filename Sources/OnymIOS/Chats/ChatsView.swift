@@ -13,6 +13,7 @@ struct ChatsView: View {
     let makeShareInviteFlow: @MainActor () -> ShareInviteFlow
 
     @State private var showCreateGroup = false
+    @State private var showShareKey = false
 
     var body: some View {
         Group {
@@ -34,6 +35,20 @@ struct ChatsView: View {
             // the badge only appears when `pending.count > 0`.
             ToolbarItem(placement: .topBarTrailing) {
                 ApproveRequestsToolbarButton(flow: approveRequestsFlow)
+            }
+            // Share invite-key shortcut — opens the same QR / link /
+            // copy-key sheet as Settings → Invite Key, so users can
+            // hand out their inbox key without leaving the main tab.
+            if activeSummary != nil {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showShareKey = true
+                    } label: {
+                        Image(systemName: "qrcode")
+                    }
+                    .accessibilityLabel("Share invite key")
+                    .accessibilityIdentifier("chats.share_key_toolbar")
+                }
             }
             // Plus button mirrors iOS Mail / Messages — useful once
             // the user already has at least one chat. Hidden in the
@@ -59,16 +74,27 @@ struct ChatsView: View {
                 onClose: { showCreateGroup = false }
             )
         }
+        .sheet(isPresented: $showShareKey) {
+            if let active = activeSummary {
+                NavigationStack {
+                    ShareKeyView(identity: active, blsPrefix: identitiesFlow.blsPrefix(of: active))
+                }
+            }
+        }
+    }
+
+    /// Active identity summary, or nil pre-bootstrap. Drives both the
+    /// nav title and whether the Share-Key toolbar shortcut is visible.
+    private var activeSummary: IdentitySummary? {
+        guard let id = identitiesFlow.currentID else { return nil }
+        return identitiesFlow.identities.first { $0.id == id }
     }
 
     /// "Chats" when no identity exists yet (pre-bootstrap), otherwise
     /// the active identity's display name. SwiftUI re-renders on every
     /// `currentID` change because `identitiesFlow` is `@Observable`.
     private var currentIdentityName: String {
-        guard let id = identitiesFlow.currentID,
-              let summary = identitiesFlow.identities.first(where: { $0.id == id })
-        else { return "Chats" }
-        return summary.name
+        activeSummary?.name ?? "Chats"
     }
 
     // MARK: - Empty state

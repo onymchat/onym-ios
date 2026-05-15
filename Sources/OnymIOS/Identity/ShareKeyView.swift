@@ -14,6 +14,12 @@ struct ShareKeyView: View {
         settingsInviteURL(blsPublicKey: identity.inboxPublicKey)
     }
 
+    /// 64-char hex of the X25519 inbox public key — the value the
+    /// "Invite by inbox key" paste field expects on the other device.
+    private var inboxKeyHex: String {
+        identity.inboxPublicKey.map { String(format: "%02x", $0) }.joined()
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
@@ -85,6 +91,26 @@ struct ShareKeyView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 14)
+
+                Button {
+                    UIPasteboard.general.string = inboxKeyHex
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "key.fill")
+                        Text("Copy inbox key")
+                            .font(.system(size: 15, weight: .semibold))
+                    }
+                    .foregroundStyle(OnymAccent.blue.color)
+                    .frame(maxWidth: .infinity, minHeight: 48)
+                    .background(OnymTokens.surface2,
+                                in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(OnymTokens.hairline, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("share_key.copy_inbox_key_button")
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
 
                 SettingsFootnote("Anyone who scans this code with Onym can start a private, end-to-end encrypted chat with \(identity.name). The invite key contains your inbox X25519 public key only — no contact info.")
             }
