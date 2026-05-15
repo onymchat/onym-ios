@@ -121,7 +121,11 @@ jobs:
         run: git lfs pull
 
       - name: Select Xcode 26
-        run: sudo xcode-select -s /Applications/Xcode_26.app
+        # Self-hosted runner runs as a standard user without sudo, so
+        # `xcode-select -s` (which mutates the system-wide DEVELOPER_DIR
+        # symlink) isn't available. Export DEVELOPER_DIR instead -- xcrun
+        # / xcodebuild honour it transparently and it stays job-scoped.
+        run: echo "DEVELOPER_DIR=/Applications/Xcode_26.app/Contents/Developer" >> "$GITHUB_ENV"
 
       - name: Install xcodegen
         run: brew install xcodegen
@@ -207,7 +211,11 @@ jobs:
         run: git lfs pull
 
       - name: Select Xcode 26
-        run: sudo xcode-select -s /Applications/Xcode_26.app
+        # Self-hosted runner runs as a standard user without sudo, so
+        # `xcode-select -s` (which mutates the system-wide DEVELOPER_DIR
+        # symlink) isn't available. Export DEVELOPER_DIR instead -- xcrun
+        # / xcodebuild honour it transparently and it stays job-scoped.
+        run: echo "DEVELOPER_DIR=/Applications/Xcode_26.app/Contents/Developer" >> "$GITHUB_ENV"
 
       - name: Install xcodegen
         run: brew install xcodegen
@@ -295,7 +303,11 @@ jobs:
         run: git lfs pull
 
       - name: Select Xcode 26
-        run: sudo xcode-select -s /Applications/Xcode_26.app
+        # Self-hosted runner runs as a standard user without sudo, so
+        # `xcode-select -s` (which mutates the system-wide DEVELOPER_DIR
+        # symlink) isn't available. Export DEVELOPER_DIR instead -- xcrun
+        # / xcodebuild honour it transparently and it stays job-scoped.
+        run: echo "DEVELOPER_DIR=/Applications/Xcode_26.app/Contents/Developer" >> "$GITHUB_ENV"
 
       - name: Install xcodegen
         run: brew install xcodegen
