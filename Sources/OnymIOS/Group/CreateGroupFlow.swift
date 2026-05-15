@@ -39,17 +39,10 @@ final class CreateGroupFlow {
     var invitees: [OnymInvitee] = []
 
     /// Friendly placeholder generated on init / reset (e.g. "Maple
-    /// Garden"). The TextField pre-fills with this so the user can
-    /// hit Create immediately without typing — first focus on the
-    /// field clears it (see `tappedNameFieldFocused`). Submit also
-    /// falls back to this if the user emptied the field and didn't
-    /// retype.
+    /// Garden"). Rendered as the TextField's `prompt` so it appears
+    /// in the muted placeholder style — never as real input. Submit
+    /// falls back to this when the user leaves the field empty.
     private(set) var generatedName: String
-
-    /// Goes true on the first focus event of the name field. Used to
-    /// distinguish "user accepted the placeholder" from "user wants
-    /// to type their own".
-    private var nameFieldHasBeenFocused = false
 
     /// Bound to the InviteByKey screen's TextField.
     var inviteeInput: String = ""
@@ -77,21 +70,8 @@ final class CreateGroupFlow {
 
     init(interactor: CreateGroupInteractor) {
         self.interactor = interactor
-        let generated = Self.generatePlaceholderName()
-        self.generatedName = generated
-        self.name = generated
-    }
-
-    /// Called by the Step1 view when the name TextField gets focus.
-    /// On the *first* focus we clear the field so the user can type a
-    /// fresh name without manually deleting the placeholder. After
-    /// that, focus is a no-op — the user is in charge of the field.
-    func tappedNameFieldFocused() {
-        guard !nameFieldHasBeenFocused else { return }
-        nameFieldHasBeenFocused = true
-        if name == generatedName {
-            name = ""
-        }
+        self.generatedName = Self.generatePlaceholderName()
+        self.name = ""
     }
 
     // MARK: - Step 1 → Step 2
@@ -336,10 +316,8 @@ final class CreateGroupFlow {
     }
 
     private func reset() {
-        let generated = Self.generatePlaceholderName()
-        generatedName = generated
-        name = generated
-        nameFieldHasBeenFocused = false
+        generatedName = Self.generatePlaceholderName()
+        name = ""
         accent = .blue
         governance = .tyranny
         invitees = []

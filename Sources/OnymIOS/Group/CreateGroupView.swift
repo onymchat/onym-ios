@@ -245,9 +245,6 @@ private struct CreateGroupStep1View: View {
                 .autocorrectionDisabled()
                 .submitLabel(.done)
                 .focused($nameFocused)
-                .onChange(of: nameFocused) { _, isFocused in
-                    if isFocused { flow.tappedNameFieldFocused() }
-                }
                 .onChange(of: flow.name) { _, new in
                     // Strip any embedded newlines so paste from a
                     // multi-line source still resolves to a single
