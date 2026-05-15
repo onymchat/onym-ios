@@ -39,45 +39,22 @@ final class CreateGroupFlowTests: XCTestCase {
 
     // MARK: - Random placeholder name
 
-    func test_init_prePopulatesNameWithGeneratedPlaceholder() async throws {
+    func test_init_leavesNameEmpty_andGeneratesPlaceholder() async throws {
+        // The field starts empty so the TextField's `prompt` renders in
+        // the muted placeholder style. The generated name lives on the
+        // flow as a submit-time fallback only.
         let flow = await makeFlow()
-        XCTAssertFalse(flow.name.isEmpty,
-                       "init should pre-populate name with a friendly placeholder")
-        XCTAssertEqual(flow.name, flow.generatedName)
+        XCTAssertEqual(flow.name, "",
+                       "init must leave name empty so the prompt renders as a placeholder")
+        XCTAssertFalse(flow.generatedName.isEmpty,
+                       "init should still generate a placeholder for the prompt + submit fallback")
         XCTAssertTrue(flow.generatedName.contains(" "),
                       "placeholder should be 'Adjective Noun' shape")
-    }
-
-    func test_firstFocusOnNameField_clearsPlaceholder() async throws {
-        let flow = await makeFlow()
-        let original = flow.generatedName
-        XCTAssertEqual(flow.name, original)
-        flow.tappedNameFieldFocused()
-        XCTAssertEqual(flow.name, "", "first focus clears the placeholder")
-    }
-
-    func test_secondFocus_doesNotClearUserInput() async throws {
-        let flow = await makeFlow()
-        flow.tappedNameFieldFocused()  // clears placeholder
-        flow.name = "My Group"
-        flow.tappedNameFieldFocused()  // second focus — should be no-op
-        XCTAssertEqual(flow.name, "My Group")
-    }
-
-    func test_focusDoesNotClear_ifUserAlreadyEditedAwayFromPlaceholder() async throws {
-        // Edge case: programmatic name change before the field is
-        // ever focused. Focus should not stomp the user's value.
-        let flow = await makeFlow()
-        flow.name = "Manual"
-        flow.tappedNameFieldFocused()
-        XCTAssertEqual(flow.name, "Manual",
-                       "focus only clears when the field still holds the original placeholder")
     }
 
     func test_effectiveName_fallsBackToPlaceholder_whenEmpty() async throws {
         let flow = await makeFlow()
         let placeholder = flow.generatedName
-        flow.tappedNameFieldFocused()  // clears
         XCTAssertEqual(flow.effectiveName, placeholder,
                        "empty name should resolve to the auto-generated placeholder at submit")
         flow.name = "Family"
@@ -347,10 +324,10 @@ final class CreateGroupFlowTests: XCTestCase {
         flow.tappedDone()
         XCTAssertEqual(closedCount, 1)
         XCTAssertEqual(flow.route, .step1)
-        // Reset re-rolls the placeholder, so name == generatedName,
-        // not "".
-        XCTAssertEqual(flow.name, flow.generatedName)
-        XCTAssertFalse(flow.name.isEmpty)
+        XCTAssertEqual(flow.name, "",
+                       "reset should leave name empty so the prompt renders as a placeholder")
+        XCTAssertFalse(flow.generatedName.isEmpty,
+                       "reset should re-roll a fresh placeholder for the next flow run")
         XCTAssertTrue(flow.invitees.isEmpty)
     }
 
