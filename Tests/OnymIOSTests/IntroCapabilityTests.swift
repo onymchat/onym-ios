@@ -49,12 +49,12 @@ final class IntroCapabilityTests: XCTestCase {
 
     // MARK: - link forms
 
-    func test_toAppLink_isOnymChatJoinPath() throws {
+    func test_toAppLink_isOnymAppJoinPath() throws {
         let cap = try IntroCapability(
             introPublicKey: sampleIntroPub,
             groupId: sampleGroupId
         )
-        XCTAssertTrue(cap.toAppLink().hasPrefix("https://onym.chat/join?c="))
+        XCTAssertTrue(cap.toAppLink().hasPrefix("https://onym.app/join?c="))
     }
 
     func test_toCustomSchemeLink_isOnymJoinScheme() throws {
@@ -104,8 +104,8 @@ final class IntroCapabilityTests: XCTestCase {
     }
 
     func test_fromLink_missingCapabilityParam_returnsNull() {
-        XCTAssertNil(IntroCapability.fromLink("https://onym.chat/join"))
-        XCTAssertNil(IntroCapability.fromLink("https://onym.chat/join?other=value"))
+        XCTAssertNil(IntroCapability.fromLink("https://onym.app/join"))
+        XCTAssertNil(IntroCapability.fromLink("https://onym.app/join?other=value"))
     }
 
     func test_fromLink_malformedUri_returnsNull() {
@@ -173,7 +173,7 @@ final class IntroCapabilityTests: XCTestCase {
         )
         let text = IntroCapability.shareText(link: cap.toAppLink(), groupName: cap.groupName)
         XCTAssertTrue(text.contains("\"Friends\""))
-        XCTAssertTrue(text.contains("https://onym.chat/join?c="))
+        XCTAssertTrue(text.contains("https://onym.app/join?c="))
     }
 
     func test_shareText_omitsGroupName_whenBlankOrNull() throws {

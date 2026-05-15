@@ -3,7 +3,7 @@ import Foundation
 /// Persistence seam for the Nostr-relays configuration. Mirrors
 /// `RelayerSelectionStore`'s shape — UserDefaults-backed, no
 /// secrets so Keychain would be over-rotation, isolated key prefix
-/// (`chat.onym.ios.nostr.*`) so other consumers can't collide.
+/// (`app.onym.ios.nostr.*`) so other consumers can't collide.
 protocol NostrRelaysSelectionStore: Sendable {
     func load() -> NostrRelaysConfiguration
     func save(_ configuration: NostrRelaysConfiguration)
@@ -12,7 +12,7 @@ protocol NostrRelaysSelectionStore: Sendable {
 /// Production store. UserDefaults-backed; defaults to `.standard` but
 /// injectable so tests get an isolated suite.
 struct UserDefaultsNostrRelaysSelectionStore: NostrRelaysSelectionStore, @unchecked Sendable {
-    private static let configurationKey = "chat.onym.ios.nostr.configuration"
+    private static let configurationKey = "app.onym.ios.nostr.configuration"
 
     private let defaults: UserDefaults
 

@@ -8,7 +8,7 @@ import XCTest
 ///
 /// Mirrors `DeeplinkCaptureTest.kt` test-for-test. Pin the allowlist
 /// semantics:
-///  - `https://onym.chat/join?c=…` → decoded
+///  - `https://onym.app/join?c=…` → decoded
 ///  - `onym://join?c=…` → decoded
 ///  - any other scheme/host → nil (Info.plist + entitlements are
 ///    the primary gate; this is defense in depth)
@@ -56,7 +56,7 @@ final class DeeplinkCaptureTests: XCTestCase {
 
     func test_foreignScheme_returnsNil() throws {
         let good = try fixture().encode()
-        let link = "ftp://onym.chat/join?c=\(good)"
+        let link = "ftp://onym.app/join?c=\(good)"
         XCTAssertNil(DeeplinkCapture.introCapability(fromString: link))
     }
 
@@ -75,7 +75,7 @@ final class DeeplinkCaptureTests: XCTestCase {
     }
 
     func test_knownHostMissingC_returnsNil() {
-        XCTAssertNil(DeeplinkCapture.introCapability(fromString: "https://onym.chat/join"))
+        XCTAssertNil(DeeplinkCapture.introCapability(fromString: "https://onym.app/join"))
         XCTAssertNil(DeeplinkCapture.introCapability(fromString: "onym://join"))
     }
 
@@ -83,14 +83,14 @@ final class DeeplinkCaptureTests: XCTestCase {
         // Allowed scheme/host, but the `c` value is not valid
         // base64 + the JSON payload doesn't decode. `fromLink`
         // returns nil; we propagate that → callers no-op.
-        XCTAssertNil(DeeplinkCapture.introCapability(fromString: "https://onym.chat/join?c=not-base64!!!"))
+        XCTAssertNil(DeeplinkCapture.introCapability(fromString: "https://onym.app/join?c=not-base64!!!"))
     }
 
     func test_caseInsensitiveSchemeAndHost_decodes() throws {
         // RFC 3986: scheme + host are case-insensitive. Build a
         // deliberately mixed-case form to pin the normalization.
         let good = try fixture().encode()
-        let link = "HTTPS://Onym.Chat/join?c=\(good)"
+        let link = "HTTPS://Onym.App/join?c=\(good)"
         XCTAssertNotNil(DeeplinkCapture.introCapability(fromString: link))
     }
 

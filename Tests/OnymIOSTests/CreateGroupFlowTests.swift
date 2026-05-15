@@ -153,7 +153,7 @@ final class CreateGroupFlowTests: XCTestCase {
 
     func test_canonicalizeInviteKey_legacyPayloadURL_extractsHex() {
         let hex = String(repeating: "ab", count: 32)
-        let url = "https://onym.chat?payload=\(hex)"
+        let url = "https://onym.app?payload=\(hex)"
         XCTAssertEqual(CreateGroupFlow.canonicalizeInviteKey(url), hex)
     }
 
@@ -166,7 +166,7 @@ final class CreateGroupFlowTests: XCTestCase {
         b64 = b64.replacingOccurrences(of: "+", with: "-")
         b64 = b64.replacingOccurrences(of: "/", with: "_")
         while b64.hasSuffix("=") { b64.removeLast() }
-        let url = "https://onym.chat/i?k=\(b64)"
+        let url = "https://onym.app/i?k=\(b64)"
         XCTAssertEqual(CreateGroupFlow.canonicalizeInviteKey(url), expectedHex)
     }
 
@@ -181,7 +181,7 @@ final class CreateGroupFlowTests: XCTestCase {
         let flow = await makeFlow()
         flow.route = .inviteByKey
         let hex = String(repeating: "cd", count: 32)
-        flow.tappedScannedKey("https://onym.chat?payload=\(hex)")
+        flow.tappedScannedKey("https://onym.app?payload=\(hex)")
         XCTAssertEqual(flow.inviteeInput, hex)
         XCTAssertNil(flow.inviteeError)
         flow.tappedAddInvitee()

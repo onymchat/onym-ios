@@ -17,8 +17,8 @@ final class SettingsQRCodeTests: XCTestCase {
         // → 64 hex chars; anything shorter is decorative.
         let key = Data((0..<32).map { UInt8($0) })
         let url = settingsInviteURL(blsPublicKey: key)
-        XCTAssertTrue(url.hasPrefix("https://onym.chat?payload="))
-        let payload = url.replacingOccurrences(of: "https://onym.chat?payload=", with: "")
+        XCTAssertTrue(url.hasPrefix("https://onym.app?payload="))
+        let payload = url.replacingOccurrences(of: "https://onym.app?payload=", with: "")
         XCTAssertEqual(payload.count, 64, "32 bytes should serialise to 64 hex chars")
         XCTAssertEqual(payload, "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
     }

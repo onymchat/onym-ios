@@ -7,8 +7,8 @@ struct AboutView: View {
     @State private var taps = 0
 
     private static let sourceURL  = URL(string: "https://github.com/onymchat/onym-ios")!
-    private static let docsURL    = URL(string: "https://docs.onym.chat")!
-    private static let supportURL = URL(string: "mailto:hello@onym.chat")!
+    private static let docsURL    = URL(string: "https://docs.onym.app")!
+    private static let supportURL = URL(string: "mailto:hello@onym.app")!
 
     private var version: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
@@ -64,7 +64,7 @@ struct AboutView: View {
 
                     SettingsRow(
                         title: "Documentation",
-                        subtitle: "docs.onym.chat",
+                        subtitle: "docs.onym.app",
                         hasChevron: false,
                         onTap: { open(Self.docsURL.absoluteString) }
                     ) {
@@ -78,7 +78,7 @@ struct AboutView: View {
                         title: "Whitepaper",
                         subtitle: "The Onym protocol",
                         hasChevron: false,
-                        onTap: { open("https://onym.chat/whitepaper") }
+                        onTap: { open("https://onym.app/whitepaper") }
                     ) {
                         SettingsIconTile(symbol: "sparkles", bg: SettingsTile.green)
                     } right: {
@@ -113,7 +113,7 @@ struct AboutView: View {
                         title: "Community chat",
                         subtitle: "Join the dev group on Onym",
                         hasChevron: false,
-                        onTap: { open("https://onym.chat/community") }
+                        onTap: { open("https://onym.app/community") }
                     ) {
                         SettingsIconTile(symbol: "bubble.left.fill", bg: SettingsTile.green)
                     } right: {
@@ -122,7 +122,7 @@ struct AboutView: View {
                     }
                     SettingsRow(
                         title: "Contact support",
-                        subtitle: "hello@onym.chat",
+                        subtitle: "hello@onym.app",
                         hasChevron: false,
                         last: true,
                         onTap: { open(Self.supportURL.absoluteString) }
@@ -138,7 +138,7 @@ struct AboutView: View {
                 SettingsCard {
                     SettingsRow(title: "Privacy policy",
                                 hasChevron: false, inset: 16,
-                                onTap: { open("https://onym.chat/privacy") }) {
+                                onTap: { open("https://onym.app/privacy") }) {
                         EmptyView()
                     } right: {
                         Image(systemName: "arrow.up.right.square")
@@ -146,7 +146,7 @@ struct AboutView: View {
                     }
                     SettingsRow(title: "Terms of service",
                                 hasChevron: false, inset: 16,
-                                onTap: { open("https://onym.chat/terms") }) {
+                                onTap: { open("https://onym.app/terms") }) {
                         EmptyView()
                     } right: {
                         Image(systemName: "arrow.up.right.square")

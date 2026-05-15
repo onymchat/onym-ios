@@ -1,2 +1,2 @@
-app_identifier("chat.onym.ios")
+app_identifier("app.onym.ios")
 team_id(ENV['MATCH_TEAM_ID'])

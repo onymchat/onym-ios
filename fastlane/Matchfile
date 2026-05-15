@@ -1,7 +1,7 @@
 git_url(ENV['MATCH_GIT_URL'])
 storage_mode('git')
 
-app_identifier(["chat.onym.ios"])
+app_identifier(["app.onym.ios"])
 team_id(ENV['MATCH_TEAM_ID'])
 
 readonly(true)

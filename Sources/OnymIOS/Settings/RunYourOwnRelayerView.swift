@@ -7,7 +7,7 @@ struct RunYourOwnRelayerView: View {
     @State private var copied: String?
 
     private static let repoURL = URL(string: "https://github.com/onymchat/onym-relayer")!
-    private static let docsURL = URL(string: "https://onym.chat/docs/relayer")!
+    private static let docsURL = URL(string: "https://onym.app/docs/relayer")!
 
     private struct Step: Identifiable {
         let id = UUID()

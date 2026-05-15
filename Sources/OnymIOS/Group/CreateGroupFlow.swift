@@ -216,8 +216,8 @@ final class CreateGroupFlow {
     /// Pull a candidate inbox key out of a raw scanned/pasted string.
     /// Recognises:
     ///  - bare hex (returned unchanged, lowercased)
-    ///  - `https://onym.chat?payload=<hex>` (legacy iOS settings QR)
-    ///  - `https://onym.chat/i?k=<urlsafe-base64>` (Android identity
+    ///  - `https://onym.app?payload=<hex>` (legacy iOS settings QR)
+    ///  - `https://onym.app/i?k=<urlsafe-base64>` (Android identity
     ///    invite — `IdentityInviteUrl.kt`)
     /// Falls back to the trimmed raw input otherwise so the existing
     /// validation surfaces a meaningful error.

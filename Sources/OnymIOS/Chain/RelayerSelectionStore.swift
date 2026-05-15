@@ -20,7 +20,7 @@ protocol RelayerSelectionStore: Sendable {
 }
 
 /// Production `RelayerSelectionStore`. Keys are scoped under
-/// `chat.onym.ios.relayer.*` so other UserDefaults consumers can't
+/// `app.onym.ios.relayer.*` so other UserDefaults consumers can't
 /// collide. Suite name is injectable so each test gets its own
 /// isolated suite (mirrors the per-test Keychain service pattern in
 /// `IdentityRepositoryTests`).
@@ -29,10 +29,10 @@ protocol RelayerSelectionStore: Sendable {
 /// thread-safe (its set / remove / data(forKey:) APIs serialise
 /// internally) but isn't formally `Sendable` in the standard library.
 struct UserDefaultsRelayerSelectionStore: RelayerSelectionStore, @unchecked Sendable {
-    private static let configurationKey = "chat.onym.ios.relayer.configuration"
-    private static let cachedListKey = "chat.onym.ios.relayer.cachedKnownList"
+    private static let configurationKey = "app.onym.ios.relayer.configuration"
+    private static let cachedListKey = "app.onym.ios.relayer.cachedKnownList"
     /// PR #18 key — read once for migration, then deleted.
-    private static let legacySelectionKey = "chat.onym.ios.relayer.selection"
+    private static let legacySelectionKey = "app.onym.ios.relayer.selection"
 
     private let defaults: UserDefaults
 

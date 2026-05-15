@@ -290,7 +290,7 @@ identity-derived operations.
 └── README.md
 ```
 
-Bundle id is `chat.onym.ios` (production) — same as the reference
+Bundle id is `app.onym.ios` (production) — same as the reference
 impl currently shipping from `stellar-mls/clients/ios`. As long as
 both repos exist in parallel they'll fight over the same install
 slot on a device; coordinate the cutover when promoting onym-ios to
@@ -305,7 +305,7 @@ builds work without local config.
 ## Identity persistence
 
 One Keychain item (`kSecClassGenericPassword`, service
-`chat.onym.ios.identity`) holds a JSON-encoded `StoredSnapshot`:
+`app.onym.ios.identity`) holds a JSON-encoded `StoredSnapshot`:
 
 ```swift
 struct StoredSnapshot: Codable {
@@ -338,13 +338,13 @@ derived pairs stay inside the repository.
                 │  64-byte seed                       │
                 └────────┬────────────────┬───────────┘
                          │                │     HKDF-SHA256
-                         ▼                ▼     salt = "chat.onym.bip39"
+                         ▼                ▼     salt = "app.onym.bip39"
               ┌──────────────────┐ ┌──────────────────┐
               │ nostr secret     │ │ BLS secret       │
               │ (32B secp256k1)  │ │ (32B BLS Fr)     │
               └────┬─────────────┘ └────────┬─────────┘
                    │ HKDF-SHA256              │
-                   │ salt = "chat.onym.ios"   │
+                   │ salt = "app.onym.ios"   │
        ┌───────────┼───────────────┐          │
        ▼           ▼               ▼          │
   ┌─────────┐ ┌─────────────┐ ┌─────────────┐ │
@@ -370,10 +370,10 @@ generated there restores the same identity here, and vice versa.
 | Step | Input | Salt | Info | Algorithm |
 |---|---|---|---|---|
 | Seed                  | mnemonic       | `"mnemonic"+passphrase` | —                          | PBKDF2-HMAC-SHA512, 2048 iters |
-| Nostr secret          | seed           | `chat.onym.bip39`       | `nostr-secp256k1-v1`       | HKDF-SHA256, 32B |
-| BLS secret            | seed           | `chat.onym.bip39`       | `bls12-381-v1`             | HKDF-SHA256, 32B |
-| Stellar Ed25519 seed  | nostr secret   | `chat.onym.ios`         | `stellar-ed25519-v1`       | HKDF-SHA256, 32B |
-| X25519 seed (inbox)   | nostr secret   | `chat.onym.ios`         | `x25519-key-agreement-v1`  | HKDF-SHA256, 32B |
+| Nostr secret          | seed           | `app.onym.bip39`       | `nostr-secp256k1-v1`       | HKDF-SHA256, 32B |
+| BLS secret            | seed           | `app.onym.bip39`       | `bls12-381-v1`             | HKDF-SHA256, 32B |
+| Stellar Ed25519 seed  | nostr secret   | `app.onym.ios`         | `stellar-ed25519-v1`       | HKDF-SHA256, 32B |
+| X25519 seed (inbox)   | nostr secret   | `app.onym.ios`         | `x25519-key-agreement-v1`  | HKDF-SHA256, 32B |
 | Inbox tag             | X25519 pubkey  | —                       | prefix `sep-inbox-v1`      | SHA-256, hex(prefix(8)) |
 | Stellar account ID    | Ed25519 pubkey | —                       | version byte `6 << 3 = 48` | StrKey (CRC16-XMODEM + base32) |
 
@@ -533,7 +533,7 @@ shipped binary to take the test-mode branch.
 | `--mock-biometric`   | Swaps `LAContextAuthenticator` for `AlwaysAcceptAuthenticator` (DEBUG-only struct).   |
 
 UI tests use a separate Keychain service
-(`chat.onym.ios.identity.uitests`) that is never touched by
+(`app.onym.ios.identity.uitests`) that is never touched by
 production builds, so even a developer running tests on their own
 device cannot disturb their real identity.
 
@@ -729,7 +729,7 @@ inspected without re-running the workflow.
 The structure was lifted from
 `stellar-mls/.github/workflows/release.yml` — minus TestFlight
 upload, OTA droplet rsync, Android, and the NotificationService
-extension. Same Match repo / team / bundle id (`chat.onym.ios`) so
+extension. Same Match repo / team / bundle id (`app.onym.ios`) so
 no new Apple Developer setup is needed.
 
 ### Required repo secrets

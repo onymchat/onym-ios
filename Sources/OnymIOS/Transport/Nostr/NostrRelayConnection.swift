@@ -226,7 +226,7 @@ actor NostrRelayConnection {
     /// Reject incoming frames over 1 MB so a malicious relay can't
     /// exhaust memory.
     private static let maxMessageSize = 1_048_576
-    private static let securityLogger = Logger(subsystem: "chat.onym.ios", category: "Transport")
+    private static let securityLogger = Logger(subsystem: "app.onym.ios", category: "Transport")
 
     private func handleMessage(_ text: String) {
         guard text.utf8.count <= Self.maxMessageSize else {

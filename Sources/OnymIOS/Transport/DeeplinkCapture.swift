@@ -11,7 +11,7 @@ import Foundation
 ///    `IntroCapability?` out) and unit-testable. Holds the
 ///    **scheme/host allowlist** — the Info.plist `CFBundleURLTypes`
 ///    + Universal Links AASA already gate inbound URLs to
-///    `https://onym.chat/join*` and `onym://join`, but a
+///    `https://onym.app/join*` and `onym://join`, but a
 ///    misconfigured share target could still surface other URLs
 ///    to `.onOpenURL`. We re-check here as defense in depth and
 ///    so the pre-flight reasoning lives in code, not in
@@ -25,10 +25,10 @@ enum DeeplinkCapture {
 
     /// Allowlist of `(scheme, host)` pairs that may carry an
     /// `IntroCapability`. Mirrors the URL-types in `Info.plist`
-    /// + the `applinks:onym.chat` entitlement; keep them in
+    /// + the `applinks:onym.app` entitlement; keep them in
     /// lockstep.
     private static let allowed: Set<Pair> = [
-        Pair(scheme: "https", host: "onym.chat"),
+        Pair(scheme: "https", host: "onym.app"),
         Pair(scheme: "onym", host: "join"),
     ]
 

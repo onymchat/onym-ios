@@ -10,7 +10,7 @@ final class AnchorSelectionStoreTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        suiteName = "chat.onym.ios.anchors.tests.\(UUID().uuidString)"
+        suiteName = "app.onym.ios.anchors.tests.\(UUID().uuidString)"
         defaults = UserDefaults(suiteName: suiteName)
         store = UserDefaultsAnchorSelectionStore(defaults: defaults)
     }

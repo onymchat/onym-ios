@@ -7,7 +7,7 @@ import Foundation
 /// `OnymInvitee.id`) anywhere an identity is expected.
 ///
 /// Persisted via the keychain `kSecAttrService` suffix
-/// (`chat.onym.ios.identity.<uuidString>`) and inside `ChatGroup` rows
+/// (`app.onym.ios.identity.<uuidString>`) and inside `ChatGroup` rows
 /// (post-PR-3) so any group can be traced back to the identity that
 /// owns it without a separate join table.
 struct IdentityID: Hashable, Codable, Sendable, CustomStringConvertible {

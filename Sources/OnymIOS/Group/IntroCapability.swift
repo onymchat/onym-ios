@@ -11,7 +11,7 @@ import Foundation
 ///
 /// Encoded as `Base64(JSON)` and ferried via either:
 ///
-///  - `https://onym.chat/join?c=<base64>` — the Universal Link form;
+///  - `https://onym.app/join?c=<base64>` — the Universal Link form;
 ///    the OS routes it straight to the app on devices that have
 ///    fetched the AASA file.
 ///  - `onym://join?c=<base64>` — custom-scheme fallback for clients
@@ -73,7 +73,7 @@ struct IntroCapability: Codable, Equatable, Sendable, Identifiable {
     /// Optional display name. Public — see type doc.
     let groupName: String?
 
-    static let appLinkBase = "https://onym.chat/join?c="
+    static let appLinkBase = "https://onym.app/join?c="
     static let customSchemeBase = "onym://join?c="
 
     enum CodingKeys: String, CodingKey {

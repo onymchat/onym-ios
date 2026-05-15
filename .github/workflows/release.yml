@@ -426,7 +426,7 @@ jobs:
           # OTA manifest. iOS Safari hands this to the system installer
           # when the user taps the itms-services:// link. The IPA's
           # Info.plist must carry the same bundle-identifier
-          # ("chat.onym.ios") that match's ad-hoc profile is provisioned
+          # ("app.onym.ios") that match's ad-hoc profile is provisioned
           # for, otherwise the install fails with "unable to install".
           cat > "dist/qa/ios/${VERSION}/manifest.plist" <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
@@ -448,7 +448,7 @@ jobs:
                 <key>metadata</key>
                 <dict>
                   <key>bundle-identifier</key>
-                  <string>chat.onym.ios</string>
+                  <string>app.onym.ios</string>
                   <key>bundle-version</key>
                   <string>${MARKETING}</string>
                   <key>kind</key>

@@ -4,7 +4,7 @@
 <dict>
 	<key>com.apple.developer.associated-domains</key>
 	<array>
-		<string>applinks:onym.chat</string>
+		<string>applinks:onym.app</string>
 	</array>
 </dict>
 </plist>
