@@ -14,7 +14,7 @@ struct OnymIOSApp: App {
     private let introRequestStore: any IntroRequestStore
 
     /// Captured intro capability from a Universal Link or custom-
-    /// scheme deeplink (`https://onym.chat/join?c=…` /
+    /// scheme deeplink (`https://onym.app/join?c=…` /
     /// `onym://join?c=…`). Drives a `.sheet(item:)` over RootView —
     /// PR-6 surfaces a placeholder; PR-7 will replace it with the
     /// real `JoinView` + `JoinFlow`.
@@ -391,7 +391,7 @@ extension OnymIOSApp {
     ///                         (the simulator can't pass one).
     ///
     /// All UI-test runs use a separate Keychain service
-    /// (`chat.onym.ios.identity.uitests`) so they never touch the user's
+    /// (`app.onym.ios.identity.uitests`) so they never touch the user's
     /// real identity even on a developer machine.
     fileprivate static func resolveTestMode(
         args: [String]
@@ -402,7 +402,7 @@ extension OnymIOSApp {
             try? keychain.wipeAll()
             // Also clear the "selected identity" UserDefault so each
             // UI test boots into the same first-launch shape.
-            UserDefaults.standard.removeObject(forKey: "chat.onym.ios.identity.selectedID")
+            UserDefaults.standard.removeObject(forKey: "app.onym.ios.identity.selectedID")
         }
         let repo = IdentityRepository(keychain: keychain)
         let auth: BiometricAuthenticator = args.contains("--mock-biometric")

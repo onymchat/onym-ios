@@ -18,7 +18,7 @@ import Security
 actor KeychainIntroKeyStore: IntroKeyStore {
 
     /// Keychain service — one fixed item across the device.
-    static let serviceDefault = "chat.onym.ios.intro_keys"
+    static let serviceDefault = "app.onym.ios.intro_keys"
     static let account = "blob"
 
     private let service: String

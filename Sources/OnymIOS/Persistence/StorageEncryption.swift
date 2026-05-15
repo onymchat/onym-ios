@@ -14,7 +14,7 @@ import Security
 /// Persistence seam can encrypt/decrypt without taking a dependency on
 /// identity.
 enum StorageEncryption {
-    private static let keychainAccount = "chat.onym.ios.storageRootKey"
+    private static let keychainAccount = "app.onym.ios.storageRootKey"
 
     /// Memoised so repeated `encrypt` / `decrypt` calls don't round-trip
     /// to the Keychain. The seed itself never changes for the lifetime
@@ -27,7 +27,7 @@ enum StorageEncryption {
     static var storageKey: SymmetricKey {
         HKDF<SHA256>.deriveKey(
             inputKeyMaterial: SymmetricKey(data: cachedRootSecret),
-            salt: Data("chat.onym.ios.storage".utf8),
+            salt: Data("app.onym.ios.storage".utf8),
             info: Data("local-storage-v1".utf8),
             outputByteCount: 32
         )

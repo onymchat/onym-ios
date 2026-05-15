@@ -18,8 +18,8 @@ protocol AnchorSelectionStore: Sendable {
 /// Production `AnchorSelectionStore`. UserDefaults-backed (no secret
 /// material). Suite-name injectable for per-test isolation.
 struct UserDefaultsAnchorSelectionStore: AnchorSelectionStore, @unchecked Sendable {
-    private static let selectionsKey = "chat.onym.ios.anchors.selections"
-    private static let manifestKey = "chat.onym.ios.anchors.cachedManifest"
+    private static let selectionsKey = "app.onym.ios.anchors.selections"
+    private static let manifestKey = "app.onym.ios.anchors.cachedManifest"
 
     private let defaults: UserDefaults
 

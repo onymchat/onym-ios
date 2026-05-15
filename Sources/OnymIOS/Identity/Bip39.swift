@@ -2195,7 +2195,7 @@ enum Bip39 {
     static func deriveNostrKey(from seed: Data) -> Data {
         let derived = HKDF<SHA256>.deriveKey(
             inputKeyMaterial: SymmetricKey(data: seed),
-            salt: Data("chat.onym.bip39".utf8),
+            salt: Data("app.onym.bip39".utf8),
             info: Data("nostr-secp256k1-v1".utf8),
             outputByteCount: 32
         )
@@ -2206,7 +2206,7 @@ enum Bip39 {
     static func deriveBlsKey(from seed: Data) -> Data {
         let derived = HKDF<SHA256>.deriveKey(
             inputKeyMaterial: SymmetricKey(data: seed),
-            salt: Data("chat.onym.bip39".utf8),
+            salt: Data("app.onym.bip39".utf8),
             info: Data("bls12-381-v1".utf8),
             outputByteCount: 32
         )

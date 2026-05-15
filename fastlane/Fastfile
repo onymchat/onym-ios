@@ -7,7 +7,7 @@ platform :ios do
 
     match(
       type: "adhoc",
-      app_identifier: ["chat.onym.ios"],
+      app_identifier: ["app.onym.ios"],
       readonly: true
     )
 
@@ -17,7 +17,7 @@ platform :ios do
       team_id: ENV['MATCH_TEAM_ID'],
       code_sign_identity: "Apple Distribution",
       targets: ["OnymIOS"],
-      profile_name: "match AdHoc chat.onym.ios"
+      profile_name: "match AdHoc app.onym.ios"
     )
 
     gym(
@@ -31,7 +31,7 @@ platform :ios do
         signingStyle: "manual",
         teamID: ENV['MATCH_TEAM_ID'],
         provisioningProfiles: {
-          "chat.onym.ios" => "match AdHoc chat.onym.ios"
+          "app.onym.ios" => "match AdHoc app.onym.ios"
         }
       },
       xcargs: "COMPILER_INDEX_STORE_ENABLE=NO DEVELOPMENT_TEAM='#{ENV['MATCH_TEAM_ID']}'",

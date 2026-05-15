@@ -24,4 +24,9 @@ import Foundation
 struct MemberProfile: Codable, Equatable, Hashable, Sendable {
     let alias: String
     let inboxPublicKey: Data
+
+    enum CodingKeys: String, CodingKey {
+        case alias
+        case inboxPublicKey = "inbox_public_key"
+    }
 }

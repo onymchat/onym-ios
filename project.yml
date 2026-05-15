@@ -1,6 +1,6 @@
 name: OnymIOS
 options:
-  bundleIdPrefix: chat.onym
+  bundleIdPrefix: app.onym
   deploymentTarget:
     iOS: "18.0"
   xcodeVersion: "26.0"
@@ -63,13 +63,8 @@ targets:
         UILaunchScreen:
           UIColorName: LaunchBackground
           UIImageName: LaunchLogo
-        UISupportedInterfaceOrientations~iphone:
+        UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
-          - UIInterfaceOrientationLandscapeLeft
-          - UIInterfaceOrientationLandscapeRight
-        UISupportedInterfaceOrientations~ipad:
-          - UIInterfaceOrientationPortrait
-          - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         # PR-6: custom URL scheme for the Level-2 deeplink invite
@@ -80,7 +75,7 @@ targets:
         # works on both platforms.
         CFBundleURLTypes:
           - CFBundleTypeRole: Editor
-            CFBundleURLName: chat.onym.ios.join
+            CFBundleURLName: app.onym.ios.join
             CFBundleURLSchemes:
               - onym
         # Camera access is requested only when the user taps "Scan QR"
@@ -92,18 +87,18 @@ targets:
     entitlements:
       path: OnymIOS.entitlements
       properties:
-        # PR-6: Universal Links for `https://onym.chat/join*` and
-        # `https://onym.chat/onboard*`. The matching AASA file at
-        # `https://onym.chat/.well-known/apple-app-site-association`
-        # must list the team-prefixed app id (5V5EUT3ZXJ.chat.onym.ios)
+        # PR-6: Universal Links for `https://onym.app/join*` and
+        # `https://onym.app/onboard*`. The matching AASA file at
+        # `https://onym.app/.well-known/apple-app-site-association`
+        # must list the team-prefixed app id (7C7LXXWRMG.app.onym.ios)
         # against `appIDs`. Without the AASA file the OS still
         # routes the URL through the browser; the app only takes
         # over once Apple's CDN has fetched + validated the file.
         com.apple.developer.associated-domains:
-          - applinks:onym.chat
+          - applinks:onym.app
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: chat.onym.ios
+        PRODUCT_BUNDLE_IDENTIFIER: app.onym.ios
         # Single source of truth: the GitHub release tag. xcodegen
         # interpolates `${MARKETING_VERSION}` / `${CURRENT_PROJECT_VERSION}`
         # from the env at generate time; `generate-xcodeproj.sh` always
@@ -118,7 +113,7 @@ targets:
         # loud at build time instead of silently producing an unbranded
         # icon.
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        TARGETED_DEVICE_FAMILY: "1,2"
+        TARGETED_DEVICE_FAMILY: "1"
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: ${DEVELOPMENT_TEAM}
         CODE_SIGN_ENTITLEMENTS: OnymIOS.entitlements
@@ -130,11 +125,12 @@ targets:
       - Tests/OnymIOSTests
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: chat.onym.ios.tests
+        PRODUCT_BUNDLE_IDENTIFIER: app.onym.ios.tests
         SWIFT_VERSION: "5.0"
         GENERATE_INFOPLIST_FILE: YES
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: ${DEVELOPMENT_TEAM}
+        TARGETED_DEVICE_FAMILY: "1"
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/OnymIOS.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/OnymIOS"
         BUNDLE_LOADER: "$(TEST_HOST)"
     dependencies:
@@ -148,11 +144,12 @@ targets:
       - Tests/OnymIOSUITests
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: chat.onym.ios.uitests
+        PRODUCT_BUNDLE_IDENTIFIER: app.onym.ios.uitests
         SWIFT_VERSION: "5.0"
         GENERATE_INFOPLIST_FILE: YES
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: ${DEVELOPMENT_TEAM}
+        TARGETED_DEVICE_FAMILY: "1"
         TEST_TARGET_NAME: OnymIOS
     dependencies:
       - target: OnymIOS

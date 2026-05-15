@@ -673,7 +673,7 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
     ) throws -> Curve25519.Signing.PrivateKey {
         let derived = HKDF<SHA256>.deriveKey(
             inputKeyMaterial: SymmetricKey(data: nostrSecret),
-            salt: Data("chat.onym.ios".utf8),
+            salt: Data("app.onym.ios".utf8),
             info: Data("stellar-ed25519-v1".utf8),
             outputByteCount: 32
         )
@@ -691,7 +691,7 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
     ) throws -> Curve25519.KeyAgreement.PrivateKey {
         let derived = HKDF<SHA256>.deriveKey(
             inputKeyMaterial: SymmetricKey(data: nostrSecret),
-            salt: Data("chat.onym.ios".utf8),
+            salt: Data("app.onym.ios".utf8),
             info: Data("x25519-key-agreement-v1".utf8),
             outputByteCount: 32
         )
@@ -731,7 +731,7 @@ struct SelectedIdentityStore: Sendable {
     let save: @Sendable (IdentityID?) -> Void
 
     static let userDefaults: SelectedIdentityStore = {
-        let key = "chat.onym.ios.identity.selectedID"
+        let key = "app.onym.ios.identity.selectedID"
         return SelectedIdentityStore(
             load: {
                 guard let raw = UserDefaults.standard.string(forKey: key) else { return nil }

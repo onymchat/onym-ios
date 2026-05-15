@@ -135,7 +135,7 @@ private final class QRScannerViewController: UIViewController {
     var onError: ((String) -> Void)?
 
     private let session = AVCaptureSession()
-    private let sessionQueue = DispatchQueue(label: "chat.onym.qrscanner.session")
+    private let sessionQueue = DispatchQueue(label: "app.onym.qrscanner.session")
     private var previewLayer: AVCaptureVideoPreviewLayer?
 
     override func viewDidLoad() {

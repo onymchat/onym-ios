@@ -18,6 +18,7 @@
       }
     },
     " · published on Stellar so anyone can verify it’s real." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2046,6 +2047,9 @@
         }
       }
     },
+    "Paste" : {
+
+    },
     "Paste 64-char inbox key" : {
       "localizations" : {
         "en" : {
@@ -2063,6 +2067,7 @@
       }
     },
     "Paste a 64-char key" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2079,6 +2084,7 @@
       }
     },
     "Paste from clipboard" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2093,6 +2099,9 @@
           }
         }
       }
+    },
+    "Paste or scan a QR" : {
+
     },
     "People who tap one of your invite links show up here." : {
       "localizations" : {
@@ -2126,6 +2135,9 @@
           }
         }
       }
+    },
+    "Point your camera at an Onym invite QR code." : {
+
     },
     "Primary" : {
       "extractionState" : "stale",
@@ -2421,6 +2433,9 @@
           }
         }
       }
+    },
+    "Scan QR" : {
+
     },
     "Scan with Onym on another device to open a private chat with this identity." : {
       "localizations" : {

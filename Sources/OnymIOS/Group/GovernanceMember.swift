@@ -13,4 +13,9 @@ import Foundation
 struct GovernanceMember: Codable, Equatable, Sendable {
     let publicKeyCompressed: Data
     let leafHash: Data
+
+    enum CodingKeys: String, CodingKey {
+        case publicKeyCompressed = "public_key_compressed"
+        case leafHash = "leaf_hash"
+    }
 }

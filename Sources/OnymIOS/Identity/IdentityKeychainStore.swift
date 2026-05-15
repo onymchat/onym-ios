@@ -28,7 +28,7 @@ struct StoredSnapshot: Codable, Sendable, Equatable {
 
 /// Per-identity Keychain store. Each identity gets its own
 /// `kSecClassGenericPassword` item under the service name
-/// `chat.onym.ios.identity.<uuid>`. Listing identities is a single
+/// `app.onym.ios.identity.<uuid>`. Listing identities is a single
 /// `SecItemCopyMatching` over that service-name prefix.
 ///
 /// Same `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` policy as
@@ -41,7 +41,7 @@ struct StoredSnapshot: Codable, Sendable, Equatable {
 struct IdentityKeychainStore: Sendable {
     /// Service-name prefix shared by every per-identity item. Listing
     /// identities walks every item whose service starts with this.
-    static let servicePrefix = "chat.onym.ios.identity."
+    static let servicePrefix = "app.onym.ios.identity."
 
     /// Stable account string used for every item. The discriminator is
     /// the per-identity service suffix; account is constant so reading

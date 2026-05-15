@@ -53,44 +53,43 @@ final class IdentityRepositoryTests: XCTestCase {
         XCTAssertEqual(stored?.blsSecretKey.count, 32)
     }
 
-    /// **Cross-platform interop fixture.** Locks in derivation against the
-    /// canonical BIP39 test mnemonic so any change to a salt / info string
-    /// (HKDF for nostr, BLS, Stellar Ed25519, X25519, or the `sep-inbox-v1`
-    /// SHA-256 tag) breaks this test loudly.
+    /// **Derivation fixture.** Locks in derivation against the canonical BIP39
+    /// test mnemonic so any change to a salt / info string (HKDF for nostr,
+    /// BLS, Stellar Ed25519, X25519, or the `sep-inbox-v1` SHA-256 tag)
+    /// breaks this test loudly.
     ///
-    /// All four pubkeys + the inbox tag MUST match `KeyManager` /
-    /// `GroupCrypto.hiddenInboxTag` in `stellar-mls/clients/ios/StellarChat`
-    /// — and, when it lands, the same fixture in onym-android. A user who
-    /// restores `abandon × 11 + about` on any platform must land on the same
-    /// `G…` account and the same inbox tag, otherwise their groups become
-    /// unreachable.
+    /// Salts: `app.onym.bip39` (root entropy → secrets) and `app.onym.ios`
+    /// (nostr secret → Stellar/X25519 seeds). The `chat.onym.*` rebrand
+    /// changed these, so the values below diverge from the historical
+    /// `stellar-mls` / onym-android fixtures — cross-platform interop is
+    /// broken until the other platforms adopt the same salts.
     func test_derivation_matchesCrossPlatformFixture() async throws {
         let mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
         let identity = try await repo.restore(mnemonic: mnemonic)
 
         XCTAssertEqual(
             identity.nostrPublicKey.hex,
-            "1ee9632e948a11ff2b00fd0acf11f642fadcf14cd14d1f15b3bb6c072a268894"
+            "d8631b8e96d3d3d6d42cdadd07bc6db04108367dc2ce2d5e9b9a524123dc0821"
         )
         XCTAssertEqual(
             identity.blsPublicKey.hex,
-            "93c738ad5a4ff1be5692bd9b9eebb168c23710b7926b105fce3ee82fdf94debd17fef8ab2950622704438a2f16dbe3d6"
+            "a5859e962056987df69617fa41318641def18a1f78959951d1cf07bd164a6dcb50962786c8ead48c4e6aab5db6ce8f10"
         )
         XCTAssertEqual(
             identity.stellarPublicKey.hex,
-            "2d26005ffeaf78d38581e0c1c1cea3a7ae5d9510b0215a122c2b8c7ea24c6118"
+            "7a33c09cdb7f51fe723a4003d2f28272cddc8fa2cf3d74a374a5f2ee6fb1fcdc"
         )
         XCTAssertEqual(
             identity.stellarAccountID,
-            "GAWSMAC772XXRU4FQHQMDQOOUOT24XMVCCYCCWQSFQVYY7VCJRQRRF2K"
+            "GB5DHQE43N7VD7TSHJAAHUXSQJZM3XEPULHT25FDOSS7F3TPWH6NYJ7A"
         )
         XCTAssertEqual(
             identity.inboxPublicKey.hex,
-            "677244099e153cd18331aa2b44132d82b2a7f385f339b05184ac92df77e79d50"
+            "66ac34309b3b73163b628c2c40174ea76d58d4eb769172611e5c42f9a0cefe5f"
         )
         XCTAssertEqual(
             identity.inboxTag,
-            "2257fa71222dcc05"
+            "f462ae97384bd242"
         )
     }
 

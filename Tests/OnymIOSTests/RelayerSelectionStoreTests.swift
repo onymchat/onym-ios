@@ -6,7 +6,7 @@ import XCTest
 /// `IdentityRepositoryTests`.
 ///
 /// Also exercises the one-time migration from PR #18's
-/// single-selection format — the legacy `chat.onym.ios.relayer.selection`
+/// single-selection format — the legacy `app.onym.ios.relayer.selection`
 /// blob (`RelayerSelection` enum with `.known`/`.custom` cases) projects
 /// onto a one-endpoint `RelayerConfiguration` with that endpoint as
 /// primary, strategy `.primary`. After successful migration the legacy
@@ -18,7 +18,7 @@ final class RelayerSelectionStoreTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        suiteName = "chat.onym.ios.relayer.tests.\(UUID().uuidString)"
+        suiteName = "app.onym.ios.relayer.tests.\(UUID().uuidString)"
         defaults = UserDefaults(suiteName: suiteName)
         store = UserDefaultsRelayerSelectionStore(defaults: defaults)
     }
@@ -90,7 +90,7 @@ final class RelayerSelectionStoreTests: XCTestCase {
             networks: ["testnet"]
         )
         let legacyJSON = #"{ "known": { "name": "Legacy", "url": "https://legacy.example", "network": "testnet" } }"#
-        defaults.set(Data(legacyJSON.utf8), forKey: "chat.onym.ios.relayer.selection")
+        defaults.set(Data(legacyJSON.utf8), forKey: "app.onym.ios.relayer.selection")
 
         let migrated = store.loadConfiguration()
         XCTAssertEqual(migrated.endpoints, [endpoint])
@@ -101,7 +101,7 @@ final class RelayerSelectionStoreTests: XCTestCase {
     func test_migration_legacyCustomSelection_yieldsSingleEndpointConfig() throws {
         // Legacy `.custom(url)` synthesises a custom-network endpoint.
         let legacyJSON = #"{ "custom": { "_0": "https://custom.example" } }"#
-        defaults.set(Data(legacyJSON.utf8), forKey: "chat.onym.ios.relayer.selection")
+        defaults.set(Data(legacyJSON.utf8), forKey: "app.onym.ios.relayer.selection")
 
         let migrated = store.loadConfiguration()
         XCTAssertEqual(migrated.endpoints.count, 1)
@@ -113,14 +113,14 @@ final class RelayerSelectionStoreTests: XCTestCase {
 
     func test_migration_runsOnlyOnce_legacyKeyRemovedAfterMigration() throws {
         let legacyJSON = #"{ "known": { "name": "Legacy", "url": "https://legacy.example", "network": "testnet" } }"#
-        defaults.set(Data(legacyJSON.utf8), forKey: "chat.onym.ios.relayer.selection")
+        defaults.set(Data(legacyJSON.utf8), forKey: "app.onym.ios.relayer.selection")
 
         // First load triggers migration.
         _ = store.loadConfiguration()
 
         // Legacy key must be gone, replaced by the new configuration key.
-        XCTAssertNil(defaults.data(forKey: "chat.onym.ios.relayer.selection"))
-        XCTAssertNotNil(defaults.data(forKey: "chat.onym.ios.relayer.configuration"))
+        XCTAssertNil(defaults.data(forKey: "app.onym.ios.relayer.selection"))
+        XCTAssertNotNil(defaults.data(forKey: "app.onym.ios.relayer.configuration"))
 
         // Second load returns the migrated value without retriggering migration.
         let second = store.loadConfiguration()
@@ -128,10 +128,10 @@ final class RelayerSelectionStoreTests: XCTestCase {
     }
 
     func test_migration_unreadableLegacyBlob_dropsItAndReturnsEmpty() throws {
-        defaults.set(Data("garbage".utf8), forKey: "chat.onym.ios.relayer.selection")
+        defaults.set(Data("garbage".utf8), forKey: "app.onym.ios.relayer.selection")
         let migrated = store.loadConfiguration()
         XCTAssertEqual(migrated, .empty)
-        XCTAssertNil(defaults.data(forKey: "chat.onym.ios.relayer.selection"),
+        XCTAssertNil(defaults.data(forKey: "app.onym.ios.relayer.selection"),
                      "unreadable legacy blob must be dropped, not left lingering")
     }
 
@@ -141,6 +141,6 @@ final class RelayerSelectionStoreTests: XCTestCase {
         // UserDefaults writes on every cold launch).
         let result = store.loadConfiguration()
         XCTAssertEqual(result, .empty)
-        XCTAssertNil(defaults.data(forKey: "chat.onym.ios.relayer.configuration"))
+        XCTAssertNil(defaults.data(forKey: "app.onym.ios.relayer.configuration"))
     }
 }

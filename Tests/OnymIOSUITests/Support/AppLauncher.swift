@@ -6,7 +6,7 @@ import XCTest
 ///
 /// Launch arguments honoured by the app under `#if DEBUG`:
 ///   `--ui-testing`      Required to flip the App into test wiring.
-///   `--reset-keychain`  Wipe the test-isolated `chat.onym.ios.identity.uitests`
+///   `--reset-keychain`  Wipe the test-isolated `app.onym.ios.identity.uitests`
 ///                       keychain item before bootstrap.
 ///   `--mock-biometric`  Swap `LAContextAuthenticator` for a stub that returns
 ///                       success immediately without prompting.
