@@ -36,8 +36,15 @@ jobs:
         with:
           # Need the v* tag history so the auto-bump step can resolve
           # the latest patch version when the issue's Tag field is left
-          # blank. `fetch-tags` is lighter than `fetch-depth: 0`.
-          fetch-tags: true
+          # blank. `fetch-tags: true` alone (with default fetch-depth=1)
+          # does NOT actually populate refs/tags — the fetch refspec
+          # silently omits `+refs/tags/*` and `git tag` returns empty.
+          # That bit us once: auto-bump fell into the "fresh repo"
+          # branch and dispatched a duplicate v0.0.1 release, which
+          # softprops/action-gh-release happily overwrote the original
+          # v0.0.1 IPA with the HEAD build. Full clone is the only
+          # configuration that reliably ships tags here.
+          fetch-depth: 0
 
       - name: Resolve release tag
         id: tag
@@ -71,7 +78,23 @@ jobs:
                        | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
                        | head -1)
             if [ -z "$LATEST" ]; then
-              # First-ever release on a fresh repo — start at v0.0.1.
+              # Safety net: a fetch glitch leaving the working tree
+              # tagless on a non-empty repo would otherwise silently
+              # default to v0.0.1 and overwrite the historical first
+              # release. Cross-check against the remote before falling
+              # through to the fresh-repo path.
+              REMOTE_LATEST=$(git ls-remote --tags origin 'refs/tags/v*' 2>/dev/null \
+                                | awk '{print $2}' \
+                                | sed 's|refs/tags/||' \
+                                | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+                                | sort -V \
+                                | tail -1)
+              if [ -n "$REMOTE_LATEST" ]; then
+                echo "::error::Local repo has no v* tags but remote has $REMOTE_LATEST. The checkout step likely failed to fetch tags — refusing to default to v0.0.1 and overwrite an existing release."
+                gh issue comment "$ISSUE" --body "❌ Local repo has no v* tags but remote has \`$REMOTE_LATEST\`. The release workflow's tag fetch is broken; refusing to dispatch to avoid overwriting an existing release. Re-trigger after the workflow is repaired."
+                exit 1
+              fi
+              # First-ever release on a genuinely fresh repo — start at v0.0.1.
               TAG="v0.0.1"
               echo "::notice::No existing v* tags; defaulting to $TAG"
             else
