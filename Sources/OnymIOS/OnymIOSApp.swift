@@ -220,7 +220,13 @@ struct OnymIOSApp: App {
             },
             identitiesFlow: identitiesFlow,
             approveRequestsFlow: approveRequestsFlow,
-            messageRepository: messageRepository
+            messageRepository: messageRepository,
+            sendMessageInteractor: SendMessageInteractor(
+                identity: repository,
+                inboxTransport: inboxTransport,
+                messageRepository: messageRepository,
+                groupRepository: groupRepository
+            )
         )
     }
 

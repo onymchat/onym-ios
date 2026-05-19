@@ -29,4 +29,9 @@ struct AppDependencies {
     /// writes into the same actor. Constructed once in
     /// `OnymIOSApp.init` and threaded down.
     let messageRepository: MessageRepository
+    /// Stateless façade over identity + transport + repositories
+    /// for outgoing chat messages. Safe to share across screens
+    /// (it's an actor); each chat-thread view captures it and
+    /// dispatches `send(groupID:body:)` on the send-button tap.
+    let sendMessageInteractor: SendMessageInteractor
 }

@@ -28,6 +28,15 @@ final class ChatThreadViewController: UIViewController {
     /// view push.
     var onShowMembers: (() -> Void)?
 
+    /// Invoked when the user taps the input panel's Send button
+    /// with non-whitespace content. The SwiftUI wrapper points
+    /// this at `SendMessageInteractor.send(groupID:body:)` —
+    /// fire-and-forget; the interactor handles optimistic insert,
+    /// fan-out, and status flip on its own. Receives the body
+    /// already trimmed of leading/trailing whitespace by the
+    /// input panel.
+    var onSendTapped: ((String) -> Void)?
+
     private let titleLabel = UILabel()
     private let backButton = UIButton(type: .system)
     private let infoButton = UIButton(type: .system)
@@ -233,11 +242,16 @@ final class ChatThreadViewController: UIViewController {
     private func buildInputPanel() {
         inputPanel.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(inputPanel)
-        // PR 7 wires the layout + enable-state. PR 8 will replace
-        // this closure with the real `SendMessageInteractor.send`
-        // call; for now we just clear the field so the user sees
-        // the input is responsive.
-        inputPanel.onSendTapped = { [weak self] _ in
+        // Forward to the host-supplied dispatcher first (so the
+        // closure sees the typed body), then clear the field. The
+        // dispatcher is fire-and-forget — `SendMessageInteractor`
+        // does the optimistic insert before the await, so the
+        // user's message appears in the table via the snapshot
+        // stream long before the network round-trip resolves;
+        // clearing the field straight after the tap keeps the
+        // composer feeling responsive.
+        inputPanel.onSendTapped = { [weak self] body in
+            self?.onSendTapped?(body)
             self?.inputPanel.text = ""
         }
     }
