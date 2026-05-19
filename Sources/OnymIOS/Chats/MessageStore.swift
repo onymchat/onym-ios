@@ -1,0 +1,37 @@
+import Foundation
+
+/// Persistence seam for chat messages. Async surface mirrors
+/// `GroupStore` so a concrete implementation can serialise writes on
+/// its own queue without forcing callers onto a specific actor.
+///
+/// `ChatMessage` itself is the domain shape; the store is responsible
+/// for AES-GCM-wrapping the sensitive columns at the boundary.
+protocol MessageStore: Sendable {
+    /// All messages for one group, sorted by `sentAt` ascending —
+    /// chronological order is what the chat scroll renders.
+    func list(groupID: String) async -> [ChatMessage]
+
+    /// Idempotent on `message.id`. New row → insert. Same id → update
+    /// in place; used both for receive-side replays (no-op result on
+    /// the second insert) and outgoing status transitions (pending →
+    /// sent / failed). Returns `true` on insert, `false` on update.
+    @discardableResult
+    func insertOrUpdate(_ message: ChatMessage) async -> Bool
+
+    /// Flip just the status column. Convenience for the outgoing
+    /// pipeline so we don't have to round-trip the whole row through
+    /// the encryption boundary just to bump pending → sent. No-op if
+    /// the row is missing.
+    func updateStatus(id: UUID, status: MessageStatus) async
+
+    func delete(id: UUID) async
+
+    /// Drop every message for one group — wired into
+    /// `GroupRepository.delete` so removing a group wipes its
+    /// messages too.
+    func deleteGroup(groupID: String) async
+
+    /// Cascade delete for `IdentityRepository.identityRemoved`. Same
+    /// pattern as `GroupStore.deleteOwner`.
+    func deleteOwner(_ ownerIDString: String) async
+}
