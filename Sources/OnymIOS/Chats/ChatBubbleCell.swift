@@ -25,10 +25,15 @@ final class ChatBubbleCell: UITableViewCell {
     private let bubble = UIView()
     private let bodyLabel = UILabel()
 
-    // Direction-dependent constraints — only one of these pair is
-    // active at a time.
-    private var leadingAlignConstraint: NSLayoutConstraint!
-    private var trailingAlignConstraint: NSLayoutConstraint!
+    // Direction-dependent constraints — only one pair is active at a
+    // time. Each pair contains the alignment pin (`==` to the pinned
+    // edge) and the opposite-edge breathing-room gap on the *other*
+    // side. Pairing this way prevents the obvious-but-wrong layout:
+    // pinning `leading == +12` while also asserting `leading >= +56`
+    // (the original PR 6 shape) breaks every cell with a constraint
+    // log.
+    private var outgoingConstraints: [NSLayoutConstraint] = []
+    private var incomingConstraints: [NSLayoutConstraint] = []
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
@@ -53,13 +58,13 @@ final class ChatBubbleCell: UITableViewCell {
         case .outgoing:
             bubble.backgroundColor = UIColor(OnymAccent.blue.color)
             bodyLabel.textColor = UIColor(OnymTokens.onAccent)
-            leadingAlignConstraint.isActive = false
-            trailingAlignConstraint.isActive = true
+            NSLayoutConstraint.deactivate(incomingConstraints)
+            NSLayoutConstraint.activate(outgoingConstraints)
         case .incoming:
             bubble.backgroundColor = UIColor(OnymTokens.surface2)
             bodyLabel.textColor = UIColor(OnymTokens.text)
-            trailingAlignConstraint.isActive = false
-            leadingAlignConstraint.isActive = true
+            NSLayoutConstraint.deactivate(outgoingConstraints)
+            NSLayoutConstraint.activate(incomingConstraints)
         }
     }
 
@@ -71,56 +76,61 @@ final class ChatBubbleCell: UITableViewCell {
 
         bodyLabel.translatesAutoresizingMaskIntoConstraints = false
         bodyLabel.numberOfLines = 0
-        bodyLabel.font = .systemFont(ofSize: 15)
+        // Dynamic Type — the chat body should scale with the user's
+        // preferred text size. Full a11y polish pass happens later
+        // (PR 9+), but using `preferredFont(forTextStyle:)` here
+        // costs nothing now and avoids a fixed-size regression.
+        bodyLabel.font = .preferredFont(forTextStyle: .body)
+        bodyLabel.adjustsFontForContentSizeCategory = true
         bubble.addSubview(bodyLabel)
     }
 
     private func layoutBubble() {
-        // Outer margins from the cell edges. The 56pt opposite-edge
-        // inset is what gives the "addressed to the other side"
-        // visual — a bubble pinned trailing still leaves room on
-        // the left.
         let edgeInset: CGFloat = 12
-        let opposite: CGFloat = 56
+        // Opposite-edge gap: the side the bubble does NOT pin to
+        // still leaves this much breathing room from the cell edge.
+        // Gives the "addressed to one side" visual without the
+        // bubble ever filling the row, even for super-short content
+        // that the width cap doesn't bind on.
+        let oppositeGap: CGFloat = 56
 
-        leadingAlignConstraint = bubble.leadingAnchor.constraint(
-            equalTo: contentView.leadingAnchor, constant: edgeInset
-        )
-        trailingAlignConstraint = bubble.trailingAnchor.constraint(
-            equalTo: contentView.trailingAnchor, constant: -edgeInset
-        )
-
-        let widthCap = bubble.widthAnchor.constraint(
-            lessThanOrEqualTo: contentView.widthAnchor,
-            multiplier: maxWidthFraction
-        )
-
+        // Always-active constraints (don't depend on direction).
         NSLayoutConstraint.activate([
-            // Vertical padding between rows.
             bubble.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 4),
             bubble.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -4),
-
-            // Always keep a gap on the opposite side from the active
-            // alignment constraint so the bubble doesn't collide with
-            // the opposite edge.
-            bubble.leadingAnchor.constraint(
-                greaterThanOrEqualTo: contentView.leadingAnchor, constant: opposite
+            bubble.widthAnchor.constraint(
+                lessThanOrEqualTo: contentView.widthAnchor,
+                multiplier: maxWidthFraction
             ),
-            bubble.trailingAnchor.constraint(
-                lessThanOrEqualTo: contentView.trailingAnchor, constant: -opposite
-            ),
-            widthCap,
-
-            // Body label fills the bubble with padding.
             bodyLabel.leadingAnchor.constraint(equalTo: bubble.leadingAnchor, constant: 12),
             bodyLabel.trailingAnchor.constraint(equalTo: bubble.trailingAnchor, constant: -12),
             bodyLabel.topAnchor.constraint(equalTo: bubble.topAnchor, constant: 8),
             bodyLabel.bottomAnchor.constraint(equalTo: bubble.bottomAnchor, constant: -8),
         ])
 
-        // Default to leading (incoming). `configure(message:)` flips
-        // before the cell is shown — but the default keeps the cell
-        // layout-valid even if a configurer skips us.
-        leadingAlignConstraint.isActive = true
+        // Outgoing pair — trailing-pinned, leading has the
+        // opposite-edge gap. Activating the leading-`==` from the
+        // other pair simultaneously would conflict with this gap;
+        // `configure(message:)` toggles the pairs together.
+        outgoingConstraints = [
+            bubble.trailingAnchor.constraint(
+                equalTo: contentView.trailingAnchor, constant: -edgeInset
+            ),
+            bubble.leadingAnchor.constraint(
+                greaterThanOrEqualTo: contentView.leadingAnchor, constant: oppositeGap
+            ),
+        ]
+        incomingConstraints = [
+            bubble.leadingAnchor.constraint(
+                equalTo: contentView.leadingAnchor, constant: edgeInset
+            ),
+            bubble.trailingAnchor.constraint(
+                lessThanOrEqualTo: contentView.trailingAnchor, constant: -oppositeGap
+            ),
+        ]
+        // Default to leading (incoming) — `configure(message:)`
+        // overrides before the cell is shown, but the default keeps
+        // the cell layout-valid even if a configurer skips us.
+        NSLayoutConstraint.activate(incomingConstraints)
     }
 }

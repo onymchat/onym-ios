@@ -45,14 +45,35 @@ final class ChatBubbleCellTests: XCTestCase {
         XCTAssertEqual(label?.text, "hello, world")
     }
 
+    func test_layoutResolves_withoutConstraintConflicts() {
+        // Guards the bug the PR-6 review caught: pairing the
+        // opposite-edge `>=`/`<=` gap with the *same-direction*
+        // alignment pin would conflict (e.g. leading == +12 AND
+        // leading >= +56). UIKit logs and silently disables one,
+        // which the original constraint-isActive tests didn't
+        // notice. Forcing a layout pass and asserting all
+        // constraints are still active is the cheapest way to
+        // catch a regression here.
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+        cell.contentView.frame = CGRect(x: 0, y: 0, width: 320, height: 80)
+
+        cell.configure(message: makeMessage(direction: .incoming, body: "hi"))
+        cell.contentView.layoutIfNeeded()
+        XCTAssertTrue(allConstraintsStillActive(cell),
+                      "incoming layout must not auto-deactivate any constraint")
+
+        cell.configure(message: makeMessage(direction: .outgoing, body: "hi"))
+        cell.contentView.layoutIfNeeded()
+        XCTAssertTrue(allConstraintsStillActive(cell),
+                      "outgoing layout must not auto-deactivate any constraint")
+    }
+
     // MARK: - Constraint introspection
     //
-    // The leading/trailing alignment constraints are private to the
-    // cell. We can still detect which is active by reading the live
-    // constraints attached to the cell's content view + bubble —
-    // there are two `equal`-relation constraints on the bubble's
-    // leading/trailing anchors, one of them inactive at any given
-    // time.
+    // The alignment constraint pairs are private to the cell. We
+    // detect which side is pinned by looking for an `equal`-relation
+    // constraint between the bubble's anchor and the corresponding
+    // content-view anchor — that's the alignment pin (one per pair).
 
     private func activeLeadingAlignment(in cell: ChatBubbleCell) -> Bool {
         guard let bubble = cell.contentView.subviews.first else { return false }
@@ -76,6 +97,26 @@ final class ChatBubbleCellTests: XCTestCase {
             $0.secondAttribute == .trailing &&
             $0.relation == .equal
         }
+    }
+
+    /// `true` iff every required constraint on the cell remains
+    /// active after a layout pass. UIKit auto-deactivates the lower-
+    /// priority constraint when a `required` conflict resolves — so
+    /// a count-stable layout proves no conflict happened.
+    private func allConstraintsStillActive(_ cell: ChatBubbleCell) -> Bool {
+        // The cell builds eight always-on constraints + two from the
+        // direction pair == 10 active total. Anything less means
+        // UIKit disabled one to resolve a conflict.
+        let active = collectActiveConstraints(in: cell.contentView)
+        return active.count >= 10
+    }
+
+    private func collectActiveConstraints(in view: UIView) -> [NSLayoutConstraint] {
+        var found: [NSLayoutConstraint] = view.constraints.filter { $0.isActive }
+        for sub in view.subviews {
+            found.append(contentsOf: collectActiveConstraints(in: sub))
+        }
+        return found
     }
 
     private func findLabel(in view: UIView) -> UILabel? {

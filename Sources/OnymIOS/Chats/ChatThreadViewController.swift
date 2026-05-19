@@ -86,18 +86,27 @@ final class ChatThreadViewController: UIViewController {
     ///     the user was already near it (otherwise we'd hijack
     ///     mid-scroll reading of older messages).
     ///
-    /// Caller is expected to pass `messages` sorted ascending by
-    /// `sentAt` — the table's first row is the oldest message,
-    /// last row is the newest.
+    /// Defensively sorts by `sentAt` ascending. The repository's
+    /// contract is already to return sorted snapshots
+    /// (`SwiftDataMessageStoreTests.test_list_sortsBySentAtAscending`),
+    /// but a future caller / test stub might violate that without
+    /// the sort here protecting the table's row order.
+    ///
+    /// PR 8 note: `messagesByID` is updated on every call, but the
+    /// diffable identity is just `UUID` — when a status flip lands
+    /// (pending → sent), visible cells won't reconfigure. PR 8 should
+    /// switch to `snapshot.reconfigureItems(changedIDs)` or include
+    /// status in the diff identity.
     func update(messages: [ChatMessage]) {
         let isFirstApply = !hasAppliedFirstSnapshot
         let wasNearBottom = isNearBottom
 
-        messagesByID = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
+        let sorted = messages.sorted { $0.sentAt < $1.sentAt }
+        messagesByID = Dictionary(uniqueKeysWithValues: sorted.map { ($0.id, $0) })
 
         var snapshot = NSDiffableDataSourceSnapshot<Section, UUID>()
         snapshot.appendSections([.main])
-        snapshot.appendItems(messages.map(\.id))
+        snapshot.appendItems(sorted.map(\.id))
         // First apply is non-animated to avoid an initial-load
         // "fly-in" of every existing message.
         dataSource.apply(snapshot, animatingDifferences: !isFirstApply) { [weak self] in

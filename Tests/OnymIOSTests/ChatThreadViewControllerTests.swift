@@ -88,6 +88,34 @@ final class ChatThreadViewControllerTests: XCTestCase {
         XCTAssertEqual(tableView(in: vc)?.numberOfRows(inSection: 0), 2)
     }
 
+    func test_updateMessages_unsortedInput_isSortedAscending() {
+        // Defensive: the repository's contract is to emit ascending
+        // snapshots, but a future caller / test stub might violate
+        // it. The controller sorts before applying so row order is
+        // always chronological.
+        let vc = ChatThreadViewController()
+        vc.loadViewIfNeeded()
+        let oldest = makeMessage(body: "1", direction: .incoming,
+                                 sentAt: Date(timeIntervalSince1970: 1_700_000_000))
+        let middle = makeMessage(body: "2", direction: .outgoing,
+                                 sentAt: Date(timeIntervalSince1970: 1_700_000_100))
+        let newest = makeMessage(body: "3", direction: .incoming,
+                                 sentAt: Date(timeIntervalSince1970: 1_700_000_200))
+        // Out-of-order input.
+        vc.update(messages: [newest, oldest, middle])
+
+        let table = tableView(in: vc)!
+        table.frame = CGRect(x: 0, y: 0, width: 320, height: 640)
+        table.layoutIfNeeded()
+
+        // Row 0 = oldest (top), row 2 = newest (bottom). Reads via
+        // the cell text.
+        XCTAssertEqual(table.numberOfRows(inSection: 0), 3)
+        XCTAssertEqual(cellBodyText(in: table, row: 0), "1")
+        XCTAssertEqual(cellBodyText(in: table, row: 1), "2")
+        XCTAssertEqual(cellBodyText(in: table, row: 2), "3")
+    }
+
     func test_updateMessages_removeOne_shrinksTable() {
         let vc = ChatThreadViewController()
         vc.loadViewIfNeeded()
@@ -148,18 +176,36 @@ final class ChatThreadViewControllerTests: XCTestCase {
         return nil
     }
 
-    private func makeMessage(body: String, direction: MessageDirection) -> ChatMessage {
+    private func makeMessage(
+        body: String,
+        direction: MessageDirection,
+        sentAt: Date = Date(timeIntervalSince1970: 1_700_000_000)
+    ) -> ChatMessage {
         ChatMessage(
             id: UUID(),
             groupID: "aa".repeated(32),
             ownerIdentityID: IdentityID(),
             senderBlsPubkeyHex: "11".repeated(48),
             body: body,
-            sentAt: Date(timeIntervalSince1970: 1_700_000_000),
+            sentAt: sentAt,
             direction: direction,
             status: direction == .incoming ? .received : .sent,
             groupType: .tyranny
         )
+    }
+
+    private func cellBodyText(in table: UITableView, row: Int) -> String? {
+        let cell = table.cellForRow(at: IndexPath(row: row, section: 0))
+        guard let cv = cell?.contentView else { return nil }
+        return findLabelText(in: cv)
+    }
+
+    private func findLabelText(in view: UIView) -> String? {
+        if let label = view as? UILabel { return label.text }
+        for sub in view.subviews {
+            if let text = findLabelText(in: sub) { return text }
+        }
+        return nil
     }
 
     // MARK: - Subview lookup
