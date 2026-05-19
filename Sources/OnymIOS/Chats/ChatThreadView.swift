@@ -33,6 +33,7 @@ struct ChatThreadView: View {
     var body: some View {
         ChatThreadControllerBridge(
             groupName: currentGroupName,
+            memberCount: currentMemberCount,
             messages: messages,
             onBack: { dismiss() },
             onShowMembers: { showMembers = true },
@@ -90,10 +91,18 @@ struct ChatThreadView: View {
     private var currentGroupName: String {
         chatsFlow.groups.first { $0.id == groupID }?.name ?? "Chat"
     }
+
+    /// Drives the title subtitle ("N members"). Reads from the same
+    /// `chatsFlow.groups` source as the name so an admin admitting
+    /// a new joiner updates the bar live as the announcement lands.
+    private var currentMemberCount: Int {
+        chatsFlow.groups.first { $0.id == groupID }?.memberProfiles.count ?? 0
+    }
 }
 
 private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
     let groupName: String
+    let memberCount: Int
     let messages: [ChatMessage]
     let onBack: () -> Void
     let onShowMembers: () -> Void
@@ -107,7 +116,7 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         vc.onSendTapped = onSendTapped
         vc.onRetryRequested = onRetryRequested
         vc.loadViewIfNeeded()
-        vc.update(groupName: groupName)
+        vc.update(groupName: groupName, memberCount: memberCount)
         vc.update(messages: messages)
         return vc
     }
@@ -121,7 +130,7 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         vc.onShowMembers = onShowMembers
         vc.onSendTapped = onSendTapped
         vc.onRetryRequested = onRetryRequested
-        vc.update(groupName: groupName)
+        vc.update(groupName: groupName, memberCount: memberCount)
         vc.update(messages: messages)
     }
 }
