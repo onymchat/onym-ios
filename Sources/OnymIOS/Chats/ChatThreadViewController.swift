@@ -34,9 +34,7 @@ final class ChatThreadViewController: UIViewController {
     private let topBar = UIView()
     private let topBarSeparator = UIView()
     private let tableView = UITableView()
-    private let inputPanel = UIView()
-    private let inputPanelSeparator = UIView()
-    private let inputPlaceholderLabel = UILabel()
+    private let inputPanel = ChatInputPanelView()
 
     // Diffable data source state. Keyed by message UUID — stable
     // identity across re-renders, no array-index churn.
@@ -230,25 +228,18 @@ final class ChatThreadViewController: UIViewController {
         dataSource.apply(initial, animatingDifferences: false)
     }
 
-    // MARK: - Input panel placeholder
+    // MARK: - Input panel
 
     private func buildInputPanel() {
-        inputPanel.backgroundColor = UIColor(OnymTokens.surface2)
         inputPanel.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(inputPanel)
-
-        inputPanelSeparator.backgroundColor = UIColor(OnymTokens.hairline)
-        inputPanelSeparator.translatesAutoresizingMaskIntoConstraints = false
-        inputPanel.addSubview(inputPanelSeparator)
-
-        // Placeholder copy so the panel is visible during PR 5
-        // without doing anything yet. PR 6 replaces the label with
-        // a real UITextView + send button.
-        inputPlaceholderLabel.text = "Message input lands in PR 6"
-        inputPlaceholderLabel.font = .systemFont(ofSize: 14)
-        inputPlaceholderLabel.textColor = UIColor(OnymTokens.text3)
-        inputPlaceholderLabel.translatesAutoresizingMaskIntoConstraints = false
-        inputPanel.addSubview(inputPlaceholderLabel)
+        // PR 7 wires the layout + enable-state. PR 8 will replace
+        // this closure with the real `SendMessageInteractor.send`
+        // call; for now we just clear the field so the user sees
+        // the input is responsive.
+        inputPanel.onSendTapped = { [weak self] _ in
+            self?.inputPanel.text = ""
+        }
     }
 
     // MARK: - Layout
@@ -290,21 +281,19 @@ final class ChatThreadViewController: UIViewController {
             tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             tableView.bottomAnchor.constraint(equalTo: inputPanel.topAnchor),
 
-            // Input panel — pinned to the safe-area bottom, fixed
-            // 56pt height for PR 5. PR 6 swaps this for a layout
-            // that grows with the text view (up to a 3-line cap).
+            // Input panel — bottom tracks the keyboard. With no
+            // keyboard up, `keyboardLayoutGuide.topAnchor` equals
+            // the safe-area bottom; when the keyboard rises the
+            // guide tracks its top edge and the panel slides
+            // along automatically. No manual frame math or
+            // `keyboardWillShow` notifications required.
+            //
+            // Height is intrinsic — driven by the text view's
+            // height constraint inside the panel — so a multi-
+            // line composition pushes the message list up.
             inputPanel.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             inputPanel.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            inputPanel.bottomAnchor.constraint(equalTo: safeArea.bottomAnchor),
-            inputPanel.heightAnchor.constraint(equalToConstant: 56),
-
-            inputPanelSeparator.topAnchor.constraint(equalTo: inputPanel.topAnchor),
-            inputPanelSeparator.leadingAnchor.constraint(equalTo: inputPanel.leadingAnchor),
-            inputPanelSeparator.trailingAnchor.constraint(equalTo: inputPanel.trailingAnchor),
-            inputPanelSeparator.heightAnchor.constraint(equalToConstant: 1.0 / UIScreen.main.scale),
-
-            inputPlaceholderLabel.leadingAnchor.constraint(equalTo: inputPanel.leadingAnchor, constant: 16),
-            inputPlaceholderLabel.centerYAnchor.constraint(equalTo: inputPanel.centerYAnchor),
+            inputPanel.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
         ])
     }
 

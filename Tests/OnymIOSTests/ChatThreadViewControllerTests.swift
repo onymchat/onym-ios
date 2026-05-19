@@ -93,8 +93,18 @@ final class ChatThreadViewControllerTests: XCTestCase {
         // snapshots, but a future caller / test stub might violate
         // it. The controller sorts before applying so row order is
         // always chronological.
+        //
+        // The assertion reads cell content via `cellForRow(at:)`,
+        // which only returns currently-visible rows. Place the
+        // controller in a real window so Auto Layout (including
+        // the input panel's `keyboardLayoutGuide` constraint)
+        // resolves and the table view ends up tall enough to host
+        // all three rows.
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 800))
         let vc = ChatThreadViewController()
-        vc.loadViewIfNeeded()
+        window.rootViewController = vc
+        window.isHidden = false
+
         let oldest = makeMessage(body: "1", direction: .incoming,
                                  sentAt: Date(timeIntervalSince1970: 1_700_000_000))
         let middle = makeMessage(body: "2", direction: .outgoing,
@@ -103,13 +113,11 @@ final class ChatThreadViewControllerTests: XCTestCase {
                                  sentAt: Date(timeIntervalSince1970: 1_700_000_200))
         // Out-of-order input.
         vc.update(messages: [newest, oldest, middle])
-
+        vc.view.layoutIfNeeded()
         let table = tableView(in: vc)!
-        table.frame = CGRect(x: 0, y: 0, width: 320, height: 640)
         table.layoutIfNeeded()
 
-        // Row 0 = oldest (top), row 2 = newest (bottom). Reads via
-        // the cell text.
+        // Row 0 = oldest (top), row 2 = newest (bottom).
         XCTAssertEqual(table.numberOfRows(inSection: 0), 3)
         XCTAssertEqual(cellBodyText(in: table, row: 0), "1")
         XCTAssertEqual(cellBodyText(in: table, row: 1), "2")
@@ -126,6 +134,41 @@ final class ChatThreadViewControllerTests: XCTestCase {
 
         vc.update(messages: [m1])
         XCTAssertEqual(tableView(in: vc)?.numberOfRows(inSection: 0), 1)
+    }
+
+    // MARK: - Input panel wiring (PR 7)
+
+    func test_inputPanel_isHosted_andClearsTextOnSendTap() {
+        // PR 7 only wires the layout + clear-on-tap behavior; PR 8
+        // will swap the closure body for a real send. This test
+        // pins the PR-7 contract: the panel is in the hierarchy
+        // and tapping send clears the field.
+        let vc = ChatThreadViewController()
+        vc.loadViewIfNeeded()
+        guard let panel = inputPanel(in: vc) else {
+            return XCTFail("input panel not found in controller hierarchy")
+        }
+        panel.text = "hello"
+        XCTAssertTrue(sendButton(in: panel).isEnabled)
+
+        sendButton(in: panel).sendActions(for: .touchUpInside)
+        XCTAssertEqual(panel.text, "",
+                       "PR 7 contract: tapping send clears the field")
+        XCTAssertFalse(sendButton(in: panel).isEnabled,
+                       "after clearing, the send button must disable again")
+    }
+
+    private func inputPanel(in vc: UIViewController) -> ChatInputPanelView? {
+        find(in: vc.view) { $0 is ChatInputPanelView } as? ChatInputPanelView
+    }
+
+    private func sendButton(in panel: ChatInputPanelView) -> UIButton {
+        guard let b = find(in: panel, where: {
+            $0.accessibilityIdentifier == "chat.input.send"
+        }) as? UIButton else {
+            fatalError("send button not found")
+        }
+        return b
     }
 
     // MARK: - Auto-scroll heuristic
