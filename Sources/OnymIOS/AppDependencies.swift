@@ -24,4 +24,9 @@ struct AppDependencies {
     /// and the underlying collector should run for the app's
     /// lifetime regardless of which surface is mounted.
     let approveRequestsFlow: ApproveRequestsFlow
+    /// Single shared instance — the chat-thread screen subscribes to
+    /// per-group message snapshots, and the receive-side dispatcher
+    /// writes into the same actor. Constructed once in
+    /// `OnymIOSApp.init` and threaded down.
+    let messageRepository: MessageRepository
 }
