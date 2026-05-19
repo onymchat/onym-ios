@@ -178,12 +178,13 @@ enum OnymUIGovernance: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// True when this governance type is wired through the chain
-    /// layer end-to-end. All three currently surfaced types
-    /// (Tyranny, 1-on-1, Anarchy) are live.
+    /// True when this governance type is selectable in the Create
+    /// Group flow. Only Tyranny ships today — 1-on-1 and Anarchy
+    /// render with a "Soon" label and aren't selectable.
     var isAvailable: Bool {
         switch self {
-        case .tyranny, .oneOnOne, .anarchy: true
+        case .tyranny: true
+        case .oneOnOne, .anarchy: false
         }
     }
 
