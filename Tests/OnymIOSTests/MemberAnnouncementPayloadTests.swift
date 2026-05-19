@@ -52,23 +52,6 @@ final class MemberAnnouncementPayloadTests: XCTestCase {
                         "PR 3 wire key must match Android parity")
     }
 
-    func test_decoder_acceptsLegacyAnnouncementWithoutSendingPub() throws {
-        // Pre-PR-3 announcers shipped without `sending_pub`.
-        // Receivers must round-trip those into an announcement with
-        // `sendingPub == nil` so the local roster updates still
-        // succeed; PR 4's dispatcher will then fall back to trusting
-        // the BLS claim alone for that member's messages.
-        let bls = Data(repeating: 0, count: 48).base64EncodedString()
-        let inbox = Data(repeating: 0, count: 32).base64EncodedString()
-        let gid = Data(repeating: 0, count: 32).base64EncodedString()
-        let legacy = #"""
-        {"version":1,"group_id":"\#(gid)","admin_alias":"Alice","new_member":{"bls_pub":"\#(bls)","inbox_pub":"\#(inbox)","alias":"Bob"}}
-        """#
-        let bytes = legacy.data(using: .utf8)!
-        let decoded = try JSONDecoder().decode(MemberAnnouncementPayload.self, from: bytes)
-        XCTAssertNil(decoded.newMember.sendingPub)
-    }
-
     func test_constructor_rejectsWrongSizedSendingPub() {
         XCTAssertThrowsError(try MemberAnnouncementPayload.AnnouncedMember(
             blsPub: Data(repeating: 0, count: 48),
@@ -86,7 +69,8 @@ final class MemberAnnouncementPayloadTests: XCTestCase {
         let member = try MemberAnnouncementPayload.AnnouncedMember(
             blsPub: Data(repeating: 0, count: 48),
             inboxPub: Data(repeating: 0, count: 32),
-            alias: "Bob"
+            alias: "Bob",
+            sendingPub: Data(repeating: 0, count: 32)
         )
         let payload = try MemberAnnouncementPayload(
             version: 1,
@@ -116,7 +100,8 @@ final class MemberAnnouncementPayloadTests: XCTestCase {
         let member = try! MemberAnnouncementPayload.AnnouncedMember(
             blsPub: Data(repeating: 0, count: 48),
             inboxPub: Data(repeating: 0, count: 32),
-            alias: "x"
+            alias: "x",
+            sendingPub: Data(repeating: 0, count: 32)
         )
         XCTAssertThrowsError(try MemberAnnouncementPayload(
             version: 1,
@@ -132,7 +117,8 @@ final class MemberAnnouncementPayloadTests: XCTestCase {
         XCTAssertThrowsError(try MemberAnnouncementPayload.AnnouncedMember(
             blsPub: Data(repeating: 0, count: 47),
             inboxPub: Data(repeating: 0, count: 32),
-            alias: "x"
+            alias: "x",
+            sendingPub: Data(repeating: 0, count: 32)
         )) { error in
             XCTAssertTrue(error is MemberAnnouncementPayloadError)
         }
@@ -142,7 +128,8 @@ final class MemberAnnouncementPayloadTests: XCTestCase {
         XCTAssertThrowsError(try MemberAnnouncementPayload.AnnouncedMember(
             blsPub: Data(repeating: 0, count: 48),
             inboxPub: Data(repeating: 0, count: 31),
-            alias: "x"
+            alias: "x",
+            sendingPub: Data(repeating: 0, count: 32)
         )) { error in
             XCTAssertTrue(error is MemberAnnouncementPayloadError)
         }
@@ -164,7 +151,7 @@ final class MemberAnnouncementPayloadTests: XCTestCase {
 
     func test_decoder_rejectsWrongSizedBlsPub() {
         let bad = #"""
-        {"version":1,"group_id":"\#(base64Zeros(32))","new_member":{"bls_pub":"AAA=","inbox_pub":"\#(base64Zeros(32))","alias":"x"},"admin_alias":"y"}
+        {"version":1,"group_id":"\#(base64Zeros(32))","new_member":{"bls_pub":"AAA=","inbox_pub":"\#(base64Zeros(32))","alias":"x","sending_pub":"\#(base64Zeros(32))"},"admin_alias":"y"}
         """#
         let bytes = bad.data(using: .utf8)!
         XCTAssertThrowsError(
@@ -178,7 +165,7 @@ final class MemberAnnouncementPayloadTests: XCTestCase {
         // V2 receivers may add `leaf_hash`; V1 receivers MUST decode
         // payloads carrying it, ignoring the unknown field.
         let v2Shape = #"""
-        {"version":2,"group_id":"\#(base64Zeros(32))","new_member":{"bls_pub":"\#(base64Zeros(48))","leaf_hash":"\#(base64Zeros(32))","inbox_pub":"\#(base64Zeros(32))","alias":"x"},"admin_alias":"y"}
+        {"version":2,"group_id":"\#(base64Zeros(32))","new_member":{"bls_pub":"\#(base64Zeros(48))","leaf_hash":"\#(base64Zeros(32))","inbox_pub":"\#(base64Zeros(32))","alias":"x","sending_pub":"\#(base64Zeros(32))"},"admin_alias":"y"}
         """#
         let bytes = v2Shape.data(using: .utf8)!
         let decoded = try JSONDecoder().decode(

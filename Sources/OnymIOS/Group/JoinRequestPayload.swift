@@ -54,11 +54,8 @@ struct JoinRequestPayload: Codable, Equatable, Sendable {
     /// request and ships it back to existing members via
     /// `MemberAnnouncementPayload.AnnouncedMember.sendingPub` so they
     /// can verify the joiner's future chat-message envelope
-    /// signatures (PR 4). Optional for back-compat with pre-PR-3
-    /// joiner builds; admins running PR-3+ store `nil` and the
-    /// dispatcher falls back to BLS-claim trust until the joiner
-    /// updates.
-    let joinerSendingPublicKey: Data?
+    /// signatures (PR 4).
+    let joinerSendingPublicKey: Data
     let joinerDisplayLabel: String
     let groupId: Data
 
@@ -75,7 +72,7 @@ struct JoinRequestPayload: Codable, Equatable, Sendable {
         joinerInboxPublicKey: Data,
         joinerBlsPublicKey: Data?,
         joinerLeafHash: Data?,
-        joinerSendingPublicKey: Data? = nil,
+        joinerSendingPublicKey: Data,
         joinerDisplayLabel: String,
         groupId: Data
     ) throws {
@@ -94,9 +91,9 @@ struct JoinRequestPayload: Codable, Equatable, Sendable {
                 "joinerLeafHash: expected 32 bytes, got \(leaf.count)"
             )
         }
-        if let send = joinerSendingPublicKey, send.count != 32 {
+        guard joinerSendingPublicKey.count == 32 else {
             throw JoinRequestPayloadError.shape(
-                "joinerSendingPublicKey: expected 32 bytes, got \(send.count)"
+                "joinerSendingPublicKey: expected 32 bytes, got \(joinerSendingPublicKey.count)"
             )
         }
         guard groupId.count == 32 else {
@@ -117,7 +114,7 @@ struct JoinRequestPayload: Codable, Equatable, Sendable {
         let pub = try c.decode(Data.self, forKey: .joinerInboxPublicKey)
         let bls = try c.decodeIfPresent(Data.self, forKey: .joinerBlsPublicKey)
         let leaf = try c.decodeIfPresent(Data.self, forKey: .joinerLeafHash)
-        let sending = try c.decodeIfPresent(Data.self, forKey: .joinerSendingPublicKey)
+        let sending = try c.decode(Data.self, forKey: .joinerSendingPublicKey)
         let label = try c.decode(String.self, forKey: .joinerDisplayLabel)
         let gid = try c.decode(Data.self, forKey: .groupId)
         guard pub.count == 32 else {
@@ -135,9 +132,9 @@ struct JoinRequestPayload: Codable, Equatable, Sendable {
                 "joinerLeafHash: expected 32 bytes, got \(leafBytes.count)"
             )
         }
-        if let sendBytes = sending, sendBytes.count != 32 {
+        guard sending.count == 32 else {
             throw JoinRequestPayloadError.shape(
-                "joinerSendingPublicKey: expected 32 bytes, got \(sendBytes.count)"
+                "joinerSendingPublicKey: expected 32 bytes, got \(sending.count)"
             )
         }
         guard gid.count == 32 else {

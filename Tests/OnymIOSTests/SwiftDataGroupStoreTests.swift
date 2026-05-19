@@ -59,11 +59,13 @@ final class SwiftDataGroupStoreTests: XCTestCase {
         let profiles: [String: MemberProfile] = [
             aliceHex: MemberProfile(
                 alias: "alice",
-                inboxPublicKey: Data(repeating: 0xAA, count: 32)
+                inboxPublicKey: Data(repeating: 0xAA, count: 32),
+                sendingPubkey: Data(repeating: 0xE1, count: 32)
             ),
             bobHex: MemberProfile(
                 alias: "bob",
-                inboxPublicKey: Data(repeating: 0xBB, count: 32)
+                inboxPublicKey: Data(repeating: 0xBB, count: 32),
+                sendingPubkey: Data(repeating: 0xE2, count: 32)
             ),
         ]
         let group = makeGroup(

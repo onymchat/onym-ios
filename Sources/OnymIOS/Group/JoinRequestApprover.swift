@@ -57,8 +57,8 @@ actor JoinRequestApprover: JoinRequestApproving {
         /// joiner's `MemberProfile` and the fan-out
         /// `MemberAnnouncementPayload` so existing members can
         /// verify the joiner's chat-message envelope signatures
-        /// (PR 4). Optional for back-compat with pre-PR-3 joiners.
-        let joinerSendingPublicKey: Data?
+        /// (PR 4).
+        let joinerSendingPublicKey: Data
         let joinerDisplayLabel: String
         let groupId: Data
         /// Looked up from the local `GroupRepository`. nil if the
@@ -482,7 +482,7 @@ actor JoinRequestApprover: JoinRequestApproving {
         in group: ChatGroup,
         blsPub: Data,
         inboxPub: Data,
-        sendingPub: Data?,
+        sendingPub: Data,
         alias: String
     ) async {
         let key = blsPub.map { String(format: "%02x", $0) }.joined()
@@ -511,7 +511,7 @@ actor JoinRequestApprover: JoinRequestApproving {
         in group: ChatGroup,
         joinerBlsPub: Data,
         joinerInboxPub: Data,
-        joinerSendingPub: Data?,
+        joinerSendingPub: Data,
         joinerAlias: String
     ) async {
         let adminAlias = await identity.currentIdentityName() ?? ""

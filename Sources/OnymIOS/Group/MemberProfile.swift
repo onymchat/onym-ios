@@ -29,27 +29,11 @@ struct MemberProfile: Codable, Equatable, Hashable, Sendable {
     /// (PR 4) verifies an incoming chat message's envelope signature
     /// against this so an insider can't forge another member's
     /// `senderBlsPubkeyHex` claim.
-    ///
-    /// Optional for back-compat: rows / wire shapes that predate this
-    /// field land with `nil`. The dispatcher treats a missing
-    /// `sendingPubkey` as "trust the BLS claim, no signature check"
-    /// for one migration window so old members aren't locked out of
-    /// their own groups.
-    let sendingPubkey: Data?
+    let sendingPubkey: Data
 
     enum CodingKeys: String, CodingKey {
         case alias
         case inboxPublicKey = "inbox_public_key"
         case sendingPubkey = "sending_pubkey"
-    }
-
-    init(
-        alias: String,
-        inboxPublicKey: Data,
-        sendingPubkey: Data? = nil
-    ) {
-        self.alias = alias
-        self.inboxPublicKey = inboxPublicKey
-        self.sendingPubkey = sendingPubkey
     }
 }

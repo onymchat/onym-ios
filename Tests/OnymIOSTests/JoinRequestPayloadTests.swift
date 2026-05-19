@@ -38,21 +38,18 @@ final class JoinRequestPayloadTests: XCTestCase {
                         "PR 3 wire key must match Android parity")
     }
 
-    func test_decoder_acceptsLegacyPayloadWithoutSendingPub() throws {
-        // Pre-PR-3 joiners ship requests without joiner_sending_pub.
-        // The wire format must round-trip those into a payload with
-        // `joinerSendingPublicKey == nil` so the approver still ships
-        // the invitation back; PR 4's dispatcher falls back to the
-        // BLS-claim-only trust path for that member's messages.
+    func test_decoder_rejectsRequestWithoutSendingPub() throws {
+        // `joiner_sending_pub` is required — receivers must reject
+        // any request that omits it. (No real users on the join
+        // path yet, so we ship without a migration window.)
         let inbox = Data(repeating: 0, count: 32).base64EncodedString()
         let gid = Data(repeating: 0, count: 32).base64EncodedString()
         let bls = Data(repeating: 0, count: 48).base64EncodedString()
-        let legacy = #"""
+        let json = #"""
         {"joiner_inbox_pub":"\#(inbox)","joiner_bls_pub":"\#(bls)","joiner_display_label":"Bob","group_id":"\#(gid)"}
         """#
-        let bytes = legacy.data(using: .utf8)!
-        let decoded = try JSONDecoder().decode(JoinRequestPayload.self, from: bytes)
-        XCTAssertNil(decoded.joinerSendingPublicKey)
+        let bytes = json.data(using: .utf8)!
+        XCTAssertThrowsError(try JSONDecoder().decode(JoinRequestPayload.self, from: bytes))
     }
 
     func test_constructor_rejectsWrongSizedSendingPubkey() {
@@ -76,6 +73,7 @@ final class JoinRequestPayloadTests: XCTestCase {
             joinerInboxPublicKey: Data(repeating: 0, count: 32),
             joinerBlsPublicKey: Data(repeating: 0, count: 48),
             joinerLeafHash: Data(repeating: 0, count: 32),
+            joinerSendingPublicKey: Data(repeating: 0, count: 32),
             joinerDisplayLabel: "Bob",
             groupId: Data(repeating: 0, count: 32)
         )
@@ -93,6 +91,7 @@ final class JoinRequestPayloadTests: XCTestCase {
             joinerInboxPublicKey: Data(repeating: 0, count: 31),
             joinerBlsPublicKey: nil,
             joinerLeafHash: nil,
+            joinerSendingPublicKey: Data(repeating: 0, count: 32),
             joinerDisplayLabel: "x",
             groupId: Data(repeating: 0, count: 32)
         )) { error in
@@ -102,6 +101,7 @@ final class JoinRequestPayloadTests: XCTestCase {
             joinerInboxPublicKey: Data(repeating: 0, count: 32),
             joinerBlsPublicKey: nil,
             joinerLeafHash: nil,
+            joinerSendingPublicKey: Data(repeating: 0, count: 32),
             joinerDisplayLabel: "x",
             groupId: Data(repeating: 0, count: 33)
         )) { error in
@@ -111,6 +111,7 @@ final class JoinRequestPayloadTests: XCTestCase {
             joinerInboxPublicKey: Data(repeating: 0, count: 32),
             joinerBlsPublicKey: Data(repeating: 0, count: 47),
             joinerLeafHash: nil,
+            joinerSendingPublicKey: Data(repeating: 0, count: 32),
             joinerDisplayLabel: "x",
             groupId: Data(repeating: 0, count: 32)
         )) { error in
@@ -121,6 +122,7 @@ final class JoinRequestPayloadTests: XCTestCase {
             joinerInboxPublicKey: Data(repeating: 0, count: 32),
             joinerBlsPublicKey: Data(repeating: 0, count: 48),
             joinerLeafHash: Data(repeating: 0, count: 31),
+            joinerSendingPublicKey: Data(repeating: 0, count: 32),
             joinerDisplayLabel: "x",
             groupId: Data(repeating: 0, count: 32)
         )) { error in
@@ -130,7 +132,7 @@ final class JoinRequestPayloadTests: XCTestCase {
 
     func test_decoder_rejectsWrongSizedKeys() {
         let payloadJSON = #"""
-        {"joiner_inbox_pub":"AAA=","joiner_display_label":"Bob","group_id":"AAA="}
+        {"joiner_inbox_pub":"AAA=","joiner_sending_pub":"AAA=","joiner_display_label":"Bob","group_id":"AAA="}
         """#
         let bytes = payloadJSON.data(using: .utf8)!
         XCTAssertThrowsError(try JSONDecoder().decode(JoinRequestPayload.self, from: bytes)) { error in
@@ -138,18 +140,18 @@ final class JoinRequestPayloadTests: XCTestCase {
         }
     }
 
-    func test_decoder_acceptsLegacyPayloadWithoutBlsPub() throws {
-        // Older onym-android / pre-PR-4 builds ship requests without
-        // joiner_bls_pub. The wire format must round-trip those into
-        // a payload with `joinerBlsPublicKey == nil` so the approver
-        // can still ship the invitation back; only the local roster
-        // update is skipped.
+    func test_decoder_acceptsPayloadWithoutBlsPub() throws {
+        // `joiner_bls_pub` stays optional — a request without it
+        // round-trips into `joinerBlsPublicKey == nil` so the
+        // approver can still ship the invitation back (only the
+        // local roster update is skipped).
         let inbox = Data(repeating: 0, count: 32).base64EncodedString()
         let gid = Data(repeating: 0, count: 32).base64EncodedString()
-        let legacy = #"""
-        {"joiner_inbox_pub":"\#(inbox)","joiner_display_label":"Bob","group_id":"\#(gid)"}
+        let sending = Data(repeating: 0, count: 32).base64EncodedString()
+        let json = #"""
+        {"joiner_inbox_pub":"\#(inbox)","joiner_sending_pub":"\#(sending)","joiner_display_label":"Bob","group_id":"\#(gid)"}
         """#
-        let bytes = legacy.data(using: .utf8)!
+        let bytes = json.data(using: .utf8)!
         let decoded = try JSONDecoder().decode(JoinRequestPayload.self, from: bytes)
         XCTAssertNil(decoded.joinerBlsPublicKey)
         XCTAssertEqual(decoded.joinerDisplayLabel, "Bob")

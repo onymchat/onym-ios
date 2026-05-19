@@ -95,10 +95,8 @@ struct MemberAnnouncementPayload: Codable, Equatable, Sendable {
         /// `Identity.stellarPublicKey`. PR 4's chat dispatcher
         /// verifies incoming chat-message envelope signatures
         /// against this so an insider can't forge another member's
-        /// `senderBlsPubkeyHex` claim. Optional for back-compat with
-        /// pre-PR-3 announcers; receivers fall back to "trust the
-        /// BLS claim" when missing.
-        let sendingPub: Data?
+        /// `senderBlsPubkeyHex` claim.
+        let sendingPub: Data
 
         enum CodingKeys: String, CodingKey {
             case blsPub = "bls_pub"
@@ -111,7 +109,7 @@ struct MemberAnnouncementPayload: Codable, Equatable, Sendable {
             blsPub: Data,
             inboxPub: Data,
             alias: String,
-            sendingPub: Data? = nil
+            sendingPub: Data
         ) throws {
             try Self.validate(blsPub: blsPub, inboxPub: inboxPub, sendingPub: sendingPub)
             self.blsPub = blsPub
@@ -125,7 +123,7 @@ struct MemberAnnouncementPayload: Codable, Equatable, Sendable {
             let bls = try c.decode(Data.self, forKey: .blsPub)
             let inbox = try c.decode(Data.self, forKey: .inboxPub)
             let alias = try c.decode(String.self, forKey: .alias)
-            let sending = try c.decodeIfPresent(Data.self, forKey: .sendingPub)
+            let sending = try c.decode(Data.self, forKey: .sendingPub)
             try Self.validate(blsPub: bls, inboxPub: inbox, sendingPub: sending)
             self.blsPub = bls
             self.inboxPub = inbox
@@ -136,7 +134,7 @@ struct MemberAnnouncementPayload: Codable, Equatable, Sendable {
         private static func validate(
             blsPub: Data,
             inboxPub: Data,
-            sendingPub: Data?
+            sendingPub: Data
         ) throws {
             guard blsPub.count == 48 else {
                 throw MemberAnnouncementPayloadError.shape(
@@ -148,9 +146,9 @@ struct MemberAnnouncementPayload: Codable, Equatable, Sendable {
                     "inboxPub: expected 32 bytes, got \(inboxPub.count)"
                 )
             }
-            if let s = sendingPub, s.count != 32 {
+            guard sendingPub.count == 32 else {
                 throw MemberAnnouncementPayloadError.shape(
-                    "sendingPub: expected 32 bytes, got \(s.count)"
+                    "sendingPub: expected 32 bytes, got \(sendingPub.count)"
                 )
             }
         }
