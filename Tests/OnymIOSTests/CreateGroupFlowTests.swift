@@ -233,11 +233,12 @@ final class CreateGroupFlowTests: XCTestCase {
 
     // MARK: - OneOnOne governance gates
 
-    func test_oneOnOne_isNowAvailable() async throws {
-        // PR-3 flips the gate — Step1 should advance with .oneOnOne.
+    func test_oneOnOne_isDisabled() async throws {
+        // 1-on-1 is gated off in the Create Group flow — Step1 must
+        // not advance when it's selected.
         let flow = await makeFlow()
         flow.governance = .oneOnOne
-        XCTAssertTrue(flow.canAdvanceToStep2)
+        XCTAssertFalse(flow.canAdvanceToStep2)
     }
 
     func test_oneOnOne_canCreate_requiresExactlyOneInvitee() async throws {
@@ -298,11 +299,12 @@ final class CreateGroupFlowTests: XCTestCase {
 
     // MARK: - Anarchy governance gates
 
-    func test_anarchy_isNowAvailable() async throws {
-        // PR-3 of Anarchy flips the gate — Step1 should advance with .anarchy.
+    func test_anarchy_isDisabled() async throws {
+        // Anarchy is gated off in the Create Group flow — Step1 must
+        // not advance when it's selected.
         let flow = await makeFlow()
         flow.governance = .anarchy
-        XCTAssertTrue(flow.canAdvanceToStep2)
+        XCTAssertFalse(flow.canAdvanceToStep2)
     }
 
     func test_anarchy_canCreate_alwaysTrue() async throws {
