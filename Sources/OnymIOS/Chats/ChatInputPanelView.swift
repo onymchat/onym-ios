@@ -21,6 +21,10 @@ final class ChatInputPanelView: UIView {
     var onSendTapped: ((String) -> Void)?
 
     var text: String {
+        // `UITextView.text` is bridged as `String!`, but Swift
+        // still requires unwrap for chained access on the
+        // surface. Keep the `?? ""` so the compiler is happy and
+        // we don't have a stray force-unwrap site.
         get { textView.text ?? "" }
         set {
             textView.text = newValue
@@ -136,6 +140,12 @@ final class ChatInputPanelView: UIView {
             sendButton.widthAnchor.constraint(equalToConstant: 36),
             sendButton.heightAnchor.constraint(equalToConstant: 36),
 
+            // Placeholder is positioned via static `textContainerInset`
+            // values captured at constraint-creation time. The inset is
+            // a constant today; if it ever becomes Dynamic-Type-driven
+            // (or otherwise mutable), update these constraints' constants
+            // in `refreshAfterTextChange` to keep the placeholder
+            // aligned with the actual text cursor.
             placeholderLabel.leadingAnchor.constraint(
                 equalTo: textView.leadingAnchor,
                 constant: textView.textContainerInset.left
@@ -185,7 +195,16 @@ final class ChatInputPanelView: UIView {
             textViewHeightConstraint.constant = target
         }
         textView.isScrollEnabled = measuredHeight > cap
-        sendButton.isEnabled = !body.isEmpty
+
+        // Send-button enable gate. Matches the trim in `tappedSend`
+        // — whitespace-only input is treated as empty so the
+        // disabled button is the canonical signal that nothing
+        // would be sent. Placeholder visibility uses the raw
+        // emptiness check so typing a space immediately hides the
+        // overlay (the user *is* typing, even if the trimmed
+        // content is still empty).
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        sendButton.isEnabled = !trimmed.isEmpty
         placeholderLabel.isHidden = !body.isEmpty
     }
 

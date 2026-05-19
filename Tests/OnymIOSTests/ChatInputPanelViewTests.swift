@@ -35,6 +35,17 @@ final class ChatInputPanelViewTests: XCTestCase {
         XCTAssertFalse(sendButton(in: panel).isEnabled)
     }
 
+    func test_setText_whitespaceOnly_disablesSend() {
+        // Whitespace-only input must leave the button disabled —
+        // it's the canonical signal to the user that tapping
+        // wouldn't send anything. (`tappedSend` already no-ops on
+        // whitespace; this asserts the button's enable state
+        // matches that behavior.)
+        let panel = ChatInputPanelView()
+        panel.text = "   \n   "
+        XCTAssertFalse(sendButton(in: panel).isEnabled)
+    }
+
     // MARK: - Send tap
 
     func test_tappingSend_invokesClosure_withTrimmedText() {
@@ -68,23 +79,30 @@ final class ChatInputPanelViewTests: XCTestCase {
     // single-line, multi-line, and capped states compared against
     // each other rather than against hard-coded numbers.
 
+    // Each height test hosts the panel in a real `UIWindow` so
+    // the constraint engine actually drives the height constraint
+    // — without a superview, `layoutIfNeeded()` is a no-op and
+    // the constraint stays at its initial constant, making any
+    // pre/post comparison pass trivially. (PR 7 review point #2.)
+
     func test_singleLineText_doesNotGrowBeyondEmpty() {
         // Short text fits on one line, so the panel height must
         // match the empty state's height — auto-grow doesn't kick
         // in until the second line.
-        let panel = ChatInputPanelView()
-        panel.frame = CGRect(x: 0, y: 0, width: 320, height: 100)
-        panel.layoutIfNeeded()
+        let panel = makePanelInWindow(width: 320)
         let emptyHeight = textViewHeight(in: panel)
+        // Sanity-check: the constraint was actually driven by the
+        // layout pass. A trivial "both reads return 36" failure
+        // mode would slip past the comparison below.
+        XCTAssertGreaterThan(emptyHeight, 0)
 
         panel.text = "hi"
+        panel.layoutIfNeeded()
         XCTAssertEqual(textViewHeight(in: panel), emptyHeight, accuracy: 0.5)
     }
 
     func test_multiLineText_growsBeyondSingleLine() {
-        let panel = ChatInputPanelView()
-        panel.frame = CGRect(x: 0, y: 0, width: 320, height: 200)
-        panel.layoutIfNeeded()
+        let panel = makePanelInWindow(width: 320)
         let emptyHeight = textViewHeight(in: panel)
 
         panel.text = "line 1\nline 2"
@@ -97,9 +115,7 @@ final class ChatInputPanelViewTests: XCTestCase {
         // Three vs ten lines should produce the *same* height —
         // anything past the cap scrolls internally instead of
         // pushing the panel taller.
-        let panel = ChatInputPanelView()
-        panel.frame = CGRect(x: 0, y: 0, width: 320, height: 400)
-        panel.layoutIfNeeded()
+        let panel = makePanelInWindow(width: 400)
 
         panel.text = "1\n2\n3"
         panel.layoutIfNeeded()
@@ -111,6 +127,29 @@ final class ChatInputPanelViewTests: XCTestCase {
 
         XCTAssertEqual(tenLineHeight, threeLineHeight, accuracy: 0.5,
                        "panel must stop growing past the line cap")
+    }
+
+    /// Hosts the panel in a real `UIWindow` of the requested width
+    /// with the panel pinned to leading / trailing / bottom. The
+    /// constraint engine drives the panel's intrinsic height to a
+    /// real value, so subsequent `textViewHeight(in:)` reads
+    /// reflect what production layout would produce.
+    private func makePanelInWindow(width: CGFloat) -> ChatInputPanelView {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: width, height: 600))
+        let host = UIViewController()
+        window.rootViewController = host
+        window.isHidden = false
+
+        let panel = ChatInputPanelView()
+        panel.translatesAutoresizingMaskIntoConstraints = false
+        host.view.addSubview(panel)
+        NSLayoutConstraint.activate([
+            panel.leadingAnchor.constraint(equalTo: host.view.leadingAnchor),
+            panel.trailingAnchor.constraint(equalTo: host.view.trailingAnchor),
+            panel.bottomAnchor.constraint(equalTo: host.view.bottomAnchor),
+        ])
+        host.view.layoutIfNeeded()
+        return panel
     }
 
     // MARK: - Subview lookup
