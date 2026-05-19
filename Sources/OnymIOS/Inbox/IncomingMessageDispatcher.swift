@@ -45,6 +45,11 @@ struct IncomingMessageDispatcher: Sendable {
     /// `commitment` field fetch the live state via this seam and
     /// reject on mismatch.
     let chainState: any ChainStateReading
+    /// Persistence target for incoming chat messages. The dispatcher
+    /// looks up the sender's `MemberProfile.sendingPubkey`, verifies
+    /// the envelope's Ed25519 signer matches, and writes the message
+    /// here for the chat screen to render.
+    let messageRepository: MessageRepository
 
     func dispatch(
         messageID: String,
@@ -92,6 +97,22 @@ struct IncomingMessageDispatcher: Sendable {
         ) {
             await materializeGroup(
                 invitation,
+                ownerIdentityID: ownerIdentityID,
+                senderEd25519PublicKey: envelope.senderEd25519PublicKey
+            )
+            return
+        }
+
+        // Fast path 3: ChatMessagePayload — body of the chat thread.
+        // Verifies the envelope's Ed25519 signer matches the claimed
+        // sender's `MemberProfile.sendingPubkey` (insider-spoof
+        // defense, PR 3), then persists via `messageRepository`.
+        if let chatMessage = try? JSONDecoder().decode(
+            ChatMessagePayload.self,
+            from: envelope.plaintext
+        ) {
+            await persistChatMessage(
+                chatMessage,
                 ownerIdentityID: ownerIdentityID,
                 senderEd25519PublicKey: envelope.senderEd25519PublicKey
             )
@@ -396,5 +417,84 @@ struct IncomingMessageDispatcher: Sendable {
             sendingPubkey: payload.newMember.sendingPub
         )
         await groupRepository.insert(updated)
+    }
+
+    /// Persist an incoming chat message after authenticating the
+    /// sender. The trust chain:
+    ///
+    ///   1. The envelope was decrypted to us, so the sender knew our
+    ///      inbox pubkey (a group-membership-gated secret).
+    ///   2. The envelope's Ed25519 signer was verified by
+    ///      `decryptInvitationWithSender` — `senderEd25519PublicKey`
+    ///      is *who* signed, not just *what was claimed*.
+    ///   3. The payload's `senderBlsPubkeyHex` claim is cross-checked
+    ///      against `memberProfiles[claim].sendingPubkey`: if the
+    ///      envelope's signer matches the stored Ed25519 for the
+    ///      claimed BLS member, the claim is authentic.
+    ///
+    /// Receive-side dedup happens in `MessageRepository.insert`
+    /// (idempotent on `message.id`).
+    private func persistChatMessage(
+        _ payload: ChatMessagePayload,
+        ownerIdentityID: IdentityID,
+        senderEd25519PublicKey: Data?
+    ) async {
+        // Envelope must have been signed — anonymous chat messages
+        // are not part of the v1 trust model.
+        guard let senderEd25519PublicKey else { return }
+
+        // Look up the local group. Drop if we don't know it (stale
+        // delivery for a group we left, or routing mistake) or if it
+        // belongs to a different identity than the receiving inbox.
+        let groupIDHex = payload.groupID
+            .map { String(format: "%02x", $0) }.joined()
+        let groups = await groupRepository.currentGroups()
+        guard let group = groups.first(where: {
+            $0.id == groupIDHex && $0.ownerIdentityID == ownerIdentityID
+        }) else {
+            return
+        }
+
+        // Sender must be a known member. `memberProfiles` is keyed by
+        // lowercase BLS pubkey hex; normalize the payload's claim
+        // before lookup.
+        let senderKey = payload.senderBlsPubkeyHex.lowercased()
+        guard let senderProfile = group.memberProfiles[senderKey] else {
+            return
+        }
+
+        // Insider-spoof check: the verified envelope signer must match
+        // the stored Ed25519 for the claimed BLS member. Without this,
+        // Bob (a member) could write Alice's BLS hex into the payload
+        // and the receiver would attribute it wrong.
+        guard senderEd25519PublicKey == senderProfile.sendingPubkey else {
+            return
+        }
+
+        // Variant must match the group's governance type — Tyranny
+        // payloads belong in Tyranny groups, etc. Today only Tyranny
+        // chat ships; the variant kind doubles as a forward-compat
+        // gate for when other group types come online.
+        let variantKind: SEPGroupType = {
+            switch payload.variant {
+            case .tyranny: return .tyranny
+            }
+        }()
+        guard variantKind == group.groupType else { return }
+
+        let sentAt = Date(timeIntervalSince1970:
+            TimeInterval(payload.sentAtMillis) / 1000.0)
+        let message = ChatMessage(
+            id: payload.messageID,
+            groupID: groupIDHex,
+            ownerIdentityID: ownerIdentityID,
+            senderBlsPubkeyHex: senderKey,
+            body: payload.variant.body,
+            sentAt: sentAt,
+            direction: .incoming,
+            status: .received,
+            groupType: group.groupType
+        )
+        await messageRepository.insert(message)
     }
 }

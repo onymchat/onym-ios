@@ -61,7 +61,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             identities: StubIdentities(summaries: []),
             groupRepository: groups,
             invitationsRepository: invitations,
-            chainState: chainState
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
 
         await dispatcher.dispatch(
@@ -96,7 +97,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             identities: StubIdentities(summaries: []),
             groupRepository: groups,
             invitationsRepository: invitations,
-            chainState: chainState
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
 
         await dispatcher.dispatch(
@@ -141,7 +143,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             identities: StubIdentities(summaries: []),
             groupRepository: groups,
             invitationsRepository: invitations,
-            chainState: chainState
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
 
         await dispatcher.dispatch(
@@ -185,7 +188,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             identities: StubIdentities(summaries: []),
             groupRepository: groups,
             invitationsRepository: invitations,
-            chainState: chainState
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
         await dispatcher.dispatch(
             messageID: "msg-trust-ok",
@@ -226,7 +230,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             identities: StubIdentities(summaries: []),
             groupRepository: groups,
             invitationsRepository: invitations,
-            chainState: chainState
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
         await dispatcher.dispatch(
             messageID: "msg-trust-bad",
@@ -269,7 +274,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             identities: StubIdentities(summaries: []),
             groupRepository: groups,
             invitationsRepository: invitations,
-            chainState: chainState
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
         await dispatcher.dispatch(
             messageID: "msg-unsigned",
@@ -305,7 +311,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             identities: StubIdentities(summaries: []),
             groupRepository: groups,
             invitationsRepository: invitations,
-            chainState: chainState
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
         await dispatcher.dispatch(
             messageID: "msg-legacy-fallback",
@@ -356,7 +363,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             identities: StubIdentities(summaries: []),
             groupRepository: groups,
             invitationsRepository: invitations,
-            chainState: chainState
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
         await dispatcher.dispatch(
             messageID: "msg-cap",
@@ -390,7 +398,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             identities: StubIdentities(summaries: []),
             groupRepository: groups,
             invitationsRepository: invitations,
-            chainState: chainState
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
         await dispatcher.dispatch(
             messageID: "msg-no-commitment",
@@ -434,7 +443,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             identities: StubIdentities(summaries: []),
             groupRepository: groups,
             invitationsRepository: invitations,
-            chainState: chainState
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
         await dispatcher.dispatch(
             messageID: "msg-onchain-mismatch",
@@ -470,7 +480,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             identities: StubIdentities(summaries: []),
             groupRepository: groups,
             invitationsRepository: invitations,
-            chainState: chainState
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
         await dispatcher.dispatch(
             messageID: "msg-internal-mismatch",
@@ -524,7 +535,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             identities: StubIdentities(summaries: []),
             groupRepository: groups,
             invitationsRepository: invitations,
-            chainState: chainState
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
         await dispatcher.dispatch(
             messageID: "msg-announce-mismatch",
@@ -572,7 +584,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             identities: StubIdentities(summaries: [selfSummary]),
             groupRepository: groups,
             invitationsRepository: invitations,
-            chainState: chainState
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
 
         await dispatcher.dispatch(
@@ -620,7 +633,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             identities: StubIdentities(summaries: [selfSummary]),
             groupRepository: groups,
             invitationsRepository: invitations,
-            chainState: chainState
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
 
         await dispatcher.dispatch(
@@ -658,7 +672,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             identities: StubIdentities(summaries: []),
             groupRepository: groups,
             invitationsRepository: invitations,
-            chainState: chainState
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
 
         await dispatcher.dispatch(
@@ -684,7 +699,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             identities: StubIdentities(summaries: []),
             groupRepository: groups,
             invitationsRepository: invitations,
-            chainState: chainState
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
 
         await dispatcher.dispatch(
@@ -712,7 +728,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             identities: StubIdentities(summaries: []),
             groupRepository: groups,
             invitationsRepository: invitations,
-            chainState: chainState
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
 
         await dispatcher.dispatch(
