@@ -555,7 +555,8 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
             id: id,
             name: names[id] ?? Self.fallbackName(forNewSlot: 1),
             blsPublicKey: identity.blsPublicKey,
-            inboxPublicKey: identity.inboxPublicKey
+            inboxPublicKey: identity.inboxPublicKey,
+            sendingPublicKey: identity.stellarPublicKey
         )
     }
 

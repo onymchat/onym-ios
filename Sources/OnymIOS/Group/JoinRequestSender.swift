@@ -64,6 +64,7 @@ actor JoinRequestSender {
                 joinerInboxPublicKey: active.inboxPublicKey,
                 joinerBlsPublicKey: active.blsPublicKey,
                 joinerLeafHash: leafHash,
+                joinerSendingPublicKey: active.stellarPublicKey,
                 joinerDisplayLabel: joinerDisplayLabel,
                 groupId: capability.groupId
             )

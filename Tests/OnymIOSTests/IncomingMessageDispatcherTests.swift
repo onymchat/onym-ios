@@ -560,7 +560,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             id: owner,
             name: "Bob",
             blsPublicKey: Data(repeating: 0x22, count: 48),
-            inboxPublicKey: Data(repeating: 0xBB, count: 32)
+            inboxPublicKey: Data(repeating: 0xBB, count: 32),
+            sendingPublicKey: Data(repeating: 0xCC, count: 32)
         )
         let dispatcher = IncomingMessageDispatcher(
             envelopeDecrypter: decrypter,
@@ -607,7 +608,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             id: owner,
             name: "Carol",
             blsPublicKey: Data(repeating: 0x33, count: 48),
-            inboxPublicKey: Data(repeating: 0xCC, count: 32)
+            inboxPublicKey: Data(repeating: 0xCC, count: 32),
+            sendingPublicKey: Data(repeating: 0xDD, count: 32)
         )
         let dispatcher = IncomingMessageDispatcher(
             envelopeDecrypter: decrypter,

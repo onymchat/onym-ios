@@ -14,7 +14,8 @@ final class MemberAnnouncementPayloadTests: XCTestCase {
         let member = try MemberAnnouncementPayload.AnnouncedMember(
             blsPub: Data(repeating: 0x11, count: 48),
             inboxPub: Data(repeating: 0x33, count: 32),
-            alias: "Bob"
+            alias: "Bob",
+            sendingPub: Data(repeating: 0xEE, count: 32)
         )
         let original = try MemberAnnouncementPayload(
             version: 1,
@@ -28,6 +29,55 @@ final class MemberAnnouncementPayloadTests: XCTestCase {
             from: encoded
         )
         XCTAssertEqual(decoded, original)
+        XCTAssertEqual(decoded.newMember.sendingPub, Data(repeating: 0xEE, count: 32))
+    }
+
+    func test_wire_carries_sending_pub() throws {
+        let member = try MemberAnnouncementPayload.AnnouncedMember(
+            blsPub: Data(repeating: 0, count: 48),
+            inboxPub: Data(repeating: 0, count: 32),
+            alias: "Bob",
+            sendingPub: Data(repeating: 0xEE, count: 32)
+        )
+        let payload = try MemberAnnouncementPayload(
+            version: 1,
+            groupId: Data(repeating: 0, count: 32),
+            newMember: member,
+            adminAlias: "Alice"
+        )
+        let encoded = try JSONEncoder().encode(payload)
+        let obj = try JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        let memberObj = obj?["new_member"] as? [String: Any]
+        XCTAssertNotNil(memberObj?["sending_pub"],
+                        "PR 3 wire key must match Android parity")
+    }
+
+    func test_decoder_acceptsLegacyAnnouncementWithoutSendingPub() throws {
+        // Pre-PR-3 announcers shipped without `sending_pub`.
+        // Receivers must round-trip those into an announcement with
+        // `sendingPub == nil` so the local roster updates still
+        // succeed; PR 4's dispatcher will then fall back to trusting
+        // the BLS claim alone for that member's messages.
+        let bls = Data(repeating: 0, count: 48).base64EncodedString()
+        let inbox = Data(repeating: 0, count: 32).base64EncodedString()
+        let gid = Data(repeating: 0, count: 32).base64EncodedString()
+        let legacy = #"""
+        {"version":1,"group_id":"\#(gid)","admin_alias":"Alice","new_member":{"bls_pub":"\#(bls)","inbox_pub":"\#(inbox)","alias":"Bob"}}
+        """#
+        let bytes = legacy.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(MemberAnnouncementPayload.self, from: bytes)
+        XCTAssertNil(decoded.newMember.sendingPub)
+    }
+
+    func test_constructor_rejectsWrongSizedSendingPub() {
+        XCTAssertThrowsError(try MemberAnnouncementPayload.AnnouncedMember(
+            blsPub: Data(repeating: 0, count: 48),
+            inboxPub: Data(repeating: 0, count: 32),
+            alias: "x",
+            sendingPub: Data(repeating: 0, count: 31)
+        )) { error in
+            XCTAssertTrue(error is MemberAnnouncementPayloadError)
+        }
     }
 
     // MARK: - Wire shape

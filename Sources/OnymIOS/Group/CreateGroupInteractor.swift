@@ -720,7 +720,8 @@ struct CreateGroupInteractor: Sendable {
         return [
             creatorBlsHex: MemberProfile(
                 alias: alias,
-                inboxPublicKey: identitySnapshot.inboxPublicKey
+                inboxPublicKey: identitySnapshot.inboxPublicKey,
+                sendingPubkey: identitySnapshot.stellarPublicKey
             )
         ]
     }

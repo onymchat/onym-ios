@@ -333,7 +333,8 @@ struct IncomingMessageDispatcher: Sendable {
             .map { String(format: "%02x", $0) }.joined()
         let profile = MemberProfile(
             alias: me.name,
-            inboxPublicKey: me.inboxPublicKey
+            inboxPublicKey: me.inboxPublicKey,
+            sendingPubkey: me.sendingPublicKey
         )
         return (key, profile)
     }
@@ -391,7 +392,8 @@ struct IncomingMessageDispatcher: Sendable {
         var updated = group
         updated.memberProfiles[key] = MemberProfile(
             alias: payload.newMember.alias,
-            inboxPublicKey: payload.newMember.inboxPub
+            inboxPublicKey: payload.newMember.inboxPub,
+            sendingPubkey: payload.newMember.sendingPub
         )
         await groupRepository.insert(updated)
     }

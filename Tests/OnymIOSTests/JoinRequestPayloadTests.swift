@@ -13,12 +13,59 @@ final class JoinRequestPayloadTests: XCTestCase {
             joinerInboxPublicKey: Data(repeating: 0xAA, count: 32),
             joinerBlsPublicKey: Data(repeating: 0xBB, count: 48),
             joinerLeafHash: Data(repeating: 0xCC, count: 32),
+            joinerSendingPublicKey: Data(repeating: 0xEE, count: 32),
             joinerDisplayLabel: "Bob",
             groupId: Data(repeating: 0x42, count: 32)
         )
         let encoded = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(JoinRequestPayload.self, from: encoded)
         XCTAssertEqual(decoded, original)
+        XCTAssertEqual(decoded.joinerSendingPublicKey, Data(repeating: 0xEE, count: 32))
+    }
+
+    func test_wire_carries_joiner_sending_pub() throws {
+        let payload = try JoinRequestPayload(
+            joinerInboxPublicKey: Data(repeating: 0, count: 32),
+            joinerBlsPublicKey: Data(repeating: 0, count: 48),
+            joinerLeafHash: Data(repeating: 0, count: 32),
+            joinerSendingPublicKey: Data(repeating: 0xEE, count: 32),
+            joinerDisplayLabel: "x",
+            groupId: Data(repeating: 0, count: 32)
+        )
+        let encoded = try JSONEncoder().encode(payload)
+        let obj = try JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        XCTAssertNotNil(obj?["joiner_sending_pub"],
+                        "PR 3 wire key must match Android parity")
+    }
+
+    func test_decoder_acceptsLegacyPayloadWithoutSendingPub() throws {
+        // Pre-PR-3 joiners ship requests without joiner_sending_pub.
+        // The wire format must round-trip those into a payload with
+        // `joinerSendingPublicKey == nil` so the approver still ships
+        // the invitation back; PR 4's dispatcher falls back to the
+        // BLS-claim-only trust path for that member's messages.
+        let inbox = Data(repeating: 0, count: 32).base64EncodedString()
+        let gid = Data(repeating: 0, count: 32).base64EncodedString()
+        let bls = Data(repeating: 0, count: 48).base64EncodedString()
+        let legacy = #"""
+        {"joiner_inbox_pub":"\#(inbox)","joiner_bls_pub":"\#(bls)","joiner_display_label":"Bob","group_id":"\#(gid)"}
+        """#
+        let bytes = legacy.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(JoinRequestPayload.self, from: bytes)
+        XCTAssertNil(decoded.joinerSendingPublicKey)
+    }
+
+    func test_constructor_rejectsWrongSizedSendingPubkey() {
+        XCTAssertThrowsError(try JoinRequestPayload(
+            joinerInboxPublicKey: Data(repeating: 0, count: 32),
+            joinerBlsPublicKey: nil,
+            joinerLeafHash: nil,
+            joinerSendingPublicKey: Data(repeating: 0, count: 31),
+            joinerDisplayLabel: "x",
+            groupId: Data(repeating: 0, count: 32)
+        )) { error in
+            XCTAssertTrue(error is JoinRequestPayloadError)
+        }
     }
 
     func test_snake_case_keys_match_android_parity() throws {
