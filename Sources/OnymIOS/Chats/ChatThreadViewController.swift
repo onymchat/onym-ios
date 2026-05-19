@@ -37,6 +37,14 @@ final class ChatThreadViewController: UIViewController {
     /// input panel.
     var onSendTapped: ((String) -> Void)?
 
+    /// Invoked when the user taps a `.failed` outgoing bubble.
+    /// The SwiftUI wrapper points this at
+    /// `SendMessageInteractor.retry(groupID:messageID:)` — same
+    /// fire-and-forget contract as `onSendTapped`. Only `.failed`
+    /// rows have the tap target installed by `ChatBubbleCell`, so
+    /// this never fires for other statuses.
+    var onRetryRequested: ((UUID) -> Void)?
+
     private let titleLabel = UILabel()
     private let backButton = UIButton(type: .system)
     private let infoButton = UIButton(type: .system)
@@ -99,21 +107,31 @@ final class ChatThreadViewController: UIViewController {
     /// but a future caller / test stub might violate that without
     /// the sort here protecting the table's row order.
     ///
-    /// PR 8 note: `messagesByID` is updated on every call, but the
-    /// diffable identity is just `UUID` — when a status flip lands
-    /// (pending → sent), visible cells won't reconfigure. PR 8 should
-    /// switch to `snapshot.reconfigureItems(changedIDs)` or include
-    /// status in the diff identity.
+    /// Status flips on the same UUID land via
+    /// `snapshot.reconfigureItems(changedIDs)` — the row stays at
+    /// the same index but the cell provider re-runs against the
+    /// updated `messagesByID` entry, so a `.pending` → `.sent`
+    /// transition swaps the glyph without animating the bubble.
     func update(messages: [ChatMessage]) {
         let isFirstApply = !hasAppliedFirstSnapshot
         let wasNearBottom = isNearBottom
 
         let sorted = messages.sorted { $0.sentAt < $1.sentAt }
+        // Detect status/body changes on already-known rows so
+        // `reconfigureItems` can repaint their cells without
+        // deleting + reinserting (which would animate the bubble).
+        let changedIDs: [UUID] = sorted.compactMap { msg in
+            guard let prior = messagesByID[msg.id], prior != msg else { return nil }
+            return msg.id
+        }
         messagesByID = Dictionary(uniqueKeysWithValues: sorted.map { ($0.id, $0) })
 
         var snapshot = NSDiffableDataSourceSnapshot<Section, UUID>()
         snapshot.appendSections([.main])
         snapshot.appendItems(sorted.map(\.id))
+        if !changedIDs.isEmpty {
+            snapshot.reconfigureItems(changedIDs)
+        }
         // First apply is non-animated to avoid an initial-load
         // "fly-in" of every existing message.
         dataSource.apply(snapshot, animatingDifferences: !isFirstApply) { [weak self] in
@@ -226,7 +244,12 @@ final class ChatThreadViewController: UIViewController {
             )
             if let bubble = cell as? ChatBubbleCell,
                let message = self?.messagesByID[id] {
-                bubble.configure(message: message)
+                let retryHandler: (() -> Void)? = {
+                    guard message.direction == .outgoing,
+                          message.status == .failed else { return nil }
+                    return { [weak self] in self?.onRetryRequested?(id) }
+                }()
+                bubble.configure(message: message, onRetry: retryHandler)
             }
             return cell
         }

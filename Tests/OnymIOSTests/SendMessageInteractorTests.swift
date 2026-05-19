@@ -198,6 +198,63 @@ final class SendMessageInteractorTests: XCTestCase {
         }
     }
 
+    // MARK: - Retry (PR 9)
+
+    func test_retry_failedMessage_flipsToSentOnSuccess() async throws {
+        let groupID = await seedGroupWithTwoPeers()
+        // Drive an initial send to .failed by rejecting all relays.
+        await transport.setAcceptedBy(0)
+        let original = try await interactor.send(groupID: groupID, body: "retry me")
+        XCTAssertEqual(original.status, .failed)
+        await transport.clearRecords()
+
+        // Now flip transport back to success and retry.
+        await transport.setAcceptedBy(1)
+        await interactor.retry(groupID: groupID, messageID: original.id)
+
+        let stored = await messages.currentMessages(groupID: groupID)
+        XCTAssertEqual(stored.count, 1, "retry must not duplicate the row")
+        XCTAssertEqual(stored[0].id, original.id, "retry must reuse the same message id")
+        XCTAssertEqual(stored[0].status, .sent)
+
+        let sends = await transport.recordedSends
+        XCTAssertEqual(sends.count, 2, "retry must re-fan out to both peers")
+    }
+
+    func test_retry_failedMessage_staysFailedIfRelaysStillReject() async throws {
+        let groupID = await seedGroupWithTwoPeers()
+        await transport.setAcceptedBy(0)
+        let original = try await interactor.send(groupID: groupID, body: "still no luck")
+        XCTAssertEqual(original.status, .failed)
+
+        await interactor.retry(groupID: groupID, messageID: original.id)
+
+        let stored = await messages.currentMessages(groupID: groupID)
+        XCTAssertEqual(stored[0].status, .failed)
+    }
+
+    func test_retry_unknownMessage_isNoOp() async throws {
+        let groupID = await seedGroupWithTwoPeers()
+        await interactor.retry(groupID: groupID, messageID: UUID())
+        let sends = await transport.recordedSends
+        XCTAssertTrue(sends.isEmpty,
+                      "retrying an unknown messageID must not perform any sends")
+    }
+
+    func test_retry_nonFailedMessage_isNoOp() async throws {
+        // A .sent message must not re-fan out — that would
+        // double-deliver. Retry is for .failed rows only.
+        let groupID = await seedGroupWithTwoPeers()
+        let sent = try await interactor.send(groupID: groupID, body: "already delivered")
+        XCTAssertEqual(sent.status, .sent)
+        await transport.clearRecords()
+
+        await interactor.retry(groupID: groupID, messageID: sent.id)
+        let sends = await transport.recordedSends
+        XCTAssertTrue(sends.isEmpty,
+                      "retrying a .sent message must not double-deliver")
+    }
+
     // MARK: - Helpers
 
     private func seedGroupWithTwoPeers() async -> String {
@@ -303,6 +360,11 @@ private actor RecordingInboxTransport: InboxTransport {
 
     func setBehavior(_ b: Behavior) {
         behavior = b
+    }
+
+    func clearRecords() {
+        recordedSends.removeAll()
+        sendCount = 0
     }
 
     func connect(to endpoints: [TransportEndpoint]) async {}

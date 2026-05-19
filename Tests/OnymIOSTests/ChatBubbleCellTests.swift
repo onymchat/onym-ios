@@ -45,6 +45,125 @@ final class ChatBubbleCellTests: XCTestCase {
         XCTAssertEqual(label?.text, "hello, world")
     }
 
+    // MARK: - Status indicator (PR 9)
+
+    func test_outgoingPending_showsClockIcon() {
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+        cell.configure(message: makeMessage(direction: .outgoing, status: .pending))
+        let icon = statusIcon(in: cell)
+        XCTAssertFalse(icon.isHidden)
+        // SF Symbols comparison via `accessibilityLabel` since the
+        // UIImage isn't easily equatable across symbol-config
+        // variations.
+        XCTAssertEqual(icon.accessibilityLabel, "Sending")
+    }
+
+    func test_outgoingSent_showsCheckIcon() {
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+        cell.configure(message: makeMessage(direction: .outgoing, status: .sent))
+        let icon = statusIcon(in: cell)
+        XCTAssertFalse(icon.isHidden)
+        XCTAssertEqual(icon.accessibilityLabel, "Sent")
+    }
+
+    func test_outgoingFailed_showsExclamationInRed() {
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+        cell.configure(message: makeMessage(direction: .outgoing, status: .failed))
+        let icon = statusIcon(in: cell)
+        XCTAssertFalse(icon.isHidden)
+        XCTAssertEqual(icon.accessibilityLabel, "Failed — tap to retry")
+    }
+
+    func test_incoming_hidesStatusIndicator() {
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+        cell.configure(message: makeMessage(direction: .incoming, status: .received))
+        XCTAssertTrue(statusIcon(in: cell).isHidden,
+                      "incoming rows must hide the status indicator")
+    }
+
+    func test_reconfigure_flipsStatusIcon() {
+        // Cell reuse path: a row that was .pending must update to
+        // .sent when its message is reconfigured against an updated
+        // ChatMessage. Without this, the diffable data source's
+        // `reconfigureItems` path would update messagesByID but the
+        // glyph would stay stale.
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+        let id = UUID()
+        cell.configure(message: makeMessage(id: id, direction: .outgoing, status: .pending))
+        XCTAssertEqual(statusIcon(in: cell).accessibilityLabel, "Sending")
+
+        cell.configure(message: makeMessage(id: id, direction: .outgoing, status: .sent))
+        XCTAssertEqual(statusIcon(in: cell).accessibilityLabel, "Sent")
+    }
+
+    // MARK: - Retry tap
+
+    func test_failed_tapInvokesRetryClosure() {
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+        var retryCount = 0
+        cell.configure(
+            message: makeMessage(direction: .outgoing, status: .failed),
+            onRetry: { retryCount += 1 }
+        )
+        cell.simulateBubbleTapForTest()
+        XCTAssertEqual(retryCount, 1)
+    }
+
+    func test_nonFailed_tapIsNoOp() {
+        // Sent / pending / received bubbles must not fire the
+        // retry closure. `configure(message:onRetry:)` only stores
+        // the closure when status == .failed && direction ==
+        // .outgoing, so a tap on a non-failed bubble reads `nil`
+        // and does nothing.
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+        var retryCount = 0
+        cell.configure(
+            message: makeMessage(direction: .outgoing, status: .sent),
+            onRetry: { retryCount += 1 }
+        )
+        cell.simulateBubbleTapForTest()
+        XCTAssertEqual(retryCount, 0,
+                       "non-failed bubbles must not fire the retry closure")
+    }
+
+    func test_reconfigureFromFailedToSent_dropsRetry() {
+        // Cell reuse: a failed bubble that flips to sent must
+        // forget its retry closure, so a stray tap on the
+        // now-sent bubble doesn't re-fire it.
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+        var retryCount = 0
+        let id = UUID()
+        cell.configure(
+            message: makeMessage(id: id, direction: .outgoing, status: .failed),
+            onRetry: { retryCount += 1 }
+        )
+        cell.configure(
+            message: makeMessage(id: id, direction: .outgoing, status: .sent),
+            onRetry: { retryCount += 1 }
+        )
+        cell.simulateBubbleTapForTest()
+        XCTAssertEqual(retryCount, 0,
+                       "reconfigured-to-sent bubble must drop its retry closure")
+    }
+
+    // MARK: - Helpers
+
+    private func statusIcon(in cell: ChatBubbleCell) -> UIImageView {
+        guard let icon = find(in: cell.contentView, identifier: "chat.bubble.status")
+                as? UIImageView else {
+            fatalError("status icon not found")
+        }
+        return icon
+    }
+
+    private func find(in view: UIView, identifier: String) -> UIView? {
+        if view.accessibilityIdentifier == identifier { return view }
+        for sub in view.subviews {
+            if let found = find(in: sub, identifier: identifier) { return found }
+        }
+        return nil
+    }
+
     func test_layoutResolves_withoutConstraintConflicts() {
         // Guards the bug the PR-6 review caught: pairing the
         // opposite-edge `>=`/`<=` gap with the *same-direction*
@@ -128,18 +247,20 @@ final class ChatBubbleCellTests: XCTestCase {
     }
 
     private func makeMessage(
+        id: UUID = UUID(),
         direction: MessageDirection,
-        body: String = "hi"
+        body: String = "hi",
+        status: MessageStatus? = nil
     ) -> ChatMessage {
         ChatMessage(
-            id: UUID(),
+            id: id,
             groupID: "aa".repeated(32),
             ownerIdentityID: IdentityID(),
             senderBlsPubkeyHex: "11".repeated(48),
             body: body,
             sentAt: Date(timeIntervalSince1970: 1_700_000_000),
             direction: direction,
-            status: direction == .incoming ? .received : .sent,
+            status: status ?? (direction == .incoming ? .received : .sent),
             groupType: .tyranny
         )
     }

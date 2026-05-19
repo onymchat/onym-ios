@@ -206,6 +206,107 @@ final class ChatThreadViewControllerTests: XCTestCase {
         return b
     }
 
+    // MARK: - Retry wiring (PR 9)
+
+    func test_failedBubble_tap_invokesOnRetryRequested() {
+        // Window-hosted to give the table real frames so the
+        // failed cell actually mounts.
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 800))
+        let vc = ChatThreadViewController()
+        window.rootViewController = vc
+        window.isHidden = false
+
+        let failed = makeMessage(body: "uh oh", direction: .outgoing)
+        let failedRow = ChatMessage(
+            id: failed.id,
+            groupID: failed.groupID,
+            ownerIdentityID: failed.ownerIdentityID,
+            senderBlsPubkeyHex: failed.senderBlsPubkeyHex,
+            body: failed.body,
+            sentAt: failed.sentAt,
+            direction: failed.direction,
+            status: .failed,
+            groupType: failed.groupType
+        )
+
+        var retriedIDs: [UUID] = []
+        vc.onRetryRequested = { retriedIDs.append($0) }
+        vc.update(messages: [failedRow])
+        vc.view.layoutIfNeeded()
+        let table = tableView(in: vc)!
+        table.layoutIfNeeded()
+
+        guard let cell = table.cellForRow(at: IndexPath(row: 0, section: 0))
+                as? ChatBubbleCell else {
+            return XCTFail("failed bubble cell not mounted")
+        }
+        cell.simulateBubbleTapForTest()
+        XCTAssertEqual(retriedIDs, [failedRow.id],
+                       "tapping a failed bubble must fire onRetryRequested with the message id")
+    }
+
+    // MARK: - Diffable reconfigure (PR 9)
+
+    func test_statusFlip_reconfiguresVisibleCell() {
+        // The diffable identity is just `UUID`, so a status flip
+        // (same id, different content) must use `reconfigureItems`
+        // to re-run the cell provider. Without that, the bubble's
+        // status glyph would stay stale until cell reuse.
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 800))
+        let vc = ChatThreadViewController()
+        window.rootViewController = vc
+        window.isHidden = false
+
+        let id = UUID()
+        let pending = ChatMessage(
+            id: id,
+            groupID: "aa".repeated(32),
+            ownerIdentityID: IdentityID(),
+            senderBlsPubkeyHex: "11".repeated(48),
+            body: "hi",
+            sentAt: Date(timeIntervalSince1970: 1_700_000_000),
+            direction: .outgoing,
+            status: .pending,
+            groupType: .tyranny
+        )
+        vc.update(messages: [pending])
+        vc.view.layoutIfNeeded()
+        let table = tableView(in: vc)!
+        table.layoutIfNeeded()
+
+        guard let cell = table.cellForRow(at: IndexPath(row: 0, section: 0))
+                as? ChatBubbleCell else {
+            return XCTFail("pending bubble cell not mounted")
+        }
+        let pendingIcon = find(in: cell.contentView) {
+            $0.accessibilityIdentifier == "chat.bubble.status"
+        } as? UIImageView
+        XCTAssertEqual(pendingIcon?.accessibilityLabel, "Sending")
+
+        // Flip to .sent — same id, different status.
+        let sentRow = ChatMessage(
+            id: id,
+            groupID: pending.groupID,
+            ownerIdentityID: pending.ownerIdentityID,
+            senderBlsPubkeyHex: pending.senderBlsPubkeyHex,
+            body: pending.body,
+            sentAt: pending.sentAt,
+            direction: .outgoing,
+            status: .sent,
+            groupType: .tyranny
+        )
+        vc.update(messages: [sentRow])
+        table.layoutIfNeeded()
+
+        // Same cell instance (reconfigured, not reloaded). The
+        // status glyph swapped.
+        let sentIcon = find(in: cell.contentView) {
+            $0.accessibilityIdentifier == "chat.bubble.status"
+        } as? UIImageView
+        XCTAssertEqual(sentIcon?.accessibilityLabel, "Sent",
+                       "reconfigureItems must re-run the cell provider so the glyph updates")
+    }
+
     // MARK: - Auto-scroll heuristic
 
     func test_isNearBottom_emptyContent_isTrue() {
