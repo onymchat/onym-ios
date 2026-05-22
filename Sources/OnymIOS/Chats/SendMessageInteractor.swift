@@ -117,28 +117,114 @@ actor SendMessageInteractor {
             .filter { $0.key != myBlsHex }
             .map { $0.value.inboxPublicKey }
 
+        let finalStatus = await fanOut(
+            payload: payload,
+            recipients: recipients
+        )
+        await messageRepository.updateStatus(
+            id: messageID,
+            status: finalStatus,
+            groupID: groupID
+        )
+
+        return ChatMessage(
+            id: pending.id,
+            groupID: pending.groupID,
+            ownerIdentityID: pending.ownerIdentityID,
+            senderBlsPubkeyHex: pending.senderBlsPubkeyHex,
+            body: pending.body,
+            sentAt: pending.sentAt,
+            direction: pending.direction,
+            status: finalStatus,
+            groupType: pending.groupType
+        )
+    }
+
+    /// Retry a previously-failed outgoing message. Looks up the row
+    /// by `messageID`, flips status back to `.pending` so the UI
+    /// shows the in-flight glyph, then re-runs the fan-out using the
+    /// original payload fields (same UUID + body + sentAt) so
+    /// receivers can dedup against any earlier delivery. Status is
+    /// flipped to `.sent` / `.failed` on completion.
+    ///
+    /// No-op (silent) when:
+    ///   - The message isn't in the local repository for that group.
+    ///   - The row isn't `.outgoing` with `.failed` status. Retrying
+    ///     an already-pending or already-sent message would
+    ///     double-deliver; retrying an incoming message makes no
+    ///     sense.
+    ///   - The group isn't on this device, no identity is loaded,
+    ///     or the message's group type isn't supported by v1 chat.
+    func retry(groupID: String, messageID: UUID) async {
+        let messages = await messageRepository.currentMessages(groupID: groupID)
+        guard let message = messages.first(where: { $0.id == messageID }),
+              message.direction == .outgoing,
+              message.status == .failed
+        else { return }
+
+        guard await identity.currentIdentity() != nil else { return }
+        let groups = await groupRepository.currentGroups()
+        guard let group = groups.first(where: { $0.id == groupID }) else { return }
+
+        let myBlsHex = message.senderBlsPubkeyHex
+        guard group.memberProfiles[myBlsHex] != nil else { return }
+
+        let variant: ChatMessageVariant
+        switch group.groupType {
+        case .tyranny:
+            variant = .tyranny(body: message.body)
+        case .oneOnOne, .anarchy, .democracy, .oligarchy:
+            return
+        }
+
+        // Flip the row to `.pending` first so the UI's status
+        // glyph swaps from the red-bang to the in-flight clock
+        // before the network work starts. Receivers dedup against
+        // any prior delivery via the same `messageID`.
+        await messageRepository.updateStatus(
+            id: messageID,
+            status: .pending,
+            groupID: groupID
+        )
+
+        let payload = ChatMessagePayload(
+            version: 1,
+            messageID: messageID,
+            groupID: group.groupIDData,
+            senderBlsPubkeyHex: myBlsHex,
+            sentAtMillis: Int64(message.sentAt.timeIntervalSince1970 * 1000),
+            variant: variant
+        )
+
+        let recipients = group.memberProfiles
+            .filter { $0.key != myBlsHex }
+            .map { $0.value.inboxPublicKey }
+
+        let finalStatus = await fanOut(payload: payload, recipients: recipients)
+        await messageRepository.updateStatus(
+            id: messageID,
+            status: finalStatus,
+            groupID: groupID
+        )
+    }
+
+    /// Encode the payload, seal one envelope per recipient, ship
+    /// each, return `.sent` if any relay accepted (or the recipient
+    /// list was empty), `.failed` if every send threw or every
+    /// relay rejected. Shared between `send` and `retry` since the
+    /// per-recipient fan-out shape is identical.
+    private func fanOut(
+        payload: ChatMessagePayload,
+        recipients: [Data]
+    ) async -> MessageStatus {
         let payloadBytes: Data
         do {
             payloadBytes = try JSONEncoder().encode(payload)
         } catch {
-            // Encoding failure is a programmer error (Data field
-            // can't fail at JSON encode); mark failed and surface.
-            await messageRepository.updateStatus(
-                id: messageID,
-                status: .failed,
-                groupID: groupID
-            )
-            return ChatMessage(
-                id: pending.id,
-                groupID: pending.groupID,
-                ownerIdentityID: pending.ownerIdentityID,
-                senderBlsPubkeyHex: pending.senderBlsPubkeyHex,
-                body: pending.body,
-                sentAt: pending.sentAt,
-                direction: pending.direction,
-                status: .failed,
-                groupType: pending.groupType
-            )
+            // JSONEncoder on a static-typed Codable value can't
+            // realistically fail; surface as a transport failure
+            // so the caller marks the row `.failed`.
+            return .failed
         }
 
         var successCount = 0
@@ -162,25 +248,7 @@ actor SendMessageInteractor {
         // Empty roster (only the sender is a member) is fine — the
         // message is local-only. Anything with recipients must reach
         // at least one to count as sent.
-        let finalStatus: MessageStatus =
-            recipients.isEmpty || successCount > 0 ? .sent : .failed
-        await messageRepository.updateStatus(
-            id: messageID,
-            status: finalStatus,
-            groupID: groupID
-        )
-
-        return ChatMessage(
-            id: pending.id,
-            groupID: pending.groupID,
-            ownerIdentityID: pending.ownerIdentityID,
-            senderBlsPubkeyHex: pending.senderBlsPubkeyHex,
-            body: pending.body,
-            sentAt: pending.sentAt,
-            direction: pending.direction,
-            status: finalStatus,
-            groupType: pending.groupType
-        )
+        return recipients.isEmpty || successCount > 0 ? .sent : .failed
     }
 
     /// Same derivation as `IdentityRepository.inboxTag(from:)` —

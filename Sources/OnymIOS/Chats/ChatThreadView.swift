@@ -53,6 +53,19 @@ struct ChatThreadView: View {
                 Task {
                     try? await interactor.send(groupID: groupID, body: body)
                 }
+            },
+            onRetryRequested: { messageID in
+                // PR 9: retry a failed outgoing message. Same
+                // fire-and-forget shape as the send path — the
+                // interactor flips status to .pending before the
+                // network work begins (so the glyph swaps to the
+                // in-flight clock immediately), runs the fan-out,
+                // then flips to .sent / .failed on completion.
+                let interactor = sendMessageInteractor
+                let groupID = groupID
+                Task {
+                    await interactor.retry(groupID: groupID, messageID: messageID)
+                }
             }
         )
         .toolbar(.hidden, for: .navigationBar)
@@ -85,12 +98,14 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
     let onBack: () -> Void
     let onShowMembers: () -> Void
     let onSendTapped: (String) -> Void
+    let onRetryRequested: (UUID) -> Void
 
     func makeUIViewController(context: Context) -> ChatThreadViewController {
         let vc = ChatThreadViewController()
         vc.onBack = onBack
         vc.onShowMembers = onShowMembers
         vc.onSendTapped = onSendTapped
+        vc.onRetryRequested = onRetryRequested
         vc.loadViewIfNeeded()
         vc.update(groupName: groupName)
         vc.update(messages: messages)
@@ -100,11 +115,12 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
     func updateUIViewController(_ vc: ChatThreadViewController, context: Context) {
         // Closures are refreshed every render — SwiftUI captures the
         // *current* `dismiss` + `showMembers` setters + send-tap
-        // dispatcher, so the version the controller invokes always
-        // reflects the live binding.
+        // dispatcher + retry dispatcher, so the version the
+        // controller invokes always reflects the live binding.
         vc.onBack = onBack
         vc.onShowMembers = onShowMembers
         vc.onSendTapped = onSendTapped
+        vc.onRetryRequested = onRetryRequested
         vc.update(groupName: groupName)
         vc.update(messages: messages)
     }
