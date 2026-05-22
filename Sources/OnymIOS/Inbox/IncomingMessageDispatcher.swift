@@ -352,25 +352,47 @@ struct IncomingMessageDispatcher: Sendable {
         } catch {
             return false
         }
-        // Converge-forward gate. The chain only stores the *latest*
-        // commitment+epoch, so a snapshot can't be byte-verified once
-        // the chain has moved past its epoch (e.g. another invitee was
-        // anchored between this invite being sealed and it landing).
-        //   - chain behind the snapshot  → impossible for a real
-        //     anchored snapshot; reject.
-        //   - chain exactly at the snapshot's epoch → byte-verify the
-        //     committed roster (the strong anti-forgery anchor for a
-        //     first-contact invite).
-        //   - chain ahead → the group provably exists on chain and the
-        //     snapshot is internally consistent; accept and let
-        //     subsequent `MemberAnnouncementPayload`s carry the roster
-        //     forward rather than dropping the invite outright.
+        // Bounded converge-forward gate. The chain stores only the
+        // LATEST (commitment, epoch), so a snapshot can't be byte-checked
+        // once the chain moves past its epoch.
+        //   - chain behind the snapshot → impossible for a real anchored
+        //     snapshot; reject.
+        //   - chain EXACTLY at the snapshot's epoch → byte-verify the
+        //     committed roster. This is the strong anti-forgery anchor: a
+        //     forger would have to reproduce `Poseidon(Poseidon(root,
+        //     epoch), salt)`, but `salt` is random and never on chain —
+        //     only a legitimate invitation carries it.
+        //   - chain AHEAD → we can't reproduce the byte-check, so accept
+        //     only within a small staleness window. This covers a burst
+        //     of concurrent approvals advancing the epoch between an
+        //     invite being sealed and it landing, while bounding the
+        //     forgery surface (a dropped salt-check would otherwise let
+        //     anyone who knows the recipient's inbox key + a real groupID
+        //     materialize an arbitrary fake group).
+        //
+        // SECURITY: even within the window a self-consistent fake snapshot
+        // for a *young* group is accepted. Fully closing this needs the
+        // chain read to expose `admin_pubkey_commitment` so the snapshot's
+        // adminPubkeyHex can be bound to chain independent of epoch —
+        // tracked as a follow-up (relayer + SDK support required).
         guard onchain.epoch >= invitation.epoch else { return false }
         if onchain.epoch == invitation.epoch {
             guard onchain.commitment == claimedCommitment else { return false }
+        } else {
+            guard onchain.epoch - invitation.epoch <= Self.maxInvitationStaleEpochs
+            else { return false }
         }
         return true
     }
+
+    /// Upper bound on how far the chain may have advanced past an
+    /// inbound invitation's epoch and still materialize. Sized to absorb
+    /// a realistic burst of serialized approvals during delivery latency
+    /// while keeping the salt-free forgery surface (chain-ahead branch of
+    /// `verifyTyrannyInvitation`) confined to young groups. A
+    /// longer-offline invitee on a fast-growing group beyond this falls
+    /// back to a re-invite rather than trusting an unverifiable snapshot.
+    static let maxInvitationStaleEpochs: UInt64 = 16
 
     /// PR 13b: validate a Tyranny `MemberAnnouncementPayload`'s
     /// claimed commitment + epoch against the on-chain state. Same

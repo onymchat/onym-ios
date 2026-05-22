@@ -938,6 +938,51 @@ final class IncomingMessageDispatcherTests: XCTestCase {
                        "stale-but-valid Tyranny invite should still materialize when the chain is ahead")
         XCTAssertEqual(after.first?.groupIDData, groupID)
     }
+
+    func test_invitation_tyranny_rejectsWhenChainEpochTooFarAhead() async throws {
+        // Beyond the bounded staleness window the snapshot can't be
+        // byte-verified (the salt-gated commitment check only works at an
+        // exact epoch), so it could be a salt-free forgery — drop it
+        // rather than materialize a fake group.
+        let groupID = Data(repeating: 0x42, count: 32)
+        let salt = Data(repeating: 0x66, count: 32)
+        let realCommitment = try Self.makeRealTyrannyCommitment(
+            members: [], epoch: 0, salt: salt, tier: .small
+        )
+        let farAhead = IncomingMessageDispatcher.maxInvitationStaleEpochs + 1
+        chainState.setNext(commitment: Data(repeating: 0x99, count: 32), epoch: farAhead)
+        let payload = makeInvitationPayload(
+            groupID: groupID,
+            name: "Family",
+            memberProfiles: nil,
+            groupType: .tyranny,
+            commitment: realCommitment
+        )
+        let plaintext = try JSONEncoder().encode(payload)
+        let decrypter = FakeInvitationEnvelopeDecrypter(
+            mode: .fixed(plaintext),
+            senderEd25519PublicKey: Data(repeating: 0xED, count: 32)
+        )
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
+        )
+
+        await dispatcher.dispatch(
+            messageID: "msg-too-stale",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+
+        let after = await groups.currentGroups()
+        XCTAssertTrue(after.isEmpty,
+                      "invitation more than maxInvitationStaleEpochs behind chain must be rejected")
+    }
 }
 
 // MARK: - Stub identity provider
