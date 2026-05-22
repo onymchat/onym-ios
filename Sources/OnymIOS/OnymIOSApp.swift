@@ -219,7 +219,8 @@ struct OnymIOSApp: App {
                 ChatsFlow(repository: groupRepository)
             },
             identitiesFlow: identitiesFlow,
-            approveRequestsFlow: approveRequestsFlow
+            approveRequestsFlow: approveRequestsFlow,
+            messageRepository: messageRepository
         )
     }
 

@@ -38,6 +38,24 @@ final class ChatThreadViewController: UIViewController {
     private let inputPanelSeparator = UIView()
     private let inputPlaceholderLabel = UILabel()
 
+    // Diffable data source state. Keyed by message UUID — stable
+    // identity across re-renders, no array-index churn.
+    private enum Section: Hashable { case main }
+    private var dataSource: UITableViewDiffableDataSource<Section, UUID>!
+    /// Lookup table the cell-provider reads from. Keys mirror the
+    /// diffable snapshot's items so a dequeue can always resolve.
+    private var messagesByID: [UUID: ChatMessage] = [:]
+    /// Set after the first `update(messages:)` so the initial load
+    /// applies non-animated + always scrolls to the bottom, while
+    /// subsequent updates animate and only auto-scroll when the
+    /// user is already near the bottom.
+    private var hasAppliedFirstSnapshot = false
+
+    /// "Within this many points of the content bottom" counts as
+    /// "near bottom" for the auto-scroll heuristic. Exposed for
+    /// tests; production-only callers should treat as a constant.
+    static let nearBottomThreshold: CGFloat = 100
+
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = UIColor(OnymTokens.bg)
@@ -45,6 +63,7 @@ final class ChatThreadViewController: UIViewController {
         buildTableView()
         buildInputPanel()
         layout()
+        configureDataSource()
     }
 
     /// Push a new group-name into the title. Called by the SwiftUI
@@ -52,6 +71,80 @@ final class ChatThreadViewController: UIViewController {
     /// renames (PR 9 polish) without re-creating the controller.
     func update(groupName: String) {
         titleLabel.text = groupName.isEmpty ? "Chat" : groupName
+    }
+
+    /// Push a new message list into the table. Called by the SwiftUI
+    /// wrapper on every render with the latest snapshot from
+    /// `MessageRepository.snapshots(groupID:)`. The diffable data
+    /// source figures out the inserts/deletes/moves; rows that
+    /// didn't change don't re-layout.
+    ///
+    /// Behavior:
+    ///   - First apply (cold open): non-animated, always scroll to
+    ///     the bottom so the user lands on the latest message.
+    ///   - Subsequent applies: animated; only scroll to bottom if
+    ///     the user was already near it (otherwise we'd hijack
+    ///     mid-scroll reading of older messages).
+    ///
+    /// Defensively sorts by `sentAt` ascending. The repository's
+    /// contract is already to return sorted snapshots
+    /// (`SwiftDataMessageStoreTests.test_list_sortsBySentAtAscending`),
+    /// but a future caller / test stub might violate that without
+    /// the sort here protecting the table's row order.
+    ///
+    /// PR 8 note: `messagesByID` is updated on every call, but the
+    /// diffable identity is just `UUID` — when a status flip lands
+    /// (pending → sent), visible cells won't reconfigure. PR 8 should
+    /// switch to `snapshot.reconfigureItems(changedIDs)` or include
+    /// status in the diff identity.
+    func update(messages: [ChatMessage]) {
+        let isFirstApply = !hasAppliedFirstSnapshot
+        let wasNearBottom = isNearBottom
+
+        let sorted = messages.sorted { $0.sentAt < $1.sentAt }
+        messagesByID = Dictionary(uniqueKeysWithValues: sorted.map { ($0.id, $0) })
+
+        var snapshot = NSDiffableDataSourceSnapshot<Section, UUID>()
+        snapshot.appendSections([.main])
+        snapshot.appendItems(sorted.map(\.id))
+        // First apply is non-animated to avoid an initial-load
+        // "fly-in" of every existing message.
+        dataSource.apply(snapshot, animatingDifferences: !isFirstApply) { [weak self] in
+            guard let self else { return }
+            if isFirstApply {
+                self.scrollToBottom(animated: false)
+                self.hasAppliedFirstSnapshot = true
+            } else if wasNearBottom {
+                self.scrollToBottom(animated: true)
+            }
+        }
+    }
+
+    /// True when the user is within `nearBottomThreshold` points of
+    /// the content bottom. Used to decide whether a fresh message
+    /// should pull the scroll along or leave the user where they
+    /// are. Exposed for tests; production-only callers should treat
+    /// as private.
+    var isNearBottom: Bool {
+        let contentHeight = tableView.contentSize.height
+        let visibleHeight = tableView.bounds.height
+        let offsetY = tableView.contentOffset.y
+        // When the content is shorter than the viewport (empty / few
+        // messages), we're always "at the bottom" — auto-scroll has
+        // nothing to do.
+        guard contentHeight > visibleHeight else { return true }
+        let maxOffset = contentHeight - visibleHeight
+        return maxOffset - offsetY < Self.nearBottomThreshold
+    }
+
+    /// Scroll the table so the last row is visible.
+    func scrollToBottom(animated: Bool) {
+        let snapshot = dataSource.snapshot()
+        guard let lastSection = snapshot.sectionIdentifiers.last else { return }
+        let itemCount = snapshot.numberOfItems(inSection: lastSection)
+        guard itemCount > 0 else { return }
+        let lastIndex = IndexPath(row: itemCount - 1, section: 0)
+        tableView.scrollToRow(at: lastIndex, at: .bottom, animated: animated)
     }
 
     // MARK: - Top bar
@@ -100,16 +193,41 @@ final class ChatThreadViewController: UIViewController {
         view.addSubview(topBarSeparator)
     }
 
-    // MARK: - Table view (messages placeholder)
+    // MARK: - Table view (message list)
 
     private func buildTableView() {
         tableView.translatesAutoresizingMaskIntoConstraints = false
         tableView.backgroundColor = UIColor(OnymTokens.bg)
         tableView.separatorStyle = .none
-        // No data source yet — PR 6 attaches a diffable data source
-        // and a custom bubble cell. Empty table renders as a blank
-        // background, which is the desired PR-5 visual.
+        // Self-sizing rows — bubble height grows with body text.
+        tableView.rowHeight = UITableView.automaticDimension
+        tableView.estimatedRowHeight = 44
+        tableView.register(ChatBubbleCell.self, forCellReuseIdentifier: ChatBubbleCell.reuseID)
+        // Tap to dismiss the keyboard once PR 7 wires the input
+        // panel. No-op pre-PR-7 because nothing is first-responder.
+        tableView.keyboardDismissMode = .interactive
         view.addSubview(tableView)
+    }
+
+    private func configureDataSource() {
+        dataSource = UITableViewDiffableDataSource<Section, UUID>(
+            tableView: tableView
+        ) { [weak self] tableView, indexPath, id in
+            let cell = tableView.dequeueReusableCell(
+                withIdentifier: ChatBubbleCell.reuseID,
+                for: indexPath
+            )
+            if let bubble = cell as? ChatBubbleCell,
+               let message = self?.messagesByID[id] {
+                bubble.configure(message: message)
+            }
+            return cell
+        }
+        // No animations on the initial empty section commit; only
+        // mutations after `update(messages:)` need animation.
+        var initial = NSDiffableDataSourceSnapshot<Section, UUID>()
+        initial.appendSections([.main])
+        dataSource.apply(initial, animatingDifferences: false)
     }
 
     // MARK: - Input panel placeholder

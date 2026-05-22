@@ -19,14 +19,20 @@ struct ChatThreadView: View {
     let groupID: String
     @Bindable var chatsFlow: ChatsFlow
     @Bindable var identitiesFlow: IdentitiesFlow
+    let messageRepository: MessageRepository
     let makeShareInviteFlow: @MainActor () -> ShareInviteFlow
 
     @Environment(\.dismiss) private var dismiss
     @State private var showMembers: Bool = false
+    /// Live snapshot of the group's messages, sorted ascending by
+    /// `sentAt`. SwiftUI re-renders on every push so the bridge
+    /// hands the controller fresh data via `updateUIViewController`.
+    @State private var messages: [ChatMessage] = []
 
     var body: some View {
         ChatThreadControllerBridge(
             groupName: currentGroupName,
+            messages: messages,
             onBack: { dismiss() },
             onShowMembers: { showMembers = true }
         )
@@ -39,6 +45,14 @@ struct ChatThreadView: View {
                 makeShareInviteFlow: makeShareInviteFlow
             )
         }
+        // Per-group subscription. `task(id:)` cancels + restarts when
+        // groupID changes, so navigating into a different chat
+        // doesn't leak the previous group's stream.
+        .task(id: groupID) {
+            for await snapshot in messageRepository.snapshots(groupID: groupID) {
+                messages = snapshot
+            }
+        }
     }
 
     private var currentGroupName: String {
@@ -48,6 +62,7 @@ struct ChatThreadView: View {
 
 private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
     let groupName: String
+    let messages: [ChatMessage]
     let onBack: () -> Void
     let onShowMembers: () -> Void
 
@@ -57,6 +72,7 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         vc.onShowMembers = onShowMembers
         vc.loadViewIfNeeded()
         vc.update(groupName: groupName)
+        vc.update(messages: messages)
         return vc
     }
 
@@ -67,5 +83,6 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         vc.onBack = onBack
         vc.onShowMembers = onShowMembers
         vc.update(groupName: groupName)
+        vc.update(messages: messages)
     }
 }
