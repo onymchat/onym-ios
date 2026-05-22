@@ -64,6 +64,12 @@ struct IncomingMessageDispatcher: Sendable {
     /// keeps it as a defaulted parameter — a `let` with a default is
     /// omitted from the memberwise init entirely.
     var pendingInvites: any PendingInvitesRecording = PendingInvitesStore()
+    /// Seam for the verify-at-current state machine (Option 2). A stale
+    /// Tyranny snapshot (chain advanced past its epoch) is deferred here
+    /// on the invitee side; inbound `GroupStateRefreshRequest`s are
+    /// answered here on the admin side. Defaulted to a no-op for the
+    /// same reason as `pendingInvites`.
+    var groupStateRefresher: any GroupStateRefreshing = NoopGroupStateRefresher()
 
     func dispatch(
         messageID: String,
@@ -104,6 +110,22 @@ struct IncomingMessageDispatcher: Sendable {
                 messageID: messageID,
                 ownerIdentityID: ownerIdentityID,
                 receivedAt: receivedAt
+            )
+            return
+        }
+
+        // Fast path 0.5: GroupStateRefreshRequest — a member asking the
+        // admin for the current group state (Option 2 verify-at-current).
+        // Admin-side; delegated to the verifier, which gates on the
+        // requester being a current member before disclosing the salt.
+        if let refresh = try? JSONDecoder().decode(
+            GroupStateRefreshRequest.self,
+            from: envelope.plaintext
+        ) {
+            await groupStateRefresher.handleRefreshRequest(
+                refresh,
+                ownerIdentityID: ownerIdentityID,
+                requesterEd25519: envelope.senderEd25519PublicKey
             )
             return
         }
@@ -221,18 +243,28 @@ struct IncomingMessageDispatcher: Sendable {
               let groupType = SEPGroupType(rawValue: invitation.groupTypeRaw)
         else { return }
 
-        // PR 13b: receiver-side commitment verification. For Tyranny
-        // groups, the payload's `commitment` MUST match the on-chain
-        // state and the recomputed Poseidon root over the wire-shipped
-        // members. Either mismatch is treated as a forged invitation —
-        // drop silently. Non-Tyranny groups skip verification (no
-        // admin-anchored update path; trust falls back to the
-        // sender's Ed25519 signature on the envelope).
+        // Receiver-side verification (Option 2). For Tyranny groups the
+        // snapshot's commitment must match the recomputed Poseidon root
+        // AND the on-chain commitment at an exact epoch. Non-Tyranny
+        // groups skip verification (no admin-anchored update path; trust
+        // falls back to the sender's envelope signature).
         if groupType == .tyranny {
-            guard await verifyTyrannyInvitation(
-                invitation,
-                tier: tier
-            ) else {
+            switch await verifyTyrannyInvitation(invitation, tier: tier) {
+            case .verified:
+                break  // materialize below
+            case .reject:
+                return
+            case .staleNeedsRefresh:
+                // The chain has advanced past this snapshot's epoch, so
+                // we can't byte-verify it. Don't materialize an
+                // unverifiable group — hand it to the verifier, which
+                // asks the admin for the current state and surfaces a
+                // "couldn't verify" state to the user if the admin is
+                // unreachable.
+                await groupStateRefresher.deferVerification(
+                    invitation: invitation,
+                    ownerIdentityID: ownerIdentityID
+                )
                 return
             }
         }
@@ -314,12 +346,25 @@ struct IncomingMessageDispatcher: Sendable {
     /// "couldn't verify, reject" — the safe default. Operators
     /// observe these via the `decryptFailures` counter (out of
     /// scope for V1).
+    /// Outcome of receiver-side Tyranny invitation verification.
+    enum TyrannyInvitationVerification: Equatable {
+        /// Internally consistent AND matches the on-chain commitment at
+        /// an exact epoch — safe to materialize.
+        case verified
+        /// Internally consistent and the group exists on chain, but the
+        /// chain has advanced past the snapshot's epoch, so it can't be
+        /// byte-verified. Needs a current-state refresh from the admin.
+        case staleNeedsRefresh
+        /// Forged / unverifiable — drop.
+        case reject
+    }
+
     private func verifyTyrannyInvitation(
         _ invitation: GroupInvitationPayload,
         tier: SEPTier
-    ) async -> Bool {
+    ) async -> TyrannyInvitationVerification {
         guard let claimedCommitment = invitation.commitment else {
-            return false
+            return .reject
         }
         // Internal consistency: recompute the FULL Poseidon
         // commitment from (members, epoch, salt) and compare. The
@@ -340,9 +385,9 @@ struct IncomingMessageDispatcher: Sendable {
                 salt: invitation.salt
             )
         } catch {
-            return false
+            return .reject
         }
-        guard recomputed == claimedCommitment else { return false }
+        guard recomputed == claimedCommitment else { return .reject }
         // External anchor: matches what's on chain.
         let onchain: SEPCommitmentEntry
         do {
@@ -350,49 +395,27 @@ struct IncomingMessageDispatcher: Sendable {
                 groupID: invitation.groupID
             )
         } catch {
-            return false
+            return .reject
         }
-        // Bounded converge-forward gate. The chain stores only the
-        // LATEST (commitment, epoch), so a snapshot can't be byte-checked
-        // once the chain moves past its epoch.
+        // Verify at current chain state (Option 2). The chain stores
+        // only the LATEST (commitment, epoch), so a snapshot is only
+        // byte-verifiable when the chain is exactly at its epoch.
         //   - chain behind the snapshot → impossible for a real anchored
         //     snapshot; reject.
         //   - chain EXACTLY at the snapshot's epoch → byte-verify the
-        //     committed roster. This is the strong anti-forgery anchor: a
-        //     forger would have to reproduce `Poseidon(Poseidon(root,
-        //     epoch), salt)`, but `salt` is random and never on chain —
-        //     only a legitimate invitation carries it.
-        //   - chain AHEAD → we can't reproduce the byte-check, so accept
-        //     only within a small staleness window. This covers a burst
-        //     of concurrent approvals advancing the epoch between an
-        //     invite being sealed and it landing, while bounding the
-        //     forgery surface (a dropped salt-check would otherwise let
-        //     anyone who knows the recipient's inbox key + a real groupID
-        //     materialize an arbitrary fake group).
-        //
-        // SECURITY: even within the window a self-consistent fake snapshot
-        // for a *young* group is accepted. Fully closing this needs the
-        // chain read to expose `admin_pubkey_commitment` so the snapshot's
-        // adminPubkeyHex can be bound to chain independent of epoch —
-        // tracked as a follow-up (relayer + SDK support required).
-        guard onchain.epoch >= invitation.epoch else { return false }
+        //     committed roster. Strong anti-forgery: reproducing
+        //     `Poseidon(Poseidon(root, epoch), salt)` needs the random
+        //     `salt`, which is never on chain — only a legitimate
+        //     invitation carries it.
+        //   - chain AHEAD → can't byte-verify here; defer and ask the
+        //     admin for the current state rather than trusting (and
+        //     thereby letting a self-consistent fake materialize).
+        guard onchain.epoch >= invitation.epoch else { return .reject }
         if onchain.epoch == invitation.epoch {
-            guard onchain.commitment == claimedCommitment else { return false }
-        } else {
-            guard onchain.epoch - invitation.epoch <= Self.maxInvitationStaleEpochs
-            else { return false }
+            return onchain.commitment == claimedCommitment ? .verified : .reject
         }
-        return true
+        return .staleNeedsRefresh
     }
-
-    /// Upper bound on how far the chain may have advanced past an
-    /// inbound invitation's epoch and still materialize. Sized to absorb
-    /// a realistic burst of serialized approvals during delivery latency
-    /// while keeping the salt-free forgery surface (chain-ahead branch of
-    /// `verifyTyrannyInvitation`) confined to young groups. A
-    /// longer-offline invitee on a fast-growing group beyond this falls
-    /// back to a re-invite rather than trusting an unverifiable snapshot.
-    static let maxInvitationStaleEpochs: UInt64 = 16
 
     /// PR 13b: validate a Tyranny `MemberAnnouncementPayload`'s
     /// claimed commitment + epoch against the on-chain state. Same
