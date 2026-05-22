@@ -25,16 +25,72 @@ final class ChatThreadViewControllerTests: XCTestCase {
     func test_updateGroupName_writesThroughToTitleLabel() {
         let vc = ChatThreadViewController()
         vc.loadViewIfNeeded()
-        vc.update(groupName: "Family")
+        vc.update(groupName: "Family", memberCount: 0)
         XCTAssertEqual(titleLabel(in: vc)?.text, "Family")
     }
 
     func test_updateGroupName_emptyFallsBackToChat() {
         let vc = ChatThreadViewController()
         vc.loadViewIfNeeded()
-        vc.update(groupName: "")
+        vc.update(groupName: "", memberCount: 0)
         XCTAssertEqual(titleLabel(in: vc)?.text, "Chat",
                        "empty group names fall back to the generic title so the bar isn't blank")
+    }
+
+    func test_memberCount_zeroOrOne_hidesSubtitle() {
+        // Singleton groups (just the user) don't need a member
+        // count; nothing-known groups would show "0 members"
+        // awkwardly. Both hide the subtitle.
+        let vc = ChatThreadViewController()
+        vc.loadViewIfNeeded()
+
+        vc.update(groupName: "Group", memberCount: 0)
+        XCTAssertTrue(memberCountLabel(in: vc)?.isHidden ?? false)
+
+        vc.update(groupName: "Group", memberCount: 1)
+        XCTAssertTrue(memberCountLabel(in: vc)?.isHidden ?? false)
+    }
+
+    func test_memberCount_twoOrMore_showsSubtitleWithPluralization() {
+        let vc = ChatThreadViewController()
+        vc.loadViewIfNeeded()
+
+        vc.update(groupName: "Group", memberCount: 2)
+        XCTAssertFalse(memberCountLabel(in: vc)?.isHidden ?? true)
+        XCTAssertEqual(memberCountLabel(in: vc)?.text, "2 members")
+
+        vc.update(groupName: "Group", memberCount: 5)
+        XCTAssertEqual(memberCountLabel(in: vc)?.text, "5 members")
+    }
+
+    // MARK: - Empty state (PR 10)
+
+    func test_emptyMessageList_showsEmptyStateLabel() {
+        let vc = ChatThreadViewController()
+        vc.loadViewIfNeeded()
+        vc.update(messages: [])
+        XCTAssertFalse(emptyStateLabel(in: vc)?.isHidden ?? true,
+                       "empty state must be visible when there are no messages")
+    }
+
+    func test_nonEmptyMessageList_hidesEmptyState() {
+        let vc = ChatThreadViewController()
+        vc.loadViewIfNeeded()
+        vc.update(messages: [makeMessage(body: "hi", direction: .incoming)])
+        XCTAssertTrue(emptyStateLabel(in: vc)?.isHidden ?? false,
+                      "empty state must disappear once a message lands")
+    }
+
+    func test_messagesClearedAgain_showsEmptyState() {
+        // PR 10 contract: empty state toggle is symmetric — if all
+        // messages get deleted (rare today, possible later), the
+        // empty state should come back without the controller
+        // needing a reset.
+        let vc = ChatThreadViewController()
+        vc.loadViewIfNeeded()
+        vc.update(messages: [makeMessage(body: "hi", direction: .incoming)])
+        vc.update(messages: [])
+        XCTAssertFalse(emptyStateLabel(in: vc)?.isHidden ?? true)
     }
 
     func test_backButtonTap_invokesOnBackClosure() {
@@ -395,6 +451,14 @@ final class ChatThreadViewControllerTests: XCTestCase {
 
     private func titleLabel(in vc: UIViewController) -> UILabel? {
         find(in: vc.view, identifier: "chat.title") as? UILabel
+    }
+
+    private func memberCountLabel(in vc: UIViewController) -> UILabel? {
+        find(in: vc.view, identifier: "chat.title.member_count") as? UILabel
+    }
+
+    private func emptyStateLabel(in vc: UIViewController) -> UILabel? {
+        find(in: vc.view, identifier: "chat.empty_state") as? UILabel
     }
 
     private func backButton(in vc: UIViewController) -> UIButton? {

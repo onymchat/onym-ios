@@ -46,11 +46,14 @@ final class ChatThreadViewController: UIViewController {
     var onRetryRequested: ((UUID) -> Void)?
 
     private let titleLabel = UILabel()
+    private let memberCountLabel = UILabel()
+    private let titleStack = UIStackView()
     private let backButton = UIButton(type: .system)
     private let infoButton = UIButton(type: .system)
     private let topBar = UIView()
     private let topBarSeparator = UIView()
     private let tableView = UITableView()
+    private let emptyStateLabel = UILabel()
     private let inputPanel = ChatInputPanelView()
 
     // Diffable data source state. Keyed by message UUID — stable
@@ -81,11 +84,23 @@ final class ChatThreadViewController: UIViewController {
         configureDataSource()
     }
 
-    /// Push a new group-name into the title. Called by the SwiftUI
-    /// wrapper on every render — keeps the bar in sync as the group
-    /// renames (PR 9 polish) without re-creating the controller.
-    func update(groupName: String) {
+    /// Push a new group-name + member-count into the title bar.
+    /// Called by the SwiftUI wrapper on every render — keeps the
+    /// bar in sync as the group renames or new joiners land without
+    /// re-creating the controller.
+    ///
+    /// `memberCount` of zero or one hides the subtitle (singleton
+    /// groups don't need a member count; nothing-known groups
+    /// would just show "0 members" awkwardly).
+    func update(groupName: String, memberCount: Int) {
         titleLabel.text = groupName.isEmpty ? "Chat" : groupName
+        if memberCount > 1 {
+            memberCountLabel.text = "\(memberCount) members"
+            memberCountLabel.isHidden = false
+        } else {
+            memberCountLabel.text = nil
+            memberCountLabel.isHidden = true
+        }
     }
 
     /// Push a new message list into the table. Called by the SwiftUI
@@ -125,6 +140,11 @@ final class ChatThreadViewController: UIViewController {
             return msg.id
         }
         messagesByID = Dictionary(uniqueKeysWithValues: sorted.map { ($0.id, $0) })
+
+        // Empty state: visible iff the message list is empty. Lives
+        // behind the table view (added as a sibling); toggling
+        // `isHidden` is cheap and survives keyboard show/hide.
+        emptyStateLabel.isHidden = !sorted.isEmpty
 
         var snapshot = NSDiffableDataSourceSnapshot<Section, UUID>()
         snapshot.appendSections([.main])
@@ -197,9 +217,21 @@ final class ChatThreadViewController: UIViewController {
         titleLabel.textColor = UIColor(OnymTokens.text)
         titleLabel.textAlignment = .center
         titleLabel.text = "Chat"
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
         titleLabel.accessibilityIdentifier = "chat.title"
-        topBar.addSubview(titleLabel)
+
+        memberCountLabel.font = .systemFont(ofSize: 11, weight: .regular)
+        memberCountLabel.textColor = UIColor(OnymTokens.text3)
+        memberCountLabel.textAlignment = .center
+        memberCountLabel.isHidden = true
+        memberCountLabel.accessibilityIdentifier = "chat.title.member_count"
+
+        titleStack.axis = .vertical
+        titleStack.alignment = .center
+        titleStack.spacing = 1
+        titleStack.addArrangedSubview(titleLabel)
+        titleStack.addArrangedSubview(memberCountLabel)
+        titleStack.translatesAutoresizingMaskIntoConstraints = false
+        topBar.addSubview(titleStack)
 
         var infoConfig = UIButton.Configuration.plain()
         infoConfig.image = UIImage(systemName: "info.circle",
@@ -228,10 +260,23 @@ final class ChatThreadViewController: UIViewController {
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 44
         tableView.register(ChatBubbleCell.self, forCellReuseIdentifier: ChatBubbleCell.reuseID)
-        // Tap to dismiss the keyboard once PR 7 wires the input
-        // panel. No-op pre-PR-7 because nothing is first-responder.
         tableView.keyboardDismissMode = .interactive
         view.addSubview(tableView)
+
+        // Empty state — shown when the message list is empty, hidden
+        // as soon as the first message arrives. Positioned centered
+        // between the top bar and the input panel so it doesn't get
+        // covered when the keyboard rises.
+        emptyStateLabel.text = "No messages yet. Say hi."
+        emptyStateLabel.textAlignment = .center
+        emptyStateLabel.numberOfLines = 0
+        emptyStateLabel.font = .preferredFont(forTextStyle: .body)
+        emptyStateLabel.adjustsFontForContentSizeCategory = true
+        emptyStateLabel.textColor = UIColor(OnymTokens.text3)
+        emptyStateLabel.translatesAutoresizingMaskIntoConstraints = false
+        emptyStateLabel.isHidden = true
+        emptyStateLabel.accessibilityIdentifier = "chat.empty_state"
+        view.addSubview(emptyStateLabel)
     }
 
     private func configureDataSource() {
@@ -301,10 +346,10 @@ final class ChatThreadViewController: UIViewController {
             infoButton.widthAnchor.constraint(equalToConstant: 36),
             infoButton.heightAnchor.constraint(equalToConstant: 36),
 
-            titleLabel.centerXAnchor.constraint(equalTo: topBar.centerXAnchor),
-            titleLabel.centerYAnchor.constraint(equalTo: topBar.centerYAnchor),
-            titleLabel.leadingAnchor.constraint(greaterThanOrEqualTo: backButton.trailingAnchor, constant: 8),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: infoButton.leadingAnchor, constant: -8),
+            titleStack.centerXAnchor.constraint(equalTo: topBar.centerXAnchor),
+            titleStack.centerYAnchor.constraint(equalTo: topBar.centerYAnchor),
+            titleStack.leadingAnchor.constraint(greaterThanOrEqualTo: backButton.trailingAnchor, constant: 8),
+            titleStack.trailingAnchor.constraint(lessThanOrEqualTo: infoButton.leadingAnchor, constant: -8),
 
             topBarSeparator.topAnchor.constraint(equalTo: topBar.bottomAnchor),
             topBarSeparator.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -317,6 +362,18 @@ final class ChatThreadViewController: UIViewController {
             tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             tableView.bottomAnchor.constraint(equalTo: inputPanel.topAnchor),
+
+            // Empty state — centered in the same region the table
+            // view occupies. Sits behind the table; toggled on
+            // when the message list is empty.
+            emptyStateLabel.centerXAnchor.constraint(equalTo: tableView.centerXAnchor),
+            emptyStateLabel.centerYAnchor.constraint(equalTo: tableView.centerYAnchor),
+            emptyStateLabel.leadingAnchor.constraint(
+                greaterThanOrEqualTo: tableView.leadingAnchor, constant: 32
+            ),
+            emptyStateLabel.trailingAnchor.constraint(
+                lessThanOrEqualTo: tableView.trailingAnchor, constant: -32
+            ),
 
             // Input panel — bottom tracks the keyboard. With no
             // keyboard up, `keyboardLayoutGuide.topAnchor` equals
