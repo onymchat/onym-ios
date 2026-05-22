@@ -507,6 +507,7 @@ private final class CreateGroupTestEnv {
             networkPreference: networkPreference,
             proofGenerator: proofGenerator,
             inboxTransport: inboxTransport,
+            introducer: InviteIntroducer(store: InMemoryIntroKeyStore()),
             makeContractTransport: { [contractTransport] _ in contractTransport }
         )
     }

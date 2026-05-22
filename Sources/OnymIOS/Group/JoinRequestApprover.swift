@@ -118,6 +118,16 @@ actor JoinRequestApprover: JoinRequestApproving {
     private var pendingContinuations: [UUID: AsyncStream<[PendingRequest]>.Continuation] = [:]
     private var decryptFailures: Int = 0
     private var collectorTask: Task<Void, Never>?
+    /// Serializes `approve` calls. Each approval reads `group.epoch`,
+    /// proves an `update_commitment` from it, submits, then persists
+    /// `epoch + 1`. The actor re-enters at the multi-second prove /
+    /// submit awaits, so two overlapping approvals would both read the
+    /// same stale epoch — the chain accepts the first and rejects the
+    /// second as a stale-epoch replay (the loser's join silently
+    /// fails). Chaining each approval onto the previous one's
+    /// completion guarantees the read-prove-submit-persist critical
+    /// section runs to completion before the next begins.
+    private var approvalChain: Task<ApproveOutcome, Never>?
 
     init(
         identity: IdentityRepository,
@@ -192,6 +202,22 @@ actor JoinRequestApprover: JoinRequestApproving {
         await refresh(from: raw)
     }
 
+    /// Public entry point. Serializes onto any in-flight approval via
+    /// `approvalChain` so each on-chain `update_commitment` reads the
+    /// epoch the previous approval persisted, then defers to
+    /// `performApprove` for the actual anchor flow. The read-and-assign
+    /// of `approvalChain` is synchronous (no `await` between), so
+    /// overlapping callers chain deterministically.
+    func approve(requestId: String) async -> ApproveOutcome {
+        let previous = approvalChain
+        let task = Task { () -> ApproveOutcome in
+            _ = await previous?.value
+            return await self.performApprove(requestId: requestId)
+        }
+        approvalChain = task
+        return await task.value
+    }
+
     /// Approve a pending request. Tyranny-only on-chain anchor flow:
     ///
     ///   1. Verify joiner shipped both `bls_pub` + `leaf_hash`.
@@ -217,7 +243,7 @@ actor JoinRequestApprover: JoinRequestApproving {
     /// in `OneOnOne` / `Anarchy`. PR-13b's receiver verification
     /// gates announcements to Tyranny groups specifically; other
     /// types stay best-effort.
-    func approve(requestId: String) async -> ApproveOutcome {
+    private func performApprove(requestId: String) async -> ApproveOutcome {
         guard let req = pendingValue.first(where: { $0.id == requestId }) else {
             return .unknownRequest
         }

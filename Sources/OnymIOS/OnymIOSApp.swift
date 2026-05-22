@@ -11,6 +11,7 @@ struct OnymIOSApp: App {
     private let inboxTransport: any InboxTransport
     private let nostrRelaysRepository: NostrRelaysRepository
     private let incomingInvitations: IncomingInvitationsRepository
+    private let pendingInvitesStore: PendingInvitesStore
     private let introKeyStore: any IntroKeyStore
     private let introRequestStore: any IntroRequestStore
 
@@ -157,6 +158,33 @@ struct OnymIOSApp: App {
         )
         let approveRequestsFlow = ApproveRequestsFlow(approver: joinRequestApprover)
 
+        // Invitee-side push invitations. The dispatcher records decoded
+        // `GroupInviteOfferPayload`s here; the flow drives the Chats
+        // "Invitations" surface and, on explicit Accept, ships a
+        // `JoinRequestPayload` to the offer's intro key via a sender
+        // identical to the deeplink join path.
+        let pendingInvitesStore = PendingInvitesStore()
+        self.pendingInvitesStore = pendingInvitesStore
+        let pendingInvitesSender = JoinRequestSender(
+            identity: repository,
+            inboxTransport: inboxTransport
+        )
+        let pendingInvitesFlow = PendingInvitesFlow(
+            store: pendingInvitesStore,
+            groupRepository: groupRepository,
+            submitJoin: { cap, label in
+                await pendingInvitesSender.send(
+                    capability: cap,
+                    joinerDisplayLabel: label
+                )
+            },
+            displayLabel: { @MainActor [identitiesFlow] in
+                identitiesFlow.identities
+                    .first { $0.id == identitiesFlow.currentID }?
+                    .name ?? ""
+            }
+        )
+
         self.dependencies = AppDependencies(
             makeRecoveryPhraseBackupFlow: { @MainActor in
                 RecoveryPhraseBackupFlow(
@@ -179,7 +207,8 @@ struct OnymIOSApp: App {
                     relayers: relayerRepository,
                     contracts: contractsRepository,
                     groups: groupRepository,
-                    inboxTransport: inboxTransport
+                    inboxTransport: inboxTransport,
+                    introducer: inviteIntroducer
                 ))
             },
             makeShareInviteFlow: { @MainActor in
@@ -220,6 +249,7 @@ struct OnymIOSApp: App {
             },
             identitiesFlow: identitiesFlow,
             approveRequestsFlow: approveRequestsFlow,
+            pendingInvitesFlow: pendingInvitesFlow,
             messageRepository: messageRepository,
             sendMessageInteractor: SendMessageInteractor(
                 identity: repository,
@@ -254,6 +284,10 @@ struct OnymIOSApp: App {
                     // before the user opens the modal request list.
                     // Idempotent — `ChatsView.task` calls it too.
                     await dependencies.approveRequestsFlow.start()
+                    // Start the invitee-side invitations flow eagerly so
+                    // the Chats toolbar badge reflects offers from the
+                    // moment the app is on screen. Idempotent.
+                    await dependencies.pendingInvitesFlow.start()
                     // Kick off both GitHub Releases fetches as soon as the
                     // app is on screen. Failures are silent; the user can
                     // still enter a custom relayer URL / pick an older
@@ -268,6 +302,7 @@ struct OnymIOSApp: App {
                     if let initialID = await identityRepository.currentSelectedID() {
                         await groupRepository.setCurrentIdentity(initialID)
                         await incomingInvitations.setCurrentIdentity(initialID)
+                        await pendingInvitesStore.setCurrentIdentity(initialID)
                     }
                 }
                 .task {
@@ -276,6 +311,7 @@ struct OnymIOSApp: App {
                     for await id in identityRepository.currentIdentityID {
                         await groupRepository.setCurrentIdentity(id)
                         await incomingInvitations.setCurrentIdentity(id)
+                        await pendingInvitesStore.setCurrentIdentity(id)
                     }
                 }
                 .task {
@@ -287,6 +323,7 @@ struct OnymIOSApp: App {
                     for await removed in identityRepository.identityRemoved {
                         await groupRepository.removeForOwner(removed)
                         await incomingInvitations.removeForOwner(removed)
+                        await pendingInvitesStore.removeForOwner(removed)
                         // Cascade-wipe the removed identity's intro
                         // privkeys so an attacker who restores a
                         // backup post-removal can't decrypt
@@ -325,7 +362,8 @@ struct OnymIOSApp: App {
                         groupRepository: groupRepository,
                         invitationsRepository: incomingInvitations,
                         chainState: chainStateReader,
-                        messageRepository: messageRepository
+                        messageRepository: messageRepository,
+                        pendingInvites: pendingInvitesStore
                     )
                     let fanout = InboxFanoutInteractor(
                         inboxTransport: inboxTransport,

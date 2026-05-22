@@ -50,6 +50,20 @@ struct IncomingMessageDispatcher: Sendable {
     /// the envelope's Ed25519 signer matches, and writes the message
     /// here for the chat screen to render.
     let messageRepository: MessageRepository
+    /// Receive-side sink for decoded `GroupInviteOfferPayload`s — the
+    /// push counterpart to the deeplink join flow. An offer lands here
+    /// as a `PendingInvite` awaiting the user's explicit Accept (which
+    /// ships a `JoinRequestPayload`) or dismiss. It grants nothing and
+    /// never materializes a group: membership only follows the
+    /// invitee's accept + the admin's explicit on-chain approve.
+    ///
+    /// Defaulted to a fresh store so the many existing test
+    /// constructions don't have to thread a spy they don't exercise;
+    /// production (`OnymIOSApp`) passes the shared store explicitly.
+    /// `var` (not `let`) so the synthesized memberwise initializer
+    /// keeps it as a defaulted parameter — a `let` with a default is
+    /// omitted from the memberwise init entirely.
+    var pendingInvites: any PendingInvitesRecording = PendingInvitesStore()
 
     func dispatch(
         messageID: String,
@@ -70,6 +84,25 @@ struct IncomingMessageDispatcher: Sendable {
                 messageID: messageID,
                 ownerIdentityID: ownerIdentityID,
                 payload: payload,
+                receivedAt: receivedAt
+            )
+            return
+        }
+
+        // Fast path 0: GroupInviteOfferPayload — a push invitation.
+        // Decoded + queued for the user's explicit Accept; it carries
+        // no epoch / commitment / roster, so it never materializes a
+        // group or touches the on-chain commitment. Tried first
+        // because its required `inviter_alias` + `intro_pub` keys are
+        // unique to this type — no other inbox payload decodes as one.
+        if let offer = try? JSONDecoder().decode(
+            GroupInviteOfferPayload.self,
+            from: envelope.plaintext
+        ) {
+            await recordOffer(
+                offer,
+                messageID: messageID,
+                ownerIdentityID: ownerIdentityID,
                 receivedAt: receivedAt
             )
             return
@@ -126,6 +159,27 @@ struct IncomingMessageDispatcher: Sendable {
             payload: payload,
             receivedAt: receivedAt
         )
+    }
+
+    /// Queue a decoded push offer for the user's explicit Accept.
+    /// Keyed by the inbound Nostr event id so a re-delivered offer
+    /// (replaceable events are re-fetched on every relaunch) is
+    /// idempotent in the store.
+    private func recordOffer(
+        _ offer: GroupInviteOfferPayload,
+        messageID: String,
+        ownerIdentityID: IdentityID,
+        receivedAt: Date
+    ) async {
+        await pendingInvites.record(PendingInvite(
+            id: messageID,
+            ownerIdentityID: ownerIdentityID,
+            introPublicKey: offer.introPublicKey,
+            groupID: offer.groupID,
+            groupName: offer.groupName,
+            inviterAlias: offer.inviterAlias,
+            receivedAt: receivedAt
+        ))
     }
 
     private func fallThrough(
@@ -298,10 +352,47 @@ struct IncomingMessageDispatcher: Sendable {
         } catch {
             return false
         }
-        guard onchain.commitment == claimedCommitment else { return false }
-        guard onchain.epoch == invitation.epoch else { return false }
+        // Bounded converge-forward gate. The chain stores only the
+        // LATEST (commitment, epoch), so a snapshot can't be byte-checked
+        // once the chain moves past its epoch.
+        //   - chain behind the snapshot → impossible for a real anchored
+        //     snapshot; reject.
+        //   - chain EXACTLY at the snapshot's epoch → byte-verify the
+        //     committed roster. This is the strong anti-forgery anchor: a
+        //     forger would have to reproduce `Poseidon(Poseidon(root,
+        //     epoch), salt)`, but `salt` is random and never on chain —
+        //     only a legitimate invitation carries it.
+        //   - chain AHEAD → we can't reproduce the byte-check, so accept
+        //     only within a small staleness window. This covers a burst
+        //     of concurrent approvals advancing the epoch between an
+        //     invite being sealed and it landing, while bounding the
+        //     forgery surface (a dropped salt-check would otherwise let
+        //     anyone who knows the recipient's inbox key + a real groupID
+        //     materialize an arbitrary fake group).
+        //
+        // SECURITY: even within the window a self-consistent fake snapshot
+        // for a *young* group is accepted. Fully closing this needs the
+        // chain read to expose `admin_pubkey_commitment` so the snapshot's
+        // adminPubkeyHex can be bound to chain independent of epoch —
+        // tracked as a follow-up (relayer + SDK support required).
+        guard onchain.epoch >= invitation.epoch else { return false }
+        if onchain.epoch == invitation.epoch {
+            guard onchain.commitment == claimedCommitment else { return false }
+        } else {
+            guard onchain.epoch - invitation.epoch <= Self.maxInvitationStaleEpochs
+            else { return false }
+        }
         return true
     }
+
+    /// Upper bound on how far the chain may have advanced past an
+    /// inbound invitation's epoch and still materialize. Sized to absorb
+    /// a realistic burst of serialized approvals during delivery latency
+    /// while keeping the salt-free forgery surface (chain-ahead branch of
+    /// `verifyTyrannyInvitation`) confined to young groups. A
+    /// longer-offline invitee on a fast-growing group beyond this falls
+    /// back to a re-invite rather than trusting an unverifiable snapshot.
+    static let maxInvitationStaleEpochs: UInt64 = 16
 
     /// PR 13b: validate a Tyranny `MemberAnnouncementPayload`'s
     /// claimed commitment + epoch against the on-chain state. Same
@@ -334,8 +425,16 @@ struct IncomingMessageDispatcher: Sendable {
         } catch {
             return false
         }
-        guard onchain.commitment == claimedCommitment else { return false }
-        guard onchain.epoch == claimedEpoch else { return false }
+        // Same converge-forward gate as the invitation verifier. The
+        // announcement is already admin-Ed25519-signed (checked by the
+        // caller), so a stale-but-signed roster delta is a legitimate
+        // update we may have missed — accept when the chain is at or
+        // ahead of the claimed epoch, byte-verifying only on an exact
+        // epoch match.
+        guard onchain.epoch >= claimedEpoch else { return false }
+        if onchain.epoch == claimedEpoch {
+            guard onchain.commitment == claimedCommitment else { return false }
+        }
         return true
     }
 

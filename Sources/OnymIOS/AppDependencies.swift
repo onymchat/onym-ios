@@ -24,6 +24,11 @@ struct AppDependencies {
     /// and the underlying collector should run for the app's
     /// lifetime regardless of which surface is mounted.
     let approveRequestsFlow: ApproveRequestsFlow
+    /// Single shared instance — the invitee-side push-invitation
+    /// surface. Backs the Chats toolbar "Invitations" badge + modal,
+    /// and its store watcher runs for the app's lifetime like
+    /// `approveRequestsFlow`.
+    let pendingInvitesFlow: PendingInvitesFlow
     /// Single shared instance — the chat-thread screen subscribes to
     /// per-group message snapshots, and the receive-side dispatcher
     /// writes into the same actor. Constructed once in
