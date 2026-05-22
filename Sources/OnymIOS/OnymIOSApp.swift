@@ -12,6 +12,8 @@ struct OnymIOSApp: App {
     private let nostrRelaysRepository: NostrRelaysRepository
     private let incomingInvitations: IncomingInvitationsRepository
     private let pendingInvitesStore: PendingInvitesStore
+    private let pendingVerificationStore: PendingVerificationStore
+    private let groupStateVerifier: GroupStateVerifier
     private let introKeyStore: any IntroKeyStore
     private let introRequestStore: any IntroRequestStore
 
@@ -165,12 +167,25 @@ struct OnymIOSApp: App {
         // identical to the deeplink join path.
         let pendingInvitesStore = PendingInvitesStore()
         self.pendingInvitesStore = pendingInvitesStore
+        // Verify-at-current (Option 2): stale snapshots defer here; the
+        // verifier asks the admin for current state and surfaces a
+        // "couldn't verify" state if the admin is offline.
+        let pendingVerificationStore = PendingVerificationStore()
+        self.pendingVerificationStore = pendingVerificationStore
+        let groupStateVerifier = GroupStateVerifier(
+            identity: repository,
+            inboxTransport: inboxTransport,
+            groupRepository: groupRepository,
+            store: pendingVerificationStore
+        )
+        self.groupStateVerifier = groupStateVerifier
         let pendingInvitesSender = JoinRequestSender(
             identity: repository,
             inboxTransport: inboxTransport
         )
         let pendingInvitesFlow = PendingInvitesFlow(
             store: pendingInvitesStore,
+            verificationStore: pendingVerificationStore,
             groupRepository: groupRepository,
             submitJoin: { cap, label in
                 await pendingInvitesSender.send(
@@ -182,6 +197,9 @@ struct OnymIOSApp: App {
                 identitiesFlow.identities
                     .first { $0.id == identitiesFlow.currentID }?
                     .name ?? ""
+            },
+            retryVerification: { [groupStateVerifier] groupIDHex in
+                await groupStateVerifier.retry(groupIDHex: groupIDHex)
             }
         )
 
@@ -288,6 +306,10 @@ struct OnymIOSApp: App {
                     // the Chats toolbar badge reflects offers from the
                     // moment the app is on screen. Idempotent.
                     await dependencies.pendingInvitesFlow.start()
+                    // Start the verifier's group watcher so a pending
+                    // verification resolves the moment its fresh snapshot
+                    // materializes.
+                    await groupStateVerifier.start()
                     // Kick off both GitHub Releases fetches as soon as the
                     // app is on screen. Failures are silent; the user can
                     // still enter a custom relayer URL / pick an older
@@ -303,6 +325,7 @@ struct OnymIOSApp: App {
                         await groupRepository.setCurrentIdentity(initialID)
                         await incomingInvitations.setCurrentIdentity(initialID)
                         await pendingInvitesStore.setCurrentIdentity(initialID)
+                        await pendingVerificationStore.setCurrentIdentity(initialID)
                     }
                 }
                 .task {
@@ -312,6 +335,7 @@ struct OnymIOSApp: App {
                         await groupRepository.setCurrentIdentity(id)
                         await incomingInvitations.setCurrentIdentity(id)
                         await pendingInvitesStore.setCurrentIdentity(id)
+                        await pendingVerificationStore.setCurrentIdentity(id)
                     }
                 }
                 .task {
@@ -324,6 +348,7 @@ struct OnymIOSApp: App {
                         await groupRepository.removeForOwner(removed)
                         await incomingInvitations.removeForOwner(removed)
                         await pendingInvitesStore.removeForOwner(removed)
+                        await pendingVerificationStore.removeForOwner(removed)
                         // Cascade-wipe the removed identity's intro
                         // privkeys so an attacker who restores a
                         // backup post-removal can't decrypt
@@ -363,7 +388,8 @@ struct OnymIOSApp: App {
                         invitationsRepository: incomingInvitations,
                         chainState: chainStateReader,
                         messageRepository: messageRepository,
-                        pendingInvites: pendingInvitesStore
+                        pendingInvites: pendingInvitesStore,
+                        groupStateRefresher: groupStateVerifier
                     )
                     let fanout = InboxFanoutInteractor(
                         inboxTransport: inboxTransport,

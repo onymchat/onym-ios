@@ -15,7 +15,7 @@ struct PendingInvitesView: View {
             if let error = flow.lastError {
                 errorBanner(error)
             }
-            if flow.pending.isEmpty {
+            if flow.pending.isEmpty && flow.verifying.isEmpty {
                 emptyState
             } else {
                 inviteList
@@ -87,10 +87,53 @@ struct PendingInvitesView: View {
                 ForEach(flow.pending) { invite in
                     inviteCard(invite)
                 }
+                ForEach(flow.verifying) { entry in
+                    verifyingCard(entry)
+                }
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 24)
         }
+    }
+
+    /// A group accepted but not yet verifiable against the current
+    /// on-chain state — kept out of the chats list. Shows progress while
+    /// waiting for the admin's current-state reply, and a Retry when the
+    /// admin couldn't be reached.
+    private func verifyingCard(_ entry: PendingGroupVerification) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(entry.groupName.isEmpty ? "Group" : entry.groupName)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(OnymTokens.text)
+            switch entry.status {
+            case .verifying:
+                HStack(spacing: 8) {
+                    ProgressView().scaleEffect(0.8)
+                    Text("Verifying group state\u{2026}")
+                        .font(.system(size: 13))
+                        .foregroundStyle(OnymTokens.text2)
+                }
+            case .unreachable:
+                Text("Couldn\u{2019}t verify \u{2014} the admin is offline. The group stays hidden until it can be verified on chain.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(OnymTokens.text2)
+                Button {
+                    flow.retry(entry.groupIDHex)
+                } label: {
+                    Text("Retry")
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 11)
+                        .background(OnymAccent.blue.color)
+                        .foregroundStyle(OnymTokens.onAccent)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+            }
+        }
+        .padding(14)
+        .background(OnymTokens.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .accessibilityIdentifier("pending_invites.verifying.\(entry.groupIDHex)")
     }
 
     private func inviteCard(_ invite: PendingInvite) -> some View {
@@ -173,8 +216,8 @@ struct PendingInvitesToolbarButton: View {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: "envelope")
                     .font(.system(size: 17))
-                if !flow.pending.isEmpty {
-                    Text("\(flow.pending.count)")
+                if flow.badgeCount > 0 {
+                    Text("\(flow.badgeCount)")
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 5)

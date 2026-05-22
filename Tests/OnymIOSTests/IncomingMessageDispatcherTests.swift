@@ -892,18 +892,16 @@ final class IncomingMessageDispatcherTests: XCTestCase {
         XCTAssertEqual(recorded.first?.groupName, "Maple Garden")
     }
 
-    func test_invitation_tyranny_acceptedWhenChainEpochAheadOfSnapshot() async throws {
-        // Converge-forward: a snapshot at epoch 0 must still materialize
-        // when the chain has moved past it (another invitee anchored
-        // first). The internal Poseidon recompute still gates forgery;
-        // the exact-commitment byte-check only applies at an equal
-        // epoch. Pre-relaxation `== epoch` would have dropped this.
+    func test_invitation_tyranny_chainAhead_defersAndDoesNotMaterialize() async throws {
+        // Option 2: a snapshot the chain has advanced past can't be
+        // byte-verified, so it must NOT materialize — it's deferred to
+        // the verifier, which asks the admin for the current state.
         let groupID = Data(repeating: 0x42, count: 32)
         let salt = Data(repeating: 0x66, count: 32)  // matches makeInvitationPayload
         let realCommitment = try Self.makeRealTyrannyCommitment(
             members: [], epoch: 0, salt: salt, tier: .small
         )
-        // Chain ahead (epoch 5) with a *different* commitment.
+        // Chain ahead (epoch 5) — snapshot epoch 0 is stale.
         chainState.setNext(commitment: Data(repeating: 0x99, count: 32), epoch: 5)
         let payload = makeInvitationPayload(
             groupID: groupID,
@@ -917,71 +915,69 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             mode: .fixed(plaintext),
             senderEd25519PublicKey: Data(repeating: 0xED, count: 32)
         )
+        let refresher = SpyGroupStateRefresher()
         let dispatcher = IncomingMessageDispatcher(
             envelopeDecrypter: decrypter,
             identities: StubIdentities(summaries: []),
             groupRepository: groups,
             invitationsRepository: invitations,
             chainState: chainState,
-            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory()),
+            groupStateRefresher: refresher
         )
 
         await dispatcher.dispatch(
-            messageID: "msg-stale-ok",
+            messageID: "msg-stale",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
             receivedAt: Date()
         )
 
         let after = await groups.currentGroups()
-        XCTAssertEqual(after.count, 1,
-                       "stale-but-valid Tyranny invite should still materialize when the chain is ahead")
-        XCTAssertEqual(after.first?.groupIDData, groupID)
+        XCTAssertTrue(after.isEmpty, "a stale snapshot must not materialize")
+        let deferred = await refresher.deferredGroupIDs()
+        XCTAssertEqual(deferred, [groupID],
+                       "stale invitation should be deferred to the verifier")
     }
 
-    func test_invitation_tyranny_rejectsWhenChainEpochTooFarAhead() async throws {
-        // Beyond the bounded staleness window the snapshot can't be
-        // byte-verified (the salt-gated commitment check only works at an
-        // exact epoch), so it could be a salt-free forgery — drop it
-        // rather than materialize a fake group.
+    func test_refreshRequest_routedToVerifier() async throws {
+        // An inbound GroupStateRefreshRequest is delegated to the
+        // verifier (admin side) and never materializes / stores anything.
         let groupID = Data(repeating: 0x42, count: 32)
-        let salt = Data(repeating: 0x66, count: 32)
-        let realCommitment = try Self.makeRealTyrannyCommitment(
-            members: [], epoch: 0, salt: salt, tier: .small
-        )
-        let farAhead = IncomingMessageDispatcher.maxInvitationStaleEpochs + 1
-        chainState.setNext(commitment: Data(repeating: 0x99, count: 32), epoch: farAhead)
-        let payload = makeInvitationPayload(
+        let req = try GroupStateRefreshRequest(
             groupID: groupID,
-            name: "Family",
-            memberProfiles: nil,
-            groupType: .tyranny,
-            commitment: realCommitment
+            requesterInboxPublicKey: Data(repeating: 0x01, count: 32),
+            requesterBlsPublicKey: Data(repeating: 0x02, count: 48)
         )
-        let plaintext = try JSONEncoder().encode(payload)
+        let plaintext = try JSONEncoder().encode(req)
         let decrypter = FakeInvitationEnvelopeDecrypter(
             mode: .fixed(plaintext),
-            senderEd25519PublicKey: Data(repeating: 0xED, count: 32)
+            senderEd25519PublicKey: Data(repeating: 0xAB, count: 32)
         )
+        let refresher = SpyGroupStateRefresher()
         let dispatcher = IncomingMessageDispatcher(
             envelopeDecrypter: decrypter,
             identities: StubIdentities(summaries: []),
             groupRepository: groups,
             invitationsRepository: invitations,
             chainState: chainState,
-            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory()),
+            groupStateRefresher: refresher
         )
 
         await dispatcher.dispatch(
-            messageID: "msg-too-stale",
+            messageID: "msg-refresh",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
             receivedAt: Date()
         )
 
+        let handled = await refresher.handledRefreshGroupIDs()
+        XCTAssertEqual(handled, [groupID])
         let after = await groups.currentGroups()
-        XCTAssertTrue(after.isEmpty,
-                      "invitation more than maxInvitationStaleEpochs behind chain must be rejected")
+        XCTAssertTrue(after.isEmpty)
+        let storedCount = await invitationsStore.count
+        XCTAssertEqual(storedCount, 0)
     }
 }
 
@@ -1003,6 +999,25 @@ private actor SpyPendingInvites: PendingInvitesRecording {
     private(set) var recorded: [PendingInvite] = []
     func record(_ invite: PendingInvite) async { recorded.append(invite) }
     func all() -> [PendingInvite] { recorded }
+}
+
+// MARK: - Group-state refresher spy
+
+private actor SpyGroupStateRefresher: GroupStateRefreshing {
+    private var deferred: [Data] = []
+    private var handled: [Data] = []
+    func deferVerification(invitation: GroupInvitationPayload, ownerIdentityID: IdentityID) async {
+        deferred.append(invitation.groupID)
+    }
+    func handleRefreshRequest(
+        _ request: GroupStateRefreshRequest,
+        ownerIdentityID: IdentityID,
+        requesterEd25519: Data?
+    ) async {
+        handled.append(request.groupID)
+    }
+    func deferredGroupIDs() -> [Data] { deferred }
+    func handledRefreshGroupIDs() -> [Data] { handled }
 }
 
 // MARK: - String / hex helpers (test scope)
