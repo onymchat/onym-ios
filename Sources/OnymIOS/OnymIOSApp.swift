@@ -7,6 +7,7 @@ struct OnymIOSApp: App {
     private let relayerRepository: RelayerRepository
     private let contractsRepository: ContractsRepository
     private let groupRepository: GroupRepository
+    private let messageRepository: MessageRepository
     private let inboxTransport: any InboxTransport
     private let nostrRelaysRepository: NostrRelaysRepository
     private let incomingInvitations: IncomingInvitationsRepository
@@ -85,6 +86,18 @@ struct OnymIOSApp: App {
             groupRepository = GroupRepository(store: SwiftDataGroupStore.inMemory())
         }
         self.groupRepository = groupRepository
+
+        // Chat messages — same fall-back policy as `groupRepository`
+        // (on-disk store with in-memory fallback if FileProtection /
+        // sandbox blocks the file). Separate `Messages.store` keeps
+        // schema migrations from cross-domain wipes.
+        let messageRepository: MessageRepository
+        if let store = try? SwiftDataMessageStore() {
+            messageRepository = MessageRepository(store: store)
+        } else {
+            messageRepository = MessageRepository(store: SwiftDataMessageStore.inMemory())
+        }
+        self.messageRepository = messageRepository
 
         // Inbox transport for invitation send. The endpoint list comes
         // from `NostrRelaysRepository` — read at app boot in the
@@ -304,7 +317,8 @@ struct OnymIOSApp: App {
                         identities: identityRepository,
                         groupRepository: groupRepository,
                         invitationsRepository: incomingInvitations,
-                        chainState: chainStateReader
+                        chainState: chainStateReader,
+                        messageRepository: messageRepository
                     )
                     let fanout = InboxFanoutInteractor(
                         inboxTransport: inboxTransport,

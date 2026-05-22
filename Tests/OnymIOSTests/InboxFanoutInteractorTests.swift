@@ -42,7 +42,8 @@ final class InboxFanoutInteractorTests: XCTestCase {
             identities: identity,
             groupRepository: groups,
             invitationsRepository: invitations,
-            chainState: FanoutNoChainState()
+            chainState: FanoutNoChainState(),
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
     }
 
