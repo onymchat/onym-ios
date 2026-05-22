@@ -198,6 +198,7 @@ final class ApproveRequestsFlowTests: XCTestCase {
             joinerInboxPublicKey: Data(repeating: 0xAA, count: 32),
             joinerBlsPublicKey: Data(repeating: 0xCC, count: 48),
             joinerLeafHash: Data(repeating: 0xDD, count: 32),
+            joinerSendingPublicKey: Data(repeating: 0xEE, count: 32),
             joinerDisplayLabel: alias,
             groupId: Data(repeating: 0xBB, count: 32),
             groupName: "Family"

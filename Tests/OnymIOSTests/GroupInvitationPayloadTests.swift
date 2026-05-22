@@ -15,7 +15,8 @@ final class GroupInvitationPayloadTests: XCTestCase {
         let profiles: [String: MemberProfile] = [
             aliceHex: MemberProfile(
                 alias: "Alice",
-                inboxPublicKey: Data(repeating: 0xAA, count: 32)
+                inboxPublicKey: Data(repeating: 0xAA, count: 32),
+                sendingPubkey: Data(repeating: 0xEE, count: 32)
             )
         ]
         let original = makePayload(memberProfiles: profiles)
@@ -58,7 +59,8 @@ final class GroupInvitationPayloadTests: XCTestCase {
         let payload = makePayload(memberProfiles: [
             "ab".repeated(48): MemberProfile(
                 alias: "x",
-                inboxPublicKey: Data(repeating: 0, count: 32)
+                inboxPublicKey: Data(repeating: 0, count: 32),
+                sendingPubkey: Data(repeating: 0, count: 32)
             )
         ])
         let encoded = try JSONEncoder().encode(payload)

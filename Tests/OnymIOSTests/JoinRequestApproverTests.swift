@@ -179,8 +179,8 @@ final class JoinRequestApproverTests: XCTestCase {
         let peerOneInbox = Data(repeating: 0x77, count: 32)
         let peerTwoInbox = Data(repeating: 0x88, count: 32)
         let extraProfiles: [String: MemberProfile] = [
-            "77".repeated(48): MemberProfile(alias: "PeerOne", inboxPublicKey: peerOneInbox),
-            "88".repeated(48): MemberProfile(alias: "PeerTwo", inboxPublicKey: peerTwoInbox),
+            "77".repeated(48): MemberProfile(alias: "PeerOne", inboxPublicKey: peerOneInbox, sendingPubkey: Data(repeating: 0xE1, count: 32)),
+            "88".repeated(48): MemberProfile(alias: "PeerTwo", inboxPublicKey: peerTwoInbox, sendingPubkey: Data(repeating: 0xE2, count: 32)),
         ]
         let env = try await seedEnvironment(extraMemberProfiles: extraProfiles)
         await env.approver.pumpOnce()
@@ -361,6 +361,7 @@ final class JoinRequestApproverTests: XCTestCase {
             joinerInboxPublicKey: joinerInboxPub,
             joinerBlsPublicKey: joinerBlsPub,
             joinerLeafHash: omitJoinerLeafHash ? nil : joinerLeafHash,
+            joinerSendingPublicKey: Data(repeating: 0xEE, count: 32),
             joinerDisplayLabel: joinerAlias,
             groupId: groupID
         )
@@ -387,7 +388,8 @@ final class JoinRequestApproverTests: XCTestCase {
             var profiles = extraMemberProfiles
             profiles[adminBlsHex] = MemberProfile(
                 alias: "Admin",
-                inboxPublicKey: active.inboxPublicKey
+                inboxPublicKey: active.inboxPublicKey,
+                sendingPubkey: active.stellarPublicKey
             )
             // Admin must be in the cryptographic roster for the
             // anchor path to find adminIndexOld. Real groups land

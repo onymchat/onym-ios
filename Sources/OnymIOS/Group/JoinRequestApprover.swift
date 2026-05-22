@@ -52,6 +52,13 @@ actor JoinRequestApprover: JoinRequestApproving {
         /// requests can't be approved on-chain and surface as
         /// `.outdatedJoinerClient`.
         let joinerLeafHash: Data?
+        /// 32-byte Ed25519 raw pubkey — joiner's
+        /// `Identity.stellarPublicKey`. Plumbed through to the
+        /// joiner's `MemberProfile` and the fan-out
+        /// `MemberAnnouncementPayload` so existing members can
+        /// verify the joiner's chat-message envelope signatures
+        /// (PR 4).
+        let joinerSendingPublicKey: Data
         let joinerDisplayLabel: String
         let groupId: Data
         /// Looked up from the local `GroupRepository`. nil if the
@@ -297,12 +304,14 @@ actor JoinRequestApprover: JoinRequestApproving {
                 in: anchored,
                 blsPub: blsPub,
                 inboxPub: req.joinerInboxPublicKey,
+                sendingPub: req.joinerSendingPublicKey,
                 alias: req.joinerDisplayLabel
             )
             await broadcastJoin(
                 in: anchored,
                 joinerBlsPub: blsPub,
                 joinerInboxPub: req.joinerInboxPublicKey,
+                joinerSendingPub: req.joinerSendingPublicKey,
                 joinerAlias: req.joinerDisplayLabel
             )
         }
@@ -473,13 +482,15 @@ actor JoinRequestApprover: JoinRequestApproving {
         in group: ChatGroup,
         blsPub: Data,
         inboxPub: Data,
+        sendingPub: Data,
         alias: String
     ) async {
         let key = blsPub.map { String(format: "%02x", $0) }.joined()
         var updated = group
         updated.memberProfiles[key] = MemberProfile(
             alias: alias,
-            inboxPublicKey: inboxPub
+            inboxPublicKey: inboxPub,
+            sendingPubkey: sendingPub
         )
         await groupRepository.insert(updated)
     }
@@ -500,6 +511,7 @@ actor JoinRequestApprover: JoinRequestApproving {
         in group: ChatGroup,
         joinerBlsPub: Data,
         joinerInboxPub: Data,
+        joinerSendingPub: Data,
         joinerAlias: String
     ) async {
         let adminAlias = await identity.currentIdentityName() ?? ""
@@ -508,7 +520,8 @@ actor JoinRequestApprover: JoinRequestApproving {
             announced = try MemberAnnouncementPayload.AnnouncedMember(
                 blsPub: joinerBlsPub,
                 inboxPub: joinerInboxPub,
-                alias: joinerAlias
+                alias: joinerAlias,
+                sendingPub: joinerSendingPub
             )
         } catch {
             // Wrong-sized BLS pubkey shouldn't happen — we already
@@ -651,6 +664,7 @@ actor JoinRequestApprover: JoinRequestApproving {
             joinerInboxPublicKey: payload.joinerInboxPublicKey,
             joinerBlsPublicKey: payload.joinerBlsPublicKey,
             joinerLeafHash: payload.joinerLeafHash,
+            joinerSendingPublicKey: payload.joinerSendingPublicKey,
             joinerDisplayLabel: payload.joinerDisplayLabel,
             groupId: payload.groupId,
             groupName: groupName

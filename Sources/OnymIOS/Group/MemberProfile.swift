@@ -24,9 +24,52 @@ import Foundation
 struct MemberProfile: Codable, Equatable, Hashable, Sendable {
     let alias: String
     let inboxPublicKey: Data
+    /// 32-byte Ed25519 raw public key (`Identity.stellarPublicKey`).
+    /// Same key that signs every `SealedEnvelope` — the chat dispatcher
+    /// (PR 4) verifies an incoming chat message's envelope signature
+    /// against this so an insider can't forge another member's
+    /// `senderBlsPubkeyHex` claim.
+    let sendingPubkey: Data
 
     enum CodingKeys: String, CodingKey {
         case alias
         case inboxPublicKey = "inbox_public_key"
+        case sendingPubkey = "sending_pubkey"
     }
+
+    init(alias: String, inboxPublicKey: Data, sendingPubkey: Data) {
+        self.alias = alias
+        self.inboxPublicKey = inboxPublicKey
+        self.sendingPubkey = sendingPubkey
+    }
+
+    /// The wire-side decode boundary. `MemberProfile` ships inside
+    /// `GroupInvitationPayload.memberProfiles` and
+    /// `MemberAnnouncementPayload` (via the dispatcher's profile
+    /// merge), so a wrong-sized key on the wire becomes a bogus
+    /// verification key for PR 4. Validate at decode — same pattern
+    /// as `MemberAnnouncementPayload.AnnouncedMember`.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let alias = try c.decode(String.self, forKey: .alias)
+        let inbox = try c.decode(Data.self, forKey: .inboxPublicKey)
+        let sending = try c.decode(Data.self, forKey: .sendingPubkey)
+        guard inbox.count == 32 else {
+            throw MemberProfileError.shape(
+                "inboxPublicKey: expected 32 bytes, got \(inbox.count)"
+            )
+        }
+        guard sending.count == 32 else {
+            throw MemberProfileError.shape(
+                "sendingPubkey: expected 32 bytes, got \(sending.count)"
+            )
+        }
+        self.alias = alias
+        self.inboxPublicKey = inbox
+        self.sendingPubkey = sending
+    }
+}
+
+enum MemberProfileError: Error, Equatable {
+    case shape(String)
 }

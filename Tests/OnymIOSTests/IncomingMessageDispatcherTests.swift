@@ -39,7 +39,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
         let groupID = Data(repeating: 0xAB, count: 32)
         let creator = MemberProfile(
             alias: "Alice",
-            inboxPublicKey: Data(repeating: 0x10, count: 32)
+            inboxPublicKey: Data(repeating: 0x10, count: 32),
+            sendingPubkey: Data(repeating: 0xEE, count: 32)
         )
         let creatorBlsHex = "aa".repeated(48)
         await seedGroup(
@@ -117,7 +118,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
         let bobBlsHex = "bb".repeated(48)
         let bob = MemberProfile(
             alias: "Bob (original)",
-            inboxPublicKey: Data(repeating: 0x33, count: 32)
+            inboxPublicKey: Data(repeating: 0x33, count: 32),
+            sendingPubkey: Data(repeating: 0xEE, count: 32)
         )
         await seedGroup(
             groupID: groupID,
@@ -501,7 +503,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
         let member = try MemberAnnouncementPayload.AnnouncedMember(
             blsPub: Data(repeating: 0xBB, count: 48),
             inboxPub: Data(repeating: 0x33, count: 32),
-            alias: "Bob"
+            alias: "Bob",
+            sendingPub: Data(repeating: 0xEE, count: 32)
         )
         let payload = try MemberAnnouncementPayload(
             version: 1,
@@ -543,7 +546,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
         let creatorBlsHex = "11".repeated(48)
         let creatorProfile = MemberProfile(
             alias: "Alice",
-            inboxPublicKey: Data(repeating: 0xAA, count: 32)
+            inboxPublicKey: Data(repeating: 0xAA, count: 32),
+            sendingPubkey: Data(repeating: 0xEE, count: 32)
         )
         let payload = makeInvitationPayload(
             groupID: Data(repeating: 0x42, count: 32),
@@ -560,7 +564,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             id: owner,
             name: "Bob",
             blsPublicKey: Data(repeating: 0x22, count: 48),
-            inboxPublicKey: Data(repeating: 0xBB, count: 32)
+            inboxPublicKey: Data(repeating: 0xBB, count: 32),
+            sendingPublicKey: Data(repeating: 0xCC, count: 32)
         )
         let dispatcher = IncomingMessageDispatcher(
             envelopeDecrypter: decrypter,
@@ -607,7 +612,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             id: owner,
             name: "Carol",
             blsPublicKey: Data(repeating: 0x33, count: 48),
-            inboxPublicKey: Data(repeating: 0xCC, count: 32)
+            inboxPublicKey: Data(repeating: 0xCC, count: 32),
+            sendingPublicKey: Data(repeating: 0xDD, count: 32)
         )
         let dispatcher = IncomingMessageDispatcher(
             envelopeDecrypter: decrypter,
@@ -641,7 +647,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             name: "Race",
             memberProfiles: [creatorBlsHex: MemberProfile(
                 alias: "Alice",
-                inboxPublicKey: Data(repeating: 0x44, count: 32)
+                inboxPublicKey: Data(repeating: 0x44, count: 32),
+                sendingPubkey: Data(repeating: 0xEE, count: 32)
             )]
         )
         let plaintext = try JSONEncoder().encode(payload)
@@ -763,7 +770,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
         let member = try MemberAnnouncementPayload.AnnouncedMember(
             blsPub: blsPub,
             inboxPub: Data(repeating: joinerInboxByte, count: 32),
-            alias: joinerAlias
+            alias: joinerAlias,
+            sendingPub: Data(repeating: 0xEE, count: 32)
         )
         return try MemberAnnouncementPayload(
             version: 1,

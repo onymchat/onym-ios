@@ -91,18 +91,31 @@ struct MemberAnnouncementPayload: Codable, Equatable, Sendable {
         let inboxPub: Data
         /// Self-asserted display alias.
         let alias: String
+        /// 32-byte Ed25519 raw public key — the joiner's
+        /// `Identity.stellarPublicKey`. PR 4's chat dispatcher
+        /// verifies incoming chat-message envelope signatures
+        /// against this so an insider can't forge another member's
+        /// `senderBlsPubkeyHex` claim.
+        let sendingPub: Data
 
         enum CodingKeys: String, CodingKey {
             case blsPub = "bls_pub"
             case inboxPub = "inbox_pub"
             case alias
+            case sendingPub = "sending_pub"
         }
 
-        init(blsPub: Data, inboxPub: Data, alias: String) throws {
-            try Self.validate(blsPub: blsPub, inboxPub: inboxPub)
+        init(
+            blsPub: Data,
+            inboxPub: Data,
+            alias: String,
+            sendingPub: Data
+        ) throws {
+            try Self.validate(blsPub: blsPub, inboxPub: inboxPub, sendingPub: sendingPub)
             self.blsPub = blsPub
             self.inboxPub = inboxPub
             self.alias = alias
+            self.sendingPub = sendingPub
         }
 
         init(from decoder: Decoder) throws {
@@ -110,13 +123,19 @@ struct MemberAnnouncementPayload: Codable, Equatable, Sendable {
             let bls = try c.decode(Data.self, forKey: .blsPub)
             let inbox = try c.decode(Data.self, forKey: .inboxPub)
             let alias = try c.decode(String.self, forKey: .alias)
-            try Self.validate(blsPub: bls, inboxPub: inbox)
+            let sending = try c.decode(Data.self, forKey: .sendingPub)
+            try Self.validate(blsPub: bls, inboxPub: inbox, sendingPub: sending)
             self.blsPub = bls
             self.inboxPub = inbox
             self.alias = alias
+            self.sendingPub = sending
         }
 
-        private static func validate(blsPub: Data, inboxPub: Data) throws {
+        private static func validate(
+            blsPub: Data,
+            inboxPub: Data,
+            sendingPub: Data
+        ) throws {
             guard blsPub.count == 48 else {
                 throw MemberAnnouncementPayloadError.shape(
                     "blsPub: expected 48 bytes, got \(blsPub.count)"
@@ -125,6 +144,11 @@ struct MemberAnnouncementPayload: Codable, Equatable, Sendable {
             guard inboxPub.count == 32 else {
                 throw MemberAnnouncementPayloadError.shape(
                     "inboxPub: expected 32 bytes, got \(inboxPub.count)"
+                )
+            }
+            guard sendingPub.count == 32 else {
+                throw MemberAnnouncementPayloadError.shape(
+                    "sendingPub: expected 32 bytes, got \(sendingPub.count)"
                 )
             }
         }

@@ -18,4 +18,10 @@ struct IdentitySummary: Hashable, Sendable {
     /// need; also feeds the inbox-tag derivation that PR-4's transport
     /// fan-out subscribes against.
     let inboxPublicKey: Data
+    /// 32-byte Ed25519 raw public key (`Identity.stellarPublicKey`).
+    /// Same key that signs every `SealedEnvelope`. Carried on the
+    /// summary so the chat dispatcher can populate the receiver's own
+    /// `MemberProfile.sendingPubkey` without crossing into the
+    /// repository's secret-material path.
+    let sendingPublicKey: Data
 }
