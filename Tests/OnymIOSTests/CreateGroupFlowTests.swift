@@ -418,6 +418,7 @@ private final class CreateGroupFlowTestEnv {
             contracts: contracts,
             groups: GroupRepository(store: SwiftDataGroupStore.inMemory()),
             inboxTransport: FlowTestInboxTransport(),
+            introducer: InviteIntroducer(store: InMemoryIntroKeyStore()),
             makeContractTransport: { _ in FlowTestContractTransport() }
         )
         return CreateGroupFlowTestEnv(interactor: interactor, keychain: keychain)

@@ -846,6 +846,98 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             memberProfiles: memberProfiles
         )
     }
+
+    // MARK: - Invite offers + converge-forward (handshake)
+
+    func test_offer_isQueuedForAcceptAndDoesNotMaterializeGroup() async throws {
+        // A push offer must NOT materialize a group or land in the
+        // opaque invitations queue — it's queued as a structured
+        // PendingInvite for the user's explicit Accept. Membership only
+        // follows accept + the admin's explicit approve.
+        let offer = try GroupInviteOfferPayload(
+            introPublicKey: Data(repeating: 0x44, count: 32),
+            groupID: Data(repeating: 0x42, count: 32),
+            groupName: "Maple Garden",
+            inviterAlias: "Alice"
+        )
+        let plaintext = try JSONEncoder().encode(offer)
+        let decrypter = FakeInvitationEnvelopeDecrypter(mode: .fixed(plaintext))
+        let spy = SpyPendingInvites()
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory()),
+            pendingInvites: spy
+        )
+
+        await dispatcher.dispatch(
+            messageID: "msg-offer",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+
+        let after = await groups.currentGroups()
+        XCTAssertTrue(after.isEmpty, "an offer must NOT materialize a group")
+        let storedCount = await invitationsStore.count
+        XCTAssertEqual(storedCount, 0, "an offer is not an opaque invitation")
+        let recorded = await spy.all()
+        XCTAssertEqual(recorded.count, 1)
+        XCTAssertEqual(recorded.first?.id, "msg-offer")
+        XCTAssertEqual(recorded.first?.introPublicKey, Data(repeating: 0x44, count: 32))
+        XCTAssertEqual(recorded.first?.inviterAlias, "Alice")
+        XCTAssertEqual(recorded.first?.groupName, "Maple Garden")
+    }
+
+    func test_invitation_tyranny_acceptedWhenChainEpochAheadOfSnapshot() async throws {
+        // Converge-forward: a snapshot at epoch 0 must still materialize
+        // when the chain has moved past it (another invitee anchored
+        // first). The internal Poseidon recompute still gates forgery;
+        // the exact-commitment byte-check only applies at an equal
+        // epoch. Pre-relaxation `== epoch` would have dropped this.
+        let groupID = Data(repeating: 0x42, count: 32)
+        let salt = Data(repeating: 0x66, count: 32)  // matches makeInvitationPayload
+        let realCommitment = try Self.makeRealTyrannyCommitment(
+            members: [], epoch: 0, salt: salt, tier: .small
+        )
+        // Chain ahead (epoch 5) with a *different* commitment.
+        chainState.setNext(commitment: Data(repeating: 0x99, count: 32), epoch: 5)
+        let payload = makeInvitationPayload(
+            groupID: groupID,
+            name: "Family",
+            memberProfiles: nil,
+            groupType: .tyranny,
+            commitment: realCommitment
+        )
+        let plaintext = try JSONEncoder().encode(payload)
+        let decrypter = FakeInvitationEnvelopeDecrypter(
+            mode: .fixed(plaintext),
+            senderEd25519PublicKey: Data(repeating: 0xED, count: 32)
+        )
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
+        )
+
+        await dispatcher.dispatch(
+            messageID: "msg-stale-ok",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+
+        let after = await groups.currentGroups()
+        XCTAssertEqual(after.count, 1,
+                       "stale-but-valid Tyranny invite should still materialize when the chain is ahead")
+        XCTAssertEqual(after.first?.groupIDData, groupID)
+    }
 }
 
 // MARK: - Stub identity provider
@@ -858,6 +950,14 @@ private actor StubIdentities: IdentitiesProviding {
     }
 
     func currentIdentities() -> [IdentitySummary] { summaries }
+}
+
+// MARK: - Pending-invites spy
+
+private actor SpyPendingInvites: PendingInvitesRecording {
+    private(set) var recorded: [PendingInvite] = []
+    func record(_ invite: PendingInvite) async { recorded.append(invite) }
+    func all() -> [PendingInvite] { recorded }
 }
 
 // MARK: - String / hex helpers (test scope)

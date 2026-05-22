@@ -143,6 +143,7 @@ final class CreateGroupOneOnOneE2ETests: XCTestCase {
                 networkPreference: networkPreference,
                 proofGenerator: proofGenerator,
                 inboxTransport: inboxTransport,
+                introducer: InviteIntroducer(store: InMemoryIntroKeyStore()),
                 makeContractTransport: makeContractTransport
             )
         }

@@ -9,6 +9,7 @@ struct ChatsView: View {
     let flow: ChatsFlow
     let identitiesFlow: IdentitiesFlow
     let approveRequestsFlow: ApproveRequestsFlow
+    let pendingInvitesFlow: PendingInvitesFlow
     let messageRepository: MessageRepository
     let sendMessageInteractor: SendMessageInteractor
     let makeCreateGroupFlow: @MainActor () -> CreateGroupFlow
@@ -37,6 +38,11 @@ struct ChatsView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 ApproveRequestsToolbarButton(flow: approveRequestsFlow)
             }
+            // Invitations received by this identity (push offers). Same
+            // always-rendered + badge-on-nonempty treatment.
+            ToolbarItem(placement: .topBarTrailing) {
+                PendingInvitesToolbarButton(flow: pendingInvitesFlow)
+            }
             // Plus button mirrors iOS Mail / Messages — useful once
             // the user already has at least one chat. Hidden in the
             // empty state because the central CTA already covers it.
@@ -54,6 +60,7 @@ struct ChatsView: View {
         .task { flow.start() }
         .task { await identitiesFlow.start() }
         .task { await approveRequestsFlow.start() }
+        .task { await pendingInvitesFlow.start() }
         .fullScreenCover(isPresented: $showCreateGroup) {
             CreateGroupViewHost(
                 makeFlow: makeCreateGroupFlow,

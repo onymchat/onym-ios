@@ -38,6 +38,11 @@ struct CreateGroupInteractor: Sendable {
     let networkPreference: any NetworkPreferenceProviding
     let proofGenerator: any GroupProofGenerator
     let inboxTransport: any InboxTransport
+    /// Mints a per-invitee intro key for each create-time invite offer
+    /// (Tyranny). That intro key is the reply channel the invitee seals
+    /// their `JoinRequestPayload` to when they accept — the same
+    /// machinery the deeplink share-invite flow uses, just pushed.
+    let introducer: InviteIntroducer
     /// Builds a `SEPContractTransport` from the relayer URL chosen
     /// per-call. Injected so tests can swap in a fake without
     /// touching `URLSession`.
@@ -51,6 +56,7 @@ struct CreateGroupInteractor: Sendable {
         networkPreference: any NetworkPreferenceProviding = UserDefaultsNetworkPreference(),
         proofGenerator: any GroupProofGenerator = OnymGroupProofGenerator(),
         inboxTransport: any InboxTransport,
+        introducer: InviteIntroducer,
         makeContractTransport: @escaping @Sendable (URL) -> any SEPContractTransport = { url in
             URLSessionSEPContractTransport(
                 endpoint: url,
@@ -65,6 +71,7 @@ struct CreateGroupInteractor: Sendable {
         self.networkPreference = networkPreference
         self.proofGenerator = proofGenerator
         self.inboxTransport = inboxTransport
+        self.introducer = introducer
         self.makeContractTransport = makeContractTransport
     }
 
@@ -249,24 +256,25 @@ struct CreateGroupInteractor: Sendable {
         _ = await groups.insert(group)
         await groups.markPublished(id: group.id, commitment: proof.commitment)
 
-        // 8. Send invitations
+        // 8. Send durable invite offers. Each invitee gets a freshly-
+        // minted per-invite intro key (the reply channel) wrapped in a
+        // `GroupInviteOfferPayload`. The offer carries no epoch /
+        // commitment / roster — it grants nothing and never expires.
+        // The invitee explicitly accepts (ships a `JoinRequestPayload`
+        // to that intro key) and the admin explicitly approves
+        // (`update_commitment`) before anyone is added to the on-chain
+        // roster. The creator stays the only on-chain member until
+        // then — exactly what the chats list shows.
         if !invitees.isEmpty {
             onProgress(.sendingInvitations(total: invitees.count))
-            let invitePayload = GroupInvitationPayload(
-                version: 1,
+            let inviterAlias = await identity.currentIdentityName() ?? ""
+            try await sendOffers(
+                to: invitees,
+                ownerIdentityID: ownerID,
                 groupID: groupID,
-                groupSecret: groupSecret,
-                name: trimmedName,
-                members: members,
-                epoch: 0,
-                salt: salt,
-                commitment: proof.commitment,
-                tierRaw: tier.rawValue,
-                groupTypeRaw: SEPGroupType.tyranny.rawValue,
-                adminPubkeyHex: adminPubkeyHex,
-                memberProfiles: creatorProfiles
+                groupName: trimmedName,
+                inviterAlias: inviterAlias
             )
-            try await sendInvitations(invitePayload, to: invitees)
         }
 
         return await reloadGroup(group)
@@ -684,6 +692,92 @@ struct CreateGroupInteractor: Sendable {
                 throw CreateGroupError.invitationSendFailed(
                     index: index,
                     reason: "no relay accepted the invitation"
+                )
+            }
+        }
+    }
+
+    // MARK: - Invite-offer send loop (Tyranny)
+
+    /// Mint a per-invitee intro key and ship a durable
+    /// `GroupInviteOfferPayload` to each invitee's inbox. Reuses the
+    /// inbox seal+send path, but the payload grants nothing: it carries
+    /// only the reply channel + display context, so it never expires
+    /// and never anchors anyone. The invitee turns it into a join
+    /// request on accept; the admin anchors only on explicit approve.
+    private func sendOffers(
+        to invitees: [Data],
+        ownerIdentityID: IdentityID,
+        groupID: Data,
+        groupName: String,
+        inviterAlias: String
+    ) async throws {
+        for (index, inboxKey) in invitees.enumerated() {
+            // One fresh intro key per invitee → granular revoke and a
+            // clean 1:1 mapping from an inbound join request back to
+            // the person the admin meant to invite.
+            let capability: IntroCapability
+            do {
+                capability = try await introducer.mint(
+                    ownerIdentityID: ownerIdentityID,
+                    groupId: groupID,
+                    groupName: groupName
+                )
+            } catch {
+                throw CreateGroupError.invitationSendFailed(
+                    index: index,
+                    reason: "mint intro key: \(error)"
+                )
+            }
+            let offer: GroupInviteOfferPayload
+            do {
+                offer = try GroupInviteOfferPayload(
+                    introPublicKey: capability.introPublicKey,
+                    groupID: groupID,
+                    groupName: groupName,
+                    inviterAlias: inviterAlias
+                )
+            } catch {
+                throw CreateGroupError.invitationSendFailed(
+                    index: index,
+                    reason: "build offer: \(error)"
+                )
+            }
+            let payloadBytes: Data
+            do {
+                payloadBytes = try JSONEncoder().encode(offer)
+            } catch {
+                throw CreateGroupError.invitationEncodingFailed
+            }
+            let sealed: Data
+            do {
+                sealed = try await identity.sealInvitation(
+                    payload: payloadBytes,
+                    to: inboxKey
+                )
+            } catch {
+                throw CreateGroupError.invitationSendFailed(
+                    index: index,
+                    reason: String(describing: error)
+                )
+            }
+            let inboxTag = Self.inboxTag(from: inboxKey)
+            let receipt: PublishReceipt
+            do {
+                receipt = try await inboxTransport.send(
+                    sealed,
+                    to: TransportInboxID(rawValue: inboxTag)
+                )
+            } catch {
+                throw CreateGroupError.invitationSendFailed(
+                    index: index,
+                    reason: String(describing: error)
+                )
+            }
+            guard receipt.acceptedBy >= 1 else {
+                throw CreateGroupError.invitationSendFailed(
+                    index: index,
+                    reason: "no relay accepted the invite offer"
                 )
             }
         }
