@@ -46,6 +46,9 @@ actor GroupStateVerifier: GroupStateRefreshing {
     /// the group materializes.
     private var targets: [String: RefreshTarget] = [:]
     private var timeouts: [String: Task<Void, Never>] = [:]
+    /// Groups with a refresh send currently in flight — guards against
+    /// rapid Retry taps / re-delivery firing duplicate sealed sends.
+    private var inFlight: Set<String> = []
     private var watchTask: Task<Void, Never>?
 
     private struct RefreshTarget {
@@ -59,7 +62,11 @@ actor GroupStateVerifier: GroupStateRefreshing {
         inboxTransport: any InboxTransport,
         groupRepository: GroupRepository,
         store: PendingVerificationStore,
-        refreshTimeoutSeconds: UInt64 = 30
+        // 60s (not 30) to tolerate slow relays / cold inbox
+        // subscriptions before declaring the admin unreachable. Injected
+        // so it can be tuned; a telemetry-driven value is a follow-up
+        // once the app has a metrics seam.
+        refreshTimeoutSeconds: UInt64 = 60
     ) {
         self.identity = identity
         self.inboxTransport = inboxTransport
@@ -89,7 +96,18 @@ actor GroupStateVerifier: GroupStateRefreshing {
         ownerIdentityID: IdentityID
     ) async {
         let groupIDHex = Self.hex(invitation.groupID)
-        guard await !store.contains(groupIDHex: groupIDHex) else { return }
+        // Idempotent per groupID — a forger who knows a recipient inbox
+        // key + a real on-chain groupID can spawn at most ONE pending
+        // card (and one sealed send) per distinct groupID, not an
+        // unbounded stream. Per-peer rate-limiting of deferrals is a
+        // tracked follow-up.
+        if let existing = await store.status(groupIDHex: groupIDHex) {
+            // Re-arm a previously-failed entry on re-delivery of the
+            // retained snapshot — auto-recovery once the admin is back.
+            // A `.verifying` entry already has a request outstanding.
+            if existing == .unreachable { await retry(groupIDHex: groupIDHex) }
+            return
+        }
 
         // We can only ask the admin if the snapshot told us their inbox.
         guard let adminBls = invitation.adminPubkeyHex?.lowercased(),
@@ -124,13 +142,19 @@ actor GroupStateVerifier: GroupStateRefreshing {
     /// auto-retry on foreground). No-op if the group resolved or we have
     /// no target for it.
     func retry(groupIDHex: String) async {
-        guard targets[groupIDHex] != nil else { return }
+        // Need a target, no send already in flight, and a failed entry —
+        // re-sending a `.verifying` one (request still outstanding) would
+        // just burn relay budget.
+        guard targets[groupIDHex] != nil, !inFlight.contains(groupIDHex) else { return }
+        guard await store.status(groupIDHex: groupIDHex) == .unreachable else { return }
         await store.updateStatus(groupIDHex: groupIDHex, status: .verifying)
         await sendRefresh(groupIDHex: groupIDHex)
     }
 
     private func sendRefresh(groupIDHex: String) async {
-        guard let target = targets[groupIDHex] else { return }
+        guard let target = targets[groupIDHex], !inFlight.contains(groupIDHex) else { return }
+        inFlight.insert(groupIDHex)
+        defer { inFlight.remove(groupIDHex) }
         // Build the request from the *current* identity. V1 assumes the
         // owner is the selected identity (matching the single-active
         // assumption elsewhere); if it isn't, the admin's membership
@@ -167,8 +191,10 @@ actor GroupStateVerifier: GroupStateRefreshing {
     }
 
     private func markUnreachableIfStillVerifying(_ groupIDHex: String) async {
-        guard await store.contains(groupIDHex: groupIDHex) else { return }
-        await store.updateStatus(groupIDHex: groupIDHex, status: .unreachable)
+        // Atomic on the store: flips only when still `.verifying`, so a
+        // timer firing after the entry was resolved (or re-armed) can't
+        // clobber it.
+        await store.markUnreachableIfVerifying(groupIDHex: groupIDHex)
     }
 
     private func resolve(_ materializedHexes: Set<String>) async {
@@ -194,6 +220,15 @@ actor GroupStateVerifier: GroupStateRefreshing {
         }) else {
             return
         }
+        // This device must actually BE the group's admin. Requests only
+        // reach admins today (sealed to the snapshot's admin inbox), but
+        // if a member's inbox were ever reused as the admin inbox in some
+        // snapshot, they'd otherwise answer with the salt. Refuse unless
+        // our own BLS is the group's admin pubkey.
+        guard let me = await identity.currentIdentity(),
+              let adminHex = group.adminPubkeyHex,
+              Self.hex(me.blsPublicKey) == adminHex.lowercased()
+        else { return }
         // Membership gate — the reply carries `salt`, so only answer a
         // requester that is a current member, and only after confirming
         // the envelope's signer matches that member's stored Ed25519

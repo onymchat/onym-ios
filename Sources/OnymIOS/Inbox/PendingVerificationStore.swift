@@ -54,6 +54,22 @@ actor PendingVerificationStore {
         all.contains { $0.groupIDHex == groupIDHex }
     }
 
+    func status(groupIDHex: String) -> PendingGroupVerification.Status? {
+        all.first { $0.groupIDHex == groupIDHex }?.status
+    }
+
+    /// Flip `.verifying → .unreachable` only if still verifying. Atomic
+    /// on the store actor, so a stale timeout can't clobber an entry
+    /// that was resolved-then-re-recorded between the timer firing and
+    /// this call.
+    func markUnreachableIfVerifying(groupIDHex: String) {
+        guard let idx = all.firstIndex(where: { $0.groupIDHex == groupIDHex }),
+              all[idx].status == .verifying
+        else { return }
+        all[idx].status = .unreachable
+        publish()
+    }
+
     /// Remove entries whose group now exists locally — the fresh
     /// snapshot verified + materialized, so verification is done.
     func resolveMaterialized(_ groupIDHexes: Set<String>) {
