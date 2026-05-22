@@ -121,7 +121,12 @@ struct ChatsView: View {
         }
         .listStyle(.plain)
         .navigationDestination(for: String.self) { groupID in
-            ChatMembersView(
+            // PR 5 of the chat stack: tapping a group opens the
+            // UIKit chat thread instead of the members roster. The
+            // thread's info button pushes `ChatMembersView` from
+            // there, so the existing surface is still reachable —
+            // just one tap deeper.
+            ChatThreadView(
                 groupID: groupID,
                 chatsFlow: flow,
                 identitiesFlow: identitiesFlow,
