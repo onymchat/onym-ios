@@ -20,6 +20,7 @@ struct ChatThreadView: View {
     @Bindable var chatsFlow: ChatsFlow
     @Bindable var identitiesFlow: IdentitiesFlow
     let messageRepository: MessageRepository
+    let sendMessageInteractor: SendMessageInteractor
     let makeShareInviteFlow: @MainActor () -> ShareInviteFlow
 
     @Environment(\.dismiss) private var dismiss
@@ -34,7 +35,25 @@ struct ChatThreadView: View {
             groupName: currentGroupName,
             messages: messages,
             onBack: { dismiss() },
-            onShowMembers: { showMembers = true }
+            onShowMembers: { showMembers = true },
+            onSendTapped: { body in
+                // Fire-and-forget. `SendMessageInteractor` does the
+                // optimistic insert as `.pending` synchronously
+                // before the await, so the new row appears in the
+                // `MessageRepository.snapshots` stream we're
+                // subscribing to above — the table updates without
+                // any extra plumbing here. The interactor also
+                // owns the status flip to `.sent` / `.failed`, so
+                // a thrown error here would only indicate a
+                // precondition violation (no identity, unknown
+                // group). Those shouldn't happen mid-chat-screen;
+                // swallow with `try?` for PR 8.
+                let interactor = sendMessageInteractor
+                let groupID = groupID
+                Task {
+                    try? await interactor.send(groupID: groupID, body: body)
+                }
+            }
         )
         .toolbar(.hidden, for: .navigationBar)
         .navigationDestination(isPresented: $showMembers) {
@@ -65,11 +84,13 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
     let messages: [ChatMessage]
     let onBack: () -> Void
     let onShowMembers: () -> Void
+    let onSendTapped: (String) -> Void
 
     func makeUIViewController(context: Context) -> ChatThreadViewController {
         let vc = ChatThreadViewController()
         vc.onBack = onBack
         vc.onShowMembers = onShowMembers
+        vc.onSendTapped = onSendTapped
         vc.loadViewIfNeeded()
         vc.update(groupName: groupName)
         vc.update(messages: messages)
@@ -78,10 +99,12 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
 
     func updateUIViewController(_ vc: ChatThreadViewController, context: Context) {
         // Closures are refreshed every render — SwiftUI captures the
-        // *current* `dismiss` + `showMembers` setters, so the version
-        // the controller invokes always reflects the live binding.
+        // *current* `dismiss` + `showMembers` setters + send-tap
+        // dispatcher, so the version the controller invokes always
+        // reflects the live binding.
         vc.onBack = onBack
         vc.onShowMembers = onShowMembers
+        vc.onSendTapped = onSendTapped
         vc.update(groupName: groupName)
         vc.update(messages: messages)
     }

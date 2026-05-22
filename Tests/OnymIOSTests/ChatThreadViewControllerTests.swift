@@ -136,13 +136,10 @@ final class ChatThreadViewControllerTests: XCTestCase {
         XCTAssertEqual(tableView(in: vc)?.numberOfRows(inSection: 0), 1)
     }
 
-    // MARK: - Input panel wiring (PR 7)
+    // MARK: - Input panel wiring (PR 7 / PR 8)
 
     func test_inputPanel_isHosted_andClearsTextOnSendTap() {
-        // PR 7 only wires the layout + clear-on-tap behavior; PR 8
-        // will swap the closure body for a real send. This test
-        // pins the PR-7 contract: the panel is in the hierarchy
-        // and tapping send clears the field.
+        // Tapping send clears the field — PR 7 contract.
         let vc = ChatThreadViewController()
         vc.loadViewIfNeeded()
         guard let panel = inputPanel(in: vc) else {
@@ -153,9 +150,47 @@ final class ChatThreadViewControllerTests: XCTestCase {
 
         sendButton(in: panel).sendActions(for: .touchUpInside)
         XCTAssertEqual(panel.text, "",
-                       "PR 7 contract: tapping send clears the field")
+                       "tapping send must clear the field")
         XCTAssertFalse(sendButton(in: panel).isEnabled,
                        "after clearing, the send button must disable again")
+    }
+
+    func test_inputPanel_send_invokesOnSendTapped_withTrimmedBody() {
+        // PR 8 contract: the controller forwards the panel's
+        // trimmed body to `onSendTapped` (the SwiftUI bridge
+        // points this at `SendMessageInteractor.send`).
+        let vc = ChatThreadViewController()
+        vc.loadViewIfNeeded()
+        guard let panel = inputPanel(in: vc) else {
+            return XCTFail("input panel not found in controller hierarchy")
+        }
+        var receivedBodies: [String] = []
+        vc.onSendTapped = { receivedBodies.append($0) }
+
+        panel.text = "   hello   "
+        sendButton(in: panel).sendActions(for: .touchUpInside)
+        XCTAssertEqual(receivedBodies, ["hello"],
+                       "the controller must forward the trimmed body to the host's send dispatcher")
+    }
+
+    func test_inputPanel_send_doesNotFire_forWhitespaceOnlyBody() {
+        // Belt + braces. The input panel already gates the button
+        // disabled for whitespace-only input, but if anything ever
+        // bypasses that (programmatic tap, accessibility action),
+        // the controller's forwarder must not invoke the
+        // dispatcher with an empty body.
+        let vc = ChatThreadViewController()
+        vc.loadViewIfNeeded()
+        guard let panel = inputPanel(in: vc) else {
+            return XCTFail("input panel not found")
+        }
+        var fired = false
+        vc.onSendTapped = { _ in fired = true }
+
+        panel.text = "   "
+        sendButton(in: panel).sendActions(for: .touchUpInside)
+        XCTAssertFalse(fired,
+                       "whitespace-only body must not reach the send dispatcher")
     }
 
     private func inputPanel(in vc: UIViewController) -> ChatInputPanelView? {

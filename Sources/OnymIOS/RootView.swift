@@ -31,6 +31,7 @@ struct RootView: View {
                         identitiesFlow: dependencies.identitiesFlow,
                         approveRequestsFlow: dependencies.approveRequestsFlow,
                         messageRepository: dependencies.messageRepository,
+                        sendMessageInteractor: dependencies.sendMessageInteractor,
                         makeCreateGroupFlow: dependencies.makeCreateGroupFlow,
                         makeShareInviteFlow: dependencies.makeShareInviteFlow
                     )

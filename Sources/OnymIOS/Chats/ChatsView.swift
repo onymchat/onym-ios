@@ -10,6 +10,7 @@ struct ChatsView: View {
     let identitiesFlow: IdentitiesFlow
     let approveRequestsFlow: ApproveRequestsFlow
     let messageRepository: MessageRepository
+    let sendMessageInteractor: SendMessageInteractor
     let makeCreateGroupFlow: @MainActor () -> CreateGroupFlow
     let makeShareInviteFlow: @MainActor () -> ShareInviteFlow
 
@@ -132,6 +133,7 @@ struct ChatsView: View {
                 chatsFlow: flow,
                 identitiesFlow: identitiesFlow,
                 messageRepository: messageRepository,
+                sendMessageInteractor: sendMessageInteractor,
                 makeShareInviteFlow: makeShareInviteFlow
             )
         }
