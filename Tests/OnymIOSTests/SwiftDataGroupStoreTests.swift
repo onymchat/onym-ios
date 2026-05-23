@@ -88,6 +88,39 @@ final class SwiftDataGroupStoreTests: XCTestCase {
         XCTAssertEqual(listed[0].memberProfiles, [:])
     }
 
+    // MARK: - Avatar
+
+    func test_insertOrUpdate_persistsAvatar() async {
+        let avatar = Data(repeating: 0xAB, count: 1234)
+        var group = makeGroup(id: "a0".repeated(32), name: "With photo")
+        group.avatarJPEG = avatar
+        _ = await store.insertOrUpdate(group)
+
+        let listed = await store.list()
+        XCTAssertEqual(listed[0].avatarJPEG, avatar)
+    }
+
+    func test_insertOrUpdate_nilAvatarRoundtripsAsNil() async {
+        let group = makeGroup(id: "a1".repeated(32), name: "No photo")
+        _ = await store.insertOrUpdate(group)
+
+        let listed = await store.list()
+        XCTAssertNil(listed[0].avatarJPEG)
+    }
+
+    func test_insertOrUpdate_clearsAvatarOnUpdate() async {
+        var group = makeGroup(id: "a2".repeated(32), name: "G")
+        group.avatarJPEG = Data(repeating: 0x01, count: 64)
+        _ = await store.insertOrUpdate(group)
+
+        var cleared = group
+        cleared.avatarJPEG = nil
+        _ = await store.insertOrUpdate(cleared)
+
+        let listed = await store.list()
+        XCTAssertNil(listed[0].avatarJPEG)
+    }
+
     // MARK: - Idempotence
 
     func test_insertOrUpdate_secondCallUpdatesInPlace() async {

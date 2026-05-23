@@ -37,6 +37,11 @@ final class CreateGroupFlow {
     /// Always `.tyranny` in PR-C — the picker disables the others.
     var governance: OnymUIGovernance = .tyranny
     var invitees: [OnymInvitee] = []
+    /// Square JPEG group photo chosen from the gallery or generated
+    /// with Image Playground, already squared/downscaled/budgeted by
+    /// `GroupAvatarImage`. `nil` → the brand mark stands in. Passed to
+    /// the interactor at submit and sealed into the invitation snapshot.
+    var avatarImageData: Data?
 
     /// Friendly placeholder generated on init / reset (e.g. "Maple
     /// Garden"). The TextField pre-fills with this so the user can
@@ -343,6 +348,7 @@ final class CreateGroupFlow {
         accent = .blue
         governance = .tyranny
         invitees = []
+        avatarImageData = nil
         inviteeInput = ""
         inviteeError = nil
         progress = nil

@@ -93,6 +93,7 @@ actor SwiftDataGroupStore: GroupStore {
             existing.encryptedAdminPubkeyHex = encoded.encryptedAdminPubkeyHex
             existing.encryptedMemberProfilesJSON = encoded.encryptedMemberProfilesJSON
             existing.encryptedAdminEd25519PubkeyHex = encoded.encryptedAdminEd25519PubkeyHex
+            existing.encryptedAvatar = encoded.encryptedAvatar
             try? context.save()
             return false
         }
@@ -166,7 +167,8 @@ actor SwiftDataGroupStore: GroupStore {
             encryptedCommitment: try group.commitment.map(StorageEncryption.encrypt),
             encryptedAdminPubkeyHex: try group.adminPubkeyHex.map(StorageEncryption.encrypt),
             encryptedMemberProfilesJSON: encryptedProfilesJSON,
-            encryptedAdminEd25519PubkeyHex: try group.adminEd25519PubkeyHex.map(StorageEncryption.encrypt)
+            encryptedAdminEd25519PubkeyHex: try group.adminEd25519PubkeyHex.map(StorageEncryption.encrypt),
+            encryptedAvatar: try group.avatarJPEG.map(StorageEncryption.encrypt)
         )
     }
 
@@ -197,6 +199,9 @@ actor SwiftDataGroupStore: GroupStore {
             .flatMap { try? StorageEncryption.decrypt($0) }
             .flatMap { try? JSONDecoder().decode([String: MemberProfile].self, from: $0) }
             ?? [:]
+        // Advisory like the profiles map: a decode miss just costs the
+        // brand-mark fallback until the next avatar message arrives.
+        let avatarJPEG = row.encryptedAvatar.flatMap { try? StorageEncryption.decrypt($0) }
         return ChatGroup(
             id: row.id,
             ownerIdentityID: owner,
@@ -212,7 +217,8 @@ actor SwiftDataGroupStore: GroupStore {
             groupType: groupType,
             adminPubkeyHex: adminPubkeyHex,
             adminEd25519PubkeyHex: adminEd25519PubkeyHex,
-            isPublishedOnChain: row.isPublishedOnChain
+            isPublishedOnChain: row.isPublishedOnChain,
+            avatarJPEG: avatarJPEG
         )
     }
 }
