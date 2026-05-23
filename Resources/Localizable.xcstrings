@@ -1564,7 +1564,68 @@
       }
     },
     "Have them scan this with their camera to join." : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Have them scan this with their camera to join."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Попросите отсканировать этот код камерой, чтобы присоединиться."
+          }
+        }
+      }
+    },
+    "Not an Onym invite" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not an Onym invite"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Это не приглашение Onym"
+          }
+        }
+      }
+    },
+    "Scan a QR to join" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scan a QR to join"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сканируйте QR, чтобы присоединиться"
+          }
+        }
+      }
+    },
+    "Scan invite QR" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scan invite QR"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сканировать QR приглашения"
+          }
+        }
+      }
     },
     "i" : {
       "localizations" : {
@@ -3048,7 +3109,20 @@
       }
     },
     "That QR code isn't an Onym group invite. Ask the host to show the invite QR from the group's member list." : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "That QR code isn't an Onym group invite. Ask the host to show the invite QR from the group's member list."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Это не QR-код приглашения в группу Onym. Попросите администратора показать QR-код приглашения из списка участников группы."
+          }
+        }
+      }
     },
     "The phrase is generated on-device and never sent off the device." : {
       "localizations" : {
