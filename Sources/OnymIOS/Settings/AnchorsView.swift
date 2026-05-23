@@ -169,7 +169,7 @@ private struct GovernanceTypeTile: View {
         case .democracy: return "DE"
         case .oligarchy: return "OL"
         case .oneonone:  return "1\u{00B7}1"
-        case .tyranny:   return "TY"
+        case .tyranny:   return "FO"
         }
     }
 

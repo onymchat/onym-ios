@@ -168,7 +168,7 @@ enum OnymUIGovernance: String, CaseIterable, Identifiable, Sendable {
 
     var label: String {
         switch self {
-        case .tyranny: "Tyranny"
+        case .tyranny: "Founder"
         case .oneOnOne: "1\u{2011}on\u{2011}1"  // non-breaking hyphens
         case .anarchy: "Anarchy"
         }
