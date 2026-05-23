@@ -70,6 +70,7 @@ struct ChatThreadView: View {
             }
         )
         .toolbar(.hidden, for: .navigationBar)
+        .toolbar(.hidden, for: .tabBar)
         .navigationDestination(isPresented: $showMembers) {
             ChatMembersView(
                 groupID: groupID,
