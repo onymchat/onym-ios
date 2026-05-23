@@ -82,6 +82,26 @@ enum OnymAccent: String, CaseIterable, Identifiable, Sendable {
             blue:  Double(hex         & 0xFF) / 255
         )
     }
+
+    /// Deterministic accent for a chat sender, keyed off their BLS
+    /// pubkey hex.
+    ///
+    /// Color keys on the *load-bearing* identity (the pubkey), never the
+    /// self-asserted `MemberProfile.alias` — so two members who both
+    /// claim "Alice" still get different colors, and an impostor can't
+    /// steal the original's color by copying their name. The mapping is
+    /// a pure function of the hex bytes (FNV-1a, not the per-process-
+    /// seeded `Hashable`), so the same person resolves to the same color
+    /// on every device, in every group, across launches.
+    static func forSender(blsPubkeyHex: String) -> OnymAccent {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325  // FNV-1a offset basis
+        for byte in blsPubkeyHex.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x0000_0100_0000_01b3  // FNV-1a prime
+        }
+        let all = allCases
+        return all[Int(hash % UInt64(all.count))]
+    }
 }
 
 // MARK: - OnymMark — broken-ring brand logo

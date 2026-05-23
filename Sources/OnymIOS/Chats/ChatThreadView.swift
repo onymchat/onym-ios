@@ -34,6 +34,7 @@ struct ChatThreadView: View {
         ChatThreadControllerBridge(
             groupName: currentGroupName,
             memberCount: currentMemberCount,
+            memberProfiles: currentMemberProfiles,
             messages: messages,
             onBack: { dismiss() },
             onShowMembers: { showMembers = true },
@@ -99,11 +100,20 @@ struct ChatThreadView: View {
     private var currentMemberCount: Int {
         chatsFlow.groups.first { $0.id == groupID }?.memberProfiles.count ?? 0
     }
+
+    /// Member profiles for the current group, keyed by BLS pubkey hex.
+    /// Feeds the chat thread's sender-name resolution. Reads from the
+    /// same `chatsFlow.groups` source as the name/count so it stays
+    /// live as joiners land or aliases change.
+    private var currentMemberProfiles: [String: MemberProfile] {
+        chatsFlow.groups.first { $0.id == groupID }?.memberProfiles ?? [:]
+    }
 }
 
 private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
     let groupName: String
     let memberCount: Int
+    let memberProfiles: [String: MemberProfile]
     let messages: [ChatMessage]
     let onBack: () -> Void
     let onShowMembers: () -> Void
@@ -118,6 +128,9 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         vc.onRetryRequested = onRetryRequested
         vc.loadViewIfNeeded()
         vc.update(groupName: groupName, memberCount: memberCount)
+        // Profiles before messages — the first sender-display build
+        // reads the profiles to resolve names.
+        vc.update(memberProfiles: memberProfiles)
         vc.update(messages: messages)
         return vc
     }
@@ -132,6 +145,7 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         vc.onSendTapped = onSendTapped
         vc.onRetryRequested = onRetryRequested
         vc.update(groupName: groupName, memberCount: memberCount)
+        vc.update(memberProfiles: memberProfiles)
         vc.update(messages: messages)
     }
 }
