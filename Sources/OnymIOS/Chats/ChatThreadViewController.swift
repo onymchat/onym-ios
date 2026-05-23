@@ -56,6 +56,11 @@ final class ChatThreadViewController: UIViewController {
     private let emptyStateLabel = UILabel()
     private let inputPanel = ChatInputPanelView()
 
+    /// Full-width swipe-to-go-back pan. Borrows the system pop
+    /// transition's target/action so a horizontal swipe anywhere on the
+    /// screen drives the same interactive pop as the edge gesture.
+    private var fullWidthPanGesture: UIPanGestureRecognizer?
+
     // Diffable data source state. Keyed by message UUID — stable
     // identity across re-renders, no array-index churn.
     private enum Section: Hashable { case main }
@@ -82,6 +87,49 @@ final class ChatThreadViewController: UIViewController {
         buildInputPanel()
         layout()
         configureDataSource()
+    }
+
+    // The SwiftUI wrapper hides the nav bar (the controller paints its
+    // own), which makes UIKit disable the edge-swipe interactive pop
+    // gesture. Rather than just re-arm the narrow edge gesture, install
+    // a full-width pan that drives the *same* interactive pop transition
+    // — so a swipe anywhere on the chat screen goes back to the list.
+    //
+    // The trick: lift the hidden target/action off the system
+    // `interactivePopGestureRecognizer` (it points at UIKit's private
+    // navigation-transition driver) and attach it to our own pan. The
+    // edge recognizer stays delegate-gated so the two don't fight.
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        installFullWidthPopGesture()
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        navigationController?.interactivePopGestureRecognizer?.delegate = nil
+    }
+
+    private func installFullWidthPopGesture() {
+        guard let popGesture = navigationController?.interactivePopGestureRecognizer,
+              let targets = popGesture.value(forKey: "targets") as? [AnyObject],
+              fullWidthPanGesture == nil else {
+            // Already installed (or nothing to borrow) — just keep the
+            // edge gesture delegate-gated so it begins from the root-
+            // guard check below.
+            navigationController?.interactivePopGestureRecognizer?.delegate = self
+            return
+        }
+
+        let pan = UIPanGestureRecognizer()
+        pan.setValue(targets, forKey: "targets")
+        pan.delegate = self
+        view.addGestureRecognizer(pan)
+        fullWidthPanGesture = pan
+
+        // Keep the system edge gesture alive too (delegate-gated) so
+        // the standard edge swipe still works alongside the full-width
+        // one.
+        popGesture.delegate = self
     }
 
     /// Push a new group-name + member-count into the title bar.
@@ -395,4 +443,22 @@ final class ChatThreadViewController: UIViewController {
 
     @objc private func tappedBack() { onBack?() }
     @objc private func tappedInfo() { onShowMembers?() }
+}
+
+extension ChatThreadViewController: UIGestureRecognizerDelegate {
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        // Never begin a pop at the stack root — it leaves the nav
+        // controller wedged half-transitioned.
+        guard (navigationController?.viewControllers.count ?? 0) > 1 else { return false }
+
+        // The full-width pan should only claim rightward, mostly-
+        // horizontal swipes — otherwise it would swallow the message
+        // list's vertical scroll. The system edge gesture has no
+        // translation to inspect, so let it through unconditionally.
+        if gestureRecognizer === fullWidthPanGesture, let pan = fullWidthPanGesture {
+            let velocity = pan.velocity(in: view)
+            return velocity.x > 0 && abs(velocity.x) > abs(velocity.y)
+        }
+        return true
+    }
 }
