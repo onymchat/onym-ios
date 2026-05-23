@@ -252,7 +252,8 @@ actor GroupStateVerifier: GroupStateRefreshing {
             tierRaw: group.tier.rawValue,
             groupTypeRaw: group.groupType.rawValue,
             adminPubkeyHex: group.adminPubkeyHex,
-            memberProfiles: group.memberProfiles.isEmpty ? nil : group.memberProfiles
+            memberProfiles: group.memberProfiles.isEmpty ? nil : group.memberProfiles,
+            avatar: group.avatarJPEG
         )
         guard let bytes = try? JSONEncoder().encode(invite),
               let sealed = try? await identity.sealInvitation(

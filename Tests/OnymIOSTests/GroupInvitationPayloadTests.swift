@@ -53,6 +53,49 @@ final class GroupInvitationPayloadTests: XCTestCase {
         XCTAssertEqual(decoded.name, "Family")
     }
 
+    // MARK: - Avatar
+
+    func test_roundtrip_withAvatar_preservesBytes() throws {
+        let avatar = Data(repeating: 0xC3, count: 4096)
+        let original = makePayload(memberProfiles: nil, avatar: avatar)
+        let encoded = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(GroupInvitationPayload.self, from: encoded)
+        XCTAssertEqual(decoded, original)
+        XCTAssertEqual(decoded.avatar, avatar)
+    }
+
+    func test_roundtrip_withoutAvatar_decodesAsNil() throws {
+        let original = makePayload(memberProfiles: nil, avatar: nil)
+        let encoded = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(GroupInvitationPayload.self, from: encoded)
+        XCTAssertNil(decoded.avatar)
+    }
+
+    func test_decoder_acceptsLegacyPayloadWithoutAvatar() throws {
+        // Pre-avatar senders ship no `avatar` key. Decode must fall back
+        // to `nil` (brand-mark fallback) rather than failing.
+        let gid = Data(repeating: 0, count: 32).base64EncodedString()
+        let secret = Data(repeating: 0, count: 32).base64EncodedString()
+        let salt = Data(repeating: 0, count: 32).base64EncodedString()
+        let legacy = #"""
+        {"version":1,"group_id":"\#(gid)","group_secret":"\#(secret)","name":"Family","members":[],"epoch":0,"salt":"\#(salt)","tier_raw":1,"group_type_raw":"tyranny"}
+        """#
+        let decoded = try JSONDecoder().decode(
+            GroupInvitationPayload.self,
+            from: legacy.data(using: .utf8)!
+        )
+        XCTAssertNil(decoded.avatar)
+    }
+
+    func test_avatar_absentFromWireWhenNil() throws {
+        // Synthesized encoder uses encodeIfPresent for optionals, so a
+        // nil avatar must not emit the key at all (keeps the common,
+        // photo-less invite small).
+        let encoded = try JSONEncoder().encode(makePayload(memberProfiles: nil, avatar: nil))
+        let obj = try JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        XCTAssertNil(obj?["avatar"])
+    }
+
     // MARK: - Wire shape
 
     func test_member_profiles_keySpelling_matches_android_parity() throws {
@@ -72,7 +115,8 @@ final class GroupInvitationPayloadTests: XCTestCase {
     // MARK: - Helpers
 
     private func makePayload(
-        memberProfiles: [String: MemberProfile]?
+        memberProfiles: [String: MemberProfile]?,
+        avatar: Data? = nil
     ) -> GroupInvitationPayload {
         GroupInvitationPayload(
             version: 1,
@@ -87,7 +131,8 @@ final class GroupInvitationPayloadTests: XCTestCase {
             groupTypeRaw: "tyranny",
             adminPubkeyHex: nil,
             peerBlsSecret: nil,
-            memberProfiles: memberProfiles
+            memberProfiles: memberProfiles,
+            avatar: avatar
         )
     }
 }

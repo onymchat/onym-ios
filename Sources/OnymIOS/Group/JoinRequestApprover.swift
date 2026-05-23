@@ -291,7 +291,11 @@ actor JoinRequestApprover: JoinRequestApproving {
             // peers + admin by name from the moment they land. The
             // joiner's own profile gets backfilled by the receiver's
             // materializer from their active identity.
-            memberProfiles: anchored.memberProfiles.isEmpty ? nil : anchored.memberProfiles
+            memberProfiles: anchored.memberProfiles.isEmpty ? nil : anchored.memberProfiles,
+            // Tyranny invitees only get the full snapshot here (the
+            // create-time offer carries nothing), so this is where the
+            // group photo reaches them.
+            avatar: anchored.avatarJPEG
         )
         let payloadBytes: Data
         do {

@@ -93,15 +93,16 @@ struct CreateGroupInteractor: Sendable {
         governanceType: SEPGroupType = .tyranny,
         name: String,
         invitees: [Data],
+        avatar: Data? = nil,
         onProgress: @Sendable (CreateGroupProgress) -> Void = { _ in }
     ) async throws -> ChatGroup {
         switch governanceType {
         case .tyranny:
-            return try await createTyranny(name: name, invitees: invitees, onProgress: onProgress)
+            return try await createTyranny(name: name, invitees: invitees, avatar: avatar, onProgress: onProgress)
         case .oneOnOne:
-            return try await createOneOnOne(name: name, invitees: invitees, onProgress: onProgress)
+            return try await createOneOnOne(name: name, invitees: invitees, avatar: avatar, onProgress: onProgress)
         case .anarchy:
-            return try await createAnarchy(name: name, invitees: invitees, onProgress: onProgress)
+            return try await createAnarchy(name: name, invitees: invitees, avatar: avatar, onProgress: onProgress)
         case .democracy, .oligarchy:
             throw CreateGroupError.unsupportedGovernanceType(governanceType)
         }
@@ -112,6 +113,7 @@ struct CreateGroupInteractor: Sendable {
     private func createTyranny(
         name: String,
         invitees: [Data],
+        avatar: Data?,
         onProgress: @Sendable (CreateGroupProgress) -> Void
     ) async throws -> ChatGroup {
         // 1. Validate
@@ -251,7 +253,8 @@ struct CreateGroupInteractor: Sendable {
             groupType: .tyranny,
             adminPubkeyHex: adminPubkeyHex,
             adminEd25519PubkeyHex: adminEd25519PubkeyHex,
-            isPublishedOnChain: false
+            isPublishedOnChain: false,
+            avatarJPEG: avatar
         )
         _ = await groups.insert(group)
         await groups.markPublished(id: group.id, commitment: proof.commitment)
@@ -285,6 +288,7 @@ struct CreateGroupInteractor: Sendable {
     private func createOneOnOne(
         name: String,
         invitees: [Data],
+        avatar: Data?,
         onProgress: @Sendable (CreateGroupProgress) -> Void
     ) async throws -> ChatGroup {
         // 1. Validate — 1-on-1 is exactly two parties: the creator and
@@ -439,7 +443,8 @@ struct CreateGroupInteractor: Sendable {
             groupType: .oneOnOne,
             adminPubkeyHex: nil,
             adminEd25519PubkeyHex: nil,
-            isPublishedOnChain: false
+            isPublishedOnChain: false,
+            avatarJPEG: avatar
         )
         _ = await groups.insert(group)
         await groups.markPublished(id: group.id, commitment: proof.commitment)
@@ -459,7 +464,8 @@ struct CreateGroupInteractor: Sendable {
             groupTypeRaw: SEPGroupType.oneOnOne.rawValue,
             adminPubkeyHex: nil,
             peerBlsSecret: peerBlsSecret,
-            memberProfiles: creatorProfiles
+            memberProfiles: creatorProfiles,
+            avatar: avatar
         )
         try await sendInvitations(invitePayload, to: [peerInboxKey])
 
@@ -483,6 +489,7 @@ struct CreateGroupInteractor: Sendable {
     private func createAnarchy(
         name: String,
         invitees: [Data],
+        avatar: Data?,
         onProgress: @Sendable (CreateGroupProgress) -> Void
     ) async throws -> ChatGroup {
         // 1. Validate
@@ -619,7 +626,8 @@ struct CreateGroupInteractor: Sendable {
             groupType: .anarchy,
             adminPubkeyHex: nil,
             adminEd25519PubkeyHex: nil,
-            isPublishedOnChain: false
+            isPublishedOnChain: false,
+            avatarJPEG: avatar
         )
         _ = await groups.insert(group)
         await groups.markPublished(id: group.id, commitment: proof.commitment)
@@ -642,7 +650,8 @@ struct CreateGroupInteractor: Sendable {
                 tierRaw: tier.rawValue,
                 groupTypeRaw: SEPGroupType.anarchy.rawValue,
                 adminPubkeyHex: nil,
-                memberProfiles: creatorProfiles
+                memberProfiles: creatorProfiles,
+                avatar: avatar
             )
             try await sendInvitations(invitePayload, to: invitees)
         }
