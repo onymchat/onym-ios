@@ -397,6 +397,140 @@ final class ChatThreadViewControllerTests: XCTestCase {
         XCTAssertFalse(vc.isNearBottom)
     }
 
+    // MARK: - Sender differentiation (run grouping + name headers)
+
+    func test_runGrouping_headerOnlyAtStartOfSameSenderRun() {
+        let vc = mountedController()
+        let alice = "aa".repeated(48)
+        let bob = "bb".repeated(48)
+        // Alice, Alice, Bob — header on row 0 (run start) and row 2
+        // (sender change), suppressed on row 1 (mid-run).
+        let msgs = [
+            incoming(sender: alice, body: "hi", at: 1),
+            incoming(sender: alice, body: "again", at: 2),
+            incoming(sender: bob, body: "yo", at: 3),
+        ]
+        vc.update(messages: msgs)
+        let table = layoutTable(in: vc)
+
+        XCTAssertFalse(senderHeaderHidden(in: table, row: 0), "run start shows header")
+        XCTAssertTrue(senderHeaderHidden(in: table, row: 1), "mid-run hides header")
+        XCTAssertFalse(senderHeaderHidden(in: table, row: 2), "sender change shows header")
+    }
+
+    func test_outgoingMessages_neverShowHeader() {
+        let vc = mountedController()
+        vc.update(messages: [outgoing(sender: "cc".repeated(48), body: "mine", at: 1)])
+        let table = layoutTable(in: vc)
+        XCTAssertTrue(senderHeaderHidden(in: table, row: 0),
+                      "own messages are obvious from alignment + color — no header")
+    }
+
+    func test_oneOnOneGroup_suppressesHeader() {
+        let vc = mountedController()
+        let peer = "dd".repeated(48)
+        vc.update(messages: [
+            incoming(sender: peer, body: "hey", at: 1, groupType: .oneOnOne),
+        ])
+        let table = layoutTable(in: vc)
+        XCTAssertTrue(senderHeaderHidden(in: table, row: 0),
+                      "1-on-1 chats name no one — there's only one other person")
+    }
+
+    func test_header_usesAliasFromMemberProfiles() {
+        let vc = mountedController()
+        let alice = "aa".repeated(48)
+        vc.update(memberProfiles: [alice: profile(alias: "Alice")])
+        vc.update(messages: [incoming(sender: alice, body: "hi", at: 1)])
+        let table = layoutTable(in: vc)
+        XCTAssertEqual(senderHeaderText(in: table, row: 0), "Alice")
+    }
+
+    func test_header_fallsBackToFingerprint_whenAliasMissing() {
+        let vc = mountedController()
+        let alice = "aa".repeated(48)
+        // No alias for this sender → short BLS fingerprint fallback.
+        vc.update(messages: [incoming(sender: alice, body: "hi", at: 1)])
+        let table = layoutTable(in: vc)
+        XCTAssertEqual(senderHeaderText(in: table, row: 0),
+                       "BLS " + String(alice.prefix(8)))
+    }
+
+    func test_profileUpdate_refreshesRenderedHeaderName() {
+        // A joiner's alias arriving after their message is on screen
+        // must repaint the header (the bridge calls update(memberProfiles:)
+        // every render).
+        let vc = mountedController()
+        let alice = "aa".repeated(48)
+        vc.update(messages: [incoming(sender: alice, body: "hi", at: 1)])
+        var table = layoutTable(in: vc)
+        XCTAssertEqual(senderHeaderText(in: table, row: 0), "BLS " + String(alice.prefix(8)))
+
+        vc.update(memberProfiles: [alice: profile(alias: "Alice")])
+        table = layoutTable(in: vc)
+        XCTAssertEqual(senderHeaderText(in: table, row: 0), "Alice",
+                       "a later profile update must refresh the on-screen header")
+    }
+
+    // MARK: - Sender-test helpers
+
+    private func mountedController() -> ChatThreadViewController {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 800))
+        let vc = ChatThreadViewController()
+        window.rootViewController = vc
+        window.isHidden = false
+        return vc
+    }
+
+    private func layoutTable(in vc: ChatThreadViewController) -> UITableView {
+        vc.view.layoutIfNeeded()
+        let table = tableView(in: vc)!
+        table.layoutIfNeeded()
+        return table
+    }
+
+    private func senderHeader(in table: UITableView, row: Int) -> UILabel? {
+        let cell = table.cellForRow(at: IndexPath(row: row, section: 0))
+        guard let cv = cell?.contentView else { return nil }
+        return find(in: cv) { $0.accessibilityIdentifier == "chat.bubble.sender" } as? UILabel
+    }
+
+    private func senderHeaderHidden(in table: UITableView, row: Int) -> Bool {
+        senderHeader(in: table, row: row)?.isHidden ?? true
+    }
+
+    private func senderHeaderText(in table: UITableView, row: Int) -> String? {
+        senderHeader(in: table, row: row)?.text
+    }
+
+    private func profile(alias: String) -> MemberProfile {
+        MemberProfile(alias: alias, inboxPublicKey: Data(repeating: 1, count: 32),
+                      sendingPubkey: Data(repeating: 2, count: 32))
+    }
+
+    private func incoming(
+        sender: String, body: String, at seconds: TimeInterval,
+        groupType: SEPGroupType = .tyranny
+    ) -> ChatMessage {
+        ChatMessage(
+            id: UUID(), groupID: "aa".repeated(32), ownerIdentityID: IdentityID(),
+            senderBlsPubkeyHex: sender, body: body,
+            sentAt: Date(timeIntervalSince1970: 1_700_000_000 + seconds),
+            direction: .incoming, status: .received, groupType: groupType
+        )
+    }
+
+    private func outgoing(
+        sender: String, body: String, at seconds: TimeInterval
+    ) -> ChatMessage {
+        ChatMessage(
+            id: UUID(), groupID: "aa".repeated(32), ownerIdentityID: IdentityID(),
+            senderBlsPubkeyHex: sender, body: body,
+            sentAt: Date(timeIntervalSince1970: 1_700_000_000 + seconds),
+            direction: .outgoing, status: .sent, groupType: .tyranny
+        )
+    }
+
     // MARK: - Helpers
 
     private func tableView(in vc: UIViewController) -> UITableView? {

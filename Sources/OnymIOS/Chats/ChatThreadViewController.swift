@@ -68,6 +68,20 @@ final class ChatThreadViewController: UIViewController {
     /// Lookup table the cell-provider reads from. Keys mirror the
     /// diffable snapshot's items so a dequeue can always resolve.
     private var messagesByID: [UUID: ChatMessage] = [:]
+    /// Same messages as `messagesByID`, kept in display order so the
+    /// run-grouping pass (name header at the start of each consecutive
+    /// same-sender run) can look at neighbours.
+    private var orderedMessages: [ChatMessage] = []
+    /// The parent group's member profiles, keyed by BLS pubkey hex —
+    /// the source for resolving a sender's alias. Pushed by the SwiftUI
+    /// wrapper via `update(memberProfiles:)`; updated live as joiners
+    /// land or aliases change.
+    private var memberProfiles: [String: MemberProfile] = [:]
+    /// Per-message resolved sender presentation (name + accent + whether
+    /// to show the header), rebuilt whenever messages or member profiles
+    /// change. The cell-provider reads this so the cell stays a dumb
+    /// renderer.
+    private var senderDisplays: [UUID: ChatSenderDisplay] = [:]
     /// Set after the first `update(messages:)` so the initial load
     /// applies non-animated + always scrolls to the bottom, while
     /// subsequent updates animate and only auto-scroll when the
@@ -175,6 +189,33 @@ final class ChatThreadViewController: UIViewController {
     /// the same index but the cell provider re-runs against the
     /// updated `messagesByID` entry, so a `.pending` → `.sent`
     /// transition swaps the glyph without animating the bubble.
+    /// Push the parent group's member profiles in. Used to resolve
+    /// sender aliases (and, via the BLS keys, per-sender accent colors)
+    /// for the name headers. Called by the SwiftUI wrapper on every
+    /// render — a no-op when unchanged. When the profiles do change
+    /// (joiner admitted, alias edited), the already-rendered rows are
+    /// reconfigured so their headers pick up the new name without a
+    /// fresh message arriving.
+    ///
+    /// Must be called before `update(messages:)` on first render so the
+    /// initial sender-display build sees the profiles; the wrapper
+    /// orders the two calls that way.
+    func update(memberProfiles: [String: MemberProfile]) {
+        guard memberProfiles != self.memberProfiles else { return }
+        self.memberProfiles = memberProfiles
+        rebuildSenderDisplays()
+
+        // Repaint already-committed rows against the refreshed
+        // names/colors. Reconfigure only the items actually in the
+        // current snapshot (so this is safe before the first
+        // message-snapshot commits — nothing to reconfigure yet) and
+        // never reload, so nothing animates.
+        var snapshot = dataSource.snapshot()
+        guard !snapshot.itemIdentifiers.isEmpty else { return }
+        snapshot.reconfigureItems(snapshot.itemIdentifiers)
+        dataSource.apply(snapshot, animatingDifferences: false)
+    }
+
     func update(messages: [ChatMessage]) {
         let isFirstApply = !hasAppliedFirstSnapshot
         let wasNearBottom = isNearBottom
@@ -188,6 +229,8 @@ final class ChatThreadViewController: UIViewController {
             return msg.id
         }
         messagesByID = Dictionary(uniqueKeysWithValues: sorted.map { ($0.id, $0) })
+        orderedMessages = sorted
+        rebuildSenderDisplays()
 
         // Empty state: visible iff the message list is empty. Lives
         // behind the table view (added as a sibling); toggling
@@ -211,6 +254,40 @@ final class ChatThreadViewController: UIViewController {
                 self.scrollToBottom(animated: true)
             }
         }
+    }
+
+    /// Recompute the per-message sender presentation from the current
+    /// `orderedMessages` + `memberProfiles`. A name header shows only at
+    /// the *start* of a run of consecutive same-sender messages, only
+    /// for incoming messages (own messages are obvious from alignment +
+    /// color), and never in 1-on-1 groups (a single other person doesn't
+    /// need to be named on every run). Color is hashed from the BLS
+    /// pubkey, so it's stable per-person and independent of the alias.
+    private func rebuildSenderDisplays() {
+        var displays: [UUID: ChatSenderDisplay] = [:]
+        var previousSender: String?
+        for message in orderedMessages {
+            let isRunStart = message.senderBlsPubkeyHex != previousSender
+            let showHeader = isRunStart
+                && message.direction == .incoming
+                && message.groupType != .oneOnOne
+            displays[message.id] = ChatSenderDisplay(
+                name: senderName(for: message.senderBlsPubkeyHex),
+                accent: OnymAccent.forSender(blsPubkeyHex: message.senderBlsPubkeyHex),
+                showNameHeader: showHeader
+            )
+            previousSender = message.senderBlsPubkeyHex
+        }
+        senderDisplays = displays
+    }
+
+    /// The sender's display name: their self-asserted alias when set,
+    /// else a short BLS-pubkey fingerprint. Mirrors `ChatMembersView`'s
+    /// fallback so an unnamed member reads consistently in both places.
+    private func senderName(for blsPubkeyHex: String) -> String {
+        let alias = memberProfiles[blsPubkeyHex]?.alias ?? ""
+        if !alias.isEmpty { return alias }
+        return "BLS " + String(blsPubkeyHex.prefix(8))
     }
 
     /// True when the user is within `nearBottomThreshold` points of
@@ -342,7 +419,8 @@ final class ChatThreadViewController: UIViewController {
                           message.status == .failed else { return nil }
                     return { [weak self] in self?.onRetryRequested?(id) }
                 }()
-                bubble.configure(message: message, onRetry: retryHandler)
+                let sender = self?.senderDisplays[id] ?? .unknown
+                bubble.configure(message: message, sender: sender, onRetry: retryHandler)
             }
             return cell
         }

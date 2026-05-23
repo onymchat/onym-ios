@@ -1,11 +1,47 @@
 import SwiftUI
 import UIKit
 
+/// Resolved sender presentation for one bubble — computed by
+/// `ChatThreadViewController` (which alone knows the group's member
+/// profiles + run grouping) and handed to the cell. The cell stays a
+/// dumb renderer: it doesn't look up aliases or hash pubkeys itself.
+///
+/// `accent` is derived from the sender's BLS pubkey via
+/// `OnymAccent.forSender(blsPubkeyHex:)`, so it's a stable per-person
+/// color rather than anything tied to the (spoofable) alias.
+struct ChatSenderDisplay {
+    /// Alias if the member set one, else a short BLS-fingerprint
+    /// fallback. Only rendered when `showNameHeader` is true.
+    let name: String
+    /// Per-sender color. Tints the incoming bubble; fills the outgoing
+    /// bubble; colors the name header.
+    let accent: OnymAccent
+    /// Show the name header above this bubble. The controller sets this
+    /// only at the start of a run of consecutive same-sender incoming
+    /// messages, and never in 1-on-1 groups (one other person — naming
+    /// them on every run is noise).
+    let showNameHeader: Bool
+
+    /// Neutral default used by the cell when no sender info is supplied
+    /// (and by older call sites). Blue, no header — matches the
+    /// pre-sender-differentiation look.
+    static let unknown = ChatSenderDisplay(name: "", accent: .blue, showNameHeader: false)
+}
+
 /// One message bubble row. Two visual styles toggled by
 /// `ChatMessage.direction`:
 ///
-///   - `.outgoing` — accent-filled bubble pinned to the trailing edge.
-///   - `.incoming` — surface-tinted bubble pinned to the leading edge.
+///   - `.outgoing` — filled with the sender's accent, pinned to the
+///     trailing edge.
+///   - `.incoming` — tinted with the sender's accent, pinned to the
+///     leading edge, optionally topped by a colored name header.
+///
+/// Sender differentiation: there are no avatars, so consecutive
+/// incoming messages from one person are grouped under a single
+/// accent-colored name header (`ChatSenderDisplay.showNameHeader`), and
+/// the bubble itself carries that sender's accent tint. The accent is a
+/// hash of the BLS pubkey, not the alias, so it doubles as a cheap
+/// visual fingerprint that an alias-spoofer can't forge.
 ///
 /// Status indicator (PR 9): outgoing rows show a tiny glyph below
 /// the bubble's trailing edge that reflects `ChatMessage.status`
@@ -24,6 +60,12 @@ final class ChatBubbleCell: UITableViewCell {
     private let bubble = UIView()
     private let bodyLabel = UILabel()
     private let statusImageView = UIImageView()
+    private let nameLabel = UILabel()
+
+    /// Incoming bubble tint opacity over the background. Low enough that
+    /// `OnymTokens.text` stays readable on top, high enough that the
+    /// sender's accent reads at a glance.
+    private let incomingTintAlpha: Double = 0.20
 
     /// Set by the diffable data source's cell provider on every
     /// dequeue. Fires when the user taps a `.failed` bubble —
@@ -50,6 +92,14 @@ final class ChatBubbleCell: UITableViewCell {
     private var bubbleBottomConstraint: NSLayoutConstraint!
     private var statusBottomConstraint: NSLayoutConstraint!
 
+    // Direction-independent "where does the bubble's top come from"
+    // toggle. With a name header, the bubble hangs off the header's
+    // bottom; without one (the common case + every outgoing row), the
+    // bubble pins to the cell's top. Exactly one is active at a time.
+    private var bubbleTopToContentConstraint: NSLayoutConstraint!
+    private var bubbleTopToNameConstraint: NSLayoutConstraint!
+    private var nameTopConstraint: NSLayoutConstraint!
+
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
         backgroundColor = .clear
@@ -57,6 +107,7 @@ final class ChatBubbleCell: UITableViewCell {
         contentView.backgroundColor = UIColor(OnymTokens.bg)
         buildBubble()
         buildStatusIndicator()
+        buildNameLabel()
         layoutBubble()
     }
 
@@ -69,11 +120,18 @@ final class ChatBubbleCell: UITableViewCell {
     /// Caller (the diffable data source's cell provider) invokes
     /// this on every dequeue *and* every reconfigure — status flips
     /// on the same UUID land here too.
-    func configure(message: ChatMessage, onRetry: (() -> Void)? = nil) {
+    func configure(
+        message: ChatMessage,
+        sender: ChatSenderDisplay = .unknown,
+        onRetry: (() -> Void)? = nil
+    ) {
         bodyLabel.text = message.body
         switch message.direction {
         case .outgoing:
-            bubble.backgroundColor = UIColor(OnymAccent.blue.color)
+            // Own messages: solid fill in the user's own accent (so
+            // "your color" is consistent with the members list and
+            // every group). Right-aligned, status glyph below.
+            bubble.backgroundColor = UIColor(sender.accent.color)
             bodyLabel.textColor = UIColor(OnymTokens.onAccent)
             NSLayoutConstraint.deactivate(incomingConstraints)
             NSLayoutConstraint.activate(outgoingConstraints)
@@ -81,7 +139,10 @@ final class ChatBubbleCell: UITableViewCell {
             statusBottomConstraint.isActive = true
             applyStatus(message.status)
         case .incoming:
-            bubble.backgroundColor = UIColor(OnymTokens.surface2)
+            // Others' messages: low-opacity tint in the sender's accent
+            // — distinguishable per person while keeping body text on
+            // the regular text token readable.
+            bubble.backgroundColor = UIColor(sender.accent.color.opacity(incomingTintAlpha))
             bodyLabel.textColor = UIColor(OnymTokens.text)
             NSLayoutConstraint.deactivate(outgoingConstraints)
             NSLayoutConstraint.activate(incomingConstraints)
@@ -89,6 +150,7 @@ final class ChatBubbleCell: UITableViewCell {
             bubbleBottomConstraint.isActive = true
             statusImageView.isHidden = true
         }
+        applyNameHeader(sender)
 
         // Retry tap is only installed when the message is failed
         // *and* the host provided a retry callback. Cell reuse:
@@ -104,6 +166,27 @@ final class ChatBubbleCell: UITableViewCell {
             let tap = UITapGestureRecognizer(target: self, action: #selector(tappedBubble))
             bubble.addGestureRecognizer(tap)
             retryTapRecognizer = tap
+        }
+    }
+
+    /// Show or hide the accent-colored sender name above the bubble,
+    /// re-pinning the bubble's top to whichever anchor applies. Called
+    /// on every `configure` (including cell reuse), so a row that
+    /// previously showed a header drops it cleanly when reused for a
+    /// mid-run message.
+    private func applyNameHeader(_ sender: ChatSenderDisplay) {
+        if sender.showNameHeader {
+            nameLabel.text = sender.name
+            nameLabel.textColor = UIColor(sender.accent.color)
+            nameLabel.isHidden = false
+            bubbleTopToContentConstraint.isActive = false
+            nameTopConstraint.isActive = true
+            bubbleTopToNameConstraint.isActive = true
+        } else {
+            nameLabel.isHidden = true
+            nameTopConstraint.isActive = false
+            bubbleTopToNameConstraint.isActive = false
+            bubbleTopToContentConstraint.isActive = true
         }
     }
 
@@ -170,6 +253,21 @@ final class ChatBubbleCell: UITableViewCell {
         contentView.addSubview(statusImageView)
     }
 
+    private func buildNameLabel() {
+        nameLabel.translatesAutoresizingMaskIntoConstraints = false
+        // Scaled so it tracks Dynamic Type — `systemFont` alone wouldn't.
+        let base = UIFont.systemFont(ofSize: 12, weight: .semibold)
+        nameLabel.font = UIFontMetrics(forTextStyle: .caption1).scaledFont(for: base)
+        nameLabel.adjustsFontForContentSizeCategory = true
+        nameLabel.numberOfLines = 1
+        nameLabel.lineBreakMode = .byTruncatingTail
+        nameLabel.isHidden = true
+        nameLabel.accessibilityIdentifier = "chat.bubble.sender"
+        // Added after `bubble` so `contentView.subviews.first` stays the
+        // bubble — the alignment-introspection tests rely on that.
+        contentView.addSubview(nameLabel)
+    }
+
     private func layoutBubble() {
         let edgeInset: CGFloat = 12
         let oppositeGap: CGFloat = 56
@@ -181,8 +279,21 @@ final class ChatBubbleCell: UITableViewCell {
             equalTo: statusImageView.bottomAnchor, constant: 4
         )
 
+        // Bubble-top toggle. `bubbleTopToContentConstraint` is the
+        // default (no header); `applyNameHeader` swaps to
+        // `bubbleTopToNameConstraint` + `nameTopConstraint` when a
+        // header shows. Exactly one top path is active at a time.
+        bubbleTopToContentConstraint = bubble.topAnchor.constraint(
+            equalTo: contentView.topAnchor, constant: 4
+        )
+        nameTopConstraint = nameLabel.topAnchor.constraint(
+            equalTo: contentView.topAnchor, constant: 5
+        )
+        bubbleTopToNameConstraint = bubble.topAnchor.constraint(
+            equalTo: nameLabel.bottomAnchor, constant: 3
+        )
+
         NSLayoutConstraint.activate([
-            bubble.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 4),
             bubble.widthAnchor.constraint(
                 lessThanOrEqualTo: contentView.widthAnchor,
                 multiplier: maxWidthFraction
@@ -191,6 +302,14 @@ final class ChatBubbleCell: UITableViewCell {
             bodyLabel.trailingAnchor.constraint(equalTo: bubble.trailingAnchor, constant: -12),
             bodyLabel.topAnchor.constraint(equalTo: bubble.topAnchor, constant: 8),
             bodyLabel.bottomAnchor.constraint(equalTo: bubble.bottomAnchor, constant: -8),
+
+            // Name header aligns to the (incoming) bubble's leading edge
+            // with a small indent, and never runs into the trailing gap.
+            // Only laid out as visible when `nameTopConstraint` is active.
+            nameLabel.leadingAnchor.constraint(equalTo: bubble.leadingAnchor, constant: 4),
+            nameLabel.trailingAnchor.constraint(
+                lessThanOrEqualTo: contentView.trailingAnchor, constant: -oppositeGap
+            ),
 
             // Status indicator sits in the gap below the bubble,
             // trailing-aligned. Always positioned relative to the
@@ -223,10 +342,11 @@ final class ChatBubbleCell: UITableViewCell {
                 lessThanOrEqualTo: contentView.trailingAnchor, constant: -oppositeGap
             ),
         ]
-        // Default to leading (incoming) — `configure(message:)`
+        // Default to leading (incoming) + no header — `configure`
         // overrides before the cell is shown, but the default keeps
         // the cell layout-valid even if a configurer skips us.
         NSLayoutConstraint.activate(incomingConstraints)
         bubbleBottomConstraint.isActive = true
+        bubbleTopToContentConstraint.isActive = true
     }
 }

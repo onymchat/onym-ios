@@ -45,6 +45,64 @@ final class ChatBubbleCellTests: XCTestCase {
         XCTAssertEqual(label?.text, "hello, world")
     }
 
+    // MARK: - Sender name header
+
+    func test_senderHeader_shownWhenRequested_writesNameThrough() {
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+        cell.configure(
+            message: makeMessage(direction: .incoming),
+            sender: ChatSenderDisplay(name: "Alice", accent: .purple, showNameHeader: true)
+        )
+        let header = senderHeader(in: cell)
+        XCTAssertFalse(header.isHidden, "header must be visible when showNameHeader is true")
+        XCTAssertEqual(header.text, "Alice")
+    }
+
+    func test_senderHeader_hiddenWhenNotRequested() {
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+        cell.configure(
+            message: makeMessage(direction: .incoming),
+            sender: ChatSenderDisplay(name: "Alice", accent: .purple, showNameHeader: false)
+        )
+        XCTAssertTrue(senderHeader(in: cell).isHidden,
+                      "mid-run / suppressed messages must not show a header")
+    }
+
+    func test_senderHeader_droppedOnReuse() {
+        // Cell reuse: a row that showed a header is reused for a
+        // mid-run message. The header must clear, or a grouped
+        // message would carry a stale name.
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+        cell.configure(
+            message: makeMessage(direction: .incoming),
+            sender: ChatSenderDisplay(name: "Alice", accent: .purple, showNameHeader: true)
+        )
+        XCTAssertFalse(senderHeader(in: cell).isHidden)
+
+        cell.configure(
+            message: makeMessage(direction: .incoming),
+            sender: ChatSenderDisplay(name: "Alice", accent: .purple, showNameHeader: false)
+        )
+        XCTAssertTrue(senderHeader(in: cell).isHidden,
+                      "reused cell must drop the previously-shown header")
+    }
+
+    func test_defaultSender_showsNoHeader() {
+        // The `.unknown` default (older call sites / missing display)
+        // must not surface a header.
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+        cell.configure(message: makeMessage(direction: .incoming))
+        XCTAssertTrue(senderHeader(in: cell).isHidden)
+    }
+
+    private func senderHeader(in cell: ChatBubbleCell) -> UILabel {
+        guard let label = find(in: cell.contentView, identifier: "chat.bubble.sender")
+                as? UILabel else {
+            fatalError("sender header not found")
+        }
+        return label
+    }
+
     // MARK: - Status indicator (PR 9)
 
     func test_outgoingPending_showsClockIcon() {
