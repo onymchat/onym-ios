@@ -313,7 +313,11 @@ struct IncomingMessageDispatcher: Sendable {
             adminEd25519PubkeyHex: adminEd25519PubkeyHex,
             // Sender already anchored before sending the invite, so
             // by the time it lands the group is on chain.
-            isPublishedOnChain: true
+            isPublishedOnChain: true,
+            // Group photo as the sender knew it. `nil` for avatar-less
+            // groups or pre-avatar senders; a later GroupAvatarPayload
+            // can still fill it in.
+            avatarJPEG: invitation.avatar
         )
         await groupRepository.insert(group)
     }

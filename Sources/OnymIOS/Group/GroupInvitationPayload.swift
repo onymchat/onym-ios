@@ -57,6 +57,13 @@ struct GroupInvitationPayload: Codable, Equatable, Sendable {
     /// fingerprint until a future `MemberAnnouncementPayload` fills
     /// in the aliases.
     let memberProfiles: [String: MemberProfile]?
+    /// Square JPEG group photo (≤16 KB — see `GroupAvatarImage`), base64
+    /// on the wire via `Data`'s default Codable. Lets create-time
+    /// members land the photo with the initial snapshot instead of
+    /// waiting for a `GroupAvatarPayload`. Optional + `decodeIfPresent`
+    /// so avatar-less groups and pre-avatar senders round-trip cleanly;
+    /// a later avatar message can still set or replace it.
+    let avatar: Data?
 
     enum CodingKeys: String, CodingKey {
         case version
@@ -72,6 +79,7 @@ struct GroupInvitationPayload: Codable, Equatable, Sendable {
         case adminPubkeyHex = "admin_pubkey_hex"
         case peerBlsSecret = "peer_bls_secret"
         case memberProfiles = "member_profiles"
+        case avatar
     }
 
     init(
@@ -87,7 +95,8 @@ struct GroupInvitationPayload: Codable, Equatable, Sendable {
         groupTypeRaw: String,
         adminPubkeyHex: String?,
         peerBlsSecret: Data? = nil,
-        memberProfiles: [String: MemberProfile]? = nil
+        memberProfiles: [String: MemberProfile]? = nil,
+        avatar: Data? = nil
     ) {
         self.version = version
         self.groupID = groupID
@@ -102,6 +111,7 @@ struct GroupInvitationPayload: Codable, Equatable, Sendable {
         self.adminPubkeyHex = adminPubkeyHex
         self.peerBlsSecret = peerBlsSecret
         self.memberProfiles = memberProfiles
+        self.avatar = avatar
     }
 
     init(from decoder: Decoder) throws {
@@ -122,5 +132,6 @@ struct GroupInvitationPayload: Codable, Equatable, Sendable {
             [String: MemberProfile].self,
             forKey: .memberProfiles
         )
+        avatar = try c.decodeIfPresent(Data.self, forKey: .avatar)
     }
 }

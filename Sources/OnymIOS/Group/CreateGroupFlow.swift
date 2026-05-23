@@ -291,6 +291,7 @@ final class CreateGroupFlow {
                 governanceType: governance.sepGroupType,
                 name: effectiveName,
                 invitees: invitees,
+                avatar: avatarImageData,
                 onProgress: { [weak self] p in
                     Task { @MainActor in self?.progress = p }
                 }
