@@ -22,6 +22,7 @@ struct ChatThreadView: View {
     let messageRepository: MessageRepository
     let sendMessageInteractor: SendMessageInteractor
     let makeShareInviteFlow: @MainActor () -> ShareInviteFlow
+    let setGroupAvatar: @MainActor (String, Data?) async -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var showMembers: Bool = false
@@ -77,7 +78,8 @@ struct ChatThreadView: View {
                 groupID: groupID,
                 chatsFlow: chatsFlow,
                 identitiesFlow: identitiesFlow,
-                makeShareInviteFlow: makeShareInviteFlow
+                makeShareInviteFlow: makeShareInviteFlow,
+                setGroupAvatar: setGroupAvatar
             )
         }
         // Per-group subscription. `task(id:)` cancels + restarts when

@@ -143,6 +143,21 @@ struct IncomingMessageDispatcher: Sendable {
             return
         }
 
+        // Fast path 1.5: GroupAvatarPayload — admin updated the group
+        // photo. Group-state delta like the announcement above; its
+        // unique `avatar_*` keys keep it from decoding as a chat
+        // message (which shares version / group_id / sender).
+        if let avatarMsg = try? JSONDecoder().decode(
+            GroupAvatarPayload.self,
+            from: envelope.plaintext
+        ) {
+            await applyAvatar(
+                avatarMsg,
+                senderEd25519PublicKey: envelope.senderEd25519PublicKey
+            )
+            return
+        }
+
         // Fast path 2: GroupInvitationPayload — materialize a local
         // group under `ownerIdentityID`. Skips the invitations queue
         // because the group is now visible in the chat list.
@@ -542,6 +557,34 @@ struct IncomingMessageDispatcher: Sendable {
             inboxPublicKey: payload.newMember.inboxPub,
             sendingPubkey: payload.newMember.sendingPub
         )
+        await groupRepository.insert(updated)
+    }
+
+    /// Apply an inbound group-photo update to the matching local group.
+    /// Same admin-trust gate as `applyAnnouncement`: the envelope's
+    /// Ed25519 signer must match the group's stored
+    /// `adminEd25519PubkeyHex` (skipped best-effort for admin-less
+    /// governance models / pre-PR-9 rows). No on-chain cross-check —
+    /// the avatar isn't part of the group commitment. No-op when the
+    /// group is unknown or the photo already matches (re-delivery).
+    private func applyAvatar(
+        _ payload: GroupAvatarPayload,
+        senderEd25519PublicKey: Data?
+    ) async {
+        let groups = await groupRepository.currentGroups()
+        guard let group = groups.first(where: { $0.groupIDData == payload.groupID }) else {
+            return
+        }
+        if let storedAdmin = group.adminEd25519PubkeyHex {
+            guard let senderEd25519PublicKey else { return }
+            let senderHex = senderEd25519PublicKey
+                .map { String(format: "%02x", $0) }.joined()
+                .lowercased()
+            guard senderHex == storedAdmin.lowercased() else { return }
+        }
+        guard group.avatarJPEG != payload.avatar else { return }
+        var updated = group
+        updated.avatarJPEG = payload.avatar
         await groupRepository.insert(updated)
     }
 

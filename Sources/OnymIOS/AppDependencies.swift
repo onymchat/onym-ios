@@ -39,4 +39,8 @@ struct AppDependencies {
     /// (it's an actor); each chat-thread view captures it and
     /// dispatches `send(groupID:body:)` on the send-button tap.
     let sendMessageInteractor: SendMessageInteractor
+    /// Admin sets/clears a group photo: applies it locally and fans a
+    /// `GroupAvatarPayload` out to members. Backs the admin-only picker
+    /// in `ChatMembersView`; `nil` JPEG clears the photo.
+    let setGroupAvatar: @MainActor (_ groupIDHex: String, _ jpeg: Data?) async -> Void
 }

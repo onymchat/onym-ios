@@ -183,6 +183,14 @@ struct OnymIOSApp: App {
             identity: repository,
             inboxTransport: inboxTransport
         )
+        // Admin-side group-photo broadcaster — applies locally + fans a
+        // GroupAvatarPayload to members. Shared actor; the change-photo
+        // UI calls it through `AppDependencies.setGroupAvatar`.
+        let groupAvatarBroadcaster = GroupAvatarBroadcaster(
+            identity: repository,
+            inboxTransport: inboxTransport,
+            groupRepository: groupRepository
+        )
         let pendingInvitesFlow = PendingInvitesFlow(
             store: pendingInvitesStore,
             verificationStore: pendingVerificationStore,
@@ -274,7 +282,10 @@ struct OnymIOSApp: App {
                 inboxTransport: inboxTransport,
                 messageRepository: messageRepository,
                 groupRepository: groupRepository
-            )
+            ),
+            setGroupAvatar: { groupIDHex, jpeg in
+                await groupAvatarBroadcaster.setAvatar(groupIDHex: groupIDHex, jpeg: jpeg)
+            }
         )
     }
 

@@ -14,6 +14,7 @@ struct ChatsView: View {
     let sendMessageInteractor: SendMessageInteractor
     let makeCreateGroupFlow: @MainActor () -> CreateGroupFlow
     let makeShareInviteFlow: @MainActor () -> ShareInviteFlow
+    let setGroupAvatar: @MainActor (String, Data?) async -> Void
 
     @State private var showCreateGroup = false
 
@@ -141,7 +142,8 @@ struct ChatsView: View {
                 identitiesFlow: identitiesFlow,
                 messageRepository: messageRepository,
                 sendMessageInteractor: sendMessageInteractor,
-                makeShareInviteFlow: makeShareInviteFlow
+                makeShareInviteFlow: makeShareInviteFlow,
+                setGroupAvatar: setGroupAvatar
             )
         }
     }
