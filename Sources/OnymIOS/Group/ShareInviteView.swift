@@ -76,6 +76,20 @@ struct ShareInviteView: View {
                 .accessibilityIdentifier("share_invite.minting")
         case .ready(let link, let groupName):
             VStack(spacing: 12) {
+                SettingsQRCode(value: link, size: 220)
+                    .padding(14)
+                    .background(OnymTokens.surface2,
+                                in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .stroke(OnymTokens.hairline, lineWidth: 1))
+                    .accessibilityIdentifier("share_invite.qr_code")
+
+                Text("Have them scan this with their camera to join.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(OnymTokens.text2)
+                    .multilineTextAlignment(.center)
+                    .padding(.bottom, 4)
+
                 ShareLink(
                     item: link,
                     subject: Text(groupName ?? "Onym invite"),
