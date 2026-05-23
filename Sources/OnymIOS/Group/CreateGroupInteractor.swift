@@ -942,7 +942,7 @@ extension GroupProofGeneratorError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case let .notYetSupported(type):
-            return "\(type) is not supported yet — only Tyranny ships in this release"
+            return "\(type) is not supported yet — only Founder ships in this release"
         case let .adminIndexOutOfRange(index, count):
             return "Admin index \(index) is out of range for \(count) members"
         case .missingPeerSecret:

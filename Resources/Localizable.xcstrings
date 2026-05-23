@@ -2928,19 +2928,18 @@
         }
       }
     },
-    "Tyranny" : {
-      "extractionState" : "stale",
+    "Founder" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Tyranny"
+            "value" : "Founder"
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Тирания"
+            "value" : "Основатель"
           }
         }
       }

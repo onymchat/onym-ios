@@ -215,7 +215,7 @@ private extension SEPGroupType {
         case .oneOnOne:  "1-on-1"
         case .democracy: "Democracy"
         case .oligarchy: "Oligarchy"
-        case .tyranny:   "Tyranny"
+        case .tyranny:   "Founder"
         }
     }
 }

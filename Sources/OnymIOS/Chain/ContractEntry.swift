@@ -36,7 +36,7 @@ enum GovernanceType: String, Codable, CaseIterable, Hashable, Sendable {
         case .democracy: return String(localized: "Democracy")
         case .oligarchy: return String(localized: "Oligarchy")
         case .oneonone: return String(localized: "One-on-one")
-        case .tyranny: return String(localized: "Tyranny")
+        case .tyranny: return String(localized: "Founder")
         }
     }
 }
