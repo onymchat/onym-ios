@@ -407,6 +407,23 @@ struct IncomingMessageDispatcher: Sendable {
             return .reject
         }
         guard recomputed == claimedCommitment else { return .reject }
+
+        // Skip the chain read when we've already verified+materialized
+        // this exact (commitment, epoch). Re-confirming what we confirmed
+        // on a prior pass adds nothing — the recompute above already
+        // rejects a replay that swaps the roster while reusing the
+        // commitment (Poseidon would have to collide). This is the
+        // load-bearing fix for the launch-time `get_commitment` storm:
+        // every relay reconnect replays the full inbox, and without this
+        // each replayed invitation re-hit the relayer, tripping its rate
+        // limit and making fresh joins fail until the burst subsided.
+        if let existing = await groupRepository.currentGroups()
+            .first(where: { $0.groupIDData == invitation.groupID }),
+           existing.commitment == claimedCommitment,
+           existing.epoch == invitation.epoch {
+            return .verified
+        }
+
         // External anchor: matches what's on chain.
         let onchain: SEPCommitmentEntry
         do {
@@ -414,13 +431,24 @@ struct IncomingMessageDispatcher: Sendable {
                 groupID: invitation.groupID
             )
         } catch {
-            return .reject
+            // Couldn't reach / read the relayer (throttled, offline, or
+            // unconfigured). NOT evidence of forgery — never reject. Defer
+            // so the verifier retries via the admin-refresh path and the
+            // group materializes once the read succeeds, instead of being
+            // silently dropped until the next relay replay (a restart).
+            return .staleNeedsRefresh
         }
         // Verify at current chain state (Option 2). The chain stores
         // only the LATEST (commitment, epoch), so a snapshot is only
         // byte-verifiable when the chain is exactly at its epoch.
-        //   - chain behind the snapshot → impossible for a real anchored
-        //     snapshot; reject.
+        //   - chain BEHIND the snapshot → our read is lagging the admin's
+        //     just-landed `update_commitment` (indexer/relayer catch-up),
+        //     OR a self-consistent forgery claiming a future epoch. We
+        //     can't tell here, so defer + ask the admin rather than
+        //     reject: deferral never materializes without a later exact-
+        //     epoch match, so a forgery still can't get in, while a real
+        //     lagging read recovers. (Previously a hard reject — the root
+        //     cause of "joiner only sees the chat after a restart".)
         //   - chain EXACTLY at the snapshot's epoch → byte-verify the
         //     committed roster. Strong anti-forgery: reproducing
         //     `Poseidon(Poseidon(root, epoch), salt)` needs the random
@@ -429,7 +457,7 @@ struct IncomingMessageDispatcher: Sendable {
         //   - chain AHEAD → can't byte-verify here; defer and ask the
         //     admin for the current state rather than trusting (and
         //     thereby letting a self-consistent fake materialize).
-        guard onchain.epoch >= invitation.epoch else { return .reject }
+        guard onchain.epoch >= invitation.epoch else { return .staleNeedsRefresh }
         if onchain.epoch == invitation.epoch {
             return onchain.commitment == claimedCommitment ? .verified : .reject
         }
@@ -526,6 +554,17 @@ struct IncomingMessageDispatcher: Sendable {
             return
         }
 
+        // Dedup BEFORE any chain read. The dedup key is BLS pubkey hex,
+        // mirroring the producer-side dictionary key in
+        // `JoinRequestApprover.recordJoiner`. Every relay reconnect
+        // replays the full inbox, so an already-applied announcement is
+        // re-delivered on each launch — bailing here keeps those replays
+        // from each firing a `get_commitment` against the relayer (the
+        // launch-time storm). Cheap, local, and idempotent.
+        let key = payload.newMember.blsPub
+            .map { String(format: "%02x", $0) }.joined()
+        if group.memberProfiles[key] != nil { return }
+
         // PR 9 trust check: announcement must be signed by the
         // group's known admin. Skipped (best-effort) when the group
         // has no stored admin Ed25519 — happens for governance
@@ -548,9 +587,6 @@ struct IncomingMessageDispatcher: Sendable {
             return
         }
 
-        let key = payload.newMember.blsPub
-            .map { String(format: "%02x", $0) }.joined()
-        if group.memberProfiles[key] != nil { return }
         var updated = group
         updated.memberProfiles[key] = MemberProfile(
             alias: payload.newMember.alias,
