@@ -350,11 +350,12 @@ struct OnymGovIcon: View {
     }
 }
 
-// MARK: - Group avatar (Onym mark as upload placeholder)
+// MARK: - Group avatar (image-or-mark)
 
-/// Avatar slot. In this prototype the user never uploads an image, so
-/// the slot always shows the brand mark — same behaviour as the
-/// design's `GroupAvatar` after the `forceInitials` refactor.
+/// Avatar slot. Renders the group photo (`imageData`, a square JPEG —
+/// see `GroupAvatarImage`) clipped to a circle when one is set, else
+/// falls back to the Onym brand mark — the same fallback the design's
+/// `GroupAvatar` used before uploads shipped.
 struct OnymGroupAvatar: View {
     var size: CGFloat = 96
     var accent: Color = OnymAccent.blue.color
@@ -363,6 +364,8 @@ struct OnymGroupAvatar: View {
     /// When `true` the mark renders in the accent colour rather than
     /// the neutral text colour — used on the Creating screen.
     var brand: Bool = false
+    /// Square JPEG to show instead of the brand mark. `nil` → mark.
+    var imageData: Data? = nil
 
     var body: some View {
         ZStack {
@@ -372,12 +375,20 @@ struct OnymGroupAvatar: View {
                     .padding(-8)
                     .modifier(PulseModifier())
             }
-            OnymMark(
-                size: size,
-                color: brand ? accent : OnymTokens.text,
-                spinning: spinning,
-                fillOpacity: brand ? 1.0 : 0.92
-            )
+            if let imageData, let uiImage = UIImage(data: imageData) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: size, height: size)
+                    .clipShape(Circle())
+            } else {
+                OnymMark(
+                    size: size,
+                    color: brand ? accent : OnymTokens.text,
+                    spinning: spinning,
+                    fillOpacity: brand ? 1.0 : 0.92
+                )
+            }
         }
         .frame(width: size, height: size)
     }

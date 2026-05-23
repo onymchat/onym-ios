@@ -67,6 +67,12 @@ struct ChatGroup: Identifiable, Equatable, Sendable {
     /// `accepted = true`. Persisted-but-not-anchored groups can be
     /// retried.
     var isPublishedOnChain: Bool
+    /// Square JPEG (256×256, ≤16 KB — see `GroupAvatarImage`) the user
+    /// or admin set as the group photo. `nil` falls back to the Onym
+    /// brand mark in `OnymGroupAvatar`. Travels in the invitation
+    /// snapshot at create time and via `GroupAvatarPayload` afterwards.
+    /// Defaulted so existing construction sites need no change.
+    var avatarJPEG: Data? = nil
 
     /// Group ID as the raw 32-byte payload (parsed back from `id`).
     /// Used directly when building chain payloads + invitations.

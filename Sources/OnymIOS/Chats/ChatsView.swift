@@ -152,16 +152,15 @@ private struct ChatsRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // Reuse the broken-ring brand mark as the per-chat avatar
-            // — same identity the user saw on the Create Group hero.
-            // Once group avatars / uploads ship this becomes the
-            // image-or-mark fallback.
+            // Group photo when set, else the broken-ring brand mark —
+            // same identity the user saw on the Create Group hero.
             OnymGroupAvatar(
                 size: 44,
                 accent: OnymAccent.blue.color,
                 ringPulse: false,
                 spinning: false,
-                brand: false
+                brand: false,
+                imageData: group.avatarJPEG
             )
 
             VStack(alignment: .leading, spacing: 2) {

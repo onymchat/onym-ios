@@ -212,21 +212,12 @@ private struct CreateGroupStep1View: View {
     private var accentColor: Color { flow.accent.color }
 
     private var avatar: some View {
-        ZStack(alignment: .bottomTrailing) {
-            OnymGroupAvatar(size: 92, accent: accentColor)
-            ZStack {
-                Circle()
-                    .fill(accentColor)
-                    .frame(width: 28, height: 28)
-                    .overlay(
-                        Circle().stroke(OnymTokens.bg, lineWidth: 2)
-                    )
-                Image(systemName: "camera.fill")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(OnymTokens.onAccent)
-            }
-            .offset(x: 4, y: 4)
-        }
+        GroupAvatarPickerButton(
+            imageData: $flow.avatarImageData,
+            size: 92,
+            accent: accentColor,
+            conceptText: flow.effectiveName
+        )
         .padding(.top, 10)
         .padding(.bottom, 18)
     }
@@ -1126,7 +1117,11 @@ private struct CreateGroupSuccessView: View {
     private var hero: some View {
         VStack(spacing: 0) {
             ZStack(alignment: .bottomTrailing) {
-                OnymGroupAvatar(size: 96, accent: accentColor)
+                OnymGroupAvatar(
+                    size: 96,
+                    accent: accentColor,
+                    imageData: flow.createdGroup?.avatarJPEG ?? flow.avatarImageData
+                )
                 ZStack {
                     Circle().fill(OnymTokens.green)
                         .overlay(Circle().stroke(OnymTokens.bg, lineWidth: 2))

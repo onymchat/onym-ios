@@ -49,6 +49,10 @@ final class PersistedGroup {
     /// migrated from pre-PR-9 schema, or for governance models
     /// without an admin.
     var encryptedAdminEd25519PubkeyHex: Data?
+    /// Optional square JPEG group photo. Optional so SwiftData's
+    /// lightweight migration lands the column on existing rows without a
+    /// wipe; `nil` decodes to "no avatar" (brand-mark fallback).
+    var encryptedAvatar: Data?
 
     init(
         id: String,
@@ -65,7 +69,8 @@ final class PersistedGroup {
         encryptedCommitment: Data?,
         encryptedAdminPubkeyHex: Data?,
         encryptedMemberProfilesJSON: Data?,
-        encryptedAdminEd25519PubkeyHex: Data?
+        encryptedAdminEd25519PubkeyHex: Data?,
+        encryptedAvatar: Data? = nil
     ) {
         self.id = id
         self.ownerIdentityIDString = ownerIdentityIDString
@@ -82,5 +87,6 @@ final class PersistedGroup {
         self.encryptedAdminPubkeyHex = encryptedAdminPubkeyHex
         self.encryptedMemberProfilesJSON = encryptedMemberProfilesJSON
         self.encryptedAdminEd25519PubkeyHex = encryptedAdminEd25519PubkeyHex
+        self.encryptedAvatar = encryptedAvatar
     }
 }
