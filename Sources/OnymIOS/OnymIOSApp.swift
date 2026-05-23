@@ -388,9 +388,16 @@ struct OnymIOSApp: App {
                     // announcements apply directly to
                     // `GroupRepository.memberProfiles`, everything
                     // else falls through to the invitations queue.
-                    let chainStateReader = SEPContractChainStateReader(
-                        relayers: relayerRepository,
-                        contracts: contractsRepository
+                    // Cache + retry around the raw relayer reads. Without
+                    // this, every relay reconnect replays the full inbox
+                    // and each replayed group-state message fired its own
+                    // `get_commitment`, storming the relayer into
+                    // throttling fresh joins. See `CachingChainStateReader`.
+                    let chainStateReader = CachingChainStateReader(
+                        inner: SEPContractChainStateReader(
+                            relayers: relayerRepository,
+                            contracts: contractsRepository
+                        )
                     )
                     let dispatcher = IncomingMessageDispatcher(
                         envelopeDecrypter: identityRepository,

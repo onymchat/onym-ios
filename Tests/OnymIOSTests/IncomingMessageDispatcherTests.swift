@@ -1058,6 +1058,189 @@ final class IncomingMessageDispatcherTests: XCTestCase {
                        "stale invitation should be deferred to the verifier")
     }
 
+    func test_invitation_tyranny_redelivery_skipsChainReadWhenAlreadyVerified() async throws {
+        // The launch-time storm fix: a re-delivered invitation for an
+        // already-materialized (commitment, epoch) must NOT hit the
+        // relayer again. First delivery verifies (1 chain read) and
+        // materializes; the identical replay short-circuits on the local
+        // match, leaving the chain-read count at 1.
+        let groupID = Data(repeating: 0x42, count: 32)
+        let salt = Data(repeating: 0x66, count: 32)  // matches makeInvitationPayload
+        let realCommitment = try Self.makeRealTyrannyCommitment(
+            members: [], epoch: 0, salt: salt, tier: .small
+        )
+        chainState.setNext(commitment: realCommitment, epoch: 0)
+        let payload = makeInvitationPayload(
+            groupID: groupID,
+            name: "Family",
+            memberProfiles: nil,
+            groupType: .tyranny,
+            commitment: realCommitment
+        )
+        let plaintext = try JSONEncoder().encode(payload)
+        let decrypter = FakeInvitationEnvelopeDecrypter(
+            mode: .fixed(plaintext),
+            senderEd25519PublicKey: Data(repeating: 0xED, count: 32)
+        )
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
+        )
+
+        await dispatcher.dispatch(messageID: "mat-1", ownerIdentityID: owner,
+                                  payload: Data("envelope".utf8), receivedAt: Date())
+        await dispatcher.dispatch(messageID: "mat-1-replay", ownerIdentityID: owner,
+                                  payload: Data("envelope".utf8), receivedAt: Date())
+
+        let after = await groups.currentGroups()
+        XCTAssertEqual(after.filter { $0.groupIDData == groupID }.count, 1,
+                       "idempotent — still exactly one group")
+        XCTAssertEqual(chainState.calls.count, 1,
+                       "replay of an already-verified snapshot must not re-read the chain")
+    }
+
+    func test_invitation_tyranny_chainReadThrows_defersInsteadOfReject() async throws {
+        // A throttled / unreachable relayer is not evidence of forgery.
+        // The invitation must be deferred (retried via the admin-refresh
+        // path), never silently dropped — that drop was the root cause of
+        // "joiner only sees the chat after a restart".
+        let groupID = Data(repeating: 0x42, count: 32)
+        let salt = Data(repeating: 0x66, count: 32)
+        let realCommitment = try Self.makeRealTyrannyCommitment(
+            members: [], epoch: 0, salt: salt, tier: .small
+        )
+        chainState.setNextThrows(ChainReadError.noActiveRelayer)  // simulate throttle/offline
+        let payload = makeInvitationPayload(
+            groupID: groupID,
+            name: "Family",
+            memberProfiles: nil,
+            groupType: .tyranny,
+            commitment: realCommitment
+        )
+        let plaintext = try JSONEncoder().encode(payload)
+        let decrypter = FakeInvitationEnvelopeDecrypter(
+            mode: .fixed(plaintext),
+            senderEd25519PublicKey: Data(repeating: 0xED, count: 32)
+        )
+        let refresher = SpyGroupStateRefresher()
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory()),
+            groupStateRefresher: refresher
+        )
+
+        await dispatcher.dispatch(messageID: "mat-throw", ownerIdentityID: owner,
+                                  payload: Data("envelope".utf8), receivedAt: Date())
+
+        let after = await groups.currentGroups()
+        XCTAssertTrue(after.isEmpty, "unverifiable-now invitation must not materialize")
+        let deferred = await refresher.deferredGroupIDs()
+        XCTAssertEqual(deferred, [groupID],
+                       "a chain-read failure must defer (retry), not reject+drop")
+    }
+
+    func test_invitation_tyranny_chainBehind_defersInsteadOfReject() async throws {
+        // Admin just anchored epoch 1 and immediately sent the snapshot;
+        // our relayer read still lags at epoch 0. Treat as deferral, not a
+        // hard reject — deferral never materializes without a later exact-
+        // epoch match, so a forgery still can't slip in, while a real
+        // lagging read recovers live instead of only on restart.
+        let groupID = Data(repeating: 0x42, count: 32)
+        let salt = Data(repeating: 0x66, count: 32)
+        let realCommitment = try Self.makeRealTyrannyCommitment(
+            members: [], epoch: 1, salt: salt, tier: .small
+        )
+        chainState.setNext(commitment: Data(repeating: 0x00, count: 32), epoch: 0)  // behind
+        let payload = GroupInvitationPayload(
+            version: 1,
+            groupID: groupID,
+            groupSecret: Data(repeating: 0x55, count: 32),
+            name: "Family",
+            members: [],
+            epoch: 1,
+            salt: salt,
+            commitment: realCommitment,
+            tierRaw: SEPTier.small.rawValue,
+            groupTypeRaw: SEPGroupType.tyranny.rawValue,
+            adminPubkeyHex: nil
+        )
+        let plaintext = try JSONEncoder().encode(payload)
+        let decrypter = FakeInvitationEnvelopeDecrypter(
+            mode: .fixed(plaintext),
+            senderEd25519PublicKey: Data(repeating: 0xED, count: 32)
+        )
+        let refresher = SpyGroupStateRefresher()
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory()),
+            groupStateRefresher: refresher
+        )
+
+        await dispatcher.dispatch(messageID: "mat-behind", ownerIdentityID: owner,
+                                  payload: Data("envelope".utf8), receivedAt: Date())
+
+        let after = await groups.currentGroups()
+        XCTAssertTrue(after.isEmpty, "chain-behind snapshot must not materialize unverified")
+        let deferred = await refresher.deferredGroupIDs()
+        XCTAssertEqual(deferred, [groupID],
+                       "chain-behind must defer (lagging read), not reject+drop")
+    }
+
+    func test_announcement_tyranny_knownMember_skipsChainRead() async throws {
+        // Re-delivered announcement for a member we already have must
+        // dedup BEFORE the chain read, so inbox replays don't storm the
+        // relayer.
+        let groupID = Data(repeating: 0xAB, count: 32)
+        let bobBlsHex = "bb".repeated(48)
+        await seedGroup(
+            groupID: groupID,
+            memberProfiles: [bobBlsHex: MemberProfile(
+                alias: "Bob",
+                inboxPublicKey: Data(repeating: 0x33, count: 32),
+                sendingPubkey: Data(repeating: 0xEE, count: 32)
+            )],
+            adminEd25519PubkeyHex: "ed".repeated(32),
+            groupType: .tyranny
+        )
+        let plaintext = try Self.encode(announcement: try Self.makeAnnouncement(
+            groupID: groupID,
+            joinerBlsHex: bobBlsHex,
+            joinerInboxByte: 0x33,
+            joinerAlias: "Bob",
+            adminAlias: "Alice"
+        ))
+        let decrypter = FakeInvitationEnvelopeDecrypter(
+            mode: .fixed(plaintext),
+            senderEd25519PublicKey: Data(repeating: 0xED, count: 32)
+        )
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
+        )
+
+        await dispatcher.dispatch(messageID: "ann-known", ownerIdentityID: owner,
+                                  payload: Data("envelope".utf8), receivedAt: Date())
+
+        XCTAssertEqual(chainState.calls.count, 0,
+                       "known-member announcement must dedup before reading the chain")
+    }
+
     func test_refreshRequest_routedToVerifier() async throws {
         // An inbound GroupStateRefreshRequest is delegated to the
         // verifier (admin side) and never materializes / stores anything.
