@@ -896,6 +896,23 @@
         }
       }
     },
+    "Choose Photo" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose Photo"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Выбрать фото"
+          }
+        }
+      }
+    },
     "Choose the contract version used to anchor on-chain group state. Selection per (network, governance type) pins to new chats; existing chats keep the contract they were created with." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1448,6 +1465,23 @@
         }
       }
     },
+    "Generate with AI" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Generate with AI"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Создать с помощью ИИ"
+          }
+        }
+      }
+    },
     "Generating proof and updating the on-chain commitment. This usually takes a few seconds." : {
       "localizations" : {
         "en" : {
@@ -1496,6 +1530,23 @@
         }
       }
     },
+    "Group photo" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Group photo"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Фото группы"
+          }
+        }
+      }
+    },
     "Have someone scan this code with Onym to open a private chat with %@." : {
       "localizations" : {
         "en" : {
@@ -1511,6 +1562,9 @@
           }
         }
       }
+    },
+    "Have them scan this with their camera to join." : {
+
     },
     "i" : {
       "localizations" : {
@@ -2489,6 +2543,23 @@
         }
       }
     },
+    "Remove Photo" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove Photo"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Удалить фото"
+          }
+        }
+      }
+    },
     "Removing **%@** wipes its on-device secrets and every chat created under it. This cannot be undone — the recovery phrase is the only way back in." : {
       "localizations" : {
         "en" : {
@@ -2976,6 +3047,9 @@
         }
       }
     },
+    "That QR code isn't an Onym group invite. Ask the host to show the invite QR from the group's member list." : {
+
+    },
     "The phrase is generated on-device and never sent off the device." : {
       "localizations" : {
         "en" : {
@@ -3397,70 +3471,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ваш релеер — ваши правила"
-          }
-        }
-      }
-    },
-    "Group photo" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Group photo"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Фото группы"
-          }
-        }
-      }
-    },
-    "Choose Photo" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Choose Photo"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Выбрать фото"
-          }
-        }
-      }
-    },
-    "Generate with AI" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Generate with AI"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Создать с помощью ИИ"
-          }
-        }
-      }
-    },
-    "Remove Photo" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Remove Photo"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Удалить фото"
           }
         }
       }

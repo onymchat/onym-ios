@@ -14,9 +14,19 @@ struct ChatsView: View {
     let sendMessageInteractor: SendMessageInteractor
     let makeCreateGroupFlow: @MainActor () -> CreateGroupFlow
     let makeShareInviteFlow: @MainActor () -> ShareInviteFlow
+    let makeJoinFlow: @MainActor (IntroCapability) -> JoinFlow
     let setGroupAvatar: @MainActor (String, Data?) async -> Void
 
     @State private var showCreateGroup = false
+    @State private var showScanner = false
+    // Stashed across the scanner's dismissal — presenting the join
+    // sheet while the full-screen scanner is still tearing down races
+    // SwiftUI's presentation machinery, so we hand off in the cover's
+    // `onDismiss` instead. Exactly one is non-nil at a time.
+    @State private var scannedCapability: IntroCapability?
+    @State private var scannedInvalid = false
+    @State private var scanRejected = false
+    @State private var joinCapability: IntroCapability?
 
     var body: some View {
         Group {
@@ -44,6 +54,19 @@ struct ChatsView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 PendingInvitesToolbarButton(flow: pendingInvitesFlow)
             }
+            // Scan-to-join — the joiner-side counterpart to the host's
+            // invite QR (shown from Group Settings). Always available so
+            // a brand-new user can scan their way into a first group
+            // without a chat of their own yet.
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showScanner = true
+                } label: {
+                    Image(systemName: "qrcode.viewfinder")
+                }
+                .accessibilityLabel("Scan invite QR")
+                .accessibilityIdentifier("chats.scan_join_toolbar")
+            }
             // Plus button mirrors iOS Mail / Messages — useful once
             // the user already has at least one chat. Hidden in the
             // empty state because the central CTA already covers it.
@@ -68,6 +91,45 @@ struct ChatsView: View {
                 makeShareInviteFlow: makeShareInviteFlow,
                 onClose: { showCreateGroup = false }
             )
+        }
+        .fullScreenCover(isPresented: $showScanner, onDismiss: handleScannerDismiss) {
+            QRCodeScannerView(
+                onScanned: { raw in
+                    // Same allowlist + decode the deeplink path uses, so
+                    // a scanned link and a tapped link reach JoinView
+                    // identically. A non-invite QR yields nil → reject.
+                    if let cap = DeeplinkCapture.introCapability(fromString: raw) {
+                        scannedCapability = cap
+                    } else {
+                        scannedInvalid = true
+                    }
+                    showScanner = false
+                },
+                onCancel: { showScanner = false }
+            )
+        }
+        .sheet(item: $joinCapability) { cap in
+            JoinView(
+                flow: makeJoinFlow(cap),
+                onClose: { joinCapability = nil }
+            )
+        }
+        .alert("Not an Onym invite", isPresented: $scanRejected) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("That QR code isn't an Onym group invite. Ask the host to show the invite QR from the group's member list.")
+        }
+    }
+
+    /// Hands off the scan result once the full-screen scanner has fully
+    /// dismissed — see the `joinCapability`/`scannedCapability` note above.
+    private func handleScannerDismiss() {
+        if let cap = scannedCapability {
+            scannedCapability = nil
+            joinCapability = cap
+        } else if scannedInvalid {
+            scannedInvalid = false
+            scanRejected = true
         }
     }
 
@@ -115,6 +177,14 @@ struct ChatsView: View {
             .controlSize(.large)
             .padding(.top, 4)
             .accessibilityIdentifier("chats.create_group_empty_cta")
+            Button {
+                showScanner = true
+            } label: {
+                Label("Scan a QR to join", systemImage: "qrcode.viewfinder")
+                    .font(.subheadline.weight(.medium))
+            }
+            .buttonStyle(.borderless)
+            .accessibilityIdentifier("chats.scan_join_empty_cta")
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
