@@ -22,16 +22,20 @@ struct ChatMembersView: View {
     @Bindable var chatsFlow: ChatsFlow
     @Bindable var identitiesFlow: IdentitiesFlow
     let makeShareInviteFlow: @MainActor () -> ShareInviteFlow
+    let setGroupAvatar: @MainActor (String, Data?) async -> Void
 
     @State private var shareInviteFlow: ShareInviteFlow?
 
     var body: some View {
         Group {
             if let group = currentGroup {
-                if group.memberProfiles.isEmpty {
-                    emptyState
-                } else {
-                    list(for: group)
+                VStack(spacing: 0) {
+                    header(for: group)
+                    if group.memberProfiles.isEmpty {
+                        emptyState
+                    } else {
+                        list(for: group)
+                    }
                 }
             } else {
                 missingGroupState
@@ -105,6 +109,27 @@ struct ChatMembersView: View {
         return activeHex == storedAdminHex
     }
 
+    /// Whether to show the editable (picker) avatar vs a read-only one.
+    /// Same gate as `canShareInvite`: only the Tyranny admin can change
+    /// the photo, because only their broadcast passes the receiver-side
+    /// admin-signature check. Anarchy / OneOnOne have no admin, so the
+    /// photo stays as set at create time in this pass.
+    private var canChangeAvatar: Bool { canShareInvite }
+
+    /// Bridges the picker to the broadcaster: reads the live group photo,
+    /// and on a pick/clear ships it via `setGroupAvatar` (which applies
+    /// locally + fans out). The local store write flows back through
+    /// `chatsFlow.groups`, so the `get` reflects the change on the next
+    /// render without extra @State.
+    private var avatarBinding: Binding<Data?> {
+        Binding(
+            get: { currentGroup?.avatarJPEG },
+            set: { [groupID, setGroupAvatar] newValue in
+                Task { await setGroupAvatar(groupID, newValue) }
+            }
+        )
+    }
+
     private var activeBlsHex: String? {
         guard
             let id = identitiesFlow.currentID,
@@ -117,6 +142,26 @@ struct ChatMembersView: View {
     }
 
     // MARK: - Subviews
+
+    /// Group-photo hero. Editable picker for the admin; a plain
+    /// photo-or-mark for everyone else.
+    @ViewBuilder
+    private func header(for group: ChatGroup) -> some View {
+        Group {
+            if canChangeAvatar {
+                GroupAvatarPickerButton(
+                    imageData: avatarBinding,
+                    size: 72,
+                    accent: OnymAccent.blue.color,
+                    conceptText: group.name
+                )
+            } else {
+                OnymGroupAvatar(size: 72, imageData: group.avatarJPEG)
+            }
+        }
+        .padding(.top, 16)
+        .padding(.bottom, 4)
+    }
 
     private func list(for group: ChatGroup) -> some View {
         ScrollView {

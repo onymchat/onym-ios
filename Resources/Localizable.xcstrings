@@ -1125,6 +1125,22 @@
         }
       }
     },
+    "Couldn’t verify — the admin is offline. The group stays hidden until it can be verified on chain." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn’t verify — the admin is offline. The group stays hidden until it can be verified on chain."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не удалось проверить — администратор не в сети. Группа останется скрытой, пока её не удастся проверить в сети."
+          }
+        }
+      }
+    },
     "Create an end-to-end encrypted group anchored on Stellar." : {
       "localizations" : {
         "en" : {
@@ -1286,6 +1302,22 @@
         }
       }
     },
+    "Dismiss" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dismiss"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Закрыть"
+          }
+        }
+      }
+    },
     "Don’t have their key? " : {
       "localizations" : {
         "en" : {
@@ -1399,6 +1431,23 @@
         }
       }
     },
+    "Founder" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Founder"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Основатель"
+          }
+        }
+      }
+    },
     "Generating proof and updating the on-chain commitment. This usually takes a few seconds." : {
       "localizations" : {
         "en" : {
@@ -1411,6 +1460,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Генерируется доказательство и обновляется обязательство в блокчейне. Обычно занимает несколько секунд."
+          }
+        }
+      }
+    },
+    "Group invites you receive show up here for you to accept." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Group invites you receive show up here for you to accept."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Приглашения в группы, которые вы получаете, появляются здесь для принятия."
           }
         }
       }
@@ -1527,6 +1592,22 @@
         }
       }
     },
+    "Invitations" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Invitations"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Приглашения"
+          }
+        }
+      }
+    },
     "Invite" : {
       "localizations" : {
         "en" : {
@@ -1587,6 +1668,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Пригласите людей в чат — они появятся здесь."
+          }
+        }
+      }
+    },
+    "invited you to “%@”" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "invited you to “%@”"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "пригласил вас в «%@»"
           }
         }
       }
@@ -1784,6 +1881,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Контрактов пока нет"
+          }
+        }
+      }
+    },
+    "No invitations" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No invitations"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Нет приглашений"
           }
         }
       }
@@ -2441,6 +2554,22 @@
         }
       }
     },
+    "Retry" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retry"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Повторить"
+          }
+        }
+      }
+    },
     "Run a relayer for yourself, your team, or your org. End-to-end encryption stays intact — Onym never sees your messages." : {
       "localizations" : {
         "en" : {
@@ -2928,22 +3057,6 @@
         }
       }
     },
-    "Founder" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Founder"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Основатель"
-          }
-        }
-      }
-    },
     "Up to date" : {
       "localizations" : {
         "en" : {
@@ -2990,6 +3103,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Проверка"
+          }
+        }
+      }
+    },
+    "Verifying group state…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verifying group state…"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Проверка состояния группы…"
           }
         }
       }
@@ -3268,6 +3397,70 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ваш релеер — ваши правила"
+          }
+        }
+      }
+    },
+    "Group photo" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Group photo"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Фото группы"
+          }
+        }
+      }
+    },
+    "Choose Photo" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose Photo"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Выбрать фото"
+          }
+        }
+      }
+    },
+    "Generate with AI" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Generate with AI"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Создать с помощью ИИ"
+          }
+        }
+      }
+    },
+    "Remove Photo" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove Photo"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Удалить фото"
           }
         }
       }

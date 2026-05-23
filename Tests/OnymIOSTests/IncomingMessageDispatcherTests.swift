@@ -325,6 +325,108 @@ final class IncomingMessageDispatcherTests: XCTestCase {
                        "legacy group accepts announcements (best-effort)")
     }
 
+    // MARK: - Avatar path (GroupAvatarPayload)
+
+    func test_avatar_appliedWhenSenderMatchesStoredAdmin() async throws {
+        let groupID = Data(repeating: 0xAB, count: 32)
+        let adminEd25519 = Data(repeating: 0xED, count: 32)
+        await seedGroup(
+            groupID: groupID,
+            memberProfiles: [:],
+            adminEd25519PubkeyHex: "ed".repeated(32)
+        )
+        let jpeg = Data(repeating: 0x7A, count: 800)
+        let plaintext = try Self.encode(avatar: Self.makeAvatar(groupID: groupID, jpeg: jpeg))
+        let decrypter = FakeInvitationEnvelopeDecrypter(
+            mode: .fixed(plaintext),
+            senderEd25519PublicKey: adminEd25519
+        )
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
+        )
+        await dispatcher.dispatch(
+            messageID: "avatar-ok",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+        let after = await groups.currentGroups()
+        XCTAssertEqual(after.first { $0.groupIDData == groupID }?.avatarJPEG, jpeg,
+                       "admin-signed avatar update is applied")
+    }
+
+    func test_avatar_rejectedWhenSenderDoesNotMatchStoredAdmin() async throws {
+        let groupID = Data(repeating: 0xAB, count: 32)
+        await seedGroup(
+            groupID: groupID,
+            memberProfiles: [:],
+            adminEd25519PubkeyHex: "ed".repeated(32)
+        )
+        let plaintext = try Self.encode(avatar: Self.makeAvatar(
+            groupID: groupID,
+            jpeg: Data(repeating: 0x01, count: 64)
+        ))
+        let decrypter = FakeInvitationEnvelopeDecrypter(
+            mode: .fixed(plaintext),
+            senderEd25519PublicKey: Data(repeating: 0xBA, count: 32)  // imposter
+        )
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
+        )
+        await dispatcher.dispatch(
+            messageID: "avatar-imposter",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+        let after = await groups.currentGroups()
+        XCTAssertNil(after.first { $0.groupIDData == groupID }?.avatarJPEG,
+                     "imposter avatar update must not mutate the group photo")
+    }
+
+    func test_avatar_nilPayloadClearsExistingPhoto() async throws {
+        let groupID = Data(repeating: 0xAB, count: 32)
+        let adminEd25519 = Data(repeating: 0xED, count: 32)
+        await seedGroup(
+            groupID: groupID,
+            memberProfiles: [:],
+            adminEd25519PubkeyHex: "ed".repeated(32),
+            avatarJPEG: Data(repeating: 0x09, count: 128)
+        )
+        let plaintext = try Self.encode(avatar: Self.makeAvatar(groupID: groupID, jpeg: nil))
+        let decrypter = FakeInvitationEnvelopeDecrypter(
+            mode: .fixed(plaintext),
+            senderEd25519PublicKey: adminEd25519
+        )
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
+        )
+        await dispatcher.dispatch(
+            messageID: "avatar-clear",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+        let after = await groups.currentGroups()
+        XCTAssertNil(after.first { $0.groupIDData == groupID }?.avatarJPEG,
+                     "admin-signed nil avatar clears the photo")
+    }
+
     func test_invitation_capturesSenderEd25519AsAdmin() async throws {
         // PR 9: the materializer stamps the inviting envelope's
         // senderEd25519PublicKey as the group's adminEd25519PubkeyHex
@@ -750,7 +852,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
         groupID: Data,
         memberProfiles: [String: MemberProfile],
         adminEd25519PubkeyHex: String? = nil,
-        groupType: SEPGroupType = .anarchy
+        groupType: SEPGroupType = .anarchy,
+        avatarJPEG: Data? = nil
     ) async {
         // Default to .anarchy so the existing dispatcher tests skip
         // PR 13b's Tyranny-only on-chain commitment verification.
@@ -771,7 +874,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             groupType: groupType,
             adminPubkeyHex: nil,
             adminEd25519PubkeyHex: adminEd25519PubkeyHex,
-            isPublishedOnChain: true
+            isPublishedOnChain: true,
+            avatarJPEG: avatarJPEG
         )
         _ = await groups.insert(group)
     }
@@ -800,6 +904,20 @@ final class IncomingMessageDispatcherTests: XCTestCase {
 
     private static func encode(announcement: MemberAnnouncementPayload) throws -> Data {
         try JSONEncoder().encode(announcement)
+    }
+
+    private static func makeAvatar(groupID: Data, jpeg: Data?) -> GroupAvatarPayload {
+        GroupAvatarPayload(
+            version: 1,
+            groupID: groupID,
+            senderBlsPubkeyHex: "aa".repeated(48),
+            sentAtMillis: 1_700_000_000_000,
+            avatar: jpeg
+        )
+    }
+
+    private static func encode(avatar: GroupAvatarPayload) throws -> Data {
+        try JSONEncoder().encode(avatar)
     }
 
     /// Compute the real Tyranny commitment for a given (members,
