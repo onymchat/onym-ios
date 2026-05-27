@@ -196,6 +196,7 @@ final class MessageRepositoryTests: XCTestCase {
             sentAt: sentAt,
             direction: .outgoing,
             status: status,
+            replyToMessageID: nil,
             groupType: .tyranny
         )
     }
@@ -235,6 +236,7 @@ private actor InMemoryMessageStore: MessageStore {
             sentAt: existing.sentAt,
             direction: existing.direction,
             status: status,
+            replyToMessageID: existing.replyToMessageID,
             groupType: existing.groupType
         )
     }

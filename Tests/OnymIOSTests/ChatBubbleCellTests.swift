@@ -319,6 +319,7 @@ final class ChatBubbleCellTests: XCTestCase {
             sentAt: Date(timeIntervalSince1970: 1_700_000_000),
             direction: direction,
             status: status ?? (direction == .incoming ? .received : .sent),
+            replyToMessageID: nil,
             groupType: .tyranny
         )
     }

@@ -50,6 +50,20 @@ final class SwiftDataMessageStoreTests: XCTestCase {
         XCTAssertEqual(first.direction, .outgoing)
         XCTAssertEqual(first.status, .pending)
         XCTAssertEqual(first.groupType, .tyranny)
+        XCTAssertNil(first.replyToMessageID,
+                     "a non-reply message round-trips with no reply target")
+    }
+
+    func test_insertOrUpdate_replyRef_roundtrips() async {
+        let groupID = "aa".repeated(32)
+        let target = UUID()
+        let reply = makeMessage(groupID: groupID, body: "agreed", replyToMessageID: target)
+
+        _ = await store.insertOrUpdate(reply)
+
+        let listed = await store.list(groupID: groupID)
+        XCTAssertEqual(listed.first?.replyToMessageID, target,
+                       "the reply target id must survive the encrypted-store round-trip")
     }
 
     func test_insertOrUpdate_sameID_updatesInPlace() async {
@@ -66,6 +80,7 @@ final class SwiftDataMessageStoreTests: XCTestCase {
             sentAt: msg.sentAt,
             direction: .outgoing,
             status: .sent,
+            replyToMessageID: nil,
             groupType: .tyranny
         )
         let inserted = await store.insertOrUpdate(updated)
@@ -190,7 +205,8 @@ final class SwiftDataMessageStoreTests: XCTestCase {
         body: String = "hi",
         sentAt: Date = Date(timeIntervalSince1970: 1_700_000_000),
         direction: MessageDirection = .outgoing,
-        status: MessageStatus = .sent
+        status: MessageStatus = .sent,
+        replyToMessageID: UUID? = nil
     ) -> ChatMessage {
         ChatMessage(
             id: id,
@@ -201,6 +217,7 @@ final class SwiftDataMessageStoreTests: XCTestCase {
             sentAt: sentAt,
             direction: direction,
             status: status,
+            replyToMessageID: replyToMessageID,
             groupType: .tyranny
         )
     }

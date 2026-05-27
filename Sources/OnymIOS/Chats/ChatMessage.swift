@@ -44,6 +44,14 @@ struct ChatMessage: Equatable, Sendable, Identifiable {
     /// always `.received` at insert and never changes.
     let status: MessageStatus
 
+    /// The message this one replies to, if any. Mirrors
+    /// `ChatMessagePayload.replyToMessageID`. Only the target ID is
+    /// stored — the UI resolves the quoted sender + body by looking
+    /// this up among the group's other messages at render time, so a
+    /// target that isn't on this device renders as "message
+    /// unavailable" instead of carrying a stale copy of its text.
+    let replyToMessageID: UUID?
+
     /// Mirrors `ChatMessageVariant.kind`. Stored alongside the body so
     /// migrating to multi-variant rendering later doesn't need to
     /// re-fetch the group to learn the flavour.

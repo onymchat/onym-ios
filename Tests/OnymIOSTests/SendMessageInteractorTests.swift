@@ -135,6 +135,29 @@ final class SendMessageInteractorTests: XCTestCase {
         XCTAssertEqual(stored.count, 1)
     }
 
+    func test_send_withReplyRef_carriesTargetOntoMessage() async throws {
+        let groupID = await seedGroupWithTwoPeers()
+        let target = UUID()
+
+        let result = try await interactor.send(
+            groupID: groupID,
+            body: "agreed",
+            replyToMessageID: target
+        )
+        XCTAssertEqual(result.replyToMessageID, target,
+                       "the returned message must carry the reply target")
+
+        let stored = await messages.currentMessages(groupID: groupID)
+        XCTAssertEqual(stored.first?.replyToMessageID, target,
+                       "the optimistically-inserted row must carry the reply target")
+    }
+
+    func test_send_noReplyRef_isNil() async throws {
+        let groupID = await seedGroupWithTwoPeers()
+        let result = try await interactor.send(groupID: groupID, body: "plain")
+        XCTAssertNil(result.replyToMessageID)
+    }
+
     // MARK: - Status transitions
 
     func test_send_allRelaysReject_marksFailed() async throws {

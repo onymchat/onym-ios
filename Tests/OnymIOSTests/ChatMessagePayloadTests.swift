@@ -37,6 +37,50 @@ final class ChatMessagePayloadTests: XCTestCase {
         XCTAssertEqual(decoded.variant.body, "héllo 🌍 こんにちは")
     }
 
+    // MARK: - Reply reference
+
+    func test_roundtrip_replyRef_preservesTargetID() throws {
+        let target = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        let original = makePayload(body: "agreed", replyToMessageID: target)
+        let encoded = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(ChatMessagePayload.self, from: encoded)
+        XCTAssertEqual(decoded.replyToMessageID, target)
+        XCTAssertEqual(decoded, original)
+    }
+
+    func test_wireFormat_replyKeyIsSnakeCase() throws {
+        let target = UUID()
+        let encoded = try JSONEncoder().encode(makePayload(body: "hi", replyToMessageID: target))
+        let obj = try JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        XCTAssertEqual(obj?["reply_to_message_id"] as? String, target.uuidString)
+    }
+
+    func test_wireFormat_noReply_omitsKey() throws {
+        // A non-reply message should encode `null` (or omit) — never a
+        // bogus UUID. `JSONEncoder` writes `null` for a nil Optional.
+        let encoded = try JSONEncoder().encode(makePayload(body: "hi"))
+        let obj = try JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        XCTAssertNil(obj?["reply_to_message_id"] as? String,
+                     "a non-reply message must not carry a reply target")
+    }
+
+    func test_decode_missingReplyKey_isNil() throws {
+        // Backward compat: a payload from an older sender (pre-replies)
+        // has no `reply_to_message_id` — it must decode to nil, not throw.
+        let json = #"""
+        {
+          "version": 1,
+          "message_id": "11111111-1111-1111-1111-111111111111",
+          "group_id": "QkJC",
+          "sender_bls_pubkey_hex": "ab",
+          "sent_at_millis": 0,
+          "variant": { "kind": "tyranny", "body": "hi" }
+        }
+        """#.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(ChatMessagePayload.self, from: json)
+        XCTAssertNil(decoded.replyToMessageID)
+    }
+
     // MARK: - Wire format
 
     func test_wireFormat_snakeCaseKeys() throws {
@@ -129,13 +173,17 @@ final class ChatMessagePayloadTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func makePayload(body: String) -> ChatMessagePayload {
+    private func makePayload(
+        body: String,
+        replyToMessageID: UUID? = nil
+    ) -> ChatMessagePayload {
         ChatMessagePayload(
             version: 1,
             messageID: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
             groupID: Data(repeating: 0x42, count: 32),
             senderBlsPubkeyHex: String(repeating: "ab", count: 48),
             sentAtMillis: 1_700_000_000_000,
+            replyToMessageID: replyToMessageID,
             variant: .tyranny(body: body)
         )
     }

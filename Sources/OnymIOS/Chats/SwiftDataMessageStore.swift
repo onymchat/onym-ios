@@ -91,6 +91,7 @@ actor SwiftDataMessageStore: MessageStore {
             existing.directionRaw = encoded.directionRaw
             existing.statusRaw = encoded.statusRaw
             existing.groupTypeRaw = encoded.groupTypeRaw
+            existing.replyToMessageIDString = encoded.replyToMessageIDString
             existing.encryptedSenderBlsPubkeyHex = encoded.encryptedSenderBlsPubkeyHex
             existing.encryptedBody = encoded.encryptedBody
             try? context.save()
@@ -154,6 +155,7 @@ actor SwiftDataMessageStore: MessageStore {
             directionRaw: message.direction.rawValue,
             statusRaw: message.status.rawValue,
             groupTypeRaw: message.groupType.rawValue,
+            replyToMessageIDString: message.replyToMessageID?.uuidString,
             encryptedSenderBlsPubkeyHex: try StorageEncryption.encrypt(message.senderBlsPubkeyHex),
             encryptedBody: try StorageEncryption.encrypt(message.body)
         )
@@ -180,6 +182,7 @@ actor SwiftDataMessageStore: MessageStore {
             sentAt: row.sentAt,
             direction: direction,
             status: status,
+            replyToMessageID: row.replyToMessageIDString.flatMap(UUID.init(uuidString:)),
             groupType: groupType
         )
     }

@@ -282,6 +282,7 @@ final class ChatThreadViewControllerTests: XCTestCase {
             sentAt: failed.sentAt,
             direction: failed.direction,
             status: .failed,
+            replyToMessageID: nil,
             groupType: failed.groupType
         )
 
@@ -323,6 +324,7 @@ final class ChatThreadViewControllerTests: XCTestCase {
             sentAt: Date(timeIntervalSince1970: 1_700_000_000),
             direction: .outgoing,
             status: .pending,
+            replyToMessageID: nil,
             groupType: .tyranny
         )
         vc.update(messages: [pending])
@@ -349,6 +351,7 @@ final class ChatThreadViewControllerTests: XCTestCase {
             sentAt: pending.sentAt,
             direction: .outgoing,
             status: .sent,
+            replyToMessageID: nil,
             groupType: .tyranny
         )
         vc.update(messages: [sentRow])
@@ -516,7 +519,7 @@ final class ChatThreadViewControllerTests: XCTestCase {
             id: UUID(), groupID: "aa".repeated(32), ownerIdentityID: IdentityID(),
             senderBlsPubkeyHex: sender, body: body,
             sentAt: Date(timeIntervalSince1970: 1_700_000_000 + seconds),
-            direction: .incoming, status: .received, groupType: groupType
+            direction: .incoming, status: .received, replyToMessageID: nil, groupType: groupType
         )
     }
 
@@ -527,7 +530,7 @@ final class ChatThreadViewControllerTests: XCTestCase {
             id: UUID(), groupID: "aa".repeated(32), ownerIdentityID: IdentityID(),
             senderBlsPubkeyHex: sender, body: body,
             sentAt: Date(timeIntervalSince1970: 1_700_000_000 + seconds),
-            direction: .outgoing, status: .sent, groupType: .tyranny
+            direction: .outgoing, status: .sent, replyToMessageID: nil, groupType: .tyranny
         )
     }
 
@@ -559,6 +562,7 @@ final class ChatThreadViewControllerTests: XCTestCase {
             sentAt: sentAt,
             direction: direction,
             status: direction == .incoming ? .received : .sent,
+            replyToMessageID: nil,
             groupType: .tyranny
         )
     }
