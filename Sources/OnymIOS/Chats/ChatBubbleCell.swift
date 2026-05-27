@@ -28,6 +28,34 @@ struct ChatSenderDisplay {
     static let unknown = ChatSenderDisplay(name: "", accent: .blue, showNameHeader: false)
 }
 
+/// Resolved quote shown at the top of a bubble that replies to an
+/// earlier message — the Telegram-style inset preview. Built by
+/// `ChatThreadViewController` by looking the reply target up in the
+/// local message list; the cell just renders it.
+///
+/// The target is resolved *live* (not snapshotted into the payload),
+/// so when it isn't on this device the controller hands over
+/// `unavailable` and the cell renders a muted placeholder instead of
+/// a real sender + snippet.
+struct ChatReplyQuote {
+    /// Quoted sender's display name (alias or BLS fingerprint).
+    let name: String
+    /// Quoted message body, rendered on a single truncated line.
+    let snippet: String
+    /// Quoted sender's accent — colors the leading bar and the name,
+    /// so the quote reads as "from that person" at a glance.
+    let accent: OnymAccent
+    /// The reply target isn't in the local store (never delivered, or
+    /// deleted). Renders a muted "message unavailable" placeholder and
+    /// the quote isn't tappable.
+    let isUnavailable: Bool
+
+    /// Placeholder for a reply whose target this device doesn't have.
+    static let unavailable = ChatReplyQuote(
+        name: "", snippet: "", accent: .blue, isUnavailable: true
+    )
+}
+
 /// One message bubble row. Two visual styles toggled by
 /// `ChatMessage.direction`:
 ///
@@ -62,6 +90,15 @@ final class ChatBubbleCell: UITableViewCell {
     private let statusImageView = UIImageView()
     private let nameLabel = UILabel()
 
+    // Reply quote (Telegram-style inset preview at the top of the
+    // bubble). `quoteContainer` holds the accent bar + the two labels;
+    // it's hidden unless the message replies to another. Tapping it
+    // fires `onQuoteTapped` so the host can jump to the original.
+    private let quoteContainer = UIView()
+    private let quoteBar = UIView()
+    private let quoteNameLabel = UILabel()
+    private let quoteSnippetLabel = UILabel()
+
     /// Incoming bubble tint opacity over the background. Low enough that
     /// `OnymTokens.text` stays readable on top, high enough that the
     /// sender's accent reads at a glance.
@@ -74,6 +111,13 @@ final class ChatBubbleCell: UITableViewCell {
     /// fire this.
     private var onRetryRequested: (() -> Void)?
     private var retryTapRecognizer: UITapGestureRecognizer?
+
+    /// Set by the cell provider when the message replies to another
+    /// and the target is available. Fires when the user taps the
+    /// quote — the host scrolls to + flashes the original. Cleared on
+    /// every reuse so a recycled cell doesn't keep a stale target.
+    private var onQuoteTapped: (() -> Void)?
+    private var quoteTapRecognizer: UITapGestureRecognizer?
 
     // Direction-dependent constraints — only one pair is active at a
     // time. Each pair contains the alignment pin (`==` to the pinned
@@ -100,12 +144,19 @@ final class ChatBubbleCell: UITableViewCell {
     private var bubbleTopToNameConstraint: NSLayoutConstraint!
     private var nameTopConstraint: NSLayoutConstraint!
 
+    // Body-top toggle for the reply quote. Without a quote the body
+    // pins to the bubble's top inset (the common case); with one it
+    // hangs off the quote container's bottom. Exactly one is active.
+    private var bodyTopToBubbleConstraint: NSLayoutConstraint!
+    private var bodyTopToQuoteConstraint: NSLayoutConstraint!
+
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
         backgroundColor = .clear
         selectionStyle = .none
         contentView.backgroundColor = UIColor(OnymTokens.bg)
         buildBubble()
+        buildQuote()
         buildStatusIndicator()
         buildNameLabel()
         layoutBubble()
@@ -123,7 +174,9 @@ final class ChatBubbleCell: UITableViewCell {
     func configure(
         message: ChatMessage,
         sender: ChatSenderDisplay = .unknown,
-        onRetry: (() -> Void)? = nil
+        reply: ChatReplyQuote? = nil,
+        onRetry: (() -> Void)? = nil,
+        onQuoteTapped: (() -> Void)? = nil
     ) {
         bodyLabel.text = message.body
         switch message.direction {
@@ -151,6 +204,7 @@ final class ChatBubbleCell: UITableViewCell {
             statusImageView.isHidden = true
         }
         applyNameHeader(sender)
+        applyReplyQuote(reply, direction: message.direction, onTap: onQuoteTapped)
 
         // Retry tap is only installed when the message is failed
         // *and* the host provided a retry callback. Cell reuse:
@@ -190,6 +244,90 @@ final class ChatBubbleCell: UITableViewCell {
         }
     }
 
+    /// Show or hide the reply quote, re-pinning the body's top to the
+    /// quote (when shown) or the bubble (when not). Colors track the
+    /// bubble direction: an outgoing bubble is a solid accent fill, so
+    /// the quote reads in the on-accent color; an incoming bubble is a
+    /// light tint, so the quote uses the quoted sender's accent. An
+    /// unavailable target gets a muted, untappable placeholder.
+    ///
+    /// Called on every `configure` (including reuse), so a recycled
+    /// cell that previously showed a quote drops it — and its tap
+    /// target — cleanly.
+    private func applyReplyQuote(
+        _ reply: ChatReplyQuote?,
+        direction: MessageDirection,
+        onTap: (() -> Void)?
+    ) {
+        // Always tear down any prior tap target first (reuse safety).
+        if let existing = quoteTapRecognizer {
+            quoteContainer.removeGestureRecognizer(existing)
+            quoteTapRecognizer = nil
+        }
+        onQuoteTapped = nil
+
+        guard let reply else {
+            quoteContainer.isHidden = true
+            quoteNameLabel.text = nil
+            quoteSnippetLabel.text = nil
+            bodyTopToQuoteConstraint.isActive = false
+            bodyTopToBubbleConstraint.isActive = true
+            return
+        }
+
+        quoteContainer.isHidden = false
+        bodyTopToBubbleConstraint.isActive = false
+        bodyTopToQuoteConstraint.isActive = true
+
+        let onAccent = UIColor(OnymTokens.onAccent)
+        if reply.isUnavailable {
+            // Muted placeholder — no real sender to attribute.
+            let muted = direction == .outgoing
+                ? onAccent.withAlphaComponent(0.7)
+                : UIColor(OnymTokens.text3)
+            quoteBar.backgroundColor = muted
+            quoteNameLabel.text = "Message"
+            quoteNameLabel.textColor = muted
+            quoteSnippetLabel.text = "Message unavailable"
+            quoteSnippetLabel.textColor = muted
+        } else {
+            let accent = UIColor(reply.accent.color)
+            quoteBar.backgroundColor = direction == .outgoing ? onAccent : accent
+            quoteNameLabel.text = reply.name
+            quoteNameLabel.textColor = direction == .outgoing ? onAccent : accent
+            quoteSnippetLabel.text = reply.snippet
+            quoteSnippetLabel.textColor = direction == .outgoing
+                ? onAccent.withAlphaComponent(0.85)
+                : UIColor(OnymTokens.text2)
+
+            // Only an available target is tappable.
+            if let onTap {
+                onQuoteTapped = onTap
+                let tap = UITapGestureRecognizer(target: self, action: #selector(tappedQuote))
+                quoteContainer.addGestureRecognizer(tap)
+                quoteTapRecognizer = tap
+            }
+        }
+    }
+
+    @objc private func tappedQuote() {
+        onQuoteTapped?()
+    }
+
+    /// Brief background pulse on the bubble — used by the host to draw
+    /// the eye to a message after scrolling to it from a tapped quote.
+    func flashHighlight() {
+        let original = bubble.backgroundColor
+        let highlight = UIColor(OnymTokens.text3).withAlphaComponent(0.5)
+        UIView.animate(withDuration: 0.18, animations: {
+            self.bubble.backgroundColor = highlight
+        }, completion: { _ in
+            UIView.animate(withDuration: 0.45) {
+                self.bubble.backgroundColor = original
+            }
+        })
+    }
+
     private func applyStatus(_ status: MessageStatus) {
         statusImageView.isHidden = false
         switch status {
@@ -226,6 +364,16 @@ final class ChatBubbleCell: UITableViewCell {
     func simulateBubbleTapForTest() {
         tappedBubble()
     }
+
+    /// Test seam for the quote tap — fires the same handler the quote's
+    /// recognizer would, and returns whether a tap target was actually
+    /// installed (so tests can assert an unavailable quote is inert).
+    @discardableResult
+    func simulateQuoteTapForTest() -> Bool {
+        let installed = quoteTapRecognizer != nil
+        tappedQuote()
+        return installed
+    }
     #endif
 
     private func buildBubble() {
@@ -239,6 +387,36 @@ final class ChatBubbleCell: UITableViewCell {
         bodyLabel.font = .preferredFont(forTextStyle: .body)
         bodyLabel.adjustsFontForContentSizeCategory = true
         bubble.addSubview(bodyLabel)
+    }
+
+    private func buildQuote() {
+        quoteContainer.translatesAutoresizingMaskIntoConstraints = false
+        quoteContainer.isHidden = true
+        quoteContainer.accessibilityIdentifier = "chat.bubble.quote"
+        bubble.addSubview(quoteContainer)
+
+        quoteBar.translatesAutoresizingMaskIntoConstraints = false
+        quoteBar.layer.cornerRadius = 1.5
+        quoteBar.layer.cornerCurve = .continuous
+        quoteContainer.addSubview(quoteBar)
+
+        let nameBase = UIFont.systemFont(ofSize: 12, weight: .semibold)
+        quoteNameLabel.font = UIFontMetrics(forTextStyle: .caption1).scaledFont(for: nameBase)
+        quoteNameLabel.adjustsFontForContentSizeCategory = true
+        quoteNameLabel.numberOfLines = 1
+        quoteNameLabel.lineBreakMode = .byTruncatingTail
+        quoteNameLabel.translatesAutoresizingMaskIntoConstraints = false
+        quoteNameLabel.accessibilityIdentifier = "chat.bubble.quote.name"
+        quoteContainer.addSubview(quoteNameLabel)
+
+        let snippetBase = UIFont.systemFont(ofSize: 13, weight: .regular)
+        quoteSnippetLabel.font = UIFontMetrics(forTextStyle: .caption1).scaledFont(for: snippetBase)
+        quoteSnippetLabel.adjustsFontForContentSizeCategory = true
+        quoteSnippetLabel.numberOfLines = 1
+        quoteSnippetLabel.lineBreakMode = .byTruncatingTail
+        quoteSnippetLabel.translatesAutoresizingMaskIntoConstraints = false
+        quoteSnippetLabel.accessibilityIdentifier = "chat.bubble.quote.snippet"
+        quoteContainer.addSubview(quoteSnippetLabel)
     }
 
     private func buildStatusIndicator() {
@@ -293,6 +471,15 @@ final class ChatBubbleCell: UITableViewCell {
             equalTo: nameLabel.bottomAnchor, constant: 3
         )
 
+        // Body-top toggle — `configure` activates exactly one depending
+        // on whether a reply quote is shown.
+        bodyTopToBubbleConstraint = bodyLabel.topAnchor.constraint(
+            equalTo: bubble.topAnchor, constant: 8
+        )
+        bodyTopToQuoteConstraint = bodyLabel.topAnchor.constraint(
+            equalTo: quoteContainer.bottomAnchor, constant: 6
+        )
+
         NSLayoutConstraint.activate([
             bubble.widthAnchor.constraint(
                 lessThanOrEqualTo: contentView.widthAnchor,
@@ -300,8 +487,29 @@ final class ChatBubbleCell: UITableViewCell {
             ),
             bodyLabel.leadingAnchor.constraint(equalTo: bubble.leadingAnchor, constant: 12),
             bodyLabel.trailingAnchor.constraint(equalTo: bubble.trailingAnchor, constant: -12),
-            bodyLabel.topAnchor.constraint(equalTo: bubble.topAnchor, constant: 8),
             bodyLabel.bottomAnchor.constraint(equalTo: bubble.bottomAnchor, constant: -8),
+
+            // Reply quote — pinned across the top of the bubble. Only
+            // drives the body's top when `bodyTopToQuoteConstraint` is
+            // active (i.e. a quote is shown); otherwise it's hidden and
+            // its labels are cleared so it adds no height.
+            quoteContainer.topAnchor.constraint(equalTo: bubble.topAnchor, constant: 8),
+            quoteContainer.leadingAnchor.constraint(equalTo: bubble.leadingAnchor, constant: 12),
+            quoteContainer.trailingAnchor.constraint(equalTo: bubble.trailingAnchor, constant: -12),
+
+            quoteBar.leadingAnchor.constraint(equalTo: quoteContainer.leadingAnchor),
+            quoteBar.topAnchor.constraint(equalTo: quoteContainer.topAnchor),
+            quoteBar.bottomAnchor.constraint(equalTo: quoteContainer.bottomAnchor),
+            quoteBar.widthAnchor.constraint(equalToConstant: 3),
+
+            quoteNameLabel.leadingAnchor.constraint(equalTo: quoteBar.trailingAnchor, constant: 6),
+            quoteNameLabel.trailingAnchor.constraint(equalTo: quoteContainer.trailingAnchor),
+            quoteNameLabel.topAnchor.constraint(equalTo: quoteContainer.topAnchor),
+
+            quoteSnippetLabel.leadingAnchor.constraint(equalTo: quoteBar.trailingAnchor, constant: 6),
+            quoteSnippetLabel.trailingAnchor.constraint(equalTo: quoteContainer.trailingAnchor),
+            quoteSnippetLabel.topAnchor.constraint(equalTo: quoteNameLabel.bottomAnchor, constant: 1),
+            quoteSnippetLabel.bottomAnchor.constraint(equalTo: quoteContainer.bottomAnchor),
 
             // Name header aligns to the (incoming) bubble's leading edge
             // with a small indent, and never runs into the trailing gap.
@@ -348,5 +556,6 @@ final class ChatBubbleCell: UITableViewCell {
         NSLayoutConstraint.activate(incomingConstraints)
         bubbleBottomConstraint.isActive = true
         bubbleTopToContentConstraint.isActive = true
+        bodyTopToBubbleConstraint.isActive = true
     }
 }
