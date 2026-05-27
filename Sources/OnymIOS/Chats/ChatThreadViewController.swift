@@ -107,6 +107,21 @@ final class ChatThreadViewController: UIViewController {
         buildInputPanel()
         layout()
         configureDataSource()
+
+        // The input panel rides the keyboard up via the
+        // `keyboardLayoutGuide` constraint, which shrinks the message
+        // list from the bottom — leaving the latest messages under the
+        // keyboard. Rather than scroll *after* the keyboard settles
+        // (which reads as a late jump), shift the content up by the same
+        // amount the keyboard moves, animated on the keyboard's own
+        // duration + curve, so the bottom message stays glued to the
+        // input area throughout the transition.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(keyboardWillChangeFrame(_:)),
+            name: UIResponder.keyboardWillChangeFrameNotification,
+            object: nil
+        )
     }
 
     // The SwiftUI wrapper hides the nav bar (the controller paints its
@@ -344,6 +359,77 @@ final class ChatThreadViewController: UIViewController {
         guard contentHeight > visibleHeight else { return true }
         let maxOffset = contentHeight - visibleHeight
         return maxOffset - offsetY < Self.nearBottomThreshold
+    }
+
+    /// The keyboard is changing frame: shift the message list's content
+    /// up (or down) by the same distance the keyboard's top edge moves,
+    /// animated on the keyboard's own duration + curve. Because the
+    /// input panel is glued to the keyboard top and the table's bottom
+    /// to the input panel, the table shrinks/grows by exactly that
+    /// distance — so translating the content by it keeps every visible
+    /// message, the latest included, pinned in place relative to the
+    /// input area while the keyboard slides.
+    ///
+    /// This works regardless of whether the `keyboardLayoutGuide`-driven
+    /// table resize has been applied yet: the shift is `contentOffset +
+    /// delta`, and `contentOffset` is unchanged by a bounds resize, so
+    /// the target is correct either way. (Scrolling after the fact, in
+    /// `keyboardDidShow`, read as a late jump — this rides the same
+    /// animation as the keyboard.)
+    @objc private func keyboardWillChangeFrame(_ notification: Notification) {
+        guard
+            let info = notification.userInfo,
+            let endFrame = (info[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue,
+            let beginFrame = (info[UIResponder.keyboardFrameBeginUserInfoKey] as? NSValue)?.cgRectValue,
+            let duration = info[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double,
+            let curveRaw = info[UIResponder.keyboardAnimationCurveUserInfoKey] as? Int
+        else { return }
+
+        // How far the keyboard's top edge travels in our coordinates —
+        // positive when rising. The table's bottom moves the same amount.
+        let endTop = view.convert(endFrame, from: view.window).minY
+        let beginTop = view.convert(beginFrame, from: view.window).minY
+        let delta = beginTop - endTop
+        guard abs(delta) > 0.5 else { return }
+
+        // Final visible table height once the keyboard settles, derived
+        // from the keyboard's end frame (not the current bounds, which
+        // may or may not have resized yet) so the clamp is correct
+        // regardless of layout ordering.
+        let panelBottom = min(endTop, view.bounds.maxY - view.safeAreaInsets.bottom)
+        let finalViewportHeight = max(0, panelBottom - tableView.frame.minY - inputPanel.bounds.height)
+
+        let target = Self.keyboardAdjustedOffsetY(
+            currentOffsetY: tableView.contentOffset.y,
+            delta: delta,
+            contentHeight: tableView.contentSize.height,
+            finalViewportHeight: finalViewportHeight,
+            topInset: tableView.adjustedContentInset.top,
+            bottomInset: tableView.adjustedContentInset.bottom
+        )
+        guard abs(target - tableView.contentOffset.y) > 0.5 else { return }
+
+        let options = UIView.AnimationOptions(rawValue: UInt(curveRaw) << 16)
+            .union(.beginFromCurrentState)
+        UIView.animate(withDuration: duration, delay: 0, options: options) {
+            self.tableView.contentOffset.y = target
+        }
+    }
+
+    /// Translate the content offset by `delta` and clamp it to the
+    /// table's scrollable range for the post-keyboard viewport. Pure +
+    /// static so the clamp logic is unit-tested without a live keyboard.
+    static func keyboardAdjustedOffsetY(
+        currentOffsetY: CGFloat,
+        delta: CGFloat,
+        contentHeight: CGFloat,
+        finalViewportHeight: CGFloat,
+        topInset: CGFloat,
+        bottomInset: CGFloat
+    ) -> CGFloat {
+        let minY = -topInset
+        let maxY = max(minY, contentHeight + bottomInset - finalViewportHeight)
+        return min(max(currentOffsetY + delta, minY), maxY)
     }
 
     /// Scroll the table so the last row is visible.
