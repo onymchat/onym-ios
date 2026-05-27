@@ -284,6 +284,48 @@ final class ChatBubbleCellTests: XCTestCase {
         find(in: cell.contentView, identifier: "chat.bubble.quote.snippet") as? UILabel
     }
 
+    // MARK: - Swipe to reply (PR 3)
+
+    func test_swipeToReply_firesCallback() {
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+        var swipes = 0
+        cell.configure(
+            message: makeMessage(direction: .incoming),
+            onSwipeToReply: { swipes += 1 }
+        )
+        cell.simulateSwipeToReplyForTest()
+        XCTAssertEqual(swipes, 1)
+    }
+
+    func test_swipeToReply_availableForOutgoingAndAnyStatus() {
+        // Unlike retry, swipe-to-reply works on every bubble — own or
+        // others', sent / pending / failed alike.
+        for status in [MessageStatus.sent, .pending, .failed] {
+            let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+            var swipes = 0
+            cell.configure(
+                message: makeMessage(direction: .outgoing, status: status),
+                onSwipeToReply: { swipes += 1 }
+            )
+            cell.simulateSwipeToReplyForTest()
+            XCTAssertEqual(swipes, 1, "swipe-to-reply must be available for status \(status)")
+        }
+    }
+
+    func test_swipeToReply_droppedOnReuse() {
+        // A cell reused for a message whose host wires no swipe handler
+        // must not keep the prior one.
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+        var swipes = 0
+        cell.configure(
+            message: makeMessage(direction: .incoming),
+            onSwipeToReply: { swipes += 1 }
+        )
+        cell.configure(message: makeMessage(direction: .incoming))
+        cell.simulateSwipeToReplyForTest()
+        XCTAssertEqual(swipes, 0, "reused cell must drop the previous swipe handler")
+    }
+
     // MARK: - Helpers
 
     private func statusIcon(in cell: ChatBubbleCell) -> UIImageView {

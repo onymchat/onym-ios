@@ -70,6 +70,61 @@ final class ChatInputPanelViewTests: XCTestCase {
         XCTAssertFalse(fired)
     }
 
+    // MARK: - Reply banner (PR 3)
+
+    func test_replyBanner_shown_writesTitleAndSnippet() {
+        let panel = ChatInputPanelView()
+        panel.showReplyBanner(name: "Alice", snippet: "the original", accent: .purple)
+        XCTAssertFalse(replyBanner(in: panel).isHidden, "banner must be visible once armed")
+        XCTAssertEqual(replyBannerTitle(in: panel)?.text, "Replying to Alice")
+        XCTAssertEqual(replyBannerSnippet(in: panel)?.text, "the original")
+    }
+
+    func test_replyBanner_initiallyHidden() {
+        let panel = ChatInputPanelView()
+        XCTAssertTrue(replyBanner(in: panel).isHidden,
+                      "no reply armed → banner hidden")
+    }
+
+    func test_replyBanner_cleared_hides() {
+        let panel = ChatInputPanelView()
+        panel.showReplyBanner(name: "Alice", snippet: "x", accent: .purple)
+        panel.clearReplyBanner()
+        XCTAssertTrue(replyBanner(in: panel).isHidden,
+                      "clearReplyBanner must hide the banner")
+    }
+
+    func test_replyBanner_cancelButton_invokesOnCancelReply() {
+        let panel = ChatInputPanelView()
+        var cancels = 0
+        panel.onCancelReply = { cancels += 1 }
+        panel.showReplyBanner(name: "Alice", snippet: "x", accent: .purple)
+        cancelButton(in: panel).sendActions(for: .touchUpInside)
+        XCTAssertEqual(cancels, 1)
+    }
+
+    private func replyBanner(in panel: ChatInputPanelView) -> UIView {
+        guard let v = find(in: panel, identifier: "chat.input.reply_banner") else {
+            fatalError("reply banner not found")
+        }
+        return v
+    }
+
+    private func replyBannerTitle(in panel: ChatInputPanelView) -> UILabel? {
+        find(in: panel, identifier: "chat.input.reply_banner.title") as? UILabel
+    }
+
+    private func replyBannerSnippet(in panel: ChatInputPanelView) -> UILabel? {
+        find(in: panel, identifier: "chat.input.reply_banner.snippet") as? UILabel
+    }
+
+    private func cancelButton(in panel: ChatInputPanelView) -> UIButton {
+        guard let b = find(in: panel, identifier: "chat.input.reply_banner.cancel") as? UIButton else {
+            fatalError("cancel button not found")
+        }
+        return b
+    }
+
     // MARK: - Auto-height
     //
     // Asserting absolute pixel values is brittle — UITextView's
