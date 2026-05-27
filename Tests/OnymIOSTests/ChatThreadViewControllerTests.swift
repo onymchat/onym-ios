@@ -459,6 +459,46 @@ final class ChatThreadViewControllerTests: XCTestCase {
                        "must not scroll above the top content inset")
     }
 
+    // MARK: - Cold open lands at the latest
+
+    func test_coldOpen_firstNonEmptySnapshot_landsAtBottomAndReveals() {
+        let vc = mountedController()
+        let table = tableView(in: vc)!
+        let msgs = (0..<40).map {
+            incoming(sender: "aa".repeated(48), body: "message \($0)", at: TimeInterval($0))
+        }
+        vc.update(messages: msgs)
+        _ = layoutTable(in: vc)
+        pumpMainRunLoop()  // let the cold-open async scroll + reveal run
+        XCTAssertEqual(table.alpha, 1, accuracy: 0.01,
+                       "the table must be revealed after the cold open positions it")
+        XCTAssertTrue(vc.isNearBottom,
+                      "opening a long thread must land on the latest message, not the first")
+    }
+
+    func test_coldOpen_ignoresLeadingEmptySnapshot() {
+        // The SwiftUI bridge's first render is empty; the real messages
+        // arrive on the next update. That second apply must still be
+        // treated as the cold open and land at the bottom.
+        let vc = mountedController()
+        vc.update(messages: [])
+        let msgs = (0..<40).map {
+            incoming(sender: "aa".repeated(48), body: "message \($0)", at: TimeInterval($0))
+        }
+        vc.update(messages: msgs)
+        _ = layoutTable(in: vc)
+        pumpMainRunLoop()
+        XCTAssertTrue(vc.isNearBottom,
+                      "an initial empty snapshot must not consume the cold-open scroll")
+    }
+
+    /// Spin the main run loop briefly so `DispatchQueue.main.async`
+    /// work (the cold-open height-correction scroll + reveal) runs
+    /// before assertions.
+    private func pumpMainRunLoop(_ seconds: TimeInterval = 0.2) {
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: seconds))
+    }
+
     // MARK: - Sender differentiation (run grouping + name headers)
 
     func test_runGrouping_headerOnlyAtStartOfSameSenderRun() {
