@@ -12,6 +12,11 @@ import SwiftData
 ///   delete on identity removal needs a predicate over this.
 /// - `sentAt` — sort column for the chat scroll order.
 /// - `directionRaw`, `statusRaw`, `groupTypeRaw` — small enums.
+/// - `replyToMessageIDString` — optional UUID of the replied-to
+///   message. Plain (not sensitive — it's just a pointer to another
+///   row in this same table) and left queryable for a future
+///   "replies to X" lookup. Optional, so adding it is a SwiftData
+///   lightweight migration over the existing store.
 ///
 /// Encrypted (`StorageEncryption.encrypt`):
 /// - `senderBlsPubkeyHex` — group-membership identifier; consistent
@@ -30,6 +35,7 @@ final class PersistedMessage {
     var directionRaw: String
     var statusRaw: String
     var groupTypeRaw: String
+    var replyToMessageIDString: String?
 
     var encryptedSenderBlsPubkeyHex: Data
     var encryptedBody: Data
@@ -42,6 +48,7 @@ final class PersistedMessage {
         directionRaw: String,
         statusRaw: String,
         groupTypeRaw: String,
+        replyToMessageIDString: String?,
         encryptedSenderBlsPubkeyHex: Data,
         encryptedBody: Data
     ) {
@@ -52,6 +59,7 @@ final class PersistedMessage {
         self.directionRaw = directionRaw
         self.statusRaw = statusRaw
         self.groupTypeRaw = groupTypeRaw
+        self.replyToMessageIDString = replyToMessageIDString
         self.encryptedSenderBlsPubkeyHex = encryptedSenderBlsPubkeyHex
         self.encryptedBody = encryptedBody
     }

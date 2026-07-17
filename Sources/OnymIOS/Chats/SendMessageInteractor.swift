@@ -52,6 +52,7 @@ actor SendMessageInteractor {
     func send(
         groupID: String,
         body: String,
+        replyToMessageID: UUID? = nil,
         now: Date = Date()
     ) async throws -> ChatMessage {
         guard !body.isEmpty else { throw SendError.emptyBody }
@@ -90,6 +91,7 @@ actor SendMessageInteractor {
             groupID: group.groupIDData,
             senderBlsPubkeyHex: myBlsHex,
             sentAtMillis: sentAtMillis,
+            replyToMessageID: replyToMessageID,
             variant: variant
         )
 
@@ -106,6 +108,7 @@ actor SendMessageInteractor {
             sentAt: now,
             direction: .outgoing,
             status: .pending,
+            replyToMessageID: replyToMessageID,
             groupType: group.groupType
         )
         await messageRepository.insert(pending)
@@ -136,6 +139,7 @@ actor SendMessageInteractor {
             sentAt: pending.sentAt,
             direction: pending.direction,
             status: finalStatus,
+            replyToMessageID: pending.replyToMessageID,
             groupType: pending.groupType
         )
     }
@@ -193,6 +197,7 @@ actor SendMessageInteractor {
             groupID: group.groupIDData,
             senderBlsPubkeyHex: myBlsHex,
             sentAtMillis: Int64(message.sentAt.timeIntervalSince1970 * 1000),
+            replyToMessageID: message.replyToMessageID,
             variant: variant
         )
 

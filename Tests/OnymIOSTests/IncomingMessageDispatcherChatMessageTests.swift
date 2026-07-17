@@ -92,6 +92,27 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
         XCTAssertEqual(stored[0].status, .received)
         XCTAssertEqual(stored[0].senderBlsPubkeyHex, senderBlsHex)
         XCTAssertEqual(stored[0].groupType, .tyranny)
+        XCTAssertNil(stored[0].replyToMessageID)
+    }
+
+    func test_chatMessage_withReplyRef_persistsTargetID() async throws {
+        let target = UUID()
+        let payload = makePayload(body: "agreed", replyToMessageID: target)
+        let dispatcher = makeDispatcher(
+            plaintext: try JSONEncoder().encode(payload),
+            envelopeSigner: senderEd25519
+        )
+
+        await dispatcher.dispatch(
+            messageID: "msg-reply",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+
+        let stored = await messages.currentMessages(groupID: groupIDHex)
+        XCTAssertEqual(stored.first?.replyToMessageID, target,
+                       "an inbound reply must carry its target id onto the persisted message")
     }
 
     // MARK: - Drop paths
@@ -257,6 +278,7 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
             groupID: secondGroupBytes,
             senderBlsPubkeyHex: secondSenderBlsHex,
             sentAtMillis: 1_700_000_500_000,
+            replyToMessageID: nil,
             variant: .tyranny(body: "for the second identity")
         )
         let dispatcher = makeDispatcher(
@@ -315,7 +337,8 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
         body: String,
         groupIDBytes: Data? = nil,
         senderBlsHex: String? = nil,
-        messageID: UUID = UUID()
+        messageID: UUID = UUID(),
+        replyToMessageID: UUID? = nil
     ) -> ChatMessagePayload {
         ChatMessagePayload(
             version: 1,
@@ -323,6 +346,7 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
             groupID: groupIDBytes ?? self.groupIDBytes,
             senderBlsPubkeyHex: senderBlsHex ?? self.senderBlsHex,
             sentAtMillis: 1_700_000_000_000,
+            replyToMessageID: replyToMessageID,
             variant: .tyranny(body: body)
         )
     }

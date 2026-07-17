@@ -44,6 +44,7 @@ final class GroupAvatarPayloadTests: XCTestCase {
             groupID: Data(repeating: 0x42, count: 32),
             senderBlsPubkeyHex: "aa".repeated(48),
             sentAtMillis: 1_700_000_000_000,
+            replyToMessageID: nil,
             variant: .tyranny(body: "hello")
         )
         let bytes = try JSONEncoder().encode(chat)

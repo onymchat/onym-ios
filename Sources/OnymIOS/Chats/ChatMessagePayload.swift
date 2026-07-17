@@ -45,6 +45,16 @@ struct ChatMessagePayload: Codable, Equatable, Sendable {
     /// `Date`) so the wire format is unambiguous and cross-platform.
     let sentAtMillis: Int64
 
+    /// The message this one replies to, if any. Optional + additive,
+    /// so it ships under `version = 1`: a sender that omits it decodes
+    /// to `nil` on any receiver, and an old receiver decoding a payload
+    /// that carries it just ignores the unknown key. Only the target's
+    /// ID travels — the receiver resolves the quoted sender + body from
+    /// its own local store at render time, so a dangling ref (target
+    /// never delivered) degrades to "message unavailable" rather than
+    /// carrying stale text.
+    let replyToMessageID: UUID?
+
     /// Governance-keyed payload body. See `ChatMessageVariant`.
     let variant: ChatMessageVariant
 
@@ -54,6 +64,7 @@ struct ChatMessagePayload: Codable, Equatable, Sendable {
         case groupID = "group_id"
         case senderBlsPubkeyHex = "sender_bls_pubkey_hex"
         case sentAtMillis = "sent_at_millis"
+        case replyToMessageID = "reply_to_message_id"
         case variant
     }
 }

@@ -698,6 +698,13 @@ struct IncomingMessageDispatcher: Sendable {
             sentAt: sentAt,
             direction: .incoming,
             status: .received,
+            // Pointer to the quoted message, resolved against the
+            // local store at render time. No trust gate needed: a ref
+            // to a message we never received (or a forged one) just
+            // renders as "message unavailable" — it can't pull in
+            // content from outside this group because rendering only
+            // looks up local rows.
+            replyToMessageID: payload.replyToMessageID,
             groupType: group.groupType
         )
         await messageRepository.insert(message)
