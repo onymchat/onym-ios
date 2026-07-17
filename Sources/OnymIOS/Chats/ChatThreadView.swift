@@ -39,7 +39,7 @@ struct ChatThreadView: View {
             messages: messages,
             onBack: { dismiss() },
             onShowMembers: { showMembers = true },
-            onSendTapped: { body in
+            onSendTapped: { body, replyToMessageID in
                 // Fire-and-forget. `SendMessageInteractor` does the
                 // optimistic insert as `.pending` synchronously
                 // before the await, so the new row appears in the
@@ -50,11 +50,15 @@ struct ChatThreadView: View {
                 // a thrown error here would only indicate a
                 // precondition violation (no identity, unknown
                 // group). Those shouldn't happen mid-chat-screen;
-                // swallow with `try?` for PR 8.
+                // swallow with `try?`.
                 let interactor = sendMessageInteractor
                 let groupID = groupID
                 Task {
-                    try? await interactor.send(groupID: groupID, body: body)
+                    try? await interactor.send(
+                        groupID: groupID,
+                        body: body,
+                        replyToMessageID: replyToMessageID
+                    )
                 }
             },
             onRetryRequested: { messageID in
@@ -119,7 +123,7 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
     let messages: [ChatMessage]
     let onBack: () -> Void
     let onShowMembers: () -> Void
-    let onSendTapped: (String) -> Void
+    let onSendTapped: (String, UUID?) -> Void
     let onRetryRequested: (UUID) -> Void
 
     func makeUIViewController(context: Context) -> ChatThreadViewController {

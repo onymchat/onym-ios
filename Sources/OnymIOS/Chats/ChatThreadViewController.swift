@@ -30,12 +30,12 @@ final class ChatThreadViewController: UIViewController {
 
     /// Invoked when the user taps the input panel's Send button
     /// with non-whitespace content. The SwiftUI wrapper points
-    /// this at `SendMessageInteractor.send(groupID:body:)` —
-    /// fire-and-forget; the interactor handles optimistic insert,
+    /// this at `SendMessageInteractor.send(groupID:body:replyToMessageID:)`
+    /// — fire-and-forget; the interactor handles optimistic insert,
     /// fan-out, and status flip on its own. Receives the body
-    /// already trimmed of leading/trailing whitespace by the
-    /// input panel.
-    var onSendTapped: ((String) -> Void)?
+    /// already trimmed of leading/trailing whitespace by the input
+    /// panel, plus the armed reply target (nil for a normal message).
+    var onSendTapped: ((String, UUID?) -> Void)?
 
     /// Invoked when the user taps a `.failed` outgoing bubble.
     /// The SwiftUI wrapper points this at
@@ -87,6 +87,12 @@ final class ChatThreadViewController: UIViewController {
     /// subsequent updates animate and only auto-scroll when the
     /// user is already near the bottom.
     private var hasAppliedFirstSnapshot = false
+
+    /// The message the composer is currently replying to, if any. Set
+    /// by a swipe-to-reply on a bubble, cleared on cancel or after a
+    /// send. Threaded into `onSendTapped` so the sent message carries
+    /// the reply reference.
+    private var replyingTo: UUID?
 
     /// "Within this many points of the content bottom" counts as
     /// "near bottom" for the auto-scroll heuristic. Exposed for
@@ -465,7 +471,8 @@ final class ChatThreadViewController: UIViewController {
                     sender: sender,
                     reply: reply,
                     onRetry: retryHandler,
-                    onQuoteTapped: quoteTap
+                    onQuoteTapped: quoteTap,
+                    onSwipeToReply: { [weak self] in self?.armReply(for: id) }
                 )
             }
             return cell
@@ -491,9 +498,42 @@ final class ChatThreadViewController: UIViewController {
         // clearing the field straight after the tap keeps the
         // composer feeling responsive.
         inputPanel.onSendTapped = { [weak self] body in
-            self?.onSendTapped?(body)
-            self?.inputPanel.text = ""
+            self?.handleSend(body)
         }
+        // Tapping the banner's cancel button disarms the reply.
+        inputPanel.onCancelReply = { [weak self] in
+            self?.clearReply()
+        }
+    }
+
+    /// Dispatch a send with the currently-armed reply target (if any),
+    /// then clear the composer + the reply banner. Routed through here
+    /// so the send tap and the test seam share one path.
+    private func handleSend(_ body: String) {
+        onSendTapped?(body, replyingTo)
+        inputPanel.text = ""
+        clearReply()
+    }
+
+    /// Arm a reply to `messageID`: remember the target, show the
+    /// composer banner with the quoted sender + snippet, and raise the
+    /// keyboard so the user can type straight away. No-op if the target
+    /// isn't in the current list.
+    private func armReply(for messageID: UUID) {
+        guard let target = messagesByID[messageID] else { return }
+        replyingTo = messageID
+        inputPanel.showReplyBanner(
+            name: senderName(for: target.senderBlsPubkeyHex),
+            snippet: target.body,
+            accent: OnymAccent.forSender(blsPubkeyHex: target.senderBlsPubkeyHex)
+        )
+        inputPanel.focusComposer()
+    }
+
+    /// Disarm the reply and hide the banner.
+    private func clearReply() {
+        replyingTo = nil
+        inputPanel.clearReplyBanner()
     }
 
     // MARK: - Layout
@@ -567,6 +607,15 @@ final class ChatThreadViewController: UIViewController {
 
     @objc private func tappedBack() { onBack?() }
     @objc private func tappedInfo() { onShowMembers?() }
+
+    #if DEBUG
+    /// Test seam — drives the same send path the input panel's Send
+    /// button would, so tests can assert the armed reply target is
+    /// forwarded and then cleared.
+    func simulateSendForTest(body: String) {
+        handleSend(body)
+    }
+    #endif
 }
 
 extension ChatThreadViewController: UIGestureRecognizerDelegate {

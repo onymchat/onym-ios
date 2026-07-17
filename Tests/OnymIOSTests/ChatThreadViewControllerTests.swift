@@ -221,7 +221,7 @@ final class ChatThreadViewControllerTests: XCTestCase {
             return XCTFail("input panel not found in controller hierarchy")
         }
         var receivedBodies: [String] = []
-        vc.onSendTapped = { receivedBodies.append($0) }
+        vc.onSendTapped = { body, _ in receivedBodies.append(body) }
 
         panel.text = "   hello   "
         sendButton(in: panel).sendActions(for: .touchUpInside)
@@ -241,7 +241,7 @@ final class ChatThreadViewControllerTests: XCTestCase {
             return XCTFail("input panel not found")
         }
         var fired = false
-        vc.onSendTapped = { _ in fired = true }
+        vc.onSendTapped = { _, _ in fired = true }
 
         panel.text = "   "
         sendButton(in: panel).sendActions(for: .touchUpInside)
@@ -513,6 +513,74 @@ final class ChatThreadViewControllerTests: XCTestCase {
         _ = layoutTable(in: vc)
         // Must not crash / trap when the target isn't in the snapshot.
         vc.scrollAndHighlight(messageID: UUID())
+    }
+
+    // MARK: - Swipe to reply (PR 3)
+
+    func test_swipeToReply_armsBanner_withTargetSender() {
+        let vc = mountedController()
+        let alice = "aa".repeated(48)
+        vc.update(memberProfiles: [alice: profile(alias: "Alice")])
+        vc.update(messages: [incoming(sender: alice, body: "the original", at: 1)])
+        let table = layoutTable(in: vc)
+        guard let cell = table.cellForRow(at: IndexPath(row: 0, section: 0)) as? ChatBubbleCell
+        else { return XCTFail("bubble cell not mounted") }
+
+        cell.simulateSwipeToReplyForTest()
+
+        XCTAssertEqual(replyBanner(in: vc)?.isHidden, false,
+                       "a swipe-to-reply must reveal the composer banner")
+        XCTAssertEqual(replyBannerTitle(in: vc), "Replying to Alice")
+    }
+
+    func test_send_afterArming_forwardsReplyTarget_andClearsBanner() {
+        let vc = mountedController()
+        let original = incoming(sender: "aa".repeated(48), body: "orig", at: 1)
+        vc.update(messages: [original])
+        let table = layoutTable(in: vc)
+        guard let cell = table.cellForRow(at: IndexPath(row: 0, section: 0)) as? ChatBubbleCell
+        else { return XCTFail("bubble cell not mounted") }
+
+        var captured: (body: String, target: UUID?)?
+        vc.onSendTapped = { captured = ($0, $1) }
+        cell.simulateSwipeToReplyForTest()
+        vc.simulateSendForTest(body: "agreed")
+
+        XCTAssertEqual(captured?.body, "agreed")
+        XCTAssertEqual(captured?.target, original.id,
+                       "a send after arming must carry the reply target")
+        XCTAssertEqual(replyBanner(in: vc)?.isHidden, true,
+                       "the banner must clear once the reply is sent")
+    }
+
+    func test_cancelReply_thenSend_carriesNoTarget() {
+        let vc = mountedController()
+        vc.update(messages: [incoming(sender: "aa".repeated(48), body: "orig", at: 1)])
+        let table = layoutTable(in: vc)
+        guard let cell = table.cellForRow(at: IndexPath(row: 0, section: 0)) as? ChatBubbleCell
+        else { return XCTFail("bubble cell not mounted") }
+
+        var captured: (body: String, target: UUID?)?
+        vc.onSendTapped = { captured = ($0, $1) }
+        cell.simulateSwipeToReplyForTest()
+        let cancel = find(in: vc.view) {
+            $0.accessibilityIdentifier == "chat.input.reply_banner.cancel"
+        } as? UIButton
+        cancel?.sendActions(for: .touchUpInside)
+        vc.simulateSendForTest(body: "plain")
+
+        XCTAssertNil(captured?.target,
+                     "after cancelling, a send must carry no reply target")
+    }
+
+    private func replyBanner(in vc: ChatThreadViewController) -> UIView? {
+        find(in: vc.view) { $0.accessibilityIdentifier == "chat.input.reply_banner" }
+    }
+
+    private func replyBannerTitle(in vc: ChatThreadViewController) -> String? {
+        (find(in: vc.view) {
+            $0.accessibilityIdentifier == "chat.input.reply_banner.title"
+        } as? UILabel)?.text
     }
 
     // MARK: - Sender-test helpers

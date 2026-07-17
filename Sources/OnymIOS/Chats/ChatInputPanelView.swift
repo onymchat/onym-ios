@@ -20,6 +20,11 @@ final class ChatInputPanelView: UIView {
     /// to `SendMessageInteractor.send`.
     var onSendTapped: ((String) -> Void)?
 
+    /// Invoked when the user taps the reply banner's cancel button.
+    /// The host clears its armed reply target and calls
+    /// `clearReplyBanner()`.
+    var onCancelReply: (() -> Void)?
+
     var text: String {
         // `UITextView.text` is bridged as `String!`, but Swift
         // still requires unwrap for chained access on the
@@ -45,6 +50,18 @@ final class ChatInputPanelView: UIView {
     private let sendButton = UIButton(type: .system)
     private var textViewHeightConstraint: NSLayoutConstraint!
 
+    // Reply banner — shown above the composer while a reply is armed.
+    // Accent bar + "Replying to {name}" + a one-line snippet + a
+    // cancel button. Hidden by default; `showReplyBanner` reveals it
+    // and re-pins the text view's top below it.
+    private let replyBanner = UIView()
+    private let replyBannerBar = UIView()
+    private let replyBannerTitle = UILabel()
+    private let replyBannerSnippet = UILabel()
+    private let replyCancelButton = UIButton(type: .system)
+    private var textViewTopToPanelConstraint: NSLayoutConstraint!
+    private var textViewTopToBannerConstraint: NSLayoutConstraint!
+
     /// Height for exactly `lines` worth of text plus the text
     /// view's vertical insets. Drives both the natural empty-state
     /// floor (`lines = 1`) and the auto-grow cap
@@ -61,6 +78,7 @@ final class ChatInputPanelView: UIView {
         super.init(frame: frame)
         backgroundColor = UIColor(OnymTokens.surface2)
         buildSubviews()
+        buildReplyBanner()
         layoutSubviewsLocal()
         refreshAfterTextChange()
     }
@@ -116,10 +134,64 @@ final class ChatInputPanelView: UIView {
         addSubview(sendButton)
     }
 
+    private func buildReplyBanner() {
+        replyBanner.translatesAutoresizingMaskIntoConstraints = false
+        replyBanner.isHidden = true
+        replyBanner.accessibilityIdentifier = "chat.input.reply_banner"
+        addSubview(replyBanner)
+
+        replyBannerBar.translatesAutoresizingMaskIntoConstraints = false
+        replyBannerBar.layer.cornerRadius = 1.5
+        replyBannerBar.layer.cornerCurve = .continuous
+        replyBanner.addSubview(replyBannerBar)
+
+        let titleBase = UIFont.systemFont(ofSize: 12, weight: .semibold)
+        replyBannerTitle.font = UIFontMetrics(forTextStyle: .caption1).scaledFont(for: titleBase)
+        replyBannerTitle.adjustsFontForContentSizeCategory = true
+        replyBannerTitle.numberOfLines = 1
+        replyBannerTitle.lineBreakMode = .byTruncatingTail
+        replyBannerTitle.translatesAutoresizingMaskIntoConstraints = false
+        replyBannerTitle.accessibilityIdentifier = "chat.input.reply_banner.title"
+        replyBanner.addSubview(replyBannerTitle)
+
+        let snippetBase = UIFont.systemFont(ofSize: 13, weight: .regular)
+        replyBannerSnippet.font = UIFontMetrics(forTextStyle: .caption1).scaledFont(for: snippetBase)
+        replyBannerSnippet.adjustsFontForContentSizeCategory = true
+        replyBannerSnippet.numberOfLines = 1
+        replyBannerSnippet.lineBreakMode = .byTruncatingTail
+        replyBannerSnippet.textColor = UIColor(OnymTokens.text2)
+        replyBannerSnippet.translatesAutoresizingMaskIntoConstraints = false
+        replyBannerSnippet.accessibilityIdentifier = "chat.input.reply_banner.snippet"
+        replyBanner.addSubview(replyBannerSnippet)
+
+        var cancelConfig = UIButton.Configuration.plain()
+        cancelConfig.image = UIImage(
+            systemName: "xmark.circle.fill",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .regular)
+        )
+        cancelConfig.contentInsets = .zero
+        replyCancelButton.configuration = cancelConfig
+        replyCancelButton.tintColor = UIColor(OnymTokens.text3)
+        replyCancelButton.addTarget(self, action: #selector(tappedCancelReply), for: .touchUpInside)
+        replyCancelButton.translatesAutoresizingMaskIntoConstraints = false
+        replyCancelButton.accessibilityIdentifier = "chat.input.reply_banner.cancel"
+        replyCancelButton.accessibilityLabel = "Cancel reply"
+        replyBanner.addSubview(replyCancelButton)
+    }
+
     private func layoutSubviewsLocal() {
         // Initial constant is replaced on the first
         // `refreshAfterTextChange` once the font / insets resolve.
         textViewHeightConstraint = textView.heightAnchor.constraint(equalToConstant: 36)
+
+        // Text-view top toggle. Default: pinned below the panel's top
+        // inset. With a reply banner shown, pinned below the banner.
+        textViewTopToPanelConstraint = textView.topAnchor.constraint(
+            equalTo: topAnchor, constant: 8
+        )
+        textViewTopToBannerConstraint = textView.topAnchor.constraint(
+            equalTo: replyBanner.bottomAnchor, constant: 8
+        )
 
         NSLayoutConstraint.activate([
             topDivider.topAnchor.constraint(equalTo: topAnchor),
@@ -127,8 +199,32 @@ final class ChatInputPanelView: UIView {
             topDivider.trailingAnchor.constraint(equalTo: trailingAnchor),
             topDivider.heightAnchor.constraint(equalToConstant: 1.0 / UIScreen.main.scale),
 
+            // Reply banner — spans the width just under the panel top.
+            // Only drives the text view's top when shown (toggle below).
+            replyBanner.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+            replyBanner.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            replyBanner.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+
+            replyBannerBar.leadingAnchor.constraint(equalTo: replyBanner.leadingAnchor),
+            replyBannerBar.topAnchor.constraint(equalTo: replyBanner.topAnchor),
+            replyBannerBar.bottomAnchor.constraint(equalTo: replyBanner.bottomAnchor),
+            replyBannerBar.widthAnchor.constraint(equalToConstant: 3),
+
+            replyCancelButton.trailingAnchor.constraint(equalTo: replyBanner.trailingAnchor),
+            replyCancelButton.centerYAnchor.constraint(equalTo: replyBanner.centerYAnchor),
+            replyCancelButton.widthAnchor.constraint(equalToConstant: 28),
+            replyCancelButton.heightAnchor.constraint(equalToConstant: 28),
+
+            replyBannerTitle.leadingAnchor.constraint(equalTo: replyBannerBar.trailingAnchor, constant: 8),
+            replyBannerTitle.trailingAnchor.constraint(lessThanOrEqualTo: replyCancelButton.leadingAnchor, constant: -8),
+            replyBannerTitle.topAnchor.constraint(equalTo: replyBanner.topAnchor),
+
+            replyBannerSnippet.leadingAnchor.constraint(equalTo: replyBannerBar.trailingAnchor, constant: 8),
+            replyBannerSnippet.trailingAnchor.constraint(lessThanOrEqualTo: replyCancelButton.leadingAnchor, constant: -8),
+            replyBannerSnippet.topAnchor.constraint(equalTo: replyBannerTitle.bottomAnchor, constant: 1),
+            replyBannerSnippet.bottomAnchor.constraint(equalTo: replyBanner.bottomAnchor),
+
             textView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            textView.topAnchor.constraint(equalTo: topAnchor, constant: 8),
             textView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
             textViewHeightConstraint,
 
@@ -155,6 +251,43 @@ final class ChatInputPanelView: UIView {
                 constant: textView.textContainerInset.top
             ),
         ])
+
+        // No banner by default — text view hangs off the panel top.
+        textViewTopToPanelConstraint.isActive = true
+    }
+
+    // MARK: - Reply banner
+
+    /// Show the "replying to" banner with the quoted sender + snippet,
+    /// and re-pin the text view below it. Accent colors the bar + the
+    /// title so the banner matches the bubble's quote.
+    func showReplyBanner(name: String, snippet: String, accent: OnymAccent) {
+        replyBannerTitle.text = "Replying to \(name)"
+        replyBannerTitle.textColor = UIColor(accent.color)
+        replyBannerBar.backgroundColor = UIColor(accent.color)
+        replyBannerSnippet.text = snippet
+        replyBanner.isHidden = false
+        textViewTopToPanelConstraint.isActive = false
+        textViewTopToBannerConstraint.isActive = true
+    }
+
+    /// Hide the reply banner and re-pin the text view to the panel top.
+    func clearReplyBanner() {
+        replyBanner.isHidden = true
+        replyBannerTitle.text = nil
+        replyBannerSnippet.text = nil
+        textViewTopToBannerConstraint.isActive = false
+        textViewTopToPanelConstraint.isActive = true
+    }
+
+    @objc private func tappedCancelReply() {
+        onCancelReply?()
+    }
+
+    /// Raise the keyboard by focusing the composer — used by the host
+    /// after arming a reply so the user can type immediately.
+    func focusComposer() {
+        textView.becomeFirstResponder()
     }
 
     // MARK: - Update

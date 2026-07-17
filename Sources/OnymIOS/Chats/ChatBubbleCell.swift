@@ -119,6 +119,23 @@ final class ChatBubbleCell: UITableViewCell {
     private var onQuoteTapped: (() -> Void)?
     private var quoteTapRecognizer: UITapGestureRecognizer?
 
+    /// Fired when the user drags the bubble far enough left to arm a
+    /// reply (Telegram-style). Available on every message regardless of
+    /// direction or status. Set on each `configure`; reset transform on
+    /// reuse so a recycled mid-drag cell starts clean.
+    var onSwipeToReply: (() -> Void)?
+    private var swipePan: UIPanGestureRecognizer!
+    private let replyHint = UIImageView()
+    /// Drag distance (points) past which releasing arms a reply.
+    private let swipeReplyThreshold: CGFloat = 56
+    /// How far the bubble can travel — past the threshold it resists so
+    /// the gesture has a clear "armed" ceiling.
+    private let swipeMaxTravel: CGFloat = 72
+    /// True once the current drag crossed the threshold — drives the
+    /// one-shot haptic and the release decision.
+    private var swipeArmed = false
+    private let swipeHaptic = UIImpactFeedbackGenerator(style: .medium)
+
     // Direction-dependent constraints — only one pair is active at a
     // time. Each pair contains the alignment pin (`==` to the pinned
     // edge) and the opposite-edge breathing-room gap on the *other*
@@ -160,6 +177,7 @@ final class ChatBubbleCell: UITableViewCell {
         buildStatusIndicator()
         buildNameLabel()
         layoutBubble()
+        installSwipeToReply()
     }
 
     @available(*, unavailable)
@@ -176,8 +194,12 @@ final class ChatBubbleCell: UITableViewCell {
         sender: ChatSenderDisplay = .unknown,
         reply: ChatReplyQuote? = nil,
         onRetry: (() -> Void)? = nil,
-        onQuoteTapped: (() -> Void)? = nil
+        onQuoteTapped: (() -> Void)? = nil,
+        onSwipeToReply: (() -> Void)? = nil
     ) {
+        // Reuse safety: a cell recycled mid-drag must start at rest.
+        resetSwipeState()
+        self.onSwipeToReply = onSwipeToReply
         bodyLabel.text = message.body
         switch message.direction {
         case .outgoing:
@@ -314,6 +336,85 @@ final class ChatBubbleCell: UITableViewCell {
         onQuoteTapped?()
     }
 
+    // MARK: - Swipe to reply
+
+    private func installSwipeToReply() {
+        replyHint.translatesAutoresizingMaskIntoConstraints = false
+        replyHint.image = UIImage(systemName: "arrowshape.turn.up.left.fill")
+        replyHint.tintColor = UIColor(OnymTokens.text3)
+        replyHint.contentMode = .scaleAspectFit
+        replyHint.alpha = 0
+        replyHint.accessibilityIdentifier = "chat.bubble.reply_hint"
+        contentView.addSubview(replyHint)
+        NSLayoutConstraint.activate([
+            replyHint.centerYAnchor.constraint(equalTo: bubble.centerYAnchor),
+            replyHint.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -14),
+            replyHint.widthAnchor.constraint(equalToConstant: 22),
+            replyHint.heightAnchor.constraint(equalToConstant: 22),
+        ])
+
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handleSwipePan(_:)))
+        pan.delegate = self
+        contentView.addGestureRecognizer(pan)
+        swipePan = pan
+    }
+
+    @objc private func handleSwipePan(_ pan: UIPanGestureRecognizer) {
+        let tx = pan.translation(in: contentView).x
+        switch pan.state {
+        case .began:
+            swipeArmed = false
+            swipeHaptic.prepare()
+        case .changed:
+            // Leftward drag only; clamp travel so the bubble can't be
+            // dragged off-screen and the "armed" point reads as a wall.
+            let drag = min(swipeMaxTravel, max(0, -tx))
+            applySwipeTranslation(drag)
+            let progress = min(1, drag / swipeReplyThreshold)
+            replyHint.alpha = progress
+            let scale = 0.6 + 0.4 * progress
+            replyHint.transform = CGAffineTransform(scaleX: scale, y: scale)
+            if drag >= swipeReplyThreshold, !swipeArmed {
+                swipeArmed = true
+                swipeHaptic.impactOccurred()   // one-shot "armed" tick
+            } else if drag < swipeReplyThreshold {
+                swipeArmed = false
+            }
+        case .ended, .cancelled, .failed:
+            let fire = swipeArmed && pan.state == .ended
+            swipeArmed = false
+            UIView.animate(
+                withDuration: 0.25, delay: 0,
+                usingSpringWithDamping: 0.7, initialSpringVelocity: 0.5,
+                options: [.allowUserInteraction]
+            ) {
+                self.applySwipeTranslation(0)
+                self.replyHint.alpha = 0
+                self.replyHint.transform = .identity
+            }
+            if fire { onSwipeToReply?() }
+        default:
+            break
+        }
+    }
+
+    /// Translate the moving parts of the row by `dx` points to the
+    /// left. The reply hint stays put at the trailing edge and is
+    /// revealed by the gap the bubble opens up.
+    private func applySwipeTranslation(_ dx: CGFloat) {
+        let t = CGAffineTransform(translationX: -dx, y: 0)
+        bubble.transform = t
+        statusImageView.transform = t
+        nameLabel.transform = t
+    }
+
+    private func resetSwipeState() {
+        swipeArmed = false
+        applySwipeTranslation(0)
+        replyHint.alpha = 0
+        replyHint.transform = .identity
+    }
+
     /// Brief background pulse on the bubble — used by the host to draw
     /// the eye to a message after scrolling to it from a tapped quote.
     func flashHighlight() {
@@ -373,6 +474,12 @@ final class ChatBubbleCell: UITableViewCell {
         let installed = quoteTapRecognizer != nil
         tappedQuote()
         return installed
+    }
+
+    /// Test seam for the swipe-to-reply gesture — fires the armed-reply
+    /// callback the same way a past-threshold drag-release would.
+    func simulateSwipeToReplyForTest() {
+        onSwipeToReply?()
     }
     #endif
 
@@ -557,5 +664,29 @@ final class ChatBubbleCell: UITableViewCell {
         bubbleBottomConstraint.isActive = true
         bubbleTopToContentConstraint.isActive = true
         bodyTopToBubbleConstraint.isActive = true
+    }
+}
+
+// UIView already conforms to `UIGestureRecognizerDelegate` and ships
+// these as overridable methods, so we extend (not re-conform) and mark
+// both `override`. The cell is the swipe pan's own delegate.
+extension ChatBubbleCell {
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizer === swipePan else { return true }
+        // Claim only a clearly leftward, mostly-horizontal drag so the
+        // table's vertical scroll keeps working and the controller's
+        // rightward full-width back-pan is unaffected.
+        let velocity = swipePan.velocity(in: contentView)
+        return velocity.x < 0 && abs(velocity.x) > abs(velocity.y)
+    }
+
+    override func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+    ) -> Bool {
+        // Coexist with the scroll view's pan — `shouldBegin` already
+        // restricts us to horizontal drags, so the two don't fight in
+        // practice.
+        true
     }
 }
