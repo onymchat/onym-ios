@@ -400,6 +400,65 @@ final class ChatThreadViewControllerTests: XCTestCase {
         XCTAssertFalse(vc.isNearBottom)
     }
 
+    // MARK: - Keyboard keeps latest visible
+
+    // The content is shifted by the keyboard's frame delta so the bottom
+    // message stays glued to the input area while the keyboard slides.
+    // `keyboardAdjustedOffsetY` is the pure clamp at the heart of it.
+
+    func test_keyboardOffset_parkedAtBottom_risesToNewBottom() {
+        // At the bottom (offset 1520 in a 480pt viewport over 2000pt of
+        // content); keyboard rises 300pt → viewport becomes 180. The
+        // content must end exactly at the new bottom (2000 - 180 = 1820).
+        let y = ChatThreadViewController.keyboardAdjustedOffsetY(
+            currentOffsetY: 1520, delta: 300, contentHeight: 2000,
+            finalViewportHeight: 180, topInset: 0, bottomInset: 0
+        )
+        XCTAssertEqual(y, 1820, accuracy: 0.5,
+                       "a message at the bottom must stay pinned to the input area")
+    }
+
+    func test_keyboardOffset_scrolledUp_translatesByDelta_noYank() {
+        // Reading history (offset 1000); a 300pt rise shifts the content
+        // up by 300 so what was visible stays visible — not yanked to
+        // the bottom.
+        let y = ChatThreadViewController.keyboardAdjustedOffsetY(
+            currentOffsetY: 1000, delta: 300, contentHeight: 2000,
+            finalViewportHeight: 180, topInset: 0, bottomInset: 0
+        )
+        XCTAssertEqual(y, 1300, accuracy: 0.5)
+    }
+
+    func test_keyboardOffset_shortContent_doesNotScroll() {
+        // Content shorter than even the shrunken viewport → nothing to
+        // scroll; clamp pins to the top (0).
+        let y = ChatThreadViewController.keyboardAdjustedOffsetY(
+            currentOffsetY: 0, delta: 300, contentHeight: 150,
+            finalViewportHeight: 180, topInset: 0, bottomInset: 0
+        )
+        XCTAssertEqual(y, 0, accuracy: 0.5)
+    }
+
+    func test_keyboardOffset_dismiss_returnsToBottom() {
+        // Keyboard retracts 300pt (delta negative): viewport grows back
+        // to 480, content settles to the resting bottom (2000 - 480).
+        let y = ChatThreadViewController.keyboardAdjustedOffsetY(
+            currentOffsetY: 1820, delta: -300, contentHeight: 2000,
+            finalViewportHeight: 480, topInset: 0, bottomInset: 0
+        )
+        XCTAssertEqual(y, 1520, accuracy: 0.5)
+    }
+
+    func test_keyboardOffset_respectsTopInset() {
+        // Can't scroll above the top inset, even if the delta would.
+        let y = ChatThreadViewController.keyboardAdjustedOffsetY(
+            currentOffsetY: -40, delta: -50, contentHeight: 100,
+            finalViewportHeight: 400, topInset: 40, bottomInset: 0
+        )
+        XCTAssertEqual(y, -40, accuracy: 0.5,
+                       "must not scroll above the top content inset")
+    }
+
     // MARK: - Sender differentiation (run grouping + name headers)
 
     func test_runGrouping_headerOnlyAtStartOfSameSenderRun() {
