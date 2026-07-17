@@ -63,6 +63,68 @@ final class MessageRepositoryTests: XCTestCase {
         XCTAssertEqual(next?.first?.status, .sent)
     }
 
+    // MARK: - upgradeStatus (delivery / read receipts)
+
+    func test_upgradeStatus_raisesAlongTheLadder() async {
+        let store = InMemoryMessageStore()
+        let msg = makeMessage(groupID: groupA, status: .sent)
+        await store.preload([msg])
+        let repo = MessageRepository(store: store)
+
+        await repo.upgradeStatus(id: msg.id, to: .delivered, groupID: groupA)
+        var stored = await repo.currentMessages(groupID: groupA)
+        XCTAssertEqual(stored.first?.status, .delivered)
+
+        await repo.upgradeStatus(id: msg.id, to: .read, groupID: groupA)
+        stored = await repo.currentMessages(groupID: groupA)
+        XCTAssertEqual(stored.first?.status, .read)
+    }
+
+    func test_upgradeStatus_neverDowngrades() async {
+        let store = InMemoryMessageStore()
+        let msg = makeMessage(groupID: groupA, status: .read)
+        await store.preload([msg])
+        let repo = MessageRepository(store: store)
+
+        // A late delivered receipt arriving after read must not lower it.
+        await repo.upgradeStatus(id: msg.id, to: .delivered, groupID: groupA)
+        let stored = await repo.currentMessages(groupID: groupA)
+        XCTAssertEqual(stored.first?.status, .read)
+    }
+
+    func test_upgradeStatus_ignoresIncomingRows() async {
+        let store = InMemoryMessageStore()
+        let incoming = ChatMessage(
+            id: UUID(), groupID: groupA, ownerIdentityID: IdentityID(),
+            senderBlsPubkeyHex: "11".repeated(48), body: "in",
+            sentAt: Date(timeIntervalSince1970: 1),
+            direction: .incoming, status: .received,
+            replyToMessageID: nil, groupType: .tyranny
+        )
+        await store.preload([incoming])
+        let repo = MessageRepository(store: store)
+
+        await repo.upgradeStatus(id: incoming.id, to: .delivered, groupID: groupA)
+        await repo.upgradeStatus(id: UUID(), to: .delivered, groupID: groupA)  // unknown id
+
+        let stored = await repo.currentMessages(groupID: groupA)
+        XCTAssertEqual(stored.first?.status, .received,
+                       "receipts must never touch incoming rows or unknown ids")
+    }
+
+    func test_chatReceiptPayload_roundTrips() throws {
+        let original = ChatReceiptPayload(
+            version: 1, groupID: Data([0x01, 0x02, 0x03]),
+            senderBlsPubkeyHex: "ab".repeated(48), kind: .read,
+            messageIDs: [UUID(), UUID()]
+        )
+        let data = try JSONEncoder().encode(original)
+        XCTAssertEqual(try JSONDecoder().decode(ChatReceiptPayload.self, from: data), original)
+        let json = String(data: data, encoding: .utf8) ?? ""
+        XCTAssertTrue(json.contains("message_ids"))
+        XCTAssertTrue(json.contains("sender_bls_pubkey_hex"))
+    }
+
     func test_delete_emptiesSnapshot() async {
         let store = InMemoryMessageStore()
         let msg = makeMessage(groupID: groupA)

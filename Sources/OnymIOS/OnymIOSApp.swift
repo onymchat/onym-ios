@@ -283,6 +283,10 @@ struct OnymIOSApp: App {
                 messageRepository: messageRepository,
                 groupRepository: groupRepository
             ),
+            chatReceiptSender: ChatReceiptSender(
+                identity: repository,
+                inboxTransport: inboxTransport
+            ),
             setGroupAvatar: { groupIDHex, jpeg in
                 await groupAvatarBroadcaster.setAvatar(groupIDHex: groupIDHex, jpeg: jpeg)
             }
@@ -407,7 +411,12 @@ struct OnymIOSApp: App {
                         chainState: chainStateReader,
                         messageRepository: messageRepository,
                         pendingInvites: pendingInvitesStore,
-                        groupStateRefresher: groupStateVerifier
+                        groupStateRefresher: groupStateVerifier,
+                        receiptSender: ChatReceiptSender(
+                            identity: identityRepository,
+                            inboxTransport: inboxTransport
+                        ),
+                        readReceiptsEnabled: { ReadReceiptsPreference.isEnabled }
                     )
                     let fanout = InboxFanoutInteractor(
                         inboxTransport: inboxTransport,

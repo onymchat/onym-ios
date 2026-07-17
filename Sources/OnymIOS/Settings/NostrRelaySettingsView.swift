@@ -50,63 +50,71 @@ struct NostrRelaySettingsView: View {
     @ViewBuilder
     private var configuredCard: some View {
         let endpoints = flow.state.snapshot.endpoints
-        SettingsCard {
-            if endpoints.isEmpty {
+        if endpoints.isEmpty {
+            SettingsCard {
                 Text("No relays configured. Inbox transport is offline.")
                     .font(.system(size: 14))
                     .foregroundStyle(OnymTokens.text3)
                     .frame(maxWidth: .infinity)
                     .padding(.horizontal, 16).padding(.vertical, 14)
                     .accessibilityIdentifier("nostr.configured.empty")
-            } else {
+            }
+        } else {
+            // Clipped rounded stack (not SettingsCard) so each row can
+            // swipe left to reveal a Delete action masked to the card's
+            // corners. Rows carry the card surface so the reveal stays
+            // hidden until slid.
+            VStack(spacing: 0) {
                 ForEach(Array(endpoints.enumerated()), id: \.element.url) { idx, endpoint in
-                    HStack(spacing: 12) {
-                        SettingsIconTile(
-                            symbol: "antenna.radiowaves.left.and.right",
-                            bg: SettingsTile.indigo
-                        )
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack(spacing: 6) {
-                                Text(endpoint.name)
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundStyle(OnymTokens.text)
-                                if endpoint.isDefault {
-                                    Text("DEFAULT")
-                                        .font(.system(size: 10, weight: .bold))
-                                        .foregroundStyle(OnymTokens.text2)
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 2)
-                                        .background(
-                                            OnymTokens.surface3,
-                                            in: RoundedRectangle(cornerRadius: 4)
-                                        )
+                    SwipeToDeleteRow(
+                        accessibilityID: "nostr.configured.\(endpoint.url.absoluteString)",
+                        onDelete: { flow.tappedRemove(url: endpoint.url) }
+                    ) {
+                        VStack(spacing: 0) {
+                            HStack(spacing: 12) {
+                                SettingsIconTile(
+                                    symbol: "antenna.radiowaves.left.and.right",
+                                    bg: SettingsTile.indigo
+                                )
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack(spacing: 6) {
+                                        Text(endpoint.name)
+                                            .font(.system(size: 15, weight: .semibold))
+                                            .foregroundStyle(OnymTokens.text)
+                                        if endpoint.isDefault {
+                                            Text("DEFAULT")
+                                                .font(.system(size: 10, weight: .bold))
+                                                .foregroundStyle(OnymTokens.text2)
+                                                .padding(.horizontal, 6)
+                                                .padding(.vertical, 2)
+                                                .background(
+                                                    OnymTokens.surface3,
+                                                    in: RoundedRectangle(cornerRadius: 4)
+                                                )
+                                        }
+                                    }
+                                    Text(endpoint.url.absoluteString)
+                                        .font(.system(size: 12, design: .monospaced))
+                                        .foregroundStyle(OnymTokens.text3)
+                                        .lineLimit(1)
                                 }
+                                Spacer(minLength: 0)
                             }
-                            Text(endpoint.url.absoluteString)
-                                .font(.system(size: 12, design: .monospaced))
-                                .foregroundStyle(OnymTokens.text3)
-                                .lineLimit(1)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            if idx != endpoints.count - 1 {
+                                Divider()
+                                    .background(OnymTokens.hairline)
+                                    .padding(.leading, 56)
+                            }
                         }
-                        Spacer(minLength: 0)
-                        Button {
-                            flow.tappedRemove(url: endpoint.url)
-                        } label: {
-                            Image(systemName: "minus.circle.fill")
-                                .font(.system(size: 22))
-                                .foregroundStyle(OnymTokens.red)
-                        }
-                        .accessibilityLabel("Remove \(endpoint.name)")
-                        .accessibilityIdentifier("nostr.configured.remove.\(endpoint.url.absoluteString)")
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    if idx != endpoints.count - 1 {
-                        Divider()
-                            .background(OnymTokens.hairline)
-                            .padding(.leading, 56)
+                        .accessibilityElement(children: .contain)
+                        .accessibilityIdentifier("nostr.configured.\(endpoint.url.absoluteString)")
                     }
                 }
             }
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(.horizontal, 16)
         }
     }
 

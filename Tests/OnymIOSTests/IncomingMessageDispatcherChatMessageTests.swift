@@ -353,7 +353,9 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
 
     private func makeDispatcher(
         plaintext: Data,
-        envelopeSigner: Data?
+        envelopeSigner: Data?,
+        receiptSender: any ChatReceiptSending = NoopChatReceiptSender(),
+        readReceiptsEnabled: @escaping @Sendable () -> Bool = { true }
     ) -> IncomingMessageDispatcher {
         let decrypter = FakeInvitationEnvelopeDecrypter(
             mode: .fixed(plaintext),
@@ -365,8 +367,113 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
             groupRepository: groups,
             invitationsRepository: invitations,
             chainState: chainState,
-            messageRepository: messages
+            messageRepository: messages,
+            receiptSender: receiptSender,
+            readReceiptsEnabled: readReceiptsEnabled
         )
+    }
+
+    // MARK: - Receipts
+
+    func test_incomingChatMessage_shipsDeliveredReceiptToSender() async throws {
+        let payload = makePayload(body: "hi")
+        let spy = SpyChatReceiptSender()
+        let dispatcher = makeDispatcher(
+            plaintext: try JSONEncoder().encode(payload),
+            envelopeSigner: senderEd25519,
+            receiptSender: spy
+        )
+        await dispatcher.dispatch(
+            messageID: "msg-1",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+        let sends = await spy.sends
+        XCTAssertEqual(sends.count, 1)
+        XCTAssertEqual(sends.first?.kind, .delivered)
+        XCTAssertEqual(sends.first?.messageIDs, [payload.messageID])
+        XCTAssertEqual(sends.first?.recipientInboxKey, senderInbox,
+                       "delivered receipt must be addressed to the message sender's inbox")
+    }
+
+    func test_receipt_delivered_raisesOutgoingMessageToDelivered() async throws {
+        let outgoingID = UUID()
+        await seedOutgoing(id: outgoingID, status: .sent)
+        let receipt = ChatReceiptPayload(
+            version: 1, groupID: groupIDBytes,
+            senderBlsPubkeyHex: senderBlsHex, kind: .delivered, messageIDs: [outgoingID]
+        )
+        let dispatcher = makeDispatcher(
+            plaintext: try JSONEncoder().encode(receipt),
+            envelopeSigner: senderEd25519
+        )
+        await dispatcher.dispatch(
+            messageID: "rcpt-1", ownerIdentityID: owner,
+            payload: Data("envelope".utf8), receivedAt: Date()
+        )
+        let stored = await messages.currentMessages(groupID: groupIDHex)
+        XCTAssertEqual(stored.first { $0.id == outgoingID }?.status, .delivered)
+    }
+
+    func test_receipt_read_honoredOnlyWhenReadReceiptsEnabled() async throws {
+        // Setting OFF → inbound read receipt ignored (stays delivered).
+        let idOff = UUID()
+        await seedOutgoing(id: idOff, status: .delivered)
+        let readReceipt = ChatReceiptPayload(
+            version: 1, groupID: groupIDBytes,
+            senderBlsPubkeyHex: senderBlsHex, kind: .read, messageIDs: [idOff]
+        )
+        let off = makeDispatcher(
+            plaintext: try JSONEncoder().encode(readReceipt),
+            envelopeSigner: senderEd25519,
+            readReceiptsEnabled: { false }
+        )
+        await off.dispatch(messageID: "r", ownerIdentityID: owner,
+                           payload: Data("e".utf8), receivedAt: Date())
+        var stored = await messages.currentMessages(groupID: groupIDHex)
+        XCTAssertEqual(stored.first { $0.id == idOff }?.status, .delivered,
+                       "read receipt must be ignored while read receipts are disabled")
+
+        // Setting ON → same receipt raises to read.
+        let on = makeDispatcher(
+            plaintext: try JSONEncoder().encode(readReceipt),
+            envelopeSigner: senderEd25519,
+            readReceiptsEnabled: { true }
+        )
+        await on.dispatch(messageID: "r2", ownerIdentityID: owner,
+                          payload: Data("e".utf8), receivedAt: Date())
+        stored = await messages.currentMessages(groupID: groupIDHex)
+        XCTAssertEqual(stored.first { $0.id == idOff }?.status, .read)
+    }
+
+    private func seedOutgoing(id: UUID, status: MessageStatus) async {
+        await messages.insert(ChatMessage(
+            id: id, groupID: groupIDHex, ownerIdentityID: owner,
+            senderBlsPubkeyHex: "ff".repeated(48), body: "mine",
+            sentAt: Date(timeIntervalSince1970: 1_700_000_000),
+            direction: .outgoing, status: status,
+            replyToMessageID: nil, groupType: .tyranny
+        ))
+    }
+}
+
+/// Records receipt sends so tests can assert the delivered ack.
+private actor SpyChatReceiptSender: ChatReceiptSending {
+    struct Sent: Sendable {
+        let kind: ChatReceiptPayload.Kind
+        let messageIDs: [UUID]
+        let groupID: Data
+        let recipientInboxKey: Data
+    }
+    private(set) var sends: [Sent] = []
+    func send(
+        kind: ChatReceiptPayload.Kind,
+        messageIDs: [UUID],
+        groupID: Data,
+        to recipientInboxKey: Data
+    ) async {
+        sends.append(Sent(kind: kind, messageIDs: messageIDs, groupID: groupID, recipientInboxKey: recipientInboxKey))
     }
 }
 

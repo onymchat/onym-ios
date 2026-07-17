@@ -70,6 +70,14 @@ struct IncomingMessageDispatcher: Sendable {
     /// answered here on the admin side. Defaulted to a no-op for the
     /// same reason as `pendingInvites`.
     var groupStateRefresher: any GroupStateRefreshing = NoopGroupStateRefresher()
+    /// Ships a delivered receipt back to a chat message's sender the
+    /// moment we persist it. Defaulted to a no-op so the many existing
+    /// test constructions don't have to thread it.
+    var receiptSender: any ChatReceiptSending = NoopChatReceiptSender()
+    /// Symmetric read-receipt gate: an inbound `.read` receipt only
+    /// raises a message to `.read` when this device also sends read
+    /// receipts. Defaulted to `true` (the shipping default).
+    var readReceiptsEnabled: @Sendable () -> Bool = { true }
 
     func dispatch(
         messageID: String,
@@ -170,6 +178,18 @@ struct IncomingMessageDispatcher: Sendable {
                 ownerIdentityID: ownerIdentityID,
                 senderEd25519PublicKey: envelope.senderEd25519PublicKey
             )
+            return
+        }
+
+        // Fast path: chat receipt — a peer acking one of OUR messages
+        // as delivered / read. Wire-shape-disjoint from every other
+        // payload (unique `kind` + `message_ids` keys), so this `try?`
+        // decode can't steal a different payload.
+        if let receipt = try? JSONDecoder().decode(
+            ChatReceiptPayload.self,
+            from: envelope.plaintext
+        ) {
+            await applyReceipt(receipt)
             return
         }
 
@@ -708,5 +728,35 @@ struct IncomingMessageDispatcher: Sendable {
             groupType: group.groupType
         )
         await messageRepository.insert(message)
+
+        // Ack the sender: delivered now (unconditional — it only reveals
+        // a device received the ciphertext). Read receipts are sent
+        // later, when the user opens the thread.
+        await receiptSender.send(
+            kind: .delivered,
+            messageIDs: [payload.messageID],
+            groupID: payload.groupID,
+            to: senderProfile.inboxPublicKey
+        )
+    }
+
+    /// Apply an inbound receipt: raise the acked outgoing messages to
+    /// `.delivered` / `.read` (monotonic — `MessageRepository`
+    /// enforces). Read receipts are honored only when this device also
+    /// sends them (symmetric).
+    private func applyReceipt(_ receipt: ChatReceiptPayload) async {
+        let newStatus: MessageStatus
+        switch receipt.kind {
+        case .delivered:
+            newStatus = .delivered
+        case .read:
+            guard readReceiptsEnabled() else { return }
+            newStatus = .read
+        }
+        let groupIDHex = receipt.groupID
+            .map { String(format: "%02x", $0) }.joined()
+        for id in receipt.messageIDs {
+            await messageRepository.upgradeStatus(id: id, to: newStatus, groupID: groupIDHex)
+        }
     }
 }

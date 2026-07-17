@@ -21,11 +21,15 @@ struct ChatThreadView: View {
     @Bindable var identitiesFlow: IdentitiesFlow
     let messageRepository: MessageRepository
     let sendMessageInteractor: SendMessageInteractor
+    let chatReceiptSender: any ChatReceiptSending
     let makeShareInviteFlow: @MainActor () -> ShareInviteFlow
     let setGroupAvatar: @MainActor (String, Data?) async -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var showMembers: Bool = false
+    /// Incoming message IDs we've already emitted a read receipt for,
+    /// so re-renders while the thread stays open don't re-send.
+    @State private var ackedReadIDs: Set<UUID> = []
     /// Live snapshot of the group's messages, sorted ascending by
     /// `sentAt`. SwiftUI re-renders on every push so the bridge
     /// hands the controller fresh data via `updateUIViewController`.
@@ -92,7 +96,37 @@ struct ChatThreadView: View {
         .task(id: groupID) {
             for await snapshot in messageRepository.snapshots(groupID: groupID) {
                 messages = snapshot
+                // Read receipts: the thread is on-screen (this task is
+                // tied to its lifetime), so any incoming message here is
+                // "read". Gated by the symmetric setting, batched per
+                // sender, and de-duped via `ackedReadIDs`.
+                await sendReadReceipts(for: snapshot)
             }
+        }
+    }
+
+    /// Emit `.read` receipts for incoming messages the user is now
+    /// looking at. No-op when the setting is off. Groups unacked
+    /// incoming IDs by sender and ships one receipt per sender to that
+    /// sender's inbox key (resolved from the group's member profiles).
+    private func sendReadReceipts(for snapshot: [ChatMessage]) async {
+        guard ReadReceiptsPreference.isEnabled else { return }
+        guard let group = chatsFlow.groups.first(where: { $0.id == groupID }) else { return }
+        var bySender: [String: [UUID]] = [:]
+        for message in snapshot
+        where message.direction == .incoming && !ackedReadIDs.contains(message.id) {
+            bySender[message.senderBlsPubkeyHex, default: []].append(message.id)
+        }
+        guard !bySender.isEmpty else { return }
+        for (senderHex, ids) in bySender {
+            guard let inbox = group.memberProfiles[senderHex]?.inboxPublicKey else { continue }
+            await chatReceiptSender.send(
+                kind: .read,
+                messageIDs: ids,
+                groupID: group.groupIDData,
+                to: inbox
+            )
+            for id in ids { ackedReadIDs.insert(id) }
         }
     }
 

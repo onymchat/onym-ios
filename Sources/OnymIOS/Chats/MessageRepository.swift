@@ -54,6 +54,24 @@ actor MessageRepository {
         await refresh(groupID: groupID)
     }
 
+    /// Raise an outgoing message's delivery status from an inbound
+    /// receipt, never lowering it. No-op unless the row exists, is
+    /// outgoing, and `status` sits strictly higher on the delivery
+    /// ladder than the current value (so a late `.delivered` arriving
+    /// after `.read`, a duplicate receipt, or a receipt for an unknown /
+    /// incoming / failed row all do nothing). See
+    /// `MessageStatus.deliveryRank`.
+    func upgradeStatus(id: UUID, to status: MessageStatus, groupID: String) async {
+        guard let newRank = status.deliveryRank else { return }
+        let messages = await currentMessages(groupID: groupID)
+        guard let message = messages.first(where: { $0.id == id }),
+              message.direction == .outgoing,
+              let currentRank = message.status.deliveryRank,
+              newRank > currentRank
+        else { return }
+        await updateStatus(id: id, status: status, groupID: groupID)
+    }
+
     func delete(id: UUID, groupID: String) async {
         await store.delete(id: id)
         await refresh(groupID: groupID)

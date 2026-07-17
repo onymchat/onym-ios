@@ -39,6 +39,10 @@ struct AppDependencies {
     /// (it's an actor); each chat-thread view captures it and
     /// dispatches `send(groupID:body:)` on the send-button tap.
     let sendMessageInteractor: SendMessageInteractor
+    /// Seals + ships delivery/read receipts. Shared so the chat thread
+    /// can emit read receipts when the user opens it (delivered receipts
+    /// are emitted from the receive-side dispatcher instead).
+    let chatReceiptSender: any ChatReceiptSending
     /// Admin sets/clears a group photo: applies it locally and fans a
     /// `GroupAvatarPayload` out to members. Backs the admin-only picker
     /// in `ChatMembersView`; `nil` JPEG clears the photo.

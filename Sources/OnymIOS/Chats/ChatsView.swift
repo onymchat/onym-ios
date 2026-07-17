@@ -12,6 +12,7 @@ struct ChatsView: View {
     let pendingInvitesFlow: PendingInvitesFlow
     let messageRepository: MessageRepository
     let sendMessageInteractor: SendMessageInteractor
+    let chatReceiptSender: any ChatReceiptSending
     let makeCreateGroupFlow: @MainActor () -> CreateGroupFlow
     let makeShareInviteFlow: @MainActor () -> ShareInviteFlow
     let makeJoinFlow: @MainActor (IntroCapability) -> JoinFlow
@@ -212,6 +213,7 @@ struct ChatsView: View {
                 identitiesFlow: identitiesFlow,
                 messageRepository: messageRepository,
                 sendMessageInteractor: sendMessageInteractor,
+                chatReceiptSender: chatReceiptSender,
                 makeShareInviteFlow: makeShareInviteFlow,
                 setGroupAvatar: setGroupAvatar
             )

@@ -88,6 +88,10 @@ final class ChatBubbleCell: UITableViewCell {
     private let bubble = UIView()
     private let bodyLabel = UILabel()
     private let statusImageView = UIImageView()
+    /// Second checkmark, sat just left of `statusImageView` and shown
+    /// only for `.delivered` / `.read` so the pair reads as a
+    /// double-check (SF Symbols has no native double-check glyph).
+    private let statusImageView2 = UIImageView()
     /// Why the send failed, rendered under a `.failed` outgoing bubble
     /// next to the red bang so the user isn't left guessing. Text
     /// comes from `SendFailureReason.explanation` (or a generic
@@ -234,6 +238,7 @@ final class ChatBubbleCell: UITableViewCell {
             failureBottomConstraint.isActive = false
             bubbleBottomConstraint.isActive = true
             statusImageView.isHidden = true
+            statusImageView2.isHidden = true
             failureLabel.isHidden = true
             failureLabel.text = nil
         }
@@ -417,6 +422,7 @@ final class ChatBubbleCell: UITableViewCell {
         let t = CGAffineTransform(translationX: -dx, y: 0)
         bubble.transform = t
         statusImageView.transform = t
+        statusImageView2.transform = t
         failureLabel.transform = t
         nameLabel.transform = t
     }
@@ -444,6 +450,9 @@ final class ChatBubbleCell: UITableViewCell {
 
     private func applyStatus(_ status: MessageStatus, failureReason: SendFailureReason?) {
         statusImageView.isHidden = false
+        // The second checkmark only shows for the double-check states;
+        // hide it by default and let `.delivered` / `.read` reveal it.
+        statusImageView2.isHidden = true
         // Default shape: no explanation, status glyph drives the cell
         // bottom. `.failed` overrides below. Deactivate before
         // activate so the two bottom anchors never conflict.
@@ -460,6 +469,12 @@ final class ChatBubbleCell: UITableViewCell {
             statusImageView.image = UIImage(systemName: "checkmark")
             statusImageView.tintColor = UIColor(OnymTokens.text3)
             statusImageView.accessibilityLabel = "Sent"
+        case .delivered:
+            applyDoubleCheck(tint: UIColor(OnymTokens.text3))
+            statusImageView.accessibilityLabel = "Delivered"
+        case .read:
+            applyDoubleCheck(tint: UIColor(OnymAccent.blue.color))
+            statusImageView.accessibilityLabel = "Read"
         case .failed:
             statusImageView.image = UIImage(systemName: "exclamationmark.circle.fill")
             statusImageView.tintColor = UIColor(OnymTokens.red)
@@ -474,6 +489,17 @@ final class ChatBubbleCell: UITableViewCell {
             // defensive default if a bad row somehow lands here.
             statusImageView.isHidden = true
         }
+    }
+
+    /// Render both checkmarks in `tint` — gray for `.delivered`, the
+    /// accent for `.read`.
+    private func applyDoubleCheck(tint: UIColor) {
+        let check = UIImage(systemName: "checkmark")
+        statusImageView.image = check
+        statusImageView.tintColor = tint
+        statusImageView2.image = check
+        statusImageView2.tintColor = tint
+        statusImageView2.isHidden = false
     }
 
     @objc private func tappedBubble() {
@@ -561,6 +587,16 @@ final class ChatBubbleCell: UITableViewCell {
         statusImageView.isHidden = true
         statusImageView.accessibilityIdentifier = "chat.bubble.status"
         contentView.addSubview(statusImageView)
+
+        statusImageView2.translatesAutoresizingMaskIntoConstraints = false
+        statusImageView2.contentMode = .scaleAspectFit
+        statusImageView2.preferredSymbolConfiguration = UIImage.SymbolConfiguration(
+            pointSize: 11,
+            weight: .semibold
+        )
+        statusImageView2.isHidden = true
+        statusImageView2.accessibilityIdentifier = "chat.bubble.status2"
+        contentView.addSubview(statusImageView2)
 
         failureLabel.translatesAutoresizingMaskIntoConstraints = false
         let base = UIFont.systemFont(ofSize: 12, weight: .regular)
@@ -674,6 +710,13 @@ final class ChatBubbleCell: UITableViewCell {
             statusImageView.trailingAnchor.constraint(equalTo: bubble.trailingAnchor),
             statusImageView.widthAnchor.constraint(equalToConstant: 14),
             statusImageView.heightAnchor.constraint(equalToConstant: 14),
+
+            // Second checkmark, offset left so the pair overlaps into a
+            // double-check. Only visible for .delivered / .read.
+            statusImageView2.centerYAnchor.constraint(equalTo: statusImageView.centerYAnchor),
+            statusImageView2.trailingAnchor.constraint(equalTo: statusImageView.trailingAnchor, constant: -5),
+            statusImageView2.widthAnchor.constraint(equalToConstant: 14),
+            statusImageView2.heightAnchor.constraint(equalToConstant: 14),
 
             // Failure explanation sits left of the red bang, growing
             // leftward/downward as needed. Only participates in the

@@ -641,12 +641,36 @@ actor JoinRequestApprover: JoinRequestApproving {
     }
 
     private func refresh(from raw: [IntroRequest]) async {
-        var decoded: [PendingRequest] = []
+        // Collapse duplicates that represent the same logical join —
+        // same joiner identity + same group. The joiner re-sends with a
+        // fresh ephemeral Nostr key each time (accept-after-relaunch,
+        // deeplink re-open, retries), so every copy is a distinct event
+        // with its own id; `IntroRequestStore`'s event-id dedup can't
+        // catch them. Without this, one person retrying shows as several
+        // rows and approving/declining one leaves the siblings behind —
+        // which reads as "the buttons don't work". Keep the most recently
+        // received copy, positioned at the first-seen index.
+        var collapsed: [String: (request: PendingRequest, receivedAt: Date)] = [:]
+        var order: [String] = []
         for r in raw {
-            if let p = await decode(r) { decoded.append(p) }
+            guard let p = await decode(r) else { continue }
+            let identity = p.joinerBlsPublicKey ?? p.joinerInboxPublicKey
+            let key = Self.hex(identity) + ":" + Self.hex(p.groupId)
+            if let existing = collapsed[key] {
+                if r.receivedAt > existing.receivedAt {
+                    collapsed[key] = (p, r.receivedAt)
+                }
+            } else {
+                collapsed[key] = (p, r.receivedAt)
+                order.append(key)
+            }
         }
-        pendingValue = decoded
+        pendingValue = order.compactMap { collapsed[$0]?.request }
         publishPending()
+    }
+
+    private static func hex(_ data: Data) -> String {
+        data.map { String(format: "%02x", $0) }.joined()
     }
 
     private func decode(_ raw: IntroRequest) async -> PendingRequest? {

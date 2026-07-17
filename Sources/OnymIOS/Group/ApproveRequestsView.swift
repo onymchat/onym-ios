@@ -178,7 +178,10 @@ struct ApproveRequestsView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
                 .accessibilityIdentifier("approve_requests.decline_button.\(request.id)")
-                .disabled(request.groupName == nil || inFlight)
+                // Decline must stay available even when the group isn't
+                // on this device — the row's own hint says "Decline to
+                // clear it", so only block it while a call is in flight.
+                .disabled(inFlight)
                 Button {
                     flow.approve(request.id)
                 } label: {

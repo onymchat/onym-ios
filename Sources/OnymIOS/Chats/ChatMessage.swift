@@ -152,11 +152,34 @@ enum MessageStatus: String, Codable, Sendable {
     /// Outgoing only — in flight to transport.
     case pending
     /// Outgoing only — transport accepted (per-envelope errors
-    /// resolved or tolerated).
+    /// resolved or tolerated). Single check.
     case sent
+    /// Outgoing only — a recipient's device received + decrypted the
+    /// message and sent back a delivered receipt. Double check.
+    case delivered
+    /// Outgoing only — a recipient opened the thread and sent back a
+    /// read receipt (gated by the symmetric read-receipt setting).
+    /// Accent double check.
+    case read
     /// Outgoing only — transport rejected. Retry via
     /// `SendMessageInteractor` flips back to `.pending`.
     case failed
     /// Incoming only — payload decoded and persisted.
     case received
+
+    /// Position on the outgoing delivery ladder
+    /// (`pending → sent → delivered → read`). Receipts only ever
+    /// *raise* the status — a late `delivered` arriving after `read`
+    /// must not move it back — so callers compare ranks before
+    /// applying. `nil` for statuses outside the ladder (`failed`,
+    /// `received`), which receipts never transition to.
+    var deliveryRank: Int? {
+        switch self {
+        case .pending:   return 0
+        case .sent:      return 1
+        case .delivered: return 2
+        case .read:      return 3
+        case .failed, .received: return nil
+        }
+    }
 }

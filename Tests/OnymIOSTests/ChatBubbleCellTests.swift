@@ -154,6 +154,49 @@ final class ChatBubbleCellTests: XCTestCase {
         XCTAssertEqual(statusIcon(in: cell).accessibilityLabel, "Sent")
     }
 
+    // MARK: - Delivered / read (double check)
+
+    func test_outgoingDelivered_showsGrayDoubleCheck() {
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+        cell.configure(message: makeMessage(direction: .outgoing, status: .delivered))
+        XCTAssertEqual(statusIcon(in: cell).accessibilityLabel, "Delivered")
+        XCTAssertFalse(secondStatusIcon(in: cell).isHidden,
+                       "delivered must reveal the second checkmark")
+    }
+
+    func test_outgoingRead_showsDoubleCheck() {
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+        cell.configure(message: makeMessage(direction: .outgoing, status: .read))
+        XCTAssertEqual(statusIcon(in: cell).accessibilityLabel, "Read")
+        XCTAssertFalse(secondStatusIcon(in: cell).isHidden)
+    }
+
+    func test_reconfigureDeliveredToSent_hidesSecondCheck() {
+        // Reuse safety: a double-check row reused for a single-check
+        // (.sent) message must drop the second checkmark.
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+        let id = UUID()
+        cell.configure(message: makeMessage(id: id, direction: .outgoing, status: .delivered))
+        XCTAssertFalse(secondStatusIcon(in: cell).isHidden)
+        cell.configure(message: makeMessage(id: id, direction: .outgoing, status: .sent))
+        XCTAssertTrue(secondStatusIcon(in: cell).isHidden)
+        XCTAssertEqual(statusIcon(in: cell).accessibilityLabel, "Sent")
+    }
+
+    func test_incoming_hidesSecondCheck() {
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+        cell.configure(message: makeMessage(direction: .incoming, status: .received))
+        XCTAssertTrue(secondStatusIcon(in: cell).isHidden)
+    }
+
+    private func secondStatusIcon(in cell: ChatBubbleCell) -> UIImageView {
+        guard let icon = find(in: cell.contentView, identifier: "chat.bubble.status2")
+                as? UIImageView else {
+            fatalError("second status icon not found")
+        }
+        return icon
+    }
+
     // MARK: - Failure explanation
 
     func test_outgoingFailed_showsReasonExplanation() {

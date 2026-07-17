@@ -24,6 +24,11 @@ struct SettingsView: View {
     /// the network the next Create Group flow will use.
     @AppStorage(UserDefaultsNetworkPreference.storageKey) private var useMainnet = false
 
+    /// Symmetric read receipts (default ON): gates both sending your
+    /// read receipts and seeing others'. Same key as
+    /// `ReadReceiptsPreference`.
+    @AppStorage(ReadReceiptsPreference.storageKey) private var sendReadReceipts = true
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
@@ -168,6 +173,26 @@ struct SettingsView: View {
                             )
                     }
                     .accessibilityIdentifier("settings.tor_row")
+                }
+
+                SettingsSectionLabel("CHAT")
+                SettingsCard {
+                    SettingsRow(
+                        title: "Send read receipts",
+                        subtitle: "You'll only see others' read status if this is on",
+                        hasChevron: false,
+                        last: true
+                    ) {
+                        SettingsIconTile(
+                            symbol: sendReadReceipts ? "checkmark.message.fill" : "message",
+                            bg: sendReadReceipts ? SettingsTile.indigo : SettingsTile.gray
+                        )
+                    } right: {
+                        Toggle("", isOn: $sendReadReceipts)
+                            .labelsHidden()
+                            .tint(OnymTokens.green)
+                            .accessibilityIdentifier("settings.read_receipts_toggle")
+                    }
                 }
 
                 SettingsSectionLabel("APP")

@@ -112,6 +112,35 @@ final class JoinRequestApproverTests: XCTestCase {
         XCTAssertNil(intro, "intro key must be revoked after approve")
     }
 
+    // MARK: - duplicate collapse
+
+    func test_pumpOnce_collapsesDuplicateRequestsFromSameJoiner() async throws {
+        let env = try await seedEnvironment()
+
+        // The joiner re-sent: a second, distinct Nostr event (new id,
+        // later timestamp) carrying the SAME sealed join payload. The
+        // store keeps both (different ids), but the approver must
+        // collapse them into a single actionable row.
+        await introRequestStore.record(IntroRequest(
+            id: "req-\(UUID().uuidString)",
+            targetIntroPublicKey: env.introPub,
+            payload: env.sealedPayload,
+            receivedAt: Date().addingTimeInterval(60)
+        ))
+        let raw = await introRequestStore.current()
+        XCTAssertEqual(raw.count, 2, "store keeps both distinct events")
+
+        await env.approver.pumpOnce()
+
+        var iterator = env.approver.pending.makeAsyncIterator()
+        let pending = await iterator.next() ?? []
+        XCTAssertEqual(
+            pending.count, 1,
+            "duplicate requests for the same joiner + group must collapse to one row"
+        )
+        XCTAssertEqual(pending.first?.groupId, env.groupID)
+    }
+
     // MARK: - approve unknown group
 
     func test_approve_unknownGroup_returnsUnknownGroup() async throws {
@@ -305,6 +334,10 @@ final class JoinRequestApproverTests: XCTestCase {
         let joinerAlias: String
         let adminInboxPub: Data
         let expectedJoinerTag: TransportInboxID
+        /// The sealed JoinRequestPayload bytes the seed recorded, so a
+        /// test can re-record it under a fresh event id to simulate the
+        /// joiner re-sending the same logical request.
+        let sealedPayload: Data
     }
 
     /// Bootstrap one identity (the admin), mint an intro key for a
@@ -442,7 +475,8 @@ final class JoinRequestApproverTests: XCTestCase {
             joinerInboxPub: joinerInboxPub,
             joinerAlias: joinerAlias,
             adminInboxPub: active.inboxPublicKey,
-            expectedJoinerTag: TransportInboxID(rawValue: ApproverInboxTag.from(joinerInboxPub))
+            expectedJoinerTag: TransportInboxID(rawValue: ApproverInboxTag.from(joinerInboxPub)),
+            sealedPayload: sealed
         )
     }
 }
