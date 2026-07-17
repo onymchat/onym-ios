@@ -269,11 +269,33 @@ final class ChatThreadViewController: UIViewController {
         dataSource.apply(snapshot, animatingDifferences: !isFirstApply) { [weak self] in
             guard let self else { return }
             if isFirstApply {
-                self.scrollToBottom(animated: false)
+                // Cold open: land at the bottom with no visible scroll.
+                // Only the first *non-empty* snapshot counts as the cold
+                // open — the SwiftUI bridge's initial render is empty, and
+                // treating that as "first" would make the real messages a
+                // normal (animated) update that scrolls up from the top.
+                guard !sorted.isEmpty else { return }
+                self.jumpToBottomForColdOpen()
                 self.hasAppliedFirstSnapshot = true
             } else if wasNearBottom {
                 self.scrollToBottom(animated: true)
             }
+        }
+    }
+
+    /// Position the cold open directly at the latest message, without
+    /// the user ever seeing the top→bottom scroll. The table is hidden
+    /// (alpha 0) until here; we lay out, scroll to the bottom, and — on
+    /// the next runloop, after the table has corrected its estimated row
+    /// heights to actual — scroll once more and reveal, so any settle is
+    /// masked.
+    private func jumpToBottomForColdOpen() {
+        tableView.layoutIfNeeded()
+        scrollToBottom(animated: false)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.scrollToBottom(animated: false)
+            if self.tableView.alpha == 0 { self.tableView.alpha = 1 }
         }
     }
 
@@ -506,6 +528,10 @@ final class ChatThreadViewController: UIViewController {
         tableView.translatesAutoresizingMaskIntoConstraints = false
         tableView.backgroundColor = UIColor(OnymTokens.bg)
         tableView.separatorStyle = .none
+        // Hidden until the cold open is positioned at the bottom, so the
+        // user never sees the initial top→bottom scroll. Revealed by
+        // `jumpToBottomForColdOpen` once the latest message is in place.
+        tableView.alpha = 0
         // Self-sizing rows — bubble height grows with body text.
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 44
