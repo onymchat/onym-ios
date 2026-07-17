@@ -92,6 +92,7 @@ actor SwiftDataMessageStore: MessageStore {
             existing.statusRaw = encoded.statusRaw
             existing.groupTypeRaw = encoded.groupTypeRaw
             existing.replyToMessageIDString = encoded.replyToMessageIDString
+            existing.failureReasonRaw = encoded.failureReasonRaw
             existing.encryptedSenderBlsPubkeyHex = encoded.encryptedSenderBlsPubkeyHex
             existing.encryptedBody = encoded.encryptedBody
             try? context.save()
@@ -103,13 +104,14 @@ actor SwiftDataMessageStore: MessageStore {
         return true
     }
 
-    func updateStatus(id: UUID, status: MessageStatus) {
+    func updateStatus(id: UUID, status: MessageStatus, failureReason: SendFailureReason?) {
         let key = id.uuidString
         let descriptor = FetchDescriptor<PersistedMessage>(
             predicate: #Predicate { $0.id == key }
         )
         guard let row = try? context.fetch(descriptor).first else { return }
         row.statusRaw = status.rawValue
+        row.failureReasonRaw = failureReason?.rawValue
         try? context.save()
     }
 
@@ -156,6 +158,7 @@ actor SwiftDataMessageStore: MessageStore {
             statusRaw: message.status.rawValue,
             groupTypeRaw: message.groupType.rawValue,
             replyToMessageIDString: message.replyToMessageID?.uuidString,
+            failureReasonRaw: message.failureReason?.rawValue,
             encryptedSenderBlsPubkeyHex: try StorageEncryption.encrypt(message.senderBlsPubkeyHex),
             encryptedBody: try StorageEncryption.encrypt(message.body)
         )
@@ -183,7 +186,8 @@ actor SwiftDataMessageStore: MessageStore {
             direction: direction,
             status: status,
             replyToMessageID: row.replyToMessageIDString.flatMap(UUID.init(uuidString:)),
-            groupType: groupType
+            groupType: groupType,
+            failureReason: row.failureReasonRaw.flatMap(SendFailureReason.init(rawValue:))
         )
     }
 }

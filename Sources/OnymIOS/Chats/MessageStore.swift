@@ -18,11 +18,13 @@ protocol MessageStore: Sendable {
     @discardableResult
     func insertOrUpdate(_ message: ChatMessage) async -> Bool
 
-    /// Flip just the status column. Convenience for the outgoing
-    /// pipeline so we don't have to round-trip the whole row through
-    /// the encryption boundary just to bump pending → sent. No-op if
-    /// the row is missing.
-    func updateStatus(id: UUID, status: MessageStatus) async
+    /// Flip just the status column (and the failure-reason column that
+    /// travels with it — non-nil when flipping to `.failed`, nil
+    /// otherwise so a retry's pending flip clears the stale reason).
+    /// Convenience for the outgoing pipeline so we don't have to
+    /// round-trip the whole row through the encryption boundary just
+    /// to bump pending → sent. No-op if the row is missing.
+    func updateStatus(id: UUID, status: MessageStatus, failureReason: SendFailureReason?) async
 
     func delete(id: UUID) async
 

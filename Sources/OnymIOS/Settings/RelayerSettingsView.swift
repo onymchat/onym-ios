@@ -108,39 +108,50 @@ struct RelayerSettingsView: View {
                     .padding(.horizontal, 16).padding(.vertical, 14)
             }
         } else {
-            SettingsCard {
+            // Custom rounded/clipped stack (not SettingsCard) so each
+            // row can swipe left to reveal a Delete action masked to the
+            // card's corners. Rows carry the card's surface color so the
+            // reveal stays hidden until slid.
+            VStack(spacing: 0) {
                 ForEach(Array(endpoints.enumerated()), id: \.element.url) { idx, endpoint in
-                    SettingsRow(
-                        title: LocalizedStringKey(endpoint.name),
-                        subtitle: endpoint.url.absoluteString,
-                        subtitleMono: true,
-                        hasChevron: false,
-                        inset: 56,
-                        last: idx == endpoints.count - 1
+                    SwipeToDeleteRow(
+                        accessibilityID: "relayer.configured.\(endpoint.url.absoluteString)",
+                        onDelete: { flow.tappedRemove(url: endpoint.url) }
                     ) {
-                        Button { flow.tappedSetPrimary(url: endpoint.url) } label: {
-                            Image(systemName: flow.isPrimary(endpoint) ? "star.fill" : "star")
-                                .font(.system(size: 17))
-                                .foregroundStyle(flow.isPrimary(endpoint) ? SettingsTile.amber : OnymTokens.text3)
-                                .frame(width: 30, height: 30)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("relayer.configured.primary.\(endpoint.url.absoluteString)")
-                    } right: {
-                        HStack(spacing: 4) {
-                            ForEach(endpoint.networks, id: \.self) { net in
-                                SettingsChip(
-                                    text: net.uppercased(),
-                                    fg: chipColor(for: net),
-                                    bg: chipColor(for: net).opacity(0.15)
-                                )
+                        SettingsRow(
+                            title: LocalizedStringKey(endpoint.name),
+                            subtitle: endpoint.url.absoluteString,
+                            subtitleMono: true,
+                            hasChevron: false,
+                            inset: 56,
+                            last: idx == endpoints.count - 1
+                        ) {
+                            Button { flow.tappedSetPrimary(url: endpoint.url) } label: {
+                                Image(systemName: flow.isPrimary(endpoint) ? "star.fill" : "star")
+                                    .font(.system(size: 17))
+                                    .foregroundStyle(flow.isPrimary(endpoint) ? SettingsTile.amber : OnymTokens.text3)
+                                    .frame(width: 30, height: 30)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("relayer.configured.primary.\(endpoint.url.absoluteString)")
+                        } right: {
+                            HStack(spacing: 4) {
+                                ForEach(endpoint.networks, id: \.self) { net in
+                                    SettingsChip(
+                                        text: net.uppercased(),
+                                        fg: chipColor(for: net),
+                                        bg: chipColor(for: net).opacity(0.15)
+                                    )
+                                }
                             }
                         }
+                        .accessibilityElement(children: .contain)
+                        .accessibilityIdentifier("relayer.configured.\(endpoint.url.absoluteString)")
                     }
-                    .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier("relayer.configured.\(endpoint.url.absoluteString)")
                 }
             }
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(.horizontal, 16)
         }
     }
 

@@ -166,9 +166,59 @@ final class SendMessageInteractorTests: XCTestCase {
 
         let result = try await interactor.send(groupID: groupID, body: "hi")
         XCTAssertEqual(result.status, .failed)
+        XCTAssertEqual(result.failureReason, .relayRejected,
+                       "zero acceptances without a throw is an explicit relay refusal")
 
         let stored = await messages.currentMessages(groupID: groupID)
         XCTAssertEqual(stored[0].status, .failed)
+        XCTAssertEqual(stored[0].failureReason, .relayRejected,
+                       "the persisted row must carry the reason so the UI can explain the red bang")
+    }
+
+    // MARK: - Failure reasons (why the red bang happened)
+
+    func test_send_transportNotConnected_reasonIsNoRelayConnection() async throws {
+        let groupID = await seedGroupWithTwoPeers()
+        await transport.setBehavior(.alwaysThrows(.notConnected))
+
+        let result = try await interactor.send(groupID: groupID, body: "hi")
+        XCTAssertEqual(result.status, .failed)
+        XCTAssertEqual(result.failureReason, .noRelayConnection)
+    }
+
+    func test_send_tlsFailure_reasonIsSecureConnectionFailed() async throws {
+        // The expired-relay-certificate scenario: every relay socket
+        // dies in the TLS handshake, so the transport reports
+        // `.unreachable(.secureConnectionFailed)`.
+        let groupID = await seedGroupWithTwoPeers()
+        await transport.setBehavior(.alwaysThrows(.unreachable(.secureConnectionFailed)))
+
+        let result = try await interactor.send(groupID: groupID, body: "hi")
+        XCTAssertEqual(result.status, .failed)
+        XCTAssertEqual(result.failureReason, .secureConnectionFailed)
+    }
+
+    func test_send_offline_reasonIsOffline() async throws {
+        let groupID = await seedGroupWithTwoPeers()
+        await transport.setBehavior(.alwaysThrows(.unreachable(.notConnectedToInternet)))
+
+        let result = try await interactor.send(groupID: groupID, body: "hi")
+        XCTAssertEqual(result.failureReason, .offline)
+    }
+
+    func test_send_otherNetworkError_reasonIsRelayUnreachable() async throws {
+        let groupID = await seedGroupWithTwoPeers()
+        await transport.setBehavior(.alwaysThrows(.unreachable(.timedOut)))
+
+        let result = try await interactor.send(groupID: groupID, body: "hi")
+        XCTAssertEqual(result.failureReason, .relayUnreachable)
+    }
+
+    func test_send_success_hasNoFailureReason() async throws {
+        let groupID = await seedGroupWithTwoPeers()
+        let result = try await interactor.send(groupID: groupID, body: "hi")
+        XCTAssertEqual(result.status, .sent)
+        XCTAssertNil(result.failureReason)
     }
 
     func test_send_oneRelayAccepts_marksSent_bestEffort() async throws {
@@ -239,6 +289,8 @@ final class SendMessageInteractorTests: XCTestCase {
         XCTAssertEqual(stored.count, 1, "retry must not duplicate the row")
         XCTAssertEqual(stored[0].id, original.id, "retry must reuse the same message id")
         XCTAssertEqual(stored[0].status, .sent)
+        XCTAssertNil(stored[0].failureReason,
+                     "a successful retry must clear the stale failure explanation")
 
         let sends = await transport.recordedSends
         XCTAssertEqual(sends.count, 2, "retry must re-fan out to both peers")
@@ -371,6 +423,7 @@ private actor RecordingInboxTransport: InboxTransport {
     enum Behavior: Sendable {
         case constantAcceptedBy(Int)
         case firstSucceedsThenThrows
+        case alwaysThrows(TransportError)
     }
 
     private(set) var recordedSends: [Record] = []
@@ -404,6 +457,8 @@ private actor RecordingInboxTransport: InboxTransport {
                 return PublishReceipt(messageID: "fake-\(UUID().uuidString)", acceptedBy: 1)
             }
             throw NSError(domain: "test", code: 1)
+        case .alwaysThrows(let error):
+            throw error
         }
     }
 

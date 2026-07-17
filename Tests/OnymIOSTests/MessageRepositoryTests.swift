@@ -225,7 +225,7 @@ private actor InMemoryMessageStore: MessageStore {
         return isNew
     }
 
-    func updateStatus(id: UUID, status: MessageStatus) {
+    func updateStatus(id: UUID, status: MessageStatus, failureReason: SendFailureReason?) {
         guard let existing = rows[id] else { return }
         rows[id] = ChatMessage(
             id: existing.id,
@@ -237,7 +237,8 @@ private actor InMemoryMessageStore: MessageStore {
             direction: existing.direction,
             status: status,
             replyToMessageID: existing.replyToMessageID,
-            groupType: existing.groupType
+            groupType: existing.groupType,
+            failureReason: failureReason
         )
     }
 

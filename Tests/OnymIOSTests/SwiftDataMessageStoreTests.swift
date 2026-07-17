@@ -138,7 +138,7 @@ final class SwiftDataMessageStoreTests: XCTestCase {
         let msg = makeMessage(body: "in flight", status: .pending)
         _ = await store.insertOrUpdate(msg)
 
-        await store.updateStatus(id: msg.id, status: .sent)
+        await store.updateStatus(id: msg.id, status: .sent, failureReason: nil)
 
         let listed = await store.list(groupID: msg.groupID)
         XCTAssertEqual(listed[0].status, .sent)
@@ -146,8 +146,25 @@ final class SwiftDataMessageStoreTests: XCTestCase {
                        "body must survive a status-only update")
     }
 
+    func test_updateStatus_failureReason_roundTripsAndClears() async {
+        let msg = makeMessage(body: "doomed", status: .pending)
+        _ = await store.insertOrUpdate(msg)
+
+        await store.updateStatus(id: msg.id, status: .failed, failureReason: .secureConnectionFailed)
+        var listed = await store.list(groupID: msg.groupID)
+        XCTAssertEqual(listed[0].status, .failed)
+        XCTAssertEqual(listed[0].failureReason, .secureConnectionFailed,
+                       "the reason must survive the store round-trip")
+
+        // Retry flips back to pending with a nil reason — the stale
+        // explanation must clear.
+        await store.updateStatus(id: msg.id, status: .pending, failureReason: nil)
+        listed = await store.list(groupID: msg.groupID)
+        XCTAssertNil(listed[0].failureReason)
+    }
+
     func test_updateStatus_unknownID_isNoOp() async {
-        await store.updateStatus(id: UUID(), status: .sent)
+        await store.updateStatus(id: UUID(), status: .sent, failureReason: nil)
         // No throw, no row, no surprise.
         let listed = await store.list(groupID: "aa".repeated(32))
         XCTAssertTrue(listed.isEmpty)

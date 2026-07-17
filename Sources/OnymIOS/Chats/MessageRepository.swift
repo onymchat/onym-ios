@@ -40,13 +40,17 @@ actor MessageRepository {
 
     /// Flip an outgoing message's status (pending → sent / failed).
     /// Hot path for the send pipeline so we don't round-trip the
-    /// whole row through the encryption boundary.
+    /// whole row through the encryption boundary. `failureReason`
+    /// travels with the status: pass the category when flipping to
+    /// `.failed`, leave it nil for every other status so a retry's
+    /// pending flip clears the stale reason.
     func updateStatus(
         id: UUID,
         status: MessageStatus,
-        groupID: String
+        groupID: String,
+        failureReason: SendFailureReason? = nil
     ) async {
-        await store.updateStatus(id: id, status: status)
+        await store.updateStatus(id: id, status: status, failureReason: failureReason)
         await refresh(groupID: groupID)
     }
 

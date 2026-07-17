@@ -120,29 +120,53 @@ final class NostrInboxTransport: InboxTransport {
             connections.removeAll()
         }
 
+        /// Per-relay publish outcome — split so the thrown error can
+        /// tell "a relay answered and said no" (`publishRejected`)
+        /// apart from "no relay was reachable at all" (`unreachable`,
+        /// carrying the first network error's code so the app layer
+        /// can explain TLS / offline / timeout to the user).
+        private enum PublishOutcome {
+            case accepted
+            case rejected
+            case failed(any Error)
+        }
+
         func send(event: NostrEvent) async throws -> Int {
             let conns = Array(connections.values)
             guard !conns.isEmpty else {
                 throw TransportError.notConnected
             }
-            let accepted = await withTaskGroup(of: Bool.self) { group in
+            let outcomes = await withTaskGroup(of: PublishOutcome.self) { group in
                 for conn in conns {
                     group.addTask {
                         do {
                             return try await conn.publishAndAwaitOK(event: event)
+                                ? .accepted : .rejected
                         } catch {
-                            return false
+                            return .failed(error)
                         }
                     }
                 }
-                var count = 0
-                for await ok in group where ok { count += 1 }
-                return count
+                var collected: [PublishOutcome] = []
+                for await outcome in group { collected.append(outcome) }
+                return collected
             }
-            if accepted == 0 {
+            let accepted = outcomes.filter {
+                if case .accepted = $0 { return true } else { return false }
+            }.count
+            if accepted > 0 { return accepted }
+
+            let anyRejected = outcomes.contains {
+                if case .rejected = $0 { return true } else { return false }
+            }
+            if anyRejected {
                 throw TransportError.publishRejected
             }
-            return accepted
+            let firstErrorCode = outcomes.compactMap { outcome -> URLError.Code? in
+                if case .failed(let error) = outcome { return (error as? URLError)?.code }
+                return nil
+            }.first
+            throw TransportError.unreachable(firstErrorCode)
         }
 
         func subscribe(

@@ -56,11 +56,96 @@ struct ChatMessage: Equatable, Sendable, Identifiable {
     /// migrating to multi-variant rendering later doesn't need to
     /// re-fetch the group to learn the flavour.
     let groupType: SEPGroupType
+
+    /// Why the last send attempt failed. Non-nil only when `status ==
+    /// .failed`; cleared when a retry flips the row back to `.pending`.
+    /// Categorized by `SendMessageInteractor` from the transport error
+    /// so the chat UI can tell the user what went wrong instead of a
+    /// bare red bang.
+    let failureReason: SendFailureReason?
+
+    init(
+        id: UUID,
+        groupID: String,
+        ownerIdentityID: IdentityID,
+        senderBlsPubkeyHex: String,
+        body: String,
+        sentAt: Date,
+        direction: MessageDirection,
+        status: MessageStatus,
+        replyToMessageID: UUID?,
+        groupType: SEPGroupType,
+        failureReason: SendFailureReason? = nil
+    ) {
+        self.id = id
+        self.groupID = groupID
+        self.ownerIdentityID = ownerIdentityID
+        self.senderBlsPubkeyHex = senderBlsPubkeyHex
+        self.body = body
+        self.sentAt = sentAt
+        self.direction = direction
+        self.status = status
+        self.replyToMessageID = replyToMessageID
+        self.groupType = groupType
+        self.failureReason = failureReason
+    }
 }
 
 enum MessageDirection: String, Codable, Sendable {
     case incoming
     case outgoing
+}
+
+/// Coarse, user-explainable category of why an outgoing message
+/// failed to send. Persisted on the row (as its raw string) so the
+/// explanation survives app restarts alongside the `.failed` status.
+///
+/// Categorization lives in `SendMessageInteractor.categorize(_:)`;
+/// the wording lives in `explanation` and is consumed by
+/// `ChatBubbleCell` under the failed bubble. Raw values are stable —
+/// they're a persistence format.
+enum SendFailureReason: String, Codable, Sendable {
+    /// The transport had no relay connections at all — empty relay
+    /// list or `connect` never ran.
+    case noRelayConnection
+    /// The device looks offline (no internet route).
+    case offline
+    /// TLS to every relay failed — bad/expired certificate or ATS
+    /// rejection. Distinct from `relayUnreachable` because there's
+    /// nothing the user can do beyond waiting for the operator.
+    case secureConnectionFailed
+    /// Network errors (DNS, timeout, connection refused, …) on every
+    /// relay — none could be reached to accept or reject.
+    case relayUnreachable
+    /// At least one relay answered and none accepted the message.
+    case relayRejected
+    /// Sealing the envelope for a recipient failed locally, before
+    /// anything hit the network.
+    case encryptionFailed
+    /// Fallback for errors that fit none of the above.
+    case unknown
+
+    /// One-sentence user-facing explanation. The cell appends its own
+    /// "Tap the message to retry." call to action, so keep these to
+    /// the cause alone.
+    var explanation: String {
+        switch self {
+        case .noRelayConnection:
+            return "Not connected to any message relay. Check your relay settings."
+        case .offline:
+            return "You appear to be offline. Check your internet connection."
+        case .secureConnectionFailed:
+            return "Couldn't make a secure connection to any message relay. The relay may be having certificate problems — try again later."
+        case .relayUnreachable:
+            return "None of your message relays could be reached."
+        case .relayRejected:
+            return "The message relays refused to accept this message."
+        case .encryptionFailed:
+            return "This message couldn't be encrypted for the group."
+        case .unknown:
+            return "Something went wrong while sending."
+        }
+    }
 }
 
 enum MessageStatus: String, Codable, Sendable {

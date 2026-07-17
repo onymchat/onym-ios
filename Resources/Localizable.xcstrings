@@ -1579,54 +1579,6 @@
         }
       }
     },
-    "Not an Onym invite" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Not an Onym invite"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Это не приглашение Onym"
-          }
-        }
-      }
-    },
-    "Scan a QR to join" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Scan a QR to join"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Сканируйте QR, чтобы присоединиться"
-          }
-        }
-      }
-    },
-    "Scan invite QR" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Scan invite QR"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Сканировать QR приглашения"
-          }
-        }
-      }
-    },
     "i" : {
       "localizations" : {
         "en" : {
@@ -2108,6 +2060,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Nostr (npub)"
+          }
+        }
+      }
+    },
+    "Not an Onym invite" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not an Onym invite"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Это не приглашение Onym"
           }
         }
       }
@@ -2730,6 +2699,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Запустить свой релеер"
+          }
+        }
+      }
+    },
+    "Scan a QR to join" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scan a QR to join"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сканируйте QR, чтобы присоединиться"
+          }
+        }
+      }
+    },
+    "Scan invite QR" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scan invite QR"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сканировать QR приглашения"
           }
         }
       }

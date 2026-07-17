@@ -6,9 +6,9 @@ import Foundation
 /// Distinct from the chain-side `RelayerEndpoint` because the two
 /// transports talk to completely different services:
 ///   - `RelayerEndpoint` → HTTPS Soroban contract proxy
-///     (`POST https://relayer.onym.chat/`).
+///     (`POST https://relayer.onym.app/`).
 ///   - `NostrRelayEndpoint` → Nostr WebSocket relay (strfry behind
-///     nginx at `wss://nostr.onym.chat`).
+///     Caddy at `wss://nostr.onym.app`).
 ///
 /// Sharing the type would couple two unrelated concerns and force
 /// the manifest schema to track both — cleaner to keep them apart.

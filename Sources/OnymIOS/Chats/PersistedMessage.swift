@@ -36,6 +36,11 @@ final class PersistedMessage {
     var statusRaw: String
     var groupTypeRaw: String
     var replyToMessageIDString: String?
+    /// `SendFailureReason` raw value for a `.failed` outgoing row, nil
+    /// otherwise. Plain (not sensitive — a coarse error category) and
+    /// optional, so adding it is a SwiftData lightweight migration
+    /// over the existing store — same shape as `replyToMessageIDString`.
+    var failureReasonRaw: String?
 
     var encryptedSenderBlsPubkeyHex: Data
     var encryptedBody: Data
@@ -49,6 +54,7 @@ final class PersistedMessage {
         statusRaw: String,
         groupTypeRaw: String,
         replyToMessageIDString: String?,
+        failureReasonRaw: String?,
         encryptedSenderBlsPubkeyHex: Data,
         encryptedBody: Data
     ) {
@@ -60,6 +66,7 @@ final class PersistedMessage {
         self.statusRaw = statusRaw
         self.groupTypeRaw = groupTypeRaw
         self.replyToMessageIDString = replyToMessageIDString
+        self.failureReasonRaw = failureReasonRaw
         self.encryptedSenderBlsPubkeyHex = encryptedSenderBlsPubkeyHex
         self.encryptedBody = encryptedBody
     }

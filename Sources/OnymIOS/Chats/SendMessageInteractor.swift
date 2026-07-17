@@ -120,14 +120,15 @@ actor SendMessageInteractor {
             .filter { $0.key != myBlsHex }
             .map { $0.value.inboxPublicKey }
 
-        let finalStatus = await fanOut(
+        let (finalStatus, failureReason) = await fanOut(
             payload: payload,
             recipients: recipients
         )
         await messageRepository.updateStatus(
             id: messageID,
             status: finalStatus,
-            groupID: groupID
+            groupID: groupID,
+            failureReason: failureReason
         )
 
         return ChatMessage(
@@ -140,7 +141,8 @@ actor SendMessageInteractor {
             direction: pending.direction,
             status: finalStatus,
             replyToMessageID: pending.replyToMessageID,
-            groupType: pending.groupType
+            groupType: pending.groupType,
+            failureReason: failureReason
         )
     }
 
@@ -205,11 +207,12 @@ actor SendMessageInteractor {
             .filter { $0.key != myBlsHex }
             .map { $0.value.inboxPublicKey }
 
-        let finalStatus = await fanOut(payload: payload, recipients: recipients)
+        let (finalStatus, failureReason) = await fanOut(payload: payload, recipients: recipients)
         await messageRepository.updateStatus(
             id: messageID,
             status: finalStatus,
-            groupID: groupID
+            groupID: groupID,
+            failureReason: failureReason
         )
     }
 
@@ -218,10 +221,15 @@ actor SendMessageInteractor {
     /// list was empty), `.failed` if every send threw or every
     /// relay rejected. Shared between `send` and `retry` since the
     /// per-recipient fan-out shape is identical.
+    ///
+    /// On `.failed` the second tuple element carries the categorized
+    /// reason (first failure wins — recipients almost always fail the
+    /// same way since they share the relay set) so the UI can explain
+    /// the red bang. Always nil on `.sent`.
     private func fanOut(
         payload: ChatMessagePayload,
         recipients: [Data]
-    ) async -> MessageStatus {
+    ) async -> (MessageStatus, SendFailureReason?) {
         let payloadBytes: Data
         do {
             payloadBytes = try JSONEncoder().encode(payload)
@@ -229,23 +237,39 @@ actor SendMessageInteractor {
             // JSONEncoder on a static-typed Codable value can't
             // realistically fail; surface as a transport failure
             // so the caller marks the row `.failed`.
-            return .failed
+            return (.failed, .unknown)
         }
 
         var successCount = 0
+        var failureReason: SendFailureReason?
         for inboxKey in recipients {
+            let sealed: Data
             do {
-                let sealed = try await identity.sealInvitation(
+                sealed = try await identity.sealInvitation(
                     payload: payloadBytes,
                     to: inboxKey
                 )
+            } catch {
+                // Best-effort per recipient; remember why the first
+                // one failed. Sealing happens before the network, so
+                // any error here is a local crypto problem.
+                if failureReason == nil { failureReason = .encryptionFailed }
+                continue
+            }
+            do {
                 let receipt = try await inboxTransport.send(
                     sealed,
                     to: TransportInboxID(rawValue: Self.inboxTag(from: inboxKey))
                 )
-                if receipt.acceptedBy >= 1 { successCount += 1 }
+                if receipt.acceptedBy >= 1 {
+                    successCount += 1
+                } else if failureReason == nil {
+                    // Transport reported completion with zero
+                    // acceptances instead of throwing.
+                    failureReason = .relayRejected
+                }
             } catch {
-                // Swallow — best-effort per recipient.
+                if failureReason == nil { failureReason = Self.categorize(error) }
                 continue
             }
         }
@@ -253,7 +277,41 @@ actor SendMessageInteractor {
         // Empty roster (only the sender is a member) is fine — the
         // message is local-only. Anything with recipients must reach
         // at least one to count as sent.
-        return recipients.isEmpty || successCount > 0 ? .sent : .failed
+        if recipients.isEmpty || successCount > 0 {
+            return (.sent, nil)
+        }
+        return (.failed, failureReason ?? .unknown)
+    }
+
+    /// Map a transport-layer error onto the user-explainable category
+    /// persisted with the failed row. URL-loading codes are grouped
+    /// coarsely: "you're offline" (actionable by the user), "TLS
+    /// failed" (actionable by the relay operator), and everything
+    /// else network-ish as "unreachable".
+    static func categorize(_ error: any Error) -> SendFailureReason {
+        guard let transportError = error as? TransportError else {
+            return .unknown
+        }
+        switch transportError {
+        case .notConnected:
+            return .noRelayConnection
+        case .publishRejected, .invalidPayload:
+            return .relayRejected
+        case .unreachable(let code):
+            switch code {
+            case .notConnectedToInternet, .networkConnectionLost,
+                 .dataNotAllowed, .internationalRoamingOff:
+                return .offline
+            case .secureConnectionFailed, .serverCertificateUntrusted,
+                 .serverCertificateHasBadDate, .serverCertificateHasUnknownRoot,
+                 .serverCertificateNotYetValid, .clientCertificateRejected,
+                 .clientCertificateRequired,
+                 .appTransportSecurityRequiresSecureConnection:
+                return .secureConnectionFailed
+            default:
+                return .relayUnreachable
+            }
+        }
     }
 
     /// Same derivation as `IdentityRepository.inboxTag(from:)` —

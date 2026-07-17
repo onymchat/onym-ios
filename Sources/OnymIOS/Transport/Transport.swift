@@ -64,7 +64,15 @@ struct PublishReceipt: Sendable {
 
 enum TransportError: Error, Sendable {
     case notConnected
+    /// At least one endpoint answered and none accepted — an explicit
+    /// refusal, as opposed to `unreachable` where no endpoint could be
+    /// talked to at all.
     case publishRejected
+    /// Every endpoint failed at the network layer before any could
+    /// accept or reject. Carries the first failure's `URLError.Code`
+    /// when the underlying error was a URL-loading error (TLS, DNS,
+    /// offline, timeout, …); nil for anything else.
+    case unreachable(URLError.Code?)
     case invalidPayload(String)
 }
 

@@ -154,6 +154,84 @@ final class ChatBubbleCellTests: XCTestCase {
         XCTAssertEqual(statusIcon(in: cell).accessibilityLabel, "Sent")
     }
 
+    // MARK: - Failure explanation
+
+    func test_outgoingFailed_showsReasonExplanation() {
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+        cell.configure(message: makeMessage(
+            direction: .outgoing,
+            status: .failed,
+            failureReason: .secureConnectionFailed
+        ))
+        let label = failureLabel(in: cell)
+        XCTAssertFalse(label.isHidden, "a failed bubble must explain itself")
+        XCTAssertEqual(
+            label.text,
+            SendFailureReason.secureConnectionFailed.explanation + " Tap the message to retry."
+        )
+    }
+
+    func test_outgoingFailed_withoutReason_showsGenericExplanation() {
+        // Rows persisted before the reason column existed have a nil
+        // reason — they still deserve more than a bare red bang.
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+        cell.configure(message: makeMessage(direction: .outgoing, status: .failed))
+        let label = failureLabel(in: cell)
+        XCTAssertFalse(label.isHidden)
+        XCTAssertEqual(label.text, "Message not delivered. Tap the message to retry.")
+    }
+
+    func test_outgoingSent_hidesFailureExplanation() {
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+        cell.configure(message: makeMessage(direction: .outgoing, status: .sent))
+        XCTAssertTrue(failureLabel(in: cell).isHidden,
+                      "non-failed bubbles must not show a failure explanation")
+    }
+
+    func test_reconfigureFromFailedToSent_dropsFailureExplanation() {
+        // Retry path: the row flips failed → pending → sent on the
+        // same cell. The stale explanation must clear.
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+        let id = UUID()
+        cell.configure(message: makeMessage(
+            id: id, direction: .outgoing, status: .failed, failureReason: .relayRejected
+        ))
+        XCTAssertFalse(failureLabel(in: cell).isHidden)
+
+        cell.configure(message: makeMessage(id: id, direction: .outgoing, status: .sent))
+        XCTAssertTrue(failureLabel(in: cell).isHidden)
+    }
+
+    func test_incoming_neverShowsFailureExplanation() {
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+        cell.configure(message: makeMessage(direction: .incoming))
+        XCTAssertTrue(failureLabel(in: cell).isHidden)
+    }
+
+    func test_failedLayout_resolvesWithoutConstraintConflicts() {
+        // Same guard as `test_layoutResolves_withoutConstraintConflicts`
+        // but for the failed state, where `failureBottomConstraint`
+        // replaces `statusBottomConstraint` as the cell-bottom driver.
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+        cell.contentView.frame = CGRect(x: 0, y: 0, width: 320, height: 120)
+        cell.configure(message: makeMessage(
+            direction: .outgoing,
+            status: .failed,
+            failureReason: .relayUnreachable
+        ))
+        cell.contentView.layoutIfNeeded()
+        XCTAssertTrue(allConstraintsStillActive(cell),
+                      "failed layout must not auto-deactivate any constraint")
+    }
+
+    private func failureLabel(in cell: ChatBubbleCell) -> UILabel {
+        guard let label = find(in: cell.contentView, identifier: "chat.bubble.failure_reason")
+                as? UILabel else {
+            fatalError("failure label not found")
+        }
+        return label
+    }
+
     // MARK: - Retry tap
 
     func test_failed_tapInvokesRetryClosure() {
@@ -430,7 +508,8 @@ final class ChatBubbleCellTests: XCTestCase {
         id: UUID = UUID(),
         direction: MessageDirection,
         body: String = "hi",
-        status: MessageStatus? = nil
+        status: MessageStatus? = nil,
+        failureReason: SendFailureReason? = nil
     ) -> ChatMessage {
         ChatMessage(
             id: id,
@@ -442,7 +521,8 @@ final class ChatBubbleCellTests: XCTestCase {
             direction: direction,
             status: status ?? (direction == .incoming ? .received : .sent),
             replyToMessageID: nil,
-            groupType: .tyranny
+            groupType: .tyranny,
+            failureReason: failureReason
         )
     }
 }

@@ -88,6 +88,12 @@ final class ChatBubbleCell: UITableViewCell {
     private let bubble = UIView()
     private let bodyLabel = UILabel()
     private let statusImageView = UIImageView()
+    /// Why the send failed, rendered under a `.failed` outgoing bubble
+    /// next to the red bang so the user isn't left guessing. Text
+    /// comes from `SendFailureReason.explanation` (or a generic
+    /// fallback) plus the retry call-to-action. Hidden for every
+    /// other status and for incoming rows.
+    private let failureLabel = UILabel()
     private let nameLabel = UILabel()
 
     // Reply quote (Telegram-style inset preview at the top of the
@@ -152,6 +158,10 @@ final class ChatBubbleCell: UITableViewCell {
     // the indicator has room below the bubble.
     private var bubbleBottomConstraint: NSLayoutConstraint!
     private var statusBottomConstraint: NSLayoutConstraint!
+    /// Bottom anchor when the failure explanation is showing — the
+    /// label is taller than the status glyph, so it drives the cell's
+    /// height instead of `statusBottomConstraint`.
+    private var failureBottomConstraint: NSLayoutConstraint!
 
     // Direction-independent "where does the bubble's top come from"
     // toggle. With a name header, the bubble hangs off the header's
@@ -211,8 +221,7 @@ final class ChatBubbleCell: UITableViewCell {
             NSLayoutConstraint.deactivate(incomingConstraints)
             NSLayoutConstraint.activate(outgoingConstraints)
             bubbleBottomConstraint.isActive = false
-            statusBottomConstraint.isActive = true
-            applyStatus(message.status)
+            applyStatus(message.status, failureReason: message.failureReason)
         case .incoming:
             // Others' messages: low-opacity tint in the sender's accent
             // — distinguishable per person while keeping body text on
@@ -222,8 +231,11 @@ final class ChatBubbleCell: UITableViewCell {
             NSLayoutConstraint.deactivate(outgoingConstraints)
             NSLayoutConstraint.activate(incomingConstraints)
             statusBottomConstraint.isActive = false
+            failureBottomConstraint.isActive = false
             bubbleBottomConstraint.isActive = true
             statusImageView.isHidden = true
+            failureLabel.isHidden = true
+            failureLabel.text = nil
         }
         applyNameHeader(sender)
         applyReplyQuote(reply, direction: message.direction, onTap: onQuoteTapped)
@@ -405,6 +417,7 @@ final class ChatBubbleCell: UITableViewCell {
         let t = CGAffineTransform(translationX: -dx, y: 0)
         bubble.transform = t
         statusImageView.transform = t
+        failureLabel.transform = t
         nameLabel.transform = t
     }
 
@@ -429,8 +442,15 @@ final class ChatBubbleCell: UITableViewCell {
         })
     }
 
-    private func applyStatus(_ status: MessageStatus) {
+    private func applyStatus(_ status: MessageStatus, failureReason: SendFailureReason?) {
         statusImageView.isHidden = false
+        // Default shape: no explanation, status glyph drives the cell
+        // bottom. `.failed` overrides below. Deactivate before
+        // activate so the two bottom anchors never conflict.
+        failureBottomConstraint.isActive = false
+        failureLabel.isHidden = true
+        failureLabel.text = nil
+        statusBottomConstraint.isActive = true
         switch status {
         case .pending:
             statusImageView.image = UIImage(systemName: "clock")
@@ -444,6 +464,11 @@ final class ChatBubbleCell: UITableViewCell {
             statusImageView.image = UIImage(systemName: "exclamationmark.circle.fill")
             statusImageView.tintColor = UIColor(OnymTokens.red)
             statusImageView.accessibilityLabel = "Failed — tap to retry"
+            let cause = failureReason?.explanation ?? "Message not delivered."
+            failureLabel.text = cause + " Tap the message to retry."
+            failureLabel.isHidden = false
+            statusBottomConstraint.isActive = false
+            failureBottomConstraint.isActive = true
         case .received:
             // Outgoing rows never carry .received; hide as a
             // defensive default if a bad row somehow lands here.
@@ -536,6 +561,17 @@ final class ChatBubbleCell: UITableViewCell {
         statusImageView.isHidden = true
         statusImageView.accessibilityIdentifier = "chat.bubble.status"
         contentView.addSubview(statusImageView)
+
+        failureLabel.translatesAutoresizingMaskIntoConstraints = false
+        let base = UIFont.systemFont(ofSize: 12, weight: .regular)
+        failureLabel.font = UIFontMetrics(forTextStyle: .caption1).scaledFont(for: base)
+        failureLabel.adjustsFontForContentSizeCategory = true
+        failureLabel.numberOfLines = 0
+        failureLabel.textAlignment = .right
+        failureLabel.textColor = UIColor(OnymTokens.red)
+        failureLabel.isHidden = true
+        failureLabel.accessibilityIdentifier = "chat.bubble.failure_reason"
+        contentView.addSubview(failureLabel)
     }
 
     private func buildNameLabel() {
@@ -562,6 +598,9 @@ final class ChatBubbleCell: UITableViewCell {
         )
         statusBottomConstraint = contentView.bottomAnchor.constraint(
             equalTo: statusImageView.bottomAnchor, constant: 4
+        )
+        failureBottomConstraint = contentView.bottomAnchor.constraint(
+            equalTo: failureLabel.bottomAnchor, constant: 4
         )
 
         // Bubble-top toggle. `bubbleTopToContentConstraint` is the
@@ -635,6 +674,14 @@ final class ChatBubbleCell: UITableViewCell {
             statusImageView.trailingAnchor.constraint(equalTo: bubble.trailingAnchor),
             statusImageView.widthAnchor.constraint(equalToConstant: 14),
             statusImageView.heightAnchor.constraint(equalToConstant: 14),
+
+            // Failure explanation sits left of the red bang, growing
+            // leftward/downward as needed. Only participates in the
+            // cell's height when `failureBottomConstraint` is active
+            // (i.e. status == .failed on an outgoing row).
+            failureLabel.topAnchor.constraint(equalTo: bubble.bottomAnchor, constant: 2),
+            failureLabel.trailingAnchor.constraint(equalTo: statusImageView.leadingAnchor, constant: -6),
+            failureLabel.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: edgeInset),
         ])
 
         // Outgoing pair — trailing-pinned, leading has the

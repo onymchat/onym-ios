@@ -139,6 +139,73 @@ struct SettingsCard<Content: View>: View {
     }
 }
 
+/// Swipe-to-delete wrapper for one card row (iOS Mail style). Dragging
+/// the row left reveals a red Delete action; tapping it confirms — the
+/// swipe alone destroys nothing, so there's no accidental single-tap
+/// delete. Place inside a rounded, clipped container so the reveal is
+/// masked to the card's corners; the row content carries the card's
+/// opaque background so the action stays hidden until the row slides.
+///
+/// Coexists with an enclosing ScrollView: the drag is only tracked once
+/// it's clearly horizontal, and it uses default (not high) priority, so
+/// vertical drags fall through to the scroll view.
+struct SwipeToDeleteRow<Content: View>: View {
+    var deleteLabel: LocalizedStringKey = "Delete"
+    var accessibilityID: String? = nil
+    let onDelete: () -> Void
+    @ViewBuilder var content: () -> Content
+
+    @State private var offset: CGFloat = 0
+    @State private var startedHorizontal: Bool?
+    private let revealWidth: CGFloat = 96
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            Button(role: .destructive, action: confirmDelete) {
+                VStack(spacing: 3) {
+                    Image(systemName: "trash.fill").font(.system(size: 16, weight: .semibold))
+                    Text(deleteLabel).font(.system(size: 11, weight: .semibold))
+                }
+                .foregroundStyle(.white)
+                .frame(width: revealWidth)
+                .frame(maxHeight: .infinity)
+                .background(OnymTokens.red)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier(accessibilityID.map { "\($0).delete" } ?? "swipe.delete")
+
+            content()
+                .background(OnymTokens.surface2)
+                .offset(x: offset)
+                .gesture(dragGesture)
+        }
+    }
+
+    private var dragGesture: some Gesture {
+        DragGesture(minimumDistance: 14)
+            .onChanged { value in
+                if startedHorizontal == nil {
+                    startedHorizontal = abs(value.translation.width) > abs(value.translation.height)
+                }
+                guard startedHorizontal == true else { return }
+                let base: CGFloat = offset <= -revealWidth ? -revealWidth : 0
+                offset = min(0, max(-revealWidth, base + value.translation.width))
+            }
+            .onEnded { value in
+                defer { startedHorizontal = nil }
+                guard startedHorizontal == true else { return }
+                let shouldOpen = value.translation.width < -revealWidth / 2
+                    || (offset < 0 && value.translation.width < 20)
+                withAnimation(.snappy(duration: 0.22)) { offset = shouldOpen ? -revealWidth : 0 }
+            }
+    }
+
+    private func confirmDelete() {
+        withAnimation(.snappy(duration: 0.2)) { offset = 0 }
+        onDelete()
+    }
+}
+
 /// Inset hairline used between rows inside a card.
 struct SettingsRowDivider: View {
     var inset: CGFloat = 60
