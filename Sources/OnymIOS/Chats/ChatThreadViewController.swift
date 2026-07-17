@@ -281,6 +281,39 @@ final class ChatThreadViewController: UIViewController {
         senderDisplays = displays
     }
 
+    /// Resolve the reply quote for a message, if it replies to another.
+    /// The target is looked up *live* in the current message list:
+    ///   - found → quote carries the target's sender name + accent +
+    ///     a one-line body snippet;
+    ///   - not on this device (never delivered / deleted) →
+    ///     `.unavailable` placeholder.
+    /// Returns nil for a non-reply message.
+    private func replyQuote(for message: ChatMessage) -> ChatReplyQuote? {
+        guard let targetID = message.replyToMessageID else { return nil }
+        guard let target = messagesByID[targetID] else { return .unavailable }
+        return ChatReplyQuote(
+            name: senderName(for: target.senderBlsPubkeyHex),
+            snippet: target.body,
+            accent: OnymAccent.forSender(blsPubkeyHex: target.senderBlsPubkeyHex),
+            isUnavailable: false
+        )
+    }
+
+    /// Scroll the replied-to message into view and flash it — the
+    /// payoff for tapping a quote. No-op if the target isn't in the
+    /// current snapshot (it was pruned, or never arrived).
+    func scrollAndHighlight(messageID: UUID) {
+        guard let indexPath = dataSource.indexPath(for: messageID) else { return }
+        tableView.scrollToRow(at: indexPath, at: .middle, animated: true)
+        // Flash after the scroll settles so the target cell is mounted
+        // and the pulse is visible rather than scrolled past.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let cell = self?.tableView.cellForRow(at: indexPath) as? ChatBubbleCell
+            else { return }
+            cell.flashHighlight()
+        }
+    }
+
     /// The sender's display name: their self-asserted alias when set,
     /// else a short BLS-pubkey fingerprint. Mirrors `ChatMembersView`'s
     /// fallback so an unnamed member reads consistently in both places.
@@ -420,7 +453,20 @@ final class ChatThreadViewController: UIViewController {
                     return { [weak self] in self?.onRetryRequested?(id) }
                 }()
                 let sender = self?.senderDisplays[id] ?? .unknown
-                bubble.configure(message: message, sender: sender, onRetry: retryHandler)
+                let reply = self?.replyQuote(for: message)
+                let quoteTap: (() -> Void)? = {
+                    // Only an available target is worth jumping to.
+                    guard let targetID = message.replyToMessageID,
+                          reply?.isUnavailable == false else { return nil }
+                    return { [weak self] in self?.scrollAndHighlight(messageID: targetID) }
+                }()
+                bubble.configure(
+                    message: message,
+                    sender: sender,
+                    reply: reply,
+                    onRetry: retryHandler,
+                    onQuoteTapped: quoteTap
+                )
             }
             return cell
         }

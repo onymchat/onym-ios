@@ -475,7 +475,83 @@ final class ChatThreadViewControllerTests: XCTestCase {
                        "a later profile update must refresh the on-screen header")
     }
 
+    // MARK: - Reply quote (PR 2)
+
+    func test_reply_rendersQuoteResolvedFromTargetSender() {
+        let vc = mountedController()
+        let alice = "aa".repeated(48)
+        vc.update(memberProfiles: [alice: profile(alias: "Alice")])
+        let original = incoming(sender: alice, body: "the original", at: 1)
+        let reply = replyMessage(
+            sender: "cc".repeated(48), body: "agreed", to: original.id, at: 2
+        )
+        vc.update(messages: [original, reply])
+        let table = layoutTable(in: vc)
+
+        // Row 1 is the reply; its quote must name the target's sender
+        // and preview the target's body.
+        XCTAssertEqual(quoteName(in: table, row: 1), "Alice")
+        XCTAssertEqual(quoteSnippet(in: table, row: 1), "the original")
+        // Row 0 (the original, a non-reply) shows no quote.
+        XCTAssertTrue(quoteHidden(in: table, row: 0))
+    }
+
+    func test_reply_unknownTarget_showsUnavailablePlaceholder() {
+        let vc = mountedController()
+        let reply = replyMessage(
+            sender: "cc".repeated(48), body: "agreed", to: UUID(), at: 1
+        )
+        vc.update(messages: [reply])
+        let table = layoutTable(in: vc)
+        XCTAssertEqual(quoteSnippet(in: table, row: 0), "Message unavailable",
+                       "a reply to a message we don't have renders the placeholder")
+    }
+
+    func test_scrollAndHighlight_unknownID_isNoOp() {
+        let vc = mountedController()
+        vc.update(messages: [incoming(sender: "aa".repeated(48), body: "hi", at: 1)])
+        _ = layoutTable(in: vc)
+        // Must not crash / trap when the target isn't in the snapshot.
+        vc.scrollAndHighlight(messageID: UUID())
+    }
+
     // MARK: - Sender-test helpers
+
+    private func replyMessage(
+        sender: String, body: String, to target: UUID, at seconds: TimeInterval
+    ) -> ChatMessage {
+        ChatMessage(
+            id: UUID(), groupID: "aa".repeated(32), ownerIdentityID: IdentityID(),
+            senderBlsPubkeyHex: sender, body: body,
+            sentAt: Date(timeIntervalSince1970: 1_700_000_000 + seconds),
+            direction: .outgoing, status: .sent,
+            replyToMessageID: target, groupType: .tyranny
+        )
+    }
+
+    private func quoteLabel(
+        in table: UITableView, row: Int, identifier: String
+    ) -> UILabel? {
+        let cell = table.cellForRow(at: IndexPath(row: row, section: 0))
+        guard let cv = cell?.contentView else { return nil }
+        return find(in: cv) { $0.accessibilityIdentifier == identifier } as? UILabel
+    }
+
+    private func quoteName(in table: UITableView, row: Int) -> String? {
+        quoteLabel(in: table, row: row, identifier: "chat.bubble.quote.name")?.text
+    }
+
+    private func quoteSnippet(in table: UITableView, row: Int) -> String? {
+        quoteLabel(in: table, row: row, identifier: "chat.bubble.quote.snippet")?.text
+    }
+
+    private func quoteHidden(in table: UITableView, row: Int) -> Bool {
+        let cell = table.cellForRow(at: IndexPath(row: row, section: 0))
+        guard let cv = cell?.contentView,
+              let container = find(in: cv, where: { $0.accessibilityIdentifier == "chat.bubble.quote" })
+        else { return true }
+        return container.isHidden
+    }
 
     private func mountedController() -> ChatThreadViewController {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 800))

@@ -204,6 +204,86 @@ final class ChatBubbleCellTests: XCTestCase {
                        "reconfigured-to-sent bubble must drop its retry closure")
     }
 
+    // MARK: - Reply quote (PR 2)
+
+    func test_reply_showsQuoteWithSenderAndSnippet() {
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+        cell.configure(
+            message: makeMessage(direction: .incoming),
+            reply: ChatReplyQuote(
+                name: "Alice", snippet: "the original", accent: .purple, isUnavailable: false
+            )
+        )
+        let container = find(in: cell.contentView, identifier: "chat.bubble.quote")
+        XCTAssertNotNil(container)
+        XCTAssertFalse(container!.isHidden, "quote must be visible for a reply")
+        XCTAssertEqual(quoteName(in: cell)?.text, "Alice")
+        XCTAssertEqual(quoteSnippet(in: cell)?.text, "the original")
+    }
+
+    func test_noReply_hidesQuote() {
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+        cell.configure(message: makeMessage(direction: .incoming))
+        let container = find(in: cell.contentView, identifier: "chat.bubble.quote")
+        XCTAssertTrue(container?.isHidden ?? false,
+                      "a non-reply message must not show the quote")
+    }
+
+    func test_reply_tapInvokesQuoteClosure() {
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+        var taps = 0
+        cell.configure(
+            message: makeMessage(direction: .incoming),
+            reply: ChatReplyQuote(
+                name: "Alice", snippet: "x", accent: .purple, isUnavailable: false
+            ),
+            onQuoteTapped: { taps += 1 }
+        )
+        let installed = cell.simulateQuoteTapForTest()
+        XCTAssertTrue(installed, "an available quote must install a tap target")
+        XCTAssertEqual(taps, 1)
+    }
+
+    func test_reply_unavailable_showsPlaceholderAndIsInert() {
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+        var taps = 0
+        cell.configure(
+            message: makeMessage(direction: .incoming),
+            reply: .unavailable,
+            onQuoteTapped: { taps += 1 }
+        )
+        XCTAssertEqual(quoteSnippet(in: cell)?.text, "Message unavailable")
+        let installed = cell.simulateQuoteTapForTest()
+        XCTAssertFalse(installed,
+                       "an unavailable quote must not be tappable")
+        XCTAssertEqual(taps, 0)
+    }
+
+    func test_reply_droppedOnReuse() {
+        // Cell reuse: a bubble that showed a quote is reused for a
+        // non-reply message. The quote must hide, or it'd carry a
+        // stale original.
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+        cell.configure(
+            message: makeMessage(direction: .incoming),
+            reply: ChatReplyQuote(
+                name: "Alice", snippet: "x", accent: .purple, isUnavailable: false
+            )
+        )
+        cell.configure(message: makeMessage(direction: .incoming))
+        let container = find(in: cell.contentView, identifier: "chat.bubble.quote")
+        XCTAssertTrue(container?.isHidden ?? false,
+                      "reused cell must drop the previously-shown quote")
+    }
+
+    private func quoteName(in cell: ChatBubbleCell) -> UILabel? {
+        find(in: cell.contentView, identifier: "chat.bubble.quote.name") as? UILabel
+    }
+
+    private func quoteSnippet(in cell: ChatBubbleCell) -> UILabel? {
+        find(in: cell.contentView, identifier: "chat.bubble.quote.snippet") as? UILabel
+    }
+
     // MARK: - Helpers
 
     private func statusIcon(in cell: ChatBubbleCell) -> UIImageView {
