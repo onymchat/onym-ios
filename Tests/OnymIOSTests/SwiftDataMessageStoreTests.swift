@@ -55,6 +55,49 @@ final class SwiftDataMessageStoreTests: XCTestCase {
                      "a non-reply message round-trips with no reply target")
     }
 
+    func test_insertOrUpdate_imageAttachment_roundtrips() async {
+        let owner = IdentityID()
+        let groupID = "aa".repeated(32)
+        let attachment = ChatImageAttachment(
+            sha256: "cd".repeated(32),
+            mimeType: "image/jpeg",
+            byteSize: 51_234,
+            width: 1024,
+            height: 768,
+            encKey: Data(repeating: 0x7, count: 32),
+            blurhash: "LEHV6nWB2yk8",
+            server: "https://blossom.onym.app"
+        )
+        let msg = ChatMessage(
+            id: UUID(),
+            groupID: groupID,
+            ownerIdentityID: owner,
+            senderBlsPubkeyHex: "11".repeated(48),
+            body: "caption",
+            sentAt: Date(timeIntervalSince1970: 1_700_000_000),
+            direction: .outgoing,
+            status: .sent,
+            replyToMessageID: nil,
+            groupType: .tyranny,
+            imageAttachment: attachment
+        )
+        _ = await store.insertOrUpdate(msg)
+
+        let listed = await store.list(groupID: groupID, ownerIDString: owner.rawValue.uuidString)
+        XCTAssertEqual(listed.count, 1)
+        XCTAssertEqual(listed[0].imageAttachment, attachment)
+        XCTAssertEqual(listed[0].body, "caption")
+    }
+
+    func test_insertOrUpdate_noAttachment_roundtripsAsNil() async {
+        let msg = makeMessage(body: "text only")
+        _ = await store.insertOrUpdate(msg)
+        let listed = await store.list(
+            groupID: msg.groupID, ownerIDString: kOwner.rawValue.uuidString
+        )
+        XCTAssertNil(listed[0].imageAttachment)
+    }
+
     func test_insertOrUpdate_replyRef_roundtrips() async {
         let groupID = "aa".repeated(32)
         let target = UUID()

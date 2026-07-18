@@ -100,6 +100,7 @@ actor SwiftDataMessageStore: MessageStore {
             existing.failureReasonRaw = encoded.failureReasonRaw
             existing.encryptedSenderBlsPubkeyHex = encoded.encryptedSenderBlsPubkeyHex
             existing.encryptedBody = encoded.encryptedBody
+            existing.encryptedAttachmentJSON = encoded.encryptedAttachmentJSON
             try? context.save()
             return false
         }
@@ -156,7 +157,10 @@ actor SwiftDataMessageStore: MessageStore {
     // MARK: - Mapping
 
     private static func encode(_ message: ChatMessage) throws -> PersistedMessage {
-        PersistedMessage(
+        let encryptedAttachment = try message.imageAttachment.map { attachment in
+            try StorageEncryption.encrypt(JSONEncoder().encode(attachment))
+        }
+        return PersistedMessage(
             id: message.id.uuidString,
             groupID: message.groupID,
             ownerIdentityIDString: message.ownerIdentityID.rawValue.uuidString,
@@ -167,7 +171,8 @@ actor SwiftDataMessageStore: MessageStore {
             replyToMessageIDString: message.replyToMessageID?.uuidString,
             failureReasonRaw: message.failureReason?.rawValue,
             encryptedSenderBlsPubkeyHex: try StorageEncryption.encrypt(message.senderBlsPubkeyHex),
-            encryptedBody: try StorageEncryption.encrypt(message.body)
+            encryptedBody: try StorageEncryption.encrypt(message.body),
+            encryptedAttachmentJSON: encryptedAttachment
         )
     }
 
@@ -183,6 +188,11 @@ actor SwiftDataMessageStore: MessageStore {
         else {
             return nil
         }
+        // Attachment is advisory: a decrypt/decode miss degrades to a
+        // text-only row rather than dropping the whole message.
+        let imageAttachment: ChatImageAttachment? = row.encryptedAttachmentJSON
+            .flatMap { try? StorageEncryption.decrypt($0) }
+            .flatMap { try? JSONDecoder().decode(ChatImageAttachment.self, from: $0) }
         return ChatMessage(
             id: id,
             groupID: row.groupID,
@@ -194,7 +204,8 @@ actor SwiftDataMessageStore: MessageStore {
             status: status,
             replyToMessageID: row.replyToMessageIDString.flatMap(UUID.init(uuidString:)),
             groupType: groupType,
-            failureReason: row.failureReasonRaw.flatMap(SendFailureReason.init(rawValue:))
+            failureReason: row.failureReasonRaw.flatMap(SendFailureReason.init(rawValue:)),
+            imageAttachment: imageAttachment
         )
     }
 }

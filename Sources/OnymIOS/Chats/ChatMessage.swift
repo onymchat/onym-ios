@@ -64,6 +64,12 @@ struct ChatMessage: Equatable, Sendable, Identifiable {
     /// bare red bang.
     let failureReason: SendFailureReason?
 
+    /// Encrypted image attached to this message, if any. Mirrors
+    /// `ChatMessagePayload.attachment`; `body` is the caption when this
+    /// is present. The blob is fetched + decrypted lazily at render
+    /// time (see `ChatImageLoader`), not stored inline.
+    let imageAttachment: ChatImageAttachment?
+
     init(
         id: UUID,
         groupID: String,
@@ -75,7 +81,8 @@ struct ChatMessage: Equatable, Sendable, Identifiable {
         status: MessageStatus,
         replyToMessageID: UUID?,
         groupType: SEPGroupType,
-        failureReason: SendFailureReason? = nil
+        failureReason: SendFailureReason? = nil,
+        imageAttachment: ChatImageAttachment? = nil
     ) {
         self.id = id
         self.groupID = groupID
@@ -88,6 +95,7 @@ struct ChatMessage: Equatable, Sendable, Identifiable {
         self.replyToMessageID = replyToMessageID
         self.groupType = groupType
         self.failureReason = failureReason
+        self.imageAttachment = imageAttachment
     }
 }
 

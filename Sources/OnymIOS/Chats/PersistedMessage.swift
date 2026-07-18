@@ -58,6 +58,12 @@ final class PersistedMessage {
 
     var encryptedSenderBlsPubkeyHex: Data
     var encryptedBody: Data
+    /// AES-GCM-encrypted JSON of the `ChatImageAttachment` (or `nil`
+    /// for a text-only message). Encrypted at rest like `body` — it
+    /// carries the per-image key. Optional so SwiftData's lightweight
+    /// migration lands the column on existing rows without a wipe;
+    /// `nil` decodes to "no attachment".
+    var encryptedAttachmentJSON: Data?
 
     init(
         id: String,
@@ -70,7 +76,8 @@ final class PersistedMessage {
         replyToMessageIDString: String?,
         failureReasonRaw: String?,
         encryptedSenderBlsPubkeyHex: Data,
-        encryptedBody: Data
+        encryptedBody: Data,
+        encryptedAttachmentJSON: Data? = nil
     ) {
         self.id = id
         self.groupID = groupID
@@ -83,5 +90,6 @@ final class PersistedMessage {
         self.failureReasonRaw = failureReasonRaw
         self.encryptedSenderBlsPubkeyHex = encryptedSenderBlsPubkeyHex
         self.encryptedBody = encryptedBody
+        self.encryptedAttachmentJSON = encryptedAttachmentJSON
     }
 }

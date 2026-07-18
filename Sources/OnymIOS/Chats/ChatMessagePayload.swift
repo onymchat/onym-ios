@@ -58,6 +58,33 @@ struct ChatMessagePayload: Codable, Equatable, Sendable {
     /// Governance-keyed payload body. See `ChatMessageVariant`.
     let variant: ChatMessageVariant
 
+    /// Optional encrypted image attached to this message. Additive +
+    /// optional, so it ships under `version = 1`: a sender that omits
+    /// it decodes to `nil` on any receiver, and an older receiver
+    /// ignores the unknown key. When present, `variant.body` is the
+    /// (possibly empty) caption. See `ChatImageAttachment`.
+    let attachment: ChatImageAttachment?
+
+    init(
+        version: Int,
+        messageID: UUID,
+        groupID: Data,
+        senderBlsPubkeyHex: String,
+        sentAtMillis: Int64,
+        replyToMessageID: UUID?,
+        variant: ChatMessageVariant,
+        attachment: ChatImageAttachment? = nil
+    ) {
+        self.version = version
+        self.messageID = messageID
+        self.groupID = groupID
+        self.senderBlsPubkeyHex = senderBlsPubkeyHex
+        self.sentAtMillis = sentAtMillis
+        self.replyToMessageID = replyToMessageID
+        self.variant = variant
+        self.attachment = attachment
+    }
+
     enum CodingKeys: String, CodingKey {
         case version
         case messageID = "message_id"
@@ -66,6 +93,7 @@ struct ChatMessagePayload: Codable, Equatable, Sendable {
         case sentAtMillis = "sent_at_millis"
         case replyToMessageID = "reply_to_message_id"
         case variant
+        case attachment
     }
 }
 
