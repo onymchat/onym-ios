@@ -70,6 +70,13 @@ struct ChatMessage: Equatable, Sendable, Identifiable {
     /// time (see `ChatImageLoader`), not stored inline.
     let imageAttachment: ChatImageAttachment?
 
+    /// Encrypted video attached to this message, if any. Mirrors
+    /// `ChatMessagePayload.videoAttachment`; `body` is the caption when
+    /// this is present. The poster is fetched + decrypted lazily like an
+    /// image; the video blob only downloads on play (see
+    /// `ChatVideoLoader`).
+    let videoAttachment: ChatVideoAttachment?
+
     init(
         id: UUID,
         groupID: String,
@@ -82,7 +89,8 @@ struct ChatMessage: Equatable, Sendable, Identifiable {
         replyToMessageID: UUID?,
         groupType: SEPGroupType,
         failureReason: SendFailureReason? = nil,
-        imageAttachment: ChatImageAttachment? = nil
+        imageAttachment: ChatImageAttachment? = nil,
+        videoAttachment: ChatVideoAttachment? = nil
     ) {
         self.id = id
         self.groupID = groupID
@@ -96,6 +104,7 @@ struct ChatMessage: Equatable, Sendable, Identifiable {
         self.groupType = groupType
         self.failureReason = failureReason
         self.imageAttachment = imageAttachment
+        self.videoAttachment = videoAttachment
     }
 }
 

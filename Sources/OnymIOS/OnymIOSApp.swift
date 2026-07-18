@@ -9,6 +9,7 @@ struct OnymIOSApp: App {
     private let groupRepository: GroupRepository
     private let messageRepository: MessageRepository
     private let imageLoader: ChatImageLoader
+    private let videoLoader: ChatVideoLoader
     private let inboxTransport: any InboxTransport
     private let nostrRelaysRepository: NostrRelaysRepository
     private let incomingInvitations: IncomingInvitationsRepository
@@ -179,6 +180,23 @@ struct OnymIOSApp: App {
         #endif
         let imageLoader = ChatImageLoader(blossomClient: blossomClient)
         self.imageLoader = imageLoader
+        let videoLoader = ChatVideoLoader(blossomClient: blossomClient)
+        self.videoLoader = videoLoader
+
+        // Video encoder for outgoing videos. The real encoder runs
+        // AVFoundation transcoding; under `--ui-loopback` (which can't
+        // transcode a real clip on CI) swap in a canned encoding so the
+        // send pipeline still exercises seal → upload → fan-out.
+        let videoEncoder: @Sendable (URL) async -> ChatVideoEncoder.Encoded?
+        #if DEBUG
+        if args.contains("--ui-loopback") {
+            videoEncoder = { _ in Self.debugTestVideoEncoded() }
+        } else {
+            videoEncoder = ChatVideoEncoder.encode(fromVideoURL:)
+        }
+        #else
+        videoEncoder = ChatVideoEncoder.encode(fromVideoURL:)
+        #endif
 
         // Nostr-relays config — drives the inbox transport's
         // connections + the Settings → Transport → Nostr screen.
@@ -348,13 +366,15 @@ struct OnymIOSApp: App {
             pendingInvitesFlow: pendingInvitesFlow,
             messageRepository: messageRepository,
             imageLoader: imageLoader,
+            videoLoader: videoLoader,
             sendMessageInteractor: SendMessageInteractor(
                 identity: repository,
                 inboxTransport: inboxTransport,
                 messageRepository: messageRepository,
                 groupRepository: groupRepository,
                 blossomClient: blossomClient,
-                blossomServerURL: URLSessionBlossomClient.defaultBaseURL.absoluteString
+                blossomServerURL: URLSessionBlossomClient.defaultBaseURL.absoluteString,
+                videoEncoder: videoEncoder
             ),
             chatReceiptSender: ChatReceiptSender(
                 identity: repository,
@@ -365,6 +385,25 @@ struct OnymIOSApp: App {
             }
         )
     }
+
+    #if DEBUG
+    /// Canned `ChatVideoEncoder.Encoded` for the UI-test video-send path:
+    /// a real poster (from the shared test JPEG) plus small placeholder
+    /// MP4 bytes. The test only asserts the poster renders + round-trips;
+    /// playback isn't exercised, so the bytes needn't be a playable clip.
+    static func debugTestVideoEncoded() -> ChatVideoEncoder.Encoded? {
+        guard let poster = ChatImageEncoder.encode(
+            fromImageData: ChatThreadView.debugTestImageData()
+        ) else { return nil }
+        return ChatVideoEncoder.Encoded(
+            mp4: Data("uitest-video-blob".utf8),
+            width: poster.width,
+            height: poster.height,
+            durationSeconds: 3,
+            poster: poster
+        )
+    }
+    #endif
 
     var body: some Scene {
         WindowGroup {

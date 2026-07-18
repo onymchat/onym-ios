@@ -552,7 +552,8 @@ final class ChatBubbleCellTests: XCTestCase {
         direction: MessageDirection,
         body: String = "hi",
         status: MessageStatus? = nil,
-        failureReason: SendFailureReason? = nil
+        failureReason: SendFailureReason? = nil,
+        videoAttachment: ChatVideoAttachment? = nil
     ) -> ChatMessage {
         ChatMessage(
             id: id,
@@ -565,7 +566,61 @@ final class ChatBubbleCellTests: XCTestCase {
             status: status ?? (direction == .incoming ? .received : .sent),
             replyToMessageID: nil,
             groupType: .tyranny,
-            failureReason: failureReason
+            failureReason: failureReason,
+            videoAttachment: videoAttachment
+        )
+    }
+
+    // MARK: - Video attachment
+
+    func test_formatDuration_formatsAsMinutesSeconds() {
+        XCTAssertEqual(ChatBubbleCell.formatDuration(0), "0:00")
+        XCTAssertEqual(ChatBubbleCell.formatDuration(9), "0:09")
+        XCTAssertEqual(ChatBubbleCell.formatDuration(67), "1:07")
+        XCTAssertEqual(ChatBubbleCell.formatDuration(600), "10:00")
+        // Negative / NaN guard → clamps to zero.
+        XCTAssertEqual(ChatBubbleCell.formatDuration(-3), "0:00")
+    }
+
+    func test_videoMessage_showsVideoBubbleWithPosterAndPlayOverlay() {
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: nil)
+        cell.configure(message: makeMessage(direction: .incoming, videoAttachment: sampleVideo()))
+        // The poster image view is repurposed and re-identified as a video.
+        let poster = find(in: cell.contentView, identifier: "chat.bubble.video")
+        XCTAssertNotNil(poster, "video bubble must expose the poster as chat.bubble.video")
+        XCTAssertFalse(poster?.isHidden ?? true)
+    }
+
+    func test_reconfigureVideoToText_hidesAttachment() {
+        let id = UUID()
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: nil)
+        cell.configure(message: makeMessage(id: id, direction: .incoming, videoAttachment: sampleVideo()))
+        cell.configure(message: makeMessage(id: id, direction: .incoming, body: "just text"))
+        let poster = find(in: cell.contentView, identifier: "chat.bubble.video")
+        // On reuse the attachment view is hidden (id may persist, but it's not shown).
+        XCTAssertTrue(poster?.isHidden ?? true)
+    }
+
+    private func sampleVideo() -> ChatVideoAttachment {
+        ChatVideoAttachment(
+            sha256: "ab".repeated(32),
+            mimeType: "video/mp4",
+            byteSize: 4_200_000,
+            width: 1280,
+            height: 720,
+            durationSeconds: 12,
+            encKey: Data(repeating: 0x22, count: 32),
+            poster: ChatImageAttachment(
+                sha256: "cd".repeated(32),
+                mimeType: "image/jpeg",
+                byteSize: 40_000,
+                width: 1280,
+                height: 720,
+                encKey: Data(repeating: 0x11, count: 32),
+                blurhash: "LEHV6nWB2yk8",
+                server: nil
+            ),
+            server: nil
         )
     }
 }

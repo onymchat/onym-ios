@@ -94,9 +94,15 @@ final class ChatBubbleCell: UITableViewCell {
     /// SHA-256 of the attachment currently being loaded — guards the
     /// async image set against cell reuse.
     private var currentImageSha: String?
-    /// Fired when the attachment image is tapped (full-screen viewer).
+    /// Fired when the attachment image is tapped (full-screen viewer for
+    /// a photo, or the video player for a video).
     private var onImageTapped: (() -> Void)?
     private var imageTapRecognizer: UITapGestureRecognizer?
+    /// Play-button glyph shown over the poster when the attachment is a
+    /// video. Hidden for photos.
+    private let playOverlay = UIImageView()
+    /// Duration pill (`m:ss`) shown at the poster's corner for a video.
+    private let durationLabel = UILabel()
     private let statusImageView = UIImageView()
     /// Second checkmark, sat just left of `statusImageView` and shown
     /// only for `.delivered` / `.read` so the pair reads as a
@@ -228,7 +234,8 @@ final class ChatBubbleCell: UITableViewCell {
         onQuoteTapped: (() -> Void)? = nil,
         onSwipeToReply: (() -> Void)? = nil,
         imageLoader: ChatImageLoader? = nil,
-        onImageTapped: (() -> Void)? = nil
+        onImageTapped: (() -> Void)? = nil,
+        onVideoTapped: (() -> Void)? = nil
     ) {
         // Reuse safety: a cell recycled mid-drag must start at rest.
         resetSwipeState()
@@ -264,7 +271,10 @@ final class ChatBubbleCell: UITableViewCell {
         applyNameHeader(sender)
         applyReplyQuote(reply, direction: message.direction, onTap: onQuoteTapped)
         applyAttachment(
-            message.imageAttachment, imageLoader: imageLoader, onTap: onImageTapped
+            image: message.imageAttachment,
+            video: message.videoAttachment,
+            imageLoader: imageLoader,
+            onTap: message.videoAttachment != nil ? onVideoTapped : onImageTapped
         )
 
         // Retry tap is only installed when the message is failed
@@ -375,12 +385,16 @@ final class ChatBubbleCell: UITableViewCell {
         onQuoteTapped?()
     }
 
-    /// Show or hide the image attachment, re-pinning the body (caption)
-    /// below the image when present. Renders the BlurHash placeholder
-    /// synchronously, then swaps in the decrypted image from
-    /// `ChatImageLoader`. Reuse-safe via `currentImageSha`.
+    /// Show or hide the attachment, re-pinning the body (caption) below
+    /// it when present. Handles both photos and videos: a video renders
+    /// its **poster** (an image attachment) through the same pipeline,
+    /// then layers a play button + duration pill on top and routes the
+    /// tap to the player. Renders the BlurHash placeholder synchronously,
+    /// then swaps in the decrypted poster/image from `ChatImageLoader`.
+    /// Reuse-safe via `currentImageSha`.
     private func applyAttachment(
-        _ attachment: ChatImageAttachment?,
+        image: ChatImageAttachment?,
+        video: ChatVideoAttachment?,
         imageLoader: ChatImageLoader?,
         onTap: (() -> Void)?
     ) {
@@ -389,13 +403,31 @@ final class ChatBubbleCell: UITableViewCell {
         attachmentAspectConstraint = nil
         onImageTapped = onTap
 
+        // A video renders its poster; a photo renders itself.
+        let attachment = image ?? video?.poster
         guard let attachment else {
             currentImageSha = nil
             attachmentImageView.isHidden = true
             attachmentImageView.image = nil
+            playOverlay.isHidden = true
+            durationLabel.isHidden = true
             imageTopToBubbleConstraint.isActive = false
             bodyTopToImageConstraint.isActive = false
             return
+        }
+
+        // Video vs photo affordances: play glyph + duration pill + a11y.
+        if let video {
+            playOverlay.isHidden = false
+            durationLabel.isHidden = false
+            durationLabel.text = "  \(Self.formatDuration(video.durationSeconds))  "
+            attachmentImageView.accessibilityIdentifier = "chat.bubble.video"
+            attachmentImageView.accessibilityLabel = "Video"
+        } else {
+            playOverlay.isHidden = true
+            durationLabel.isHidden = true
+            attachmentImageView.accessibilityIdentifier = "chat.bubble.image"
+            attachmentImageView.accessibilityLabel = "Photo"
         }
 
         currentImageSha = attachment.sha256
@@ -642,6 +674,53 @@ final class ChatBubbleCell: UITableViewCell {
         attachmentImageView.addGestureRecognizer(imageTap)
         imageTapRecognizer = imageTap
         bubble.addSubview(attachmentImageView)
+
+        // Video-only overlays, layered on top of the poster. Hidden for
+        // photos; toggled in `applyAttachment`.
+        playOverlay.translatesAutoresizingMaskIntoConstraints = false
+        playOverlay.contentMode = .scaleAspectFit
+        playOverlay.tintColor = .white
+        playOverlay.image = UIImage(
+            systemName: "play.circle.fill",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 44, weight: .regular)
+        )
+        playOverlay.isHidden = true
+        // Soft shadow so the glyph reads over a bright poster.
+        playOverlay.layer.shadowColor = UIColor.black.cgColor
+        playOverlay.layer.shadowOpacity = 0.4
+        playOverlay.layer.shadowRadius = 4
+        playOverlay.layer.shadowOffset = .zero
+        attachmentImageView.addSubview(playOverlay)
+
+        durationLabel.translatesAutoresizingMaskIntoConstraints = false
+        durationLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+        durationLabel.textColor = .white
+        durationLabel.textAlignment = .center
+        durationLabel.backgroundColor = UIColor.black.withAlphaComponent(0.55)
+        durationLabel.layer.cornerRadius = 4
+        durationLabel.layer.cornerCurve = .continuous
+        durationLabel.clipsToBounds = true
+        durationLabel.isHidden = true
+        attachmentImageView.addSubview(durationLabel)
+
+        NSLayoutConstraint.activate([
+            playOverlay.centerXAnchor.constraint(equalTo: attachmentImageView.centerXAnchor),
+            playOverlay.centerYAnchor.constraint(equalTo: attachmentImageView.centerYAnchor),
+            playOverlay.widthAnchor.constraint(equalToConstant: 48),
+            playOverlay.heightAnchor.constraint(equalToConstant: 48),
+            durationLabel.trailingAnchor.constraint(
+                equalTo: attachmentImageView.trailingAnchor, constant: -6),
+            durationLabel.bottomAnchor.constraint(
+                equalTo: attachmentImageView.bottomAnchor, constant: -6),
+            durationLabel.heightAnchor.constraint(equalToConstant: 16),
+            durationLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 34),
+        ])
+    }
+
+    /// Formats a duration in seconds as `m:ss` (e.g. `1:07`, `0:09`).
+    static func formatDuration(_ seconds: Double) -> String {
+        let total = max(0, Int(seconds.rounded()))
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
 
     @objc private func tappedImage() {

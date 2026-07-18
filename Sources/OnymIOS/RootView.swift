@@ -33,6 +33,7 @@ struct RootView: View {
                         pendingInvitesFlow: dependencies.pendingInvitesFlow,
                         messageRepository: dependencies.messageRepository,
                         imageLoader: dependencies.imageLoader,
+                        videoLoader: dependencies.videoLoader,
                         sendMessageInteractor: dependencies.sendMessageInteractor,
                         chatReceiptSender: dependencies.chatReceiptSender,
                         makeCreateGroupFlow: dependencies.makeCreateGroupFlow,

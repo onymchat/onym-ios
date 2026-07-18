@@ -35,6 +35,10 @@ struct AppDependencies {
     /// `OnymIOSApp.init` and threaded down.
     let messageRepository: MessageRepository
     let imageLoader: ChatImageLoader
+    /// Fetches + decrypts video blobs for the full-screen player. Shared
+    /// like `imageLoader` so the on-disk decrypted-clip cache is reused
+    /// across thread opens.
+    let videoLoader: ChatVideoLoader
     /// Stateless façade over identity + transport + repositories
     /// for outgoing chat messages. Safe to share across screens
     /// (it's an actor); each chat-thread view captures it and

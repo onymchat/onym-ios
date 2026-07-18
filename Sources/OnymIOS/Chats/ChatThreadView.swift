@@ -1,5 +1,8 @@
+import AVKit
+import CoreTransferable
 import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// SwiftUI host for `ChatThreadViewController`. The chat screen is
 /// UIKit (per the design call on #150) but the surrounding app is
@@ -27,13 +30,19 @@ struct ChatThreadView: View {
     let setGroupAvatar: @MainActor (String, Data?) async -> Void
     /// Fetches + decrypts image attachments for the bubbles + viewer.
     let imageLoader: ChatImageLoader
+    /// Fetches + decrypts video blobs for the full-screen player.
+    let videoLoader: ChatVideoLoader
 
     @Environment(\.dismiss) private var dismiss
     @State private var showMembers: Bool = false
     @State private var showPhotoPicker: Bool = false
     @State private var pickedItem: PhotosPickerItem?
-    /// The attachment shown in the full-screen viewer, if any.
+    @State private var showVideoPicker: Bool = false
+    @State private var pickedVideoItem: PhotosPickerItem?
+    /// The image attachment shown in the full-screen viewer, if any.
     @State private var fullScreen: FullScreenAttachment?
+    /// The video attachment shown in the full-screen player, if any.
+    @State private var fullScreenVideo: FullScreenVideo?
     /// Incoming message IDs we've already emitted a read receipt for,
     /// so re-renders while the thread stays open don't re-send.
     @State private var ackedReadIDs: Set<UUID> = []
@@ -91,9 +100,16 @@ struct ChatThreadView: View {
                     fullScreen = FullScreenAttachment(attachment: attachment)
                 }
             },
-            onAttachTapped: { handleAttachTapped() }
+            onVideoTapped: { message in
+                if let attachment = message.videoAttachment {
+                    fullScreenVideo = FullScreenVideo(attachment: attachment)
+                }
+            },
+            onAttachTapped: { handleAttachTapped() },
+            onAttachVideoTapped: { handleAttachVideoTapped() }
         )
         .photosPicker(isPresented: $showPhotoPicker, selection: $pickedItem, matching: .images)
+        .photosPicker(isPresented: $showVideoPicker, selection: $pickedVideoItem, matching: .videos)
         .onChange(of: pickedItem) { _, item in
             guard let item else { return }
             let interactor = sendMessageInteractor
@@ -105,9 +121,28 @@ struct ChatThreadView: View {
                 pickedItem = nil
             }
         }
+        .onChange(of: pickedVideoItem) { _, item in
+            guard let item else { return }
+            let interactor = sendMessageInteractor
+            let groupID = groupID
+            Task {
+                // Videos are large — load a file URL (not Data) and hand
+                // the interactor the URL to transcode.
+                if let movie = try? await item.loadTransferable(type: PickedMovie.self) {
+                    try? await interactor.sendVideo(groupID: groupID, videoURL: movie.url)
+                    try? FileManager.default.removeItem(at: movie.url)
+                }
+                pickedVideoItem = nil
+            }
+        }
         .fullScreenCover(item: $fullScreen) { item in
             FullScreenImageView(attachment: item.attachment, imageLoader: imageLoader) {
                 fullScreen = nil
+            }
+        }
+        .fullScreenCover(item: $fullScreenVideo) { item in
+            FullScreenVideoView(attachment: item.attachment, videoLoader: videoLoader) {
+                fullScreenVideo = nil
             }
         }
         .toolbar(.hidden, for: .navigationBar)
@@ -183,6 +218,24 @@ struct ChatThreadView: View {
         showPhotoPicker = true
     }
 
+    /// Attach-video button tapped: open the system video picker. Under
+    /// the UI-test loopback harness (which can't drive PHPicker *or*
+    /// AVFoundation transcoding), send a canned video directly — the
+    /// interactor's injected test encoder ignores the URL.
+    private func handleAttachVideoTapped() {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--ui-loopback") {
+            let interactor = sendMessageInteractor
+            let groupID = groupID
+            let dummyURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("uitest-video").appendingPathExtension("mov")
+            Task { try? await interactor.sendVideo(groupID: groupID, videoURL: dummyURL) }
+            return
+        }
+        #endif
+        showVideoPicker = true
+    }
+
     #if DEBUG
     /// A small solid-colour JPEG for the UI test's image-send path.
     static func debugTestImageData() -> Data {
@@ -229,7 +282,9 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
     let onRetryRequested: (UUID) -> Void
     let imageLoader: ChatImageLoader
     let onImageTapped: (ChatMessage) -> Void
+    let onVideoTapped: (ChatMessage) -> Void
     let onAttachTapped: () -> Void
+    let onAttachVideoTapped: () -> Void
 
     func makeUIViewController(context: Context) -> ChatThreadViewController {
         let vc = ChatThreadViewController()
@@ -239,7 +294,9 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         vc.onRetryRequested = onRetryRequested
         vc.imageLoader = imageLoader
         vc.onImageTapped = onImageTapped
+        vc.onVideoTapped = onVideoTapped
         vc.onAttachTapped = onAttachTapped
+        vc.onAttachVideoTapped = onAttachVideoTapped
         vc.loadViewIfNeeded()
         vc.update(groupName: groupName, memberCount: memberCount)
         // Profiles before messages — the first sender-display build
@@ -260,7 +317,9 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         vc.onRetryRequested = onRetryRequested
         vc.imageLoader = imageLoader
         vc.onImageTapped = onImageTapped
+        vc.onVideoTapped = onVideoTapped
         vc.onAttachTapped = onAttachTapped
+        vc.onAttachVideoTapped = onAttachVideoTapped
         vc.update(groupName: groupName, memberCount: memberCount)
         vc.update(memberProfiles: memberProfiles)
         vc.update(messages: messages)
@@ -272,6 +331,78 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
 private struct FullScreenAttachment: Identifiable {
     let id = UUID()
     let attachment: ChatImageAttachment
+}
+
+/// Identifiable wrapper for the full-screen video player.
+private struct FullScreenVideo: Identifiable {
+    let id = UUID()
+    let attachment: ChatVideoAttachment
+}
+
+/// `Transferable` that receives a picked video as a file URL we own —
+/// videos are too large to load as `Data`, so we copy the picker's
+/// temporary file to a location the interactor can read + transcode.
+private struct PickedMovie: Transferable {
+    let url: URL
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(contentType: .movie) { movie in
+            SentTransferredFile(movie.url)
+        } importing: { received in
+            let dest = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString)
+                .appendingPathExtension(received.file.pathExtension.isEmpty
+                    ? "mov" : received.file.pathExtension)
+            try? FileManager.default.removeItem(at: dest)
+            try FileManager.default.copyItem(at: received.file, to: dest)
+            return PickedMovie(url: dest)
+        }
+    }
+}
+
+/// Full-screen video player: black backdrop, an `AVPlayer` over the
+/// decrypted local file, a Done button to dismiss.
+private struct FullScreenVideoView: View {
+    let attachment: ChatVideoAttachment
+    let videoLoader: ChatVideoLoader
+    let onDismiss: () -> Void
+
+    @State private var player: AVPlayer?
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            if let player {
+                VideoPlayer(player: player)
+                    .ignoresSafeArea()
+                    .accessibilityIdentifier("chat.video.fullscreen")
+            } else {
+                ProgressView().tint(.white)
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            Button {
+                player?.pause()
+                onDismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(12)
+                    .background(.black.opacity(0.4), in: Circle())
+            }
+            .padding(.leading, 16)
+            .padding(.top, 12)
+            .accessibilityIdentifier("chat.video.close")
+        }
+        .task {
+            if let url = try? await videoLoader.fileURL(for: attachment) {
+                let player = AVPlayer(url: url)
+                self.player = player
+                player.play()
+            }
+        }
+    }
 }
 
 /// Full-screen image viewer: black backdrop, the decrypted image, tap

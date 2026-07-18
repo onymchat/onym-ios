@@ -65,6 +65,14 @@ struct ChatMessagePayload: Codable, Equatable, Sendable {
     /// (possibly empty) caption. See `ChatImageAttachment`.
     let attachment: ChatImageAttachment?
 
+    /// Optional encrypted video attached to this message. Additive +
+    /// optional exactly like `attachment`, so it ships under
+    /// `version = 1`: a sender that omits it decodes to `nil` on any
+    /// receiver, and an older receiver ignores the unknown key. When
+    /// present, `variant.body` is the (possibly empty) caption. See
+    /// `ChatVideoAttachment`.
+    let videoAttachment: ChatVideoAttachment?
+
     init(
         version: Int,
         messageID: UUID,
@@ -73,7 +81,8 @@ struct ChatMessagePayload: Codable, Equatable, Sendable {
         sentAtMillis: Int64,
         replyToMessageID: UUID?,
         variant: ChatMessageVariant,
-        attachment: ChatImageAttachment? = nil
+        attachment: ChatImageAttachment? = nil,
+        videoAttachment: ChatVideoAttachment? = nil
     ) {
         self.version = version
         self.messageID = messageID
@@ -83,6 +92,7 @@ struct ChatMessagePayload: Codable, Equatable, Sendable {
         self.replyToMessageID = replyToMessageID
         self.variant = variant
         self.attachment = attachment
+        self.videoAttachment = videoAttachment
     }
 
     enum CodingKeys: String, CodingKey {
@@ -94,6 +104,7 @@ struct ChatMessagePayload: Codable, Equatable, Sendable {
         case replyToMessageID = "reply_to_message_id"
         case variant
         case attachment
+        case videoAttachment = "video_attachment"
     }
 }
 

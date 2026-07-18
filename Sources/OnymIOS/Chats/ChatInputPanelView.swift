@@ -22,6 +22,9 @@ final class ChatInputPanelView: UIView {
     /// Tapped the attach (photo) button. The host presents a picker.
     var onAttachTapped: (() -> Void)?
 
+    /// Tapped the attach-video button. The host presents a video picker.
+    var onAttachVideoTapped: (() -> Void)?
+
     /// Invoked when the user taps the reply banner's cancel button.
     /// The host clears its armed reply target and calls
     /// `clearReplyBanner()`.
@@ -51,6 +54,7 @@ final class ChatInputPanelView: UIView {
     private let placeholderLabel = UILabel()
     private let sendButton = UIButton(type: .system)
     private let attachButton = UIButton(type: .system)
+    private let attachVideoButton = UIButton(type: .system)
     private var textViewHeightConstraint: NSLayoutConstraint!
 
     // Reply banner — shown above the composer while a reply is armed.
@@ -149,6 +153,20 @@ final class ChatInputPanelView: UIView {
         attachButton.accessibilityIdentifier = "chat.input.attach"
         attachButton.accessibilityLabel = "Attach photo"
         addSubview(attachButton)
+
+        var videoConfig = UIButton.Configuration.plain()
+        videoConfig.image = UIImage(
+            systemName: "video",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .regular)
+        )
+        videoConfig.contentInsets = .zero
+        attachVideoButton.configuration = videoConfig
+        attachVideoButton.tintColor = UIColor(OnymTokens.text2)
+        attachVideoButton.addTarget(self, action: #selector(tappedAttachVideo), for: .touchUpInside)
+        attachVideoButton.translatesAutoresizingMaskIntoConstraints = false
+        attachVideoButton.accessibilityIdentifier = "chat.input.attach_video"
+        attachVideoButton.accessibilityLabel = "Attach video"
+        addSubview(attachVideoButton)
     }
 
     private func buildReplyBanner() {
@@ -246,7 +264,12 @@ final class ChatInputPanelView: UIView {
             attachButton.widthAnchor.constraint(equalToConstant: 34),
             attachButton.heightAnchor.constraint(equalToConstant: 34),
 
-            textView.leadingAnchor.constraint(equalTo: attachButton.trailingAnchor, constant: 4),
+            attachVideoButton.leadingAnchor.constraint(equalTo: attachButton.trailingAnchor, constant: 2),
+            attachVideoButton.bottomAnchor.constraint(equalTo: textView.bottomAnchor),
+            attachVideoButton.widthAnchor.constraint(equalToConstant: 34),
+            attachVideoButton.heightAnchor.constraint(equalToConstant: 34),
+
+            textView.leadingAnchor.constraint(equalTo: attachVideoButton.trailingAnchor, constant: 4),
             textView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
             textViewHeightConstraint,
 
@@ -380,6 +403,10 @@ final class ChatInputPanelView: UIView {
 
     @objc private func tappedAttach() {
         onAttachTapped?()
+    }
+
+    @objc private func tappedAttachVideo() {
+        onAttachVideoTapped?()
     }
 }
 

@@ -64,6 +64,11 @@ final class PersistedMessage {
     /// migration lands the column on existing rows without a wipe;
     /// `nil` decodes to "no attachment".
     var encryptedAttachmentJSON: Data?
+    /// AES-GCM-encrypted JSON of the `ChatVideoAttachment` (or `nil` for
+    /// a message with no video). Same at-rest encryption + lightweight-
+    /// migration shape as `encryptedAttachmentJSON`; carries the
+    /// per-video key + the poster descriptor.
+    var encryptedVideoAttachmentJSON: Data?
 
     init(
         id: String,
@@ -77,7 +82,8 @@ final class PersistedMessage {
         failureReasonRaw: String?,
         encryptedSenderBlsPubkeyHex: Data,
         encryptedBody: Data,
-        encryptedAttachmentJSON: Data? = nil
+        encryptedAttachmentJSON: Data? = nil,
+        encryptedVideoAttachmentJSON: Data? = nil
     ) {
         self.id = id
         self.groupID = groupID
@@ -91,5 +97,6 @@ final class PersistedMessage {
         self.encryptedSenderBlsPubkeyHex = encryptedSenderBlsPubkeyHex
         self.encryptedBody = encryptedBody
         self.encryptedAttachmentJSON = encryptedAttachmentJSON
+        self.encryptedVideoAttachmentJSON = encryptedVideoAttachmentJSON
     }
 }

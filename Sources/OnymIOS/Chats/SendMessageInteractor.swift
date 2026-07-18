@@ -20,6 +20,15 @@ actor SendMessageInteractor {
     /// Base URL stamped into `ChatImageAttachment.server` so receivers
     /// fetch from the same server the sender uploaded to.
     private let blossomServerURL: String
+    /// Transcodes + extracts a poster from a picked video. Injected so
+    /// the UI-test harness can supply a canned encoding instead of
+    /// running AVFoundation on a real clip. Defaults to the real encoder.
+    private let videoEncoder: @Sendable (URL) async -> ChatVideoEncoder.Encoded?
+
+    /// Hard ceiling on an encrypted blob we'll attempt to upload. Sits
+    /// under Blossom's ~100MB cap so a long clip fails fast client-side
+    /// rather than with an opaque server rejection mid-upload.
+    static let maxUploadBytes = 95 * 1024 * 1024
 
     enum SendError: Error, Equatable {
         case noIdentityLoaded
@@ -38,6 +47,12 @@ actor SendMessageInteractor {
         case imageEncodeFailed
         /// Encrypting or uploading the image blob to Blossom failed.
         case imageUploadFailed(String)
+        /// The picked video couldn't be transcoded / poster-extracted.
+        case videoEncodeFailed
+        /// Encrypting or uploading a video (or its poster) blob failed.
+        case videoUploadFailed(String)
+        /// The transcoded + encrypted video exceeds the upload cap.
+        case videoTooLarge
     }
 
     init(
@@ -49,7 +64,8 @@ actor SendMessageInteractor {
             baseURL: URLSessionBlossomClient.defaultBaseURL,
             signerProvider: OnymNostrSignerProvider()
         ),
-        blossomServerURL: String = URLSessionBlossomClient.defaultBaseURL.absoluteString
+        blossomServerURL: String = URLSessionBlossomClient.defaultBaseURL.absoluteString,
+        videoEncoder: @escaping @Sendable (URL) async -> ChatVideoEncoder.Encoded? = ChatVideoEncoder.encode(fromVideoURL:)
     ) {
         self.identity = identity
         self.inboxTransport = inboxTransport
@@ -57,6 +73,7 @@ actor SendMessageInteractor {
         self.groupRepository = groupRepository
         self.blossomClient = blossomClient
         self.blossomServerURL = blossomServerURL
+        self.videoEncoder = videoEncoder
     }
 
     /// Returns the locally-persisted `ChatMessage` after the fan-out
@@ -285,6 +302,144 @@ actor SendMessageInteractor {
             groupType: pending.groupType,
             failureReason: failureReason,
             imageAttachment: pending.imageAttachment
+        )
+    }
+
+    /// Send a video message. Transcodes to 720p + extracts a poster,
+    /// then encrypts + uploads *two* blobs — the poster (small) and the
+    /// video (large) — before shipping a `ChatMessagePayload` carrying a
+    /// `ChatVideoAttachment` (+ optional caption). Both uploads complete
+    /// before the optimistic bubble is inserted, so a receiver never
+    /// gets a descriptor pointing at a missing blob. Any encode / size /
+    /// upload failure throws before anything is persisted or fanned out.
+    @discardableResult
+    func sendVideo(
+        groupID: String,
+        videoURL: URL,
+        caption: String = "",
+        now: Date = Date()
+    ) async throws -> ChatMessage {
+        guard let active = await identity.currentIdentity(),
+              let activeID = await identity.currentSelectedID() else {
+            throw SendError.noIdentityLoaded
+        }
+        let groups = await groupRepository.currentGroups()
+        guard let group = groups.first(where: {
+            $0.id == groupID && $0.ownerIdentityID == activeID
+        }) else {
+            throw SendError.unknownGroup
+        }
+        let myBlsHex = active.blsPublicKey.map { String(format: "%02x", $0) }.joined()
+        guard group.memberProfiles[myBlsHex] != nil else {
+            throw SendError.senderNotAMember
+        }
+        let variant: ChatMessageVariant
+        switch group.groupType {
+        case .tyranny:
+            variant = .tyranny(body: caption)
+        case .oneOnOne, .anarchy, .democracy, .oligarchy:
+            throw SendError.unknownGroup
+        }
+
+        // Transcode → extract poster. All before any upload / insert so a
+        // failure leaves no dangling bubble.
+        guard let encoded = await videoEncoder(videoURL) else {
+            throw SendError.videoEncodeFailed
+        }
+
+        // Poster blob (small) — same shape as a sent image.
+        let posterSealed: ChatImageCrypto.Sealed
+        let videoSealed: ChatImageCrypto.Sealed
+        do {
+            posterSealed = try ChatImageCrypto.seal(encoded.poster.jpeg)
+            videoSealed = try ChatImageCrypto.seal(encoded.mp4)
+        } catch {
+            throw SendError.videoUploadFailed("encrypt: \(error)")
+        }
+        guard videoSealed.blob.count <= Self.maxUploadBytes else {
+            throw SendError.videoTooLarge
+        }
+        do {
+            _ = try await blossomClient.upload(posterSealed.blob, mimeType: "image/jpeg")
+            _ = try await blossomClient.upload(videoSealed.blob, mimeType: "video/mp4")
+        } catch {
+            throw SendError.videoUploadFailed(String(describing: error))
+        }
+
+        let poster = ChatImageAttachment(
+            sha256: posterSealed.sha256Hex,
+            mimeType: "image/jpeg",
+            byteSize: posterSealed.blob.count,
+            width: encoded.poster.width,
+            height: encoded.poster.height,
+            encKey: posterSealed.key,
+            blurhash: encoded.poster.blurhash,
+            server: blossomServerURL
+        )
+        let videoAttachment = ChatVideoAttachment(
+            sha256: videoSealed.sha256Hex,
+            mimeType: "video/mp4",
+            byteSize: videoSealed.blob.count,
+            width: encoded.width,
+            height: encoded.height,
+            durationSeconds: encoded.durationSeconds,
+            encKey: videoSealed.key,
+            poster: poster,
+            server: blossomServerURL
+        )
+
+        let messageID = UUID()
+        let sentAtMillis = Int64(now.timeIntervalSince1970 * 1000)
+        let payload = ChatMessagePayload(
+            version: 1,
+            messageID: messageID,
+            groupID: group.groupIDData,
+            senderBlsPubkeyHex: myBlsHex,
+            sentAtMillis: sentAtMillis,
+            replyToMessageID: nil,
+            variant: variant,
+            videoAttachment: videoAttachment
+        )
+
+        let pending = ChatMessage(
+            id: messageID,
+            groupID: groupID,
+            ownerIdentityID: group.ownerIdentityID,
+            senderBlsPubkeyHex: myBlsHex,
+            body: caption,
+            sentAt: now,
+            direction: .outgoing,
+            status: .pending,
+            replyToMessageID: nil,
+            groupType: group.groupType,
+            videoAttachment: videoAttachment
+        )
+        await messageRepository.insert(pending)
+
+        let recipients = group.memberProfiles
+            .filter { $0.key != myBlsHex }
+            .map { $0.value.inboxPublicKey }
+        let (finalStatus, failureReason) = await fanOut(payload: payload, recipients: recipients)
+        await messageRepository.updateStatus(
+            id: messageID,
+            status: finalStatus,
+            groupID: groupID,
+            owner: group.ownerIdentityID,
+            failureReason: failureReason
+        )
+        return ChatMessage(
+            id: pending.id,
+            groupID: pending.groupID,
+            ownerIdentityID: pending.ownerIdentityID,
+            senderBlsPubkeyHex: pending.senderBlsPubkeyHex,
+            body: pending.body,
+            sentAt: pending.sentAt,
+            direction: pending.direction,
+            status: finalStatus,
+            replyToMessageID: pending.replyToMessageID,
+            groupType: pending.groupType,
+            failureReason: failureReason,
+            videoAttachment: pending.videoAttachment
         )
     }
 

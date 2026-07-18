@@ -49,9 +49,15 @@ final class ChatThreadViewController: UIViewController {
     var imageLoader: ChatImageLoader?
     /// Fired when a message's image is tapped (host presents full-screen).
     var onImageTapped: ((ChatMessage) -> Void)?
+    /// Fired when a message's video poster is tapped (host presents the
+    /// full-screen player).
+    var onVideoTapped: ((ChatMessage) -> Void)?
     /// Fired when the composer's attach button is tapped (host presents
     /// the photo picker).
     var onAttachTapped: (() -> Void)?
+    /// Fired when the composer's attach-video button is tapped (host
+    /// presents the video picker).
+    var onAttachVideoTapped: (() -> Void)?
 
     private let titleLabel = UILabel()
     private let memberCountLabel = UILabel()
@@ -596,7 +602,10 @@ final class ChatThreadViewController: UIViewController {
                     imageLoader: self?.imageLoader,
                     onImageTapped: message.imageAttachment == nil
                         ? nil
-                        : { [weak self] in self?.onImageTapped?(message) }
+                        : { [weak self] in self?.onImageTapped?(message) },
+                    onVideoTapped: message.videoAttachment == nil
+                        ? nil
+                        : { [weak self] in self?.onVideoTapped?(message) }
                 )
             }
             return cell
@@ -630,6 +639,9 @@ final class ChatThreadViewController: UIViewController {
         }
         inputPanel.onAttachTapped = { [weak self] in
             self?.onAttachTapped?()
+        }
+        inputPanel.onAttachVideoTapped = { [weak self] in
+            self?.onAttachVideoTapped?()
         }
     }
 

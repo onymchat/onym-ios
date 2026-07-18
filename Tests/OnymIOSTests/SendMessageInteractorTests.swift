@@ -142,7 +142,7 @@ final class SendMessageInteractorTests: XCTestCase {
         XCTAssertTrue(stored.isEmpty, "a failed upload must not leave a dangling bubble")
     }
 
-    private static func makeJPEG() -> Data {
+    nonisolated private static func makeJPEG() -> Data {
         let format = UIGraphicsImageRendererFormat.default()
         format.scale = 1
         let img = UIGraphicsImageRenderer(size: CGSize(width: 16, height: 16), format: format).image { ctx in
@@ -150,6 +150,115 @@ final class SendMessageInteractorTests: XCTestCase {
             ctx.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
         }
         return img.jpegData(compressionQuality: 0.8)!
+    }
+
+    // MARK: - Video send
+
+    /// Canned encoding so the test doesn't run AVFoundation transcoding:
+    /// a real poster (encoded from a test JPEG) + placeholder MP4 bytes.
+    /// `nonisolated` so it can be called from the interactor's off-main
+    /// `@Sendable` encoder closure.
+    nonisolated private static func cannedVideoEncoded(mp4: Data = Data("mp4".utf8)) -> ChatVideoEncoder.Encoded {
+        let poster = ChatImageEncoder.encode(fromImageData: makeJPEG())!
+        return ChatVideoEncoder.Encoded(
+            mp4: mp4, width: 1280, height: 720, durationSeconds: 4, poster: poster
+        )
+    }
+
+    private func makeVideoInteractor(
+        encoder: @escaping @Sendable (URL) async -> ChatVideoEncoder.Encoded?
+    ) -> SendMessageInteractor {
+        SendMessageInteractor(
+            identity: identity,
+            inboxTransport: transport,
+            messageRepository: messages,
+            groupRepository: groups,
+            blossomClient: blossom,
+            blossomServerURL: "https://blossom.test",
+            videoEncoder: encoder
+        )
+    }
+
+    func test_sendVideo_uploadsPosterAndVideoBlobs_andPersistsAttachment() async throws {
+        let groupID = await seedGroupWithTwoPeers()
+        let sut = makeVideoInteractor { _ in Self.cannedVideoEncoded() }
+
+        let result = try await sut.sendVideo(
+            groupID: groupID, videoURL: Self.dummyVideoURL(), caption: "clip"
+        )
+
+        XCTAssertEqual(result.status, .sent)
+        XCTAssertEqual(result.body, "clip")
+        let video = try XCTUnwrap(result.videoAttachment)
+        XCTAssertEqual(video.mimeType, "video/mp4")
+        XCTAssertEqual(video.server, "https://blossom.test")
+        XCTAssertEqual(video.encKey.count, 32)
+        XCTAssertEqual(video.durationSeconds, 4)
+        XCTAssertEqual(video.width, 1280)
+        // Poster is its own encrypted blob with its own key + blurhash.
+        XCTAssertEqual(video.poster.mimeType, "image/jpeg")
+        XCTAssertEqual(video.poster.encKey.count, 32)
+        XCTAssertNotEqual(video.poster.sha256, video.sha256)
+        XCTAssertFalse(video.poster.blurhash.isEmpty)
+
+        // Both blobs (poster + video) were uploaded under their sha256s.
+        let uploaded = await blossom.storedSha256s
+        XCTAssertTrue(uploaded.contains(video.sha256))
+        XCTAssertTrue(uploaded.contains(video.poster.sha256))
+
+        // Fanned out to the two peers, and persisted with the video.
+        let sends = await transport.recordedSends
+        XCTAssertEqual(sends.count, 2)
+        let stored = await messages.currentMessages(groupID: groupID, owner: currentIdentityID)
+        XCTAssertEqual(stored.count, 1)
+        XCTAssertEqual(stored[0].videoAttachment?.sha256, video.sha256)
+    }
+
+    func test_sendVideo_encodeFailure_throws_andPersistsNothing() async throws {
+        let groupID = await seedGroupWithTwoPeers()
+        let sut = makeVideoInteractor { _ in nil }
+        do {
+            _ = try await sut.sendVideo(groupID: groupID, videoURL: Self.dummyVideoURL())
+            XCTFail("expected encode failure")
+        } catch SendMessageInteractor.SendError.videoEncodeFailed {
+            // expected
+        }
+        let stored = await messages.currentMessages(groupID: groupID, owner: currentIdentityID)
+        XCTAssertTrue(stored.isEmpty)
+    }
+
+    func test_sendVideo_uploadFailure_throws_andPersistsNothing() async throws {
+        let groupID = await seedGroupWithTwoPeers()
+        await blossom.setFailing(true)
+        let sut = makeVideoInteractor { _ in Self.cannedVideoEncoded() }
+        do {
+            _ = try await sut.sendVideo(groupID: groupID, videoURL: Self.dummyVideoURL())
+            XCTFail("expected upload failure")
+        } catch SendMessageInteractor.SendError.videoUploadFailed {
+            // expected
+        }
+        let stored = await messages.currentMessages(groupID: groupID, owner: currentIdentityID)
+        XCTAssertTrue(stored.isEmpty, "a failed upload must not leave a dangling bubble")
+    }
+
+    func test_sendVideo_oversizeBlob_throwsVideoTooLarge() async throws {
+        let groupID = await seedGroupWithTwoPeers()
+        // A plaintext just over the cap → the encrypted blob also exceeds it.
+        let huge = Data(count: SendMessageInteractor.maxUploadBytes + 1)
+        let sut = makeVideoInteractor { _ in Self.cannedVideoEncoded(mp4: huge) }
+        do {
+            _ = try await sut.sendVideo(groupID: groupID, videoURL: Self.dummyVideoURL())
+            XCTFail("expected too-large rejection")
+        } catch SendMessageInteractor.SendError.videoTooLarge {
+            // expected
+        }
+        let stored = await messages.currentMessages(groupID: groupID, owner: currentIdentityID)
+        XCTAssertTrue(stored.isEmpty)
+    }
+
+    private static func dummyVideoURL() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("test-video").appendingPathExtension("mov")
     }
 
     // MARK: - Happy path
