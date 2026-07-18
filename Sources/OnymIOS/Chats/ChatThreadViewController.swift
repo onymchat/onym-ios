@@ -272,6 +272,12 @@ final class ChatThreadViewController: UIViewController {
     func update(messages: [ChatMessage]) {
         let isFirstApply = !hasAppliedFirstSnapshot
         let wasNearBottom = isNearBottom
+        // Only a genuinely *new* row pulls the scroll along. A same-count
+        // update is a `reconfigureItems` — a status flip (pending → sent →
+        // delivered → read) or a body/attachment repaint — and re-scrolling
+        // on those made the thread jump up and down every time a receipt
+        // landed for the just-sent message.
+        let previousCount = orderedMessages.count
 
         let sorted = messages.sorted { $0.sentAt < $1.sentAt }
         // Detect status/body changes on already-known rows so
@@ -309,7 +315,7 @@ final class ChatThreadViewController: UIViewController {
                 guard !sorted.isEmpty else { return }
                 self.jumpToBottomForColdOpen()
                 self.hasAppliedFirstSnapshot = true
-            } else if wasNearBottom {
+            } else if wasNearBottom && sorted.count > previousCount {
                 self.scrollToBottom(animated: true)
             }
         }

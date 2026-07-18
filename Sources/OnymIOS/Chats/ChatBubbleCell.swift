@@ -870,6 +870,15 @@ final class ChatBubbleCell: UITableViewCell {
         bodyLabel.numberOfLines = 0
         bodyLabel.font = .preferredFont(forTextStyle: .body)
         bodyLabel.adjustsFontForContentSizeCategory = true
+        // Hug the text horizontally with a decisive priority so a text
+        // bubble shrinks to fit its content. Without this the label sits at
+        // the default hugging (251), tying with the hidden media siblings
+        // (image/album/voice) that are also pinned edge-to-edge on the
+        // bubble — autolayout resolves the tie inconsistently, so *some*
+        // short text bubbles stretch toward the 75% cap. `.defaultHigh`
+        // (750) beats those siblings while still yielding to the fixed
+        // 75%-width constraint (1000) a real media message installs.
+        bodyLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
         bubble.addSubview(bodyLabel)
 
         attachmentImageView.translatesAutoresizingMaskIntoConstraints = false
