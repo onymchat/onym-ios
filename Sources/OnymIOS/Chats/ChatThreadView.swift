@@ -415,29 +415,57 @@ private struct FullScreenVideoView: View {
     }
 }
 
-/// Full-screen image viewer: black backdrop, the decrypted image, tap
-/// anywhere to dismiss.
+/// Full-screen image viewer: black backdrop, the decrypted image,
+/// **swipe down to dismiss**. The image tracks the drag and the backdrop
+/// fades with it; releasing past the threshold dismisses, otherwise it
+/// springs back.
 private struct FullScreenImageView: View {
     let attachment: ChatImageAttachment
     let imageLoader: ChatImageLoader
     let onDismiss: () -> Void
 
     @State private var image: UIImage?
+    @State private var dragOffset: CGSize = .zero
+
+    /// Downward-drag distance past which releasing dismisses.
+    private let dismissThreshold: CGFloat = 120
+
+    /// 0…1 backdrop-fade based on how far the image has been dragged.
+    private var dragProgress: CGFloat {
+        min(1, max(0, dragOffset.height) / 300)
+    }
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Color.black.opacity(1 - dragProgress * 0.7).ignoresSafeArea()
             if let image {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFit()
+                    .offset(dragOffset)
                     .accessibilityIdentifier("chat.image.fullscreen")
             } else {
                 ProgressView().tint(.white)
             }
         }
         .contentShape(Rectangle())
-        .onTapGesture { onDismiss() }
+        .gesture(
+            DragGesture()
+                .onChanged { value in
+                    // Follow the finger; horizontal drift is allowed but
+                    // only the downward distance decides dismissal.
+                    dragOffset = value.translation
+                }
+                .onEnded { value in
+                    if value.translation.height > dismissThreshold {
+                        onDismiss()
+                    } else {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            dragOffset = .zero
+                        }
+                    }
+                }
+        )
         .task {
             image = try? await imageLoader.image(for: attachment)
         }
