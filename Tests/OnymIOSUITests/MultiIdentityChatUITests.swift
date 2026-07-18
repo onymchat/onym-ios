@@ -179,6 +179,16 @@ final class MultiIdentityChatUITests: XCTestCase {
         app.buttons["chat.input.attach_video"].tap()
         XCTAssertTrue(app.images["chat.bubble.video"].waitForExistence(timeout: 25),
                       "Alice's sent video bubble never rendered")
+
+        // Tap the video → full-screen player opens; swipe down → it
+        // dismisses (there's no close button; swipe is the only dismiss).
+        app.images["chat.bubble.video"].tap()
+        let videoPlayer = app.descendants(matching: .any)["chat.video.fullscreen"]
+        XCTAssertTrue(videoPlayer.waitForExistence(timeout: 10),
+                      "tapping the video never opened the full-screen player")
+        app.swipeDown(velocity: .fast)
+        XCTAssertTrue(waitForDisappearance(of: videoPlayer, timeout: 10),
+                      "swiping down never dismissed the full-screen video player")
         thread.back()
 
         switchIdentity(app, to: "Bob")

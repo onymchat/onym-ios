@@ -371,7 +371,10 @@ private struct PickedMovie: Transferable {
 }
 
 /// Full-screen video player: black backdrop, an `AVPlayer` over the
-/// decrypted local file, a Done button to dismiss.
+/// decrypted local file. Dismissed by **swipe down** (a pan recognizer
+/// that recognizes simultaneously with the player's own controls, so
+/// scrubbing + tap-to-toggle still work) — matching the image viewer;
+/// there's no explicit close button.
 private struct FullScreenVideoView: View {
     let attachment: ChatVideoAttachment
     let videoLoader: ChatVideoLoader
@@ -383,27 +386,18 @@ private struct FullScreenVideoView: View {
         ZStack {
             Color.black.ignoresSafeArea()
             if let player {
-                VideoPlayer(player: player)
-                    .ignoresSafeArea()
-                    .accessibilityIdentifier("chat.video.fullscreen")
+                DismissibleVideoPlayer(
+                    player: player,
+                    onDismiss: {
+                        player.pause()
+                        onDismiss()
+                    }
+                )
+                .ignoresSafeArea()
+                .accessibilityIdentifier("chat.video.fullscreen")
             } else {
                 ProgressView().tint(.white)
             }
-        }
-        .overlay(alignment: .topLeading) {
-            Button {
-                player?.pause()
-                onDismiss()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(12)
-                    .background(.black.opacity(0.4), in: Circle())
-            }
-            .padding(.leading, 16)
-            .padding(.top, 12)
-            .accessibilityIdentifier("chat.video.close")
         }
         .task {
             if let url = try? await videoLoader.fileURL(for: attachment) {
@@ -411,6 +405,78 @@ private struct FullScreenVideoView: View {
                 self.player = player
                 player.play()
             }
+        }
+    }
+}
+
+/// `AVPlayerViewController` wrapper that adds a swipe-down-to-dismiss pan
+/// gesture. The recognizer only claims predominantly-downward drags and
+/// runs simultaneously with the player's built-in controls, so the
+/// scrubber and tap-to-toggle keep working. A plain SwiftUI `DragGesture`
+/// over `VideoPlayer` wouldn't fire — AVKit's controls consume the
+/// touches before SwiftUI's ancestor gesture sees them.
+private struct DismissibleVideoPlayer: UIViewControllerRepresentable {
+    let player: AVPlayer
+    let onDismiss: () -> Void
+
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let controller = AVPlayerViewController()
+        controller.player = player
+        controller.view.backgroundColor = .clear
+        // Queryable from UI tests to detect the open player (there's no
+        // close button; dismissal is swipe-down only).
+        controller.view.accessibilityIdentifier = "chat.video.fullscreen"
+        let pan = UIPanGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handlePan(_:))
+        )
+        pan.delegate = context.coordinator
+        controller.view.addGestureRecognizer(pan)
+        context.coordinator.controller = controller
+        return controller
+    }
+
+    func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(onDismiss: onDismiss) }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        private let onDismiss: () -> Void
+        weak var controller: AVPlayerViewController?
+        /// Downward-drag distance past which releasing dismisses.
+        private let dismissThreshold: CGFloat = 120
+
+        init(onDismiss: @escaping () -> Void) { self.onDismiss = onDismiss }
+
+        @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
+            guard let view = controller?.view else { return }
+            let translation = gesture.translation(in: view)
+            switch gesture.state {
+            case .changed:
+                view.transform = CGAffineTransform(translationX: 0, y: max(0, translation.y))
+            case .ended, .cancelled, .failed:
+                if translation.y > dismissThreshold {
+                    onDismiss()
+                } else {
+                    UIView.animate(withDuration: 0.25) { view.transform = .identity }
+                }
+            default:
+                break
+            }
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+        ) -> Bool { true }
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard let pan = gestureRecognizer as? UIPanGestureRecognizer,
+                  let view = controller?.view else { return true }
+            // Only claim predominantly-downward drags — horizontal
+            // scrubbing + taps stay with the player's own controls.
+            let velocity = pan.velocity(in: view)
+            return velocity.y > abs(velocity.x)
         }
     }
 }
