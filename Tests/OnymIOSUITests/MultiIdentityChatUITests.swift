@@ -146,7 +146,12 @@ final class MultiIdentityChatUITests: XCTestCase {
         switchIdentity(app, to: "Bob")
         openChat(app)
         XCTAssertTrue(thread.waitReady(), "Bob's chat thread never opened")
+        // Two-step: attach stages the image in the preview strip, then
+        // Send confirms.
         app.buttons["chat.input.attach"].tap()
+        XCTAssertTrue(app.otherElements["chat.input.media_strip"].waitForExistence(timeout: 10),
+                      "attaching an image never staged it in the preview strip")
+        app.buttons["chat.input.send"].tap()
         XCTAssertTrue(app.images["chat.bubble.image"].waitForExistence(timeout: 25),
                       "Bob's sent image bubble never rendered")
 
@@ -176,7 +181,11 @@ final class MultiIdentityChatUITests: XCTestCase {
         switchIdentity(app, to: "Alice")
         openChat(app)
         XCTAssertTrue(thread.waitReady(), "Alice's chat thread never opened")
+        // Two-step: attach stages the video, then Send confirms.
         app.buttons["chat.input.attach_video"].tap()
+        XCTAssertTrue(app.otherElements["chat.input.media_strip"].waitForExistence(timeout: 10),
+                      "attaching a video never staged it in the preview strip")
+        app.buttons["chat.input.send"].tap()
         XCTAssertTrue(app.images["chat.bubble.video"].waitForExistence(timeout: 25),
                       "Alice's sent video bubble never rendered")
 
@@ -195,6 +204,24 @@ final class MultiIdentityChatUITests: XCTestCase {
         openChat(app)
         XCTAssertTrue(app.images["chat.bubble.video"].waitForExistence(timeout: 25),
                       "Bob never received + rendered the video")
+        thread.back()
+
+        // ───────── Album: two images → one grid message ─────────
+        // Stage two images in the preview strip, then Send once → a
+        // single album bubble rendered as a grid.
+        switchIdentity(app, to: "Bob")
+        openChat(app)
+        XCTAssertTrue(thread.waitReady(), "Bob's chat thread never opened for album")
+        app.buttons["chat.input.attach"].tap()
+        app.buttons["chat.input.attach"].tap()
+        XCTAssertTrue(app.otherElements["chat.input.media_strip"].waitForExistence(timeout: 10),
+                      "the preview strip never appeared for the staged album")
+        app.buttons["chat.input.send"].tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["chat.bubble.album.tile"].firstMatch
+                .waitForExistence(timeout: 25),
+            "the album grid never rendered"
+        )
         thread.back()
 
         // ───────── Search: find a message + open its chat ─────────

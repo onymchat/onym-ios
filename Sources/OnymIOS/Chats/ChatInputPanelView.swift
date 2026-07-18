@@ -25,6 +25,17 @@ final class ChatInputPanelView: UIView {
     /// Tapped the attach-video button. The host presents a video picker.
     var onAttachVideoTapped: (() -> Void)?
 
+    /// Tapped Send while media is staged in the preview strip. The host
+    /// sends the staged items (as one album) and clears the strip.
+    var onSendMediaTapped: (() -> Void)?
+
+    /// Tapped the ✕ on a staged item — the host removes it from the
+    /// pending selection and re-pushes via `setPendingMedia`.
+    var onRemovePendingMedia: ((UUID) -> Void)?
+
+    /// Whether any media is staged in the preview strip.
+    private var hasPendingMedia = false
+
     /// Invoked when the user taps the reply banner's cancel button.
     /// The host clears its armed reply target and calls
     /// `clearReplyBanner()`.
@@ -68,6 +79,20 @@ final class ChatInputPanelView: UIView {
     private let replyCancelButton = UIButton(type: .system)
     private var textViewTopToPanelConstraint: NSLayoutConstraint!
     private var textViewTopToBannerConstraint: NSLayoutConstraint!
+    private var textViewTopToStripConstraint: NSLayoutConstraint!
+    private var replyBannerTopToPanelConstraint: NSLayoutConstraint!
+    private var replyBannerTopToStripConstraint: NSLayoutConstraint!
+
+    // Media preview strip — a horizontal row of staged image/video
+    // thumbnails (each with a ✕ to remove) shown above the reply banner
+    // / text field once media is picked. Confirming with Send fires
+    // `onSendMediaTapped`. Hidden (height 0) when nothing is staged.
+    private let mediaStrip = UIScrollView()
+    private let mediaStripStack = UIStackView()
+    private var mediaStripHeightConstraint: NSLayoutConstraint!
+    /// Height of a staged thumbnail (square) in the strip.
+    private let mediaThumbSize: CGFloat = 60
+    private var replyBannerShown = false
 
     /// Height for exactly `lines` worth of text plus the text
     /// view's vertical insets. Drives both the natural empty-state
@@ -86,6 +111,7 @@ final class ChatInputPanelView: UIView {
         backgroundColor = UIColor(OnymTokens.surface2)
         buildSubviews()
         buildReplyBanner()
+        buildMediaStrip()
         layoutSubviewsLocal()
         refreshAfterTextChange()
     }
@@ -214,6 +240,108 @@ final class ChatInputPanelView: UIView {
         replyBanner.addSubview(replyCancelButton)
     }
 
+    private func buildMediaStrip() {
+        mediaStrip.translatesAutoresizingMaskIntoConstraints = false
+        mediaStrip.showsHorizontalScrollIndicator = false
+        mediaStrip.clipsToBounds = false
+        mediaStrip.isHidden = true
+        mediaStrip.accessibilityIdentifier = "chat.input.media_strip"
+        addSubview(mediaStrip)
+
+        mediaStripStack.translatesAutoresizingMaskIntoConstraints = false
+        mediaStripStack.axis = .horizontal
+        mediaStripStack.spacing = 8
+        mediaStripStack.alignment = .center
+        mediaStrip.addSubview(mediaStripStack)
+        NSLayoutConstraint.activate([
+            mediaStripStack.topAnchor.constraint(equalTo: mediaStrip.contentLayoutGuide.topAnchor),
+            mediaStripStack.bottomAnchor.constraint(equalTo: mediaStrip.contentLayoutGuide.bottomAnchor),
+            mediaStripStack.leadingAnchor.constraint(equalTo: mediaStrip.contentLayoutGuide.leadingAnchor),
+            mediaStripStack.trailingAnchor.constraint(equalTo: mediaStrip.contentLayoutGuide.trailingAnchor),
+            mediaStripStack.heightAnchor.constraint(equalTo: mediaStrip.frameLayoutGuide.heightAnchor),
+        ])
+    }
+
+    /// Stage (or restage) the picked media shown in the preview strip.
+    /// Pass an empty array to hide the strip. Each tile carries a stable
+    /// id so a ✕ tap can report which item to drop.
+    func setPendingMedia(_ items: [(id: UUID, thumbnail: UIImage)]) {
+        mediaStripStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        hasPendingMedia = !items.isEmpty
+        for item in items {
+            mediaStripStack.addArrangedSubview(makeThumbTile(id: item.id, image: item.thumbnail))
+        }
+        mediaStrip.isHidden = items.isEmpty
+        mediaStripHeightConstraint.constant = items.isEmpty ? 0 : mediaThumbSize + 12
+        updateTopChain()
+        refreshAfterTextChange()   // re-evaluate the Send button's enabled state
+    }
+
+    private func makeThumbTile(id: UUID, image: UIImage) -> UIView {
+        let container = UIView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+
+        let imageView = UIImageView(image: image)
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        imageView.contentMode = .scaleAspectFill
+        imageView.clipsToBounds = true
+        imageView.layer.cornerRadius = 8
+        imageView.layer.cornerCurve = .continuous
+        container.addSubview(imageView)
+
+        let remove = UIButton(type: .system)
+        var config = UIButton.Configuration.plain()
+        config.image = UIImage(
+            systemName: "xmark.circle.fill",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .bold)
+        )
+        config.contentInsets = .zero
+        remove.configuration = config
+        remove.tintColor = .white
+        remove.translatesAutoresizingMaskIntoConstraints = false
+        remove.accessibilityIdentifier = "chat.input.media_strip.remove"
+        remove.addAction(UIAction { [weak self] _ in self?.onRemovePendingMedia?(id) }, for: .touchUpInside)
+        container.addSubview(remove)
+
+        NSLayoutConstraint.activate([
+            imageView.topAnchor.constraint(equalTo: container.topAnchor, constant: 6),
+            imageView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            imageView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -6),
+            imageView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            imageView.widthAnchor.constraint(equalToConstant: mediaThumbSize),
+            imageView.heightAnchor.constraint(equalToConstant: mediaThumbSize),
+            remove.topAnchor.constraint(equalTo: container.topAnchor),
+            remove.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            remove.widthAnchor.constraint(equalToConstant: 22),
+            remove.heightAnchor.constraint(equalToConstant: 22),
+        ])
+        return container
+    }
+
+    /// Re-pin the top of the stack (strip → reply banner → text field)
+    /// so exactly one path is active for the current (strip, banner)
+    /// visibility combination.
+    private func updateTopChain() {
+        textViewTopToPanelConstraint.isActive = false
+        textViewTopToBannerConstraint.isActive = false
+        textViewTopToStripConstraint.isActive = false
+        replyBannerTopToPanelConstraint.isActive = false
+        replyBannerTopToStripConstraint.isActive = false
+
+        switch (hasPendingMedia, replyBannerShown) {
+        case (true, true):
+            replyBannerTopToStripConstraint.isActive = true
+            textViewTopToBannerConstraint.isActive = true
+        case (true, false):
+            textViewTopToStripConstraint.isActive = true
+        case (false, true):
+            replyBannerTopToPanelConstraint.isActive = true
+            textViewTopToBannerConstraint.isActive = true
+        case (false, false):
+            textViewTopToPanelConstraint.isActive = true
+        }
+    }
+
     private func layoutSubviewsLocal() {
         // Initial constant is replaced on the first
         // `refreshAfterTextChange` once the font / insets resolve.
@@ -227,6 +355,20 @@ final class ChatInputPanelView: UIView {
         textViewTopToBannerConstraint = textView.topAnchor.constraint(
             equalTo: replyBanner.bottomAnchor, constant: 8
         )
+        textViewTopToStripConstraint = textView.topAnchor.constraint(
+            equalTo: mediaStrip.bottomAnchor, constant: 8
+        )
+        // Reply-banner top toggle: below the panel top, or below the
+        // media strip when it's staged above the banner.
+        replyBannerTopToPanelConstraint = replyBanner.topAnchor.constraint(
+            equalTo: topAnchor, constant: 8
+        )
+        replyBannerTopToStripConstraint = replyBanner.topAnchor.constraint(
+            equalTo: mediaStrip.bottomAnchor, constant: 8
+        )
+        // Media strip — pinned across the panel top; height toggles
+        // between 0 (hidden) and a thumbnail row.
+        mediaStripHeightConstraint = mediaStrip.heightAnchor.constraint(equalToConstant: 0)
 
         NSLayoutConstraint.activate([
             topDivider.topAnchor.constraint(equalTo: topAnchor),
@@ -234,9 +376,13 @@ final class ChatInputPanelView: UIView {
             topDivider.trailingAnchor.constraint(equalTo: trailingAnchor),
             topDivider.heightAnchor.constraint(equalToConstant: 1.0 / UIScreen.main.scale),
 
-            // Reply banner — spans the width just under the panel top.
-            // Only drives the text view's top when shown (toggle below).
-            replyBanner.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+            mediaStrip.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+            mediaStrip.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            mediaStrip.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            mediaStripHeightConstraint,
+
+            // Reply banner — spans the width. Top is driven by the
+            // toggle constraints; only leading/trailing are fixed here.
             replyBanner.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
             replyBanner.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
 
@@ -312,17 +458,17 @@ final class ChatInputPanelView: UIView {
         replyBannerBar.backgroundColor = UIColor(accent.color)
         replyBannerSnippet.text = snippet
         replyBanner.isHidden = false
-        textViewTopToPanelConstraint.isActive = false
-        textViewTopToBannerConstraint.isActive = true
+        replyBannerShown = true
+        updateTopChain()
     }
 
     /// Hide the reply banner and re-pin the text view to the panel top.
     func clearReplyBanner() {
         replyBanner.isHidden = true
+        replyBannerShown = false
         replyBannerTitle.text = nil
         replyBannerSnippet.text = nil
-        textViewTopToBannerConstraint.isActive = false
-        textViewTopToPanelConstraint.isActive = true
+        updateTopChain()
     }
 
     @objc private func tappedCancelReply() {
@@ -382,7 +528,8 @@ final class ChatInputPanelView: UIView {
         // overlay (the user *is* typing, even if the trimmed
         // content is still empty).
         let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
-        sendButton.isEnabled = !trimmed.isEmpty
+        // Staged media alone is enough to send (no caption required).
+        sendButton.isEnabled = !trimmed.isEmpty || hasPendingMedia
         placeholderLabel.isHidden = !body.isEmpty
     }
 
@@ -395,6 +542,12 @@ final class ChatInputPanelView: UIView {
     }
 
     @objc private func tappedSend() {
+        // Staged media takes priority: send the album (the caption field
+        // isn't part of this iteration) and let the host clear the strip.
+        if hasPendingMedia {
+            onSendMediaTapped?()
+            return
+        }
         let body = (textView.text ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty else { return }

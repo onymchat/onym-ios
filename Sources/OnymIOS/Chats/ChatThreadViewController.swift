@@ -55,6 +55,9 @@ final class ChatThreadViewController: UIViewController {
     /// Fired when a *failed* outgoing attachment is tapped (host presents
     /// the Resend / Delete menu).
     var onAttachmentActionsRequested: ((ChatMessage) -> Void)?
+    /// Fired when an album tile is tapped (host opens the full-screen
+    /// gallery at that item index).
+    var onAlbumItemTapped: ((ChatMessage, Int) -> Void)?
     /// When set (e.g. opened from Search), the cold open lands on this
     /// message — scrolled to the middle and flashed — instead of at the
     /// bottom. Cleared after it's consumed so later snapshots behave
@@ -66,6 +69,11 @@ final class ChatThreadViewController: UIViewController {
     /// Fired when the composer's attach-video button is tapped (host
     /// presents the video picker).
     var onAttachVideoTapped: (() -> Void)?
+    /// Fired when Send is tapped with media staged in the preview strip
+    /// (host sends the album + clears the strip).
+    var onSendMedia: (() -> Void)?
+    /// Fired when the ✕ on a staged item is tapped (host drops it).
+    var onRemovePendingMedia: ((UUID) -> Void)?
 
     private let titleLabel = UILabel()
     private let memberCountLabel = UILabel()
@@ -621,10 +629,10 @@ final class ChatThreadViewController: UIViewController {
                     return { [weak self] in self?.scrollAndHighlight(messageID: targetID) }
                 }()
                 // A failed outgoing attachment taps into the Resend /
-                // Delete menu instead of the full-screen viewer.
+                // Delete menu instead of the full-screen viewer/gallery.
                 let isFailedOutgoingAttachment = message.direction == .outgoing
                     && message.status == .failed
-                    && (message.imageAttachment != nil || message.videoAttachment != nil)
+                    && !message.media.isEmpty
                 let imageTap: (() -> Void)? = message.imageAttachment == nil ? nil : { [weak self] in
                     if isFailedOutgoingAttachment { self?.onAttachmentActionsRequested?(message) }
                     else { self?.onImageTapped?(message) }
@@ -633,6 +641,10 @@ final class ChatThreadViewController: UIViewController {
                     if isFailedOutgoingAttachment { self?.onAttachmentActionsRequested?(message) }
                     else { self?.onVideoTapped?(message) }
                 }
+                let albumTap: ((Int) -> Void)? = message.media.count > 1 ? { [weak self] index in
+                    if isFailedOutgoingAttachment { self?.onAttachmentActionsRequested?(message) }
+                    else { self?.onAlbumItemTapped?(message, index) }
+                } : nil
                 bubble.configure(
                     message: message,
                     sender: sender,
@@ -642,7 +654,8 @@ final class ChatThreadViewController: UIViewController {
                     onSwipeToReply: { [weak self] in self?.armReply(for: id) },
                     imageLoader: self?.imageLoader,
                     onImageTapped: imageTap,
-                    onVideoTapped: videoTap
+                    onVideoTapped: videoTap,
+                    onAlbumItemTapped: albumTap
                 )
             }
             return cell
@@ -680,6 +693,18 @@ final class ChatThreadViewController: UIViewController {
         inputPanel.onAttachVideoTapped = { [weak self] in
             self?.onAttachVideoTapped?()
         }
+        inputPanel.onSendMediaTapped = { [weak self] in
+            self?.onSendMedia?()
+        }
+        inputPanel.onRemovePendingMedia = { [weak self] id in
+            self?.onRemovePendingMedia?(id)
+        }
+    }
+
+    /// Stage picked media in the composer's preview strip (host owns the
+    /// selection; passes fresh thumbnails on every change).
+    func setPendingMedia(_ items: [(id: UUID, thumbnail: UIImage)]) {
+        inputPanel.setPendingMedia(items)
     }
 
     /// Dispatch a send with the currently-armed reply target (if any),

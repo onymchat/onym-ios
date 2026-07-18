@@ -39,15 +39,21 @@ struct ChatThreadView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showMembers: Bool = false
     @State private var showPhotoPicker: Bool = false
-    @State private var pickedItem: PhotosPickerItem?
+    @State private var pickedItems: [PhotosPickerItem] = []
     @State private var showVideoPicker: Bool = false
-    @State private var pickedVideoItem: PhotosPickerItem?
+    @State private var pickedVideoItems: [PhotosPickerItem] = []
+    /// Media staged in the composer's preview strip, awaiting the Send
+    /// confirmation. Sent together as one album (or a single message if
+    /// only one item survives).
+    @State private var pendingMedia: [PendingMediaItem] = []
     /// The image attachment shown in the full-screen viewer, if any.
     @State private var fullScreen: FullScreenAttachment?
     /// The video attachment shown in the full-screen player, if any.
     @State private var fullScreenVideo: FullScreenVideo?
     /// A failed outgoing media message awaiting a Resend / Delete choice.
     @State private var actionsForMessage: ChatMessage?
+    /// The album + start index shown in the full-screen gallery, if any.
+    @State private var galleryContext: AlbumGalleryContext?
     /// Incoming message IDs we've already emitted a read receipt for,
     /// so re-renders while the thread stays open don't re-send.
     @State private var ackedReadIDs: Set<UUID> = []
@@ -112,34 +118,49 @@ struct ChatThreadView: View {
                 }
             },
             onAttachmentActionsRequested: { message in actionsForMessage = message },
+            onAlbumItemTapped: { message, index in
+                galleryContext = AlbumGalleryContext(items: message.media, startIndex: index)
+            },
             onAttachTapped: { handleAttachTapped() },
-            onAttachVideoTapped: { handleAttachVideoTapped() }
+            onAttachVideoTapped: { handleAttachVideoTapped() },
+            pendingMedia: pendingMedia.map { (id: $0.id, thumbnail: $0.thumbnail) },
+            onSendMedia: { handleSendPendingMedia() },
+            onRemovePendingMedia: { id in pendingMedia.removeAll { $0.id == id } }
         )
-        .photosPicker(isPresented: $showPhotoPicker, selection: $pickedItem, matching: .images)
-        .photosPicker(isPresented: $showVideoPicker, selection: $pickedVideoItem, matching: .videos)
-        .onChange(of: pickedItem) { _, item in
-            guard let item else { return }
-            let interactor = sendMessageInteractor
-            let groupID = groupID
+        .photosPicker(
+            isPresented: $showPhotoPicker, selection: $pickedItems,
+            maxSelectionCount: 10, matching: .images
+        )
+        .photosPicker(
+            isPresented: $showVideoPicker, selection: $pickedVideoItems,
+            maxSelectionCount: 10, matching: .videos
+        )
+        .onChange(of: pickedItems) { _, items in
+            guard !items.isEmpty else { return }
             Task {
-                if let data = try? await item.loadTransferable(type: Data.self) {
-                    try? await interactor.sendImage(groupID: groupID, imageData: data)
+                for item in items {
+                    guard let data = try? await item.loadTransferable(type: Data.self),
+                          let thumb = UIImage(data: data) else { continue }
+                    pendingMedia.append(PendingMediaItem(
+                        thumbnail: thumb, source: .image(data)
+                    ))
                 }
-                pickedItem = nil
+                pickedItems = []
             }
         }
-        .onChange(of: pickedVideoItem) { _, item in
-            guard let item else { return }
-            let interactor = sendMessageInteractor
-            let groupID = groupID
+        .onChange(of: pickedVideoItems) { _, items in
+            guard !items.isEmpty else { return }
             Task {
-                // Videos are large — load a file URL (not Data) and hand
-                // the interactor the URL to transcode.
-                if let movie = try? await item.loadTransferable(type: PickedMovie.self) {
-                    try? await interactor.sendVideo(groupID: groupID, videoURL: movie.url)
-                    try? FileManager.default.removeItem(at: movie.url)
+                for item in items {
+                    guard let movie = try? await item.loadTransferable(type: PickedMovie.self)
+                    else { continue }
+                    let thumb = await Self.videoThumbnail(for: movie.url)
+                        ?? UIImage(systemName: "video") ?? UIImage()
+                    pendingMedia.append(PendingMediaItem(
+                        thumbnail: thumb, source: .video(movie.url)
+                    ))
                 }
-                pickedVideoItem = nil
+                pickedVideoItems = []
             }
         }
         .fullScreenCover(item: $fullScreen) { item in
@@ -151,6 +172,14 @@ struct ChatThreadView: View {
             FullScreenVideoView(attachment: item.attachment, videoLoader: videoLoader) {
                 fullScreenVideo = nil
             }
+        }
+        .fullScreenCover(item: $galleryContext) { context in
+            FullScreenGalleryView(
+                items: context.items,
+                startIndex: context.startIndex,
+                imageLoader: imageLoader,
+                videoLoader: videoLoader
+            ) { galleryContext = nil }
         }
         .confirmationDialog(
             "This media didn't send.",
@@ -232,38 +261,59 @@ struct ChatThreadView: View {
         }
     }
 
-    /// Attach button tapped: open the system photo picker. Under the
-    /// UI-test loopback harness (which can't drive PHPicker), send a
-    /// generated test image directly instead.
+    /// Attach button tapped: open the system photo picker (multi-select),
+    /// which stages picks in the preview strip. Under the UI-test loopback
+    /// harness (which can't drive PHPicker), stage a generated test image
+    /// so the strip + Send flow can be exercised.
     private func handleAttachTapped() {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--ui-loopback") {
-            let interactor = sendMessageInteractor
-            let groupID = groupID
             let data = Self.debugTestImageData()
-            Task { try? await interactor.sendImage(groupID: groupID, imageData: data) }
+            let thumb = UIImage(data: data) ?? UIImage()
+            pendingMedia.append(PendingMediaItem(thumbnail: thumb, source: .image(data)))
             return
         }
         #endif
         showPhotoPicker = true
     }
 
-    /// Attach-video button tapped: open the system video picker. Under
-    /// the UI-test loopback harness (which can't drive PHPicker *or*
-    /// AVFoundation transcoding), send a canned video directly — the
-    /// interactor's injected test encoder ignores the URL.
+    /// Attach-video button tapped: open the system video picker
+    /// (multi-select), staging picks in the preview strip. Under the
+    /// UI-test loopback harness, stage a canned video (the interactor's
+    /// injected test encoder ignores the URL).
     private func handleAttachVideoTapped() {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--ui-loopback") {
-            let interactor = sendMessageInteractor
-            let groupID = groupID
             let dummyURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("uitest-video").appendingPathExtension("mov")
-            Task { try? await interactor.sendVideo(groupID: groupID, videoURL: dummyURL) }
+            let thumb = UIImage(data: Self.debugTestImageData()) ?? UIImage()
+            pendingMedia.append(PendingMediaItem(thumbnail: thumb, source: .video(dummyURL)))
             return
         }
         #endif
         showVideoPicker = true
+    }
+
+    /// Send the staged media as one album (or a single message if only
+    /// one item), then clear the strip. Fire-and-forget: the interactor
+    /// inserts the optimistic bubble before the uploads.
+    private func handleSendPendingMedia() {
+        let sources = pendingMedia.map(\.source)
+        guard !sources.isEmpty else { return }
+        pendingMedia = []
+        let interactor = sendMessageInteractor
+        let groupID = groupID
+        Task { try? await interactor.sendAlbum(groupID: groupID, sources: sources) }
+    }
+
+    /// Quick poster frame for a picked video, for the preview-strip
+    /// thumbnail (no transcode — just the first frame).
+    static func videoThumbnail(for url: URL) async -> UIImage? {
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 200, height: 200)
+        guard let cg = try? await generator.image(at: .zero).image else { return nil }
+        return UIImage(cgImage: cg)
     }
 
     #if DEBUG
@@ -315,8 +365,12 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
     let onImageTapped: (ChatMessage) -> Void
     let onVideoTapped: (ChatMessage) -> Void
     let onAttachmentActionsRequested: (ChatMessage) -> Void
+    let onAlbumItemTapped: (ChatMessage, Int) -> Void
     let onAttachTapped: () -> Void
     let onAttachVideoTapped: () -> Void
+    let pendingMedia: [(id: UUID, thumbnail: UIImage)]
+    let onSendMedia: () -> Void
+    let onRemovePendingMedia: (UUID) -> Void
 
     func makeUIViewController(context: Context) -> ChatThreadViewController {
         let vc = ChatThreadViewController()
@@ -333,14 +387,18 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         vc.onImageTapped = onImageTapped
         vc.onVideoTapped = onVideoTapped
         vc.onAttachmentActionsRequested = onAttachmentActionsRequested
+        vc.onAlbumItemTapped = onAlbumItemTapped
         vc.onAttachTapped = onAttachTapped
         vc.onAttachVideoTapped = onAttachVideoTapped
+        vc.onSendMedia = onSendMedia
+        vc.onRemovePendingMedia = onRemovePendingMedia
         vc.loadViewIfNeeded()
         vc.update(groupName: groupName, memberCount: memberCount)
         // Profiles before messages — the first sender-display build
         // reads the profiles to resolve names.
         vc.update(memberProfiles: memberProfiles)
         vc.update(messages: messages)
+        vc.setPendingMedia(pendingMedia)
         return vc
     }
 
@@ -357,12 +415,25 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         vc.onImageTapped = onImageTapped
         vc.onVideoTapped = onVideoTapped
         vc.onAttachmentActionsRequested = onAttachmentActionsRequested
+        vc.onAlbumItemTapped = onAlbumItemTapped
         vc.onAttachTapped = onAttachTapped
         vc.onAttachVideoTapped = onAttachVideoTapped
+        vc.onSendMedia = onSendMedia
+        vc.onRemovePendingMedia = onRemovePendingMedia
         vc.update(groupName: groupName, memberCount: memberCount)
         vc.update(memberProfiles: memberProfiles)
         vc.update(messages: messages)
+        vc.setPendingMedia(pendingMedia)
     }
+}
+
+/// A picked media item staged in the composer's preview strip, awaiting
+/// the Send confirmation. Holds a thumbnail (for the strip) + the raw
+/// source (for `sendAlbum`).
+private struct PendingMediaItem: Identifiable {
+    let id = UUID()
+    let thumbnail: UIImage
+    let source: ChatMediaSource
 }
 
 /// Identifiable wrapper so the full-screen viewer can be driven by
@@ -376,6 +447,102 @@ private struct FullScreenAttachment: Identifiable {
 private struct FullScreenVideo: Identifiable {
     let id = UUID()
     let attachment: ChatVideoAttachment
+}
+
+/// The album + the tapped start index, driving the full-screen gallery.
+private struct AlbumGalleryContext: Identifiable {
+    let id = UUID()
+    let items: [ChatMediaAttachment]
+    let startIndex: Int
+}
+
+/// Full-screen, horizontally-paged gallery over an album's items. Images
+/// render decrypted; videos play in the dismissible player. Starts on the
+/// tapped item; a Close button dismisses (paging owns horizontal drags,
+/// so the per-viewer swipe-down isn't used here).
+private struct FullScreenGalleryView: View {
+    let items: [ChatMediaAttachment]
+    let startIndex: Int
+    let imageLoader: ChatImageLoader
+    let videoLoader: ChatVideoLoader
+    let onDismiss: () -> Void
+
+    @State private var selection: Int = 0
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            TabView(selection: $selection) {
+                ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                    Group {
+                        switch item {
+                        case .image(let image):
+                            GalleryImagePage(attachment: image, imageLoader: imageLoader)
+                        case .video(let video):
+                            DismissibleVideoPlayerPage(attachment: video, videoLoader: videoLoader)
+                        }
+                    }
+                    .tag(index)
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .automatic))
+        }
+        .overlay(alignment: .topLeading) {
+            Button {
+                onDismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(12)
+                    .background(.black.opacity(0.4), in: Circle())
+            }
+            .padding(.leading, 16)
+            .padding(.top, 12)
+            .accessibilityIdentifier("chat.gallery.close")
+        }
+        .onAppear { selection = startIndex }
+    }
+}
+
+/// One image page inside the gallery.
+private struct GalleryImagePage: View {
+    let attachment: ChatImageAttachment
+    let imageLoader: ChatImageLoader
+    @State private var image: UIImage?
+
+    var body: some View {
+        ZStack {
+            if let image {
+                Image(uiImage: image).resizable().scaledToFit()
+            } else {
+                ProgressView().tint(.white)
+            }
+        }
+        .task { image = try? await imageLoader.image(for: attachment) }
+    }
+}
+
+/// One video page inside the gallery (loads + plays the decrypted clip).
+private struct DismissibleVideoPlayerPage: View {
+    let attachment: ChatVideoAttachment
+    let videoLoader: ChatVideoLoader
+    @State private var player: AVPlayer?
+
+    var body: some View {
+        ZStack {
+            if let player {
+                VideoPlayer(player: player).ignoresSafeArea()
+            } else {
+                ProgressView().tint(.white)
+            }
+        }
+        .task {
+            if let url = try? await videoLoader.fileURL(for: attachment) {
+                player = AVPlayer(url: url)
+            }
+        }
+    }
 }
 
 /// `Transferable` that receives a picked video as a file URL we own —
