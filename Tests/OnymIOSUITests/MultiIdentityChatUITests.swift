@@ -137,6 +137,24 @@ final class MultiIdentityChatUITests: XCTestCase {
         openChat(app)
         XCTAssertTrue(thread.waitForStatus("Read"),
                       "Alice's message never flipped to Read after Bob opened the thread")
+        thread.back()
+
+        // ───────── Bob → Alice: image message ─────────
+        // Under `--ui-loopback` the attach button sends a generated test
+        // image (the system photo picker can't be driven from XCUITest);
+        // the blob round-trips through the in-memory Blossom fake.
+        switchIdentity(app, to: "Bob")
+        openChat(app)
+        XCTAssertTrue(thread.waitReady(), "Bob's chat thread never opened")
+        app.buttons["chat.input.attach"].tap()
+        XCTAssertTrue(app.images["chat.bubble.image"].waitForExistence(timeout: 25),
+                      "Bob's sent image bubble never rendered")
+        thread.back()
+
+        switchIdentity(app, to: "Alice")
+        openChat(app)
+        XCTAssertTrue(app.images["chat.bubble.image"].waitForExistence(timeout: 25),
+                      "Alice never received + rendered the image")
     }
 
     // MARK: - Helpers
