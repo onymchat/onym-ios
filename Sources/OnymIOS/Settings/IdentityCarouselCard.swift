@@ -36,8 +36,10 @@ struct IdentityCarouselCard: View {
                 addPage
                     .tag(Self.addTag)
             }
-            .tabViewStyle(.page(indexDisplayMode: .always))
-            .indexViewStyle(.page(backgroundDisplayMode: .interactive))
+            // Built-in `.page` dots float at the bottom of the TabView
+            // frame, overlapping the shorter add-page content (the Create
+            // button). Hide them and draw our own row below the carousel.
+            .tabViewStyle(.page(indexDisplayMode: .never))
             .frame(height: 420)
             .accessibilityIdentifier("identity.carousel")
             .onChange(of: selection) { _, newValue in settle(on: newValue) }
@@ -55,6 +57,8 @@ struct IdentityCarouselCard: View {
                         ?? Self.addTag
                 }
             }
+
+            pageIndicator
         }
         .background(OnymTokens.surface2,
                     in: RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -63,6 +67,34 @@ struct IdentityCarouselCard: View {
         .sheet(item: removalBinding) { summary in
             RemoveIdentitySheet(flow: flow, summary: summary)
         }
+    }
+
+    // MARK: - Page indicator
+
+    /// Total pages = every identity + the trailing add page.
+    private var pageCount: Int { flow.identities.count + 1 }
+
+    /// Index of the currently-shown page (add page is last).
+    private var currentIndex: Int {
+        if selection == Self.addTag { return flow.identities.count }
+        return flow.identities.firstIndex { $0.id.rawValue.uuidString == selection } ?? 0
+    }
+
+    /// Custom dot row rendered below the carousel so it never overlaps a
+    /// page's own controls.
+    private var pageIndicator: some View {
+        HStack(spacing: 6) {
+            ForEach(0 ..< pageCount, id: \.self) { i in
+                Circle()
+                    .fill(i == currentIndex
+                          ? OnymAccent.blue.color
+                          : OnymTokens.text3.opacity(0.35))
+                    .frame(width: 6, height: 6)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: currentIndex)
+        .padding(.top, 2)
+        .padding(.bottom, 14)
     }
 
     // MARK: - Settle → set active (debounced)
