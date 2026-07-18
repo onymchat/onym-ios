@@ -149,7 +149,7 @@ final class MultiIdentityChatUITests: XCTestCase {
         // Two-step: attach stages the image in the preview strip, then
         // Send confirms.
         app.buttons["chat.input.attach"].tap()
-        XCTAssertTrue(app.otherElements["chat.input.media_strip"].waitForExistence(timeout: 10),
+        XCTAssertTrue(app.buttons["chat.input.media_strip.remove"].firstMatch.waitForExistence(timeout: 10),
                       "attaching an image never staged it in the preview strip")
         app.buttons["chat.input.send"].tap()
         XCTAssertTrue(app.images["chat.bubble.image"].waitForExistence(timeout: 25),
@@ -183,7 +183,7 @@ final class MultiIdentityChatUITests: XCTestCase {
         XCTAssertTrue(thread.waitReady(), "Alice's chat thread never opened")
         // Two-step: attach stages the video, then Send confirms.
         app.buttons["chat.input.attach_video"].tap()
-        XCTAssertTrue(app.otherElements["chat.input.media_strip"].waitForExistence(timeout: 10),
+        XCTAssertTrue(app.buttons["chat.input.media_strip.remove"].firstMatch.waitForExistence(timeout: 10),
                       "attaching a video never staged it in the preview strip")
         app.buttons["chat.input.send"].tap()
         XCTAssertTrue(app.images["chat.bubble.video"].waitForExistence(timeout: 25),
@@ -214,8 +214,8 @@ final class MultiIdentityChatUITests: XCTestCase {
         XCTAssertTrue(thread.waitReady(), "Bob's chat thread never opened for album")
         app.buttons["chat.input.attach"].tap()
         app.buttons["chat.input.attach"].tap()
-        XCTAssertTrue(app.otherElements["chat.input.media_strip"].waitForExistence(timeout: 10),
-                      "the preview strip never appeared for the staged album")
+        XCTAssertTrue(app.buttons.matching(identifier: "chat.input.media_strip.remove").element(boundBy: 1).waitForExistence(timeout: 10),
+                      "the preview strip never staged two items for the album")
         app.buttons["chat.input.send"].tap()
         XCTAssertTrue(
             app.descendants(matching: .any)["chat.bubble.album.tile"].firstMatch
