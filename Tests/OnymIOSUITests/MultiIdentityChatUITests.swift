@@ -149,6 +149,16 @@ final class MultiIdentityChatUITests: XCTestCase {
         app.buttons["chat.input.attach"].tap()
         XCTAssertTrue(app.images["chat.bubble.image"].waitForExistence(timeout: 25),
                       "Bob's sent image bubble never rendered")
+
+        // Tap the image → full-screen viewer opens; swipe down → it
+        // dismisses (the viewer is dismissed by swipe, not tap).
+        app.images["chat.bubble.image"].tap()
+        let fullscreen = app.images["chat.image.fullscreen"]
+        XCTAssertTrue(fullscreen.waitForExistence(timeout: 10),
+                      "tapping the image never opened the full-screen viewer")
+        fullscreen.swipeDown(velocity: .fast)
+        XCTAssertTrue(waitForDisappearance(of: fullscreen, timeout: 10),
+                      "swiping down never dismissed the full-screen image viewer")
         thread.back()
 
         switchIdentity(app, to: "Alice")
@@ -223,6 +233,16 @@ final class MultiIdentityChatUITests: XCTestCase {
                       "identity '\(name)' never appeared in the picker menu")
         item.tap()
         _ = chats.navTitle(name).waitForExistence(timeout: 5)
+    }
+
+    /// Poll until `element` no longer exists, or the timeout elapses.
+    private func waitForDisappearance(of element: XCUIElement, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if !element.exists { return true }
+            usleep(100_000)
+        }
+        return !element.exists
     }
 
     /// Open the single group's thread from the Chats list.
