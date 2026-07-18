@@ -46,6 +46,8 @@ struct ChatThreadView: View {
     @State private var fullScreen: FullScreenAttachment?
     /// The video attachment shown in the full-screen player, if any.
     @State private var fullScreenVideo: FullScreenVideo?
+    /// A failed outgoing media message awaiting a Resend / Delete choice.
+    @State private var actionsForMessage: ChatMessage?
     /// Incoming message IDs we've already emitted a read receipt for,
     /// so re-renders while the thread stays open don't re-send.
     @State private var ackedReadIDs: Set<UUID> = []
@@ -109,6 +111,7 @@ struct ChatThreadView: View {
                     fullScreenVideo = FullScreenVideo(attachment: attachment)
                 }
             },
+            onAttachmentActionsRequested: { message in actionsForMessage = message },
             onAttachTapped: { handleAttachTapped() },
             onAttachVideoTapped: { handleAttachVideoTapped() }
         )
@@ -148,6 +151,29 @@ struct ChatThreadView: View {
             FullScreenVideoView(attachment: item.attachment, videoLoader: videoLoader) {
                 fullScreenVideo = nil
             }
+        }
+        .confirmationDialog(
+            "This media didn't send.",
+            isPresented: Binding(
+                get: { actionsForMessage != nil },
+                set: { if !$0 { actionsForMessage = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: actionsForMessage
+        ) { message in
+            Button("Resend") {
+                let interactor = sendMessageInteractor
+                let groupID = groupID
+                let id = message.id
+                Task { await interactor.retry(groupID: groupID, messageID: id) }
+            }
+            Button("Delete", role: .destructive) {
+                let interactor = sendMessageInteractor
+                let groupID = groupID
+                let id = message.id
+                Task { await interactor.delete(groupID: groupID, messageID: id) }
+            }
+            Button("Cancel", role: .cancel) {}
         }
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
@@ -288,6 +314,7 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
     let scrollToMessageID: UUID?
     let onImageTapped: (ChatMessage) -> Void
     let onVideoTapped: (ChatMessage) -> Void
+    let onAttachmentActionsRequested: (ChatMessage) -> Void
     let onAttachTapped: () -> Void
     let onAttachVideoTapped: () -> Void
 
@@ -305,6 +332,7 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         vc.imageLoader = imageLoader
         vc.onImageTapped = onImageTapped
         vc.onVideoTapped = onVideoTapped
+        vc.onAttachmentActionsRequested = onAttachmentActionsRequested
         vc.onAttachTapped = onAttachTapped
         vc.onAttachVideoTapped = onAttachVideoTapped
         vc.loadViewIfNeeded()
@@ -328,6 +356,7 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         vc.imageLoader = imageLoader
         vc.onImageTapped = onImageTapped
         vc.onVideoTapped = onVideoTapped
+        vc.onAttachmentActionsRequested = onAttachmentActionsRequested
         vc.onAttachTapped = onAttachTapped
         vc.onAttachVideoTapped = onAttachVideoTapped
         vc.update(groupName: groupName, memberCount: memberCount)

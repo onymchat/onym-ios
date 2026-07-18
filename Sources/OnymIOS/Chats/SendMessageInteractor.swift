@@ -24,6 +24,13 @@ actor SendMessageInteractor {
     /// the UI-test harness can supply a canned encoding instead of
     /// running AVFoundation on a real clip. Defaults to the real encoder.
     private let videoEncoder: @Sendable (URL) async -> ChatVideoEncoder.Encoded?
+    /// Persists sealed blobs so a failed media send can be resent (even
+    /// after an app restart) by re-uploading the exact ciphertext.
+    private let outbox: ChatOutbox?
+    /// Primed with the plaintext of an outgoing image/poster so the
+    /// sender sees the media immediately — the optimistic bubble is now
+    /// inserted *before* the upload, so the blob isn't on Blossom yet.
+    private let imageLoader: ChatImageLoader?
 
     /// Hard ceiling on an encrypted blob we'll attempt to upload. Sits
     /// under Blossom's ~100MB cap so a long clip fails fast client-side
@@ -65,7 +72,9 @@ actor SendMessageInteractor {
             signerProvider: OnymNostrSignerProvider()
         ),
         blossomServerURL: String = URLSessionBlossomClient.defaultBaseURL.absoluteString,
-        videoEncoder: @escaping @Sendable (URL) async -> ChatVideoEncoder.Encoded? = ChatVideoEncoder.encode(fromVideoURL:)
+        videoEncoder: @escaping @Sendable (URL) async -> ChatVideoEncoder.Encoded? = ChatVideoEncoder.encode(fromVideoURL:),
+        outbox: ChatOutbox? = nil,
+        imageLoader: ChatImageLoader? = nil
     ) {
         self.identity = identity
         self.inboxTransport = inboxTransport
@@ -73,6 +82,8 @@ actor SendMessageInteractor {
         self.groupRepository = groupRepository
         self.blossomClient = blossomClient
         self.blossomServerURL = blossomServerURL
+        self.outbox = outbox
+        self.imageLoader = imageLoader
         self.videoEncoder = videoEncoder
     }
 
@@ -185,14 +196,15 @@ actor SendMessageInteractor {
         )
     }
 
-    /// Send an image message. Encodes + AES-GCM-encrypts the image,
-    /// uploads the ciphertext blob to Blossom, then ships a normal
-    /// `ChatMessagePayload` carrying a `ChatImageAttachment` (+ optional
-    /// caption). The optimistic bubble is inserted *before* the fan-out
-    /// (with the full attachment, since the SHA-256 is known right after
-    /// the local encrypt), but *after* a successful upload so receivers
-    /// never get an attachment pointing at a missing blob. Upload
-    /// failure throws before anything is persisted or fanned out.
+    /// Send an image message. Encodes + AES-GCM-encrypts the image, then
+    /// inserts the optimistic bubble **before** the upload so the sender
+    /// sees the image immediately (rendered from the primed plaintext)
+    /// with a loading indicator. The sealed ciphertext is persisted in
+    /// the outbox first, so an upload/fan-out failure leaves a `.failed`
+    /// bubble the user can resend (re-uploading the identical bytes) or
+    /// delete. Only precondition problems (no identity, unknown group,
+    /// un-decodable image) throw; network failures surface as a `.failed`
+    /// message status, not a thrown error.
     @discardableResult
     func sendImage(
         groupID: String,
@@ -222,8 +234,6 @@ actor SendMessageInteractor {
             throw SendError.unknownGroup
         }
 
-        // Encode → encrypt → upload. All before the optimistic insert so
-        // a failed upload leaves no dangling bubble.
         guard let encoded = ChatImageEncoder.encode(fromImageData: imageData) else {
             throw SendError.imageEncodeFailed
         }
@@ -232,11 +242,6 @@ actor SendMessageInteractor {
             sealed = try ChatImageCrypto.seal(encoded.jpeg)
         } catch {
             throw SendError.imageUploadFailed("encrypt: \(error)")
-        }
-        do {
-            _ = try await blossomClient.upload(sealed.blob, mimeType: "image/jpeg")
-        } catch {
-            throw SendError.imageUploadFailed(String(describing: error))
         }
 
         let attachment = ChatImageAttachment(
@@ -250,6 +255,12 @@ actor SendMessageInteractor {
             server: blossomServerURL
         )
 
+        // Persist the ciphertext for resend + prime the display so the
+        // sender's bubble renders the image now, before the blob exists
+        // on Blossom.
+        await outbox?.store(sha: sealed.sha256Hex, blob: sealed.blob)
+        await imageLoader?.prime(sha256: sealed.sha256Hex, plaintext: encoded.jpeg)
+
         let messageID = UUID()
         let sentAtMillis = Int64(now.timeIntervalSince1970 * 1000)
         let payload = ChatMessagePayload(
@@ -262,7 +273,6 @@ actor SendMessageInteractor {
             variant: variant,
             attachment: attachment
         )
-
         let pending = ChatMessage(
             id: messageID,
             groupID: groupID,
@@ -276,33 +286,23 @@ actor SendMessageInteractor {
             groupType: group.groupType,
             imageAttachment: attachment
         )
+        // Optimistic insert BEFORE the upload — the bubble appears
+        // immediately with a loading indicator.
         await messageRepository.insert(pending)
 
         let recipients = group.memberProfiles
             .filter { $0.key != myBlsHex }
             .map { $0.value.inboxPublicKey }
-        let (finalStatus, failureReason) = await fanOut(payload: payload, recipients: recipients)
-        await messageRepository.updateStatus(
-            id: messageID,
-            status: finalStatus,
+        let finalStatus = await uploadAndFanOut(
+            blobs: [(sealed.blob, "image/jpeg")],
+            payload: payload,
+            recipients: recipients,
+            messageID: messageID,
             groupID: groupID,
             owner: group.ownerIdentityID,
-            failureReason: failureReason
+            sentBlobShas: [sealed.sha256Hex]
         )
-        return ChatMessage(
-            id: pending.id,
-            groupID: pending.groupID,
-            ownerIdentityID: pending.ownerIdentityID,
-            senderBlsPubkeyHex: pending.senderBlsPubkeyHex,
-            body: pending.body,
-            sentAt: pending.sentAt,
-            direction: pending.direction,
-            status: finalStatus,
-            replyToMessageID: pending.replyToMessageID,
-            groupType: pending.groupType,
-            failureReason: failureReason,
-            imageAttachment: pending.imageAttachment
-        )
+        return pending.withStatus(finalStatus)
     }
 
     /// Send a video message. Transcodes to 720p + extracts a poster,
@@ -341,13 +341,13 @@ actor SendMessageInteractor {
             throw SendError.unknownGroup
         }
 
-        // Transcode → extract poster. All before any upload / insert so a
-        // failure leaves no dangling bubble.
+        // Transcode → extract poster. (This is the one heavy step; the
+        // bubble appears right after it, then shows a loading indicator
+        // through the upload + fan-out.)
         guard let encoded = await videoEncoder(videoURL) else {
             throw SendError.videoEncodeFailed
         }
 
-        // Poster blob (small) — same shape as a sent image.
         let posterSealed: ChatImageCrypto.Sealed
         let videoSealed: ChatImageCrypto.Sealed
         do {
@@ -358,12 +358,6 @@ actor SendMessageInteractor {
         }
         guard videoSealed.blob.count <= Self.maxUploadBytes else {
             throw SendError.videoTooLarge
-        }
-        do {
-            _ = try await blossomClient.upload(posterSealed.blob, mimeType: "image/jpeg")
-            _ = try await blossomClient.upload(videoSealed.blob, mimeType: "video/mp4")
-        } catch {
-            throw SendError.videoUploadFailed(String(describing: error))
         }
 
         let poster = ChatImageAttachment(
@@ -388,6 +382,13 @@ actor SendMessageInteractor {
             server: blossomServerURL
         )
 
+        // Persist both ciphertexts for resend; prime the poster so the
+        // sender's bubble renders it now (the video blob isn't displayed
+        // in the bubble — only the poster is).
+        await outbox?.store(sha: posterSealed.sha256Hex, blob: posterSealed.blob)
+        await outbox?.store(sha: videoSealed.sha256Hex, blob: videoSealed.blob)
+        await imageLoader?.prime(sha256: posterSealed.sha256Hex, plaintext: encoded.poster.jpeg)
+
         let messageID = UUID()
         let sentAtMillis = Int64(now.timeIntervalSince1970 * 1000)
         let payload = ChatMessagePayload(
@@ -400,7 +401,6 @@ actor SendMessageInteractor {
             variant: variant,
             videoAttachment: videoAttachment
         )
-
         let pending = ChatMessage(
             id: messageID,
             groupID: groupID,
@@ -414,33 +414,27 @@ actor SendMessageInteractor {
             groupType: group.groupType,
             videoAttachment: videoAttachment
         )
+        // Optimistic insert BEFORE upload.
         await messageRepository.insert(pending)
 
         let recipients = group.memberProfiles
             .filter { $0.key != myBlsHex }
             .map { $0.value.inboxPublicKey }
-        let (finalStatus, failureReason) = await fanOut(payload: payload, recipients: recipients)
-        await messageRepository.updateStatus(
-            id: messageID,
-            status: finalStatus,
+        // Poster first (small, so the recipient's bubble renders quickly),
+        // then the video.
+        let finalStatus = await uploadAndFanOut(
+            blobs: [
+                (posterSealed.blob, "image/jpeg"),
+                (videoSealed.blob, "video/mp4"),
+            ],
+            payload: payload,
+            recipients: recipients,
+            messageID: messageID,
             groupID: groupID,
             owner: group.ownerIdentityID,
-            failureReason: failureReason
+            sentBlobShas: [posterSealed.sha256Hex, videoSealed.sha256Hex]
         )
-        return ChatMessage(
-            id: pending.id,
-            groupID: pending.groupID,
-            ownerIdentityID: pending.ownerIdentityID,
-            senderBlsPubkeyHex: pending.senderBlsPubkeyHex,
-            body: pending.body,
-            sentAt: pending.sentAt,
-            direction: pending.direction,
-            status: finalStatus,
-            replyToMessageID: pending.replyToMessageID,
-            groupType: pending.groupType,
-            failureReason: failureReason,
-            videoAttachment: pending.videoAttachment
-        )
+        return pending.withStatus(finalStatus)
     }
 
     /// Retry a previously-failed outgoing message. Looks up the row
@@ -499,6 +493,10 @@ actor SendMessageInteractor {
             owner: group.ownerIdentityID
         )
 
+        // Preserve the attachment across the resend — the earlier
+        // implementation dropped it, resending an image/video as a
+        // text-only bubble. The payload carries the same descriptor, and
+        // the blob(s) are re-uploaded from the outbox below.
         let payload = ChatMessagePayload(
             version: 1,
             messageID: messageID,
@@ -506,21 +504,120 @@ actor SendMessageInteractor {
             senderBlsPubkeyHex: myBlsHex,
             sentAtMillis: Int64(message.sentAt.timeIntervalSince1970 * 1000),
             replyToMessageID: message.replyToMessageID,
-            variant: variant
+            variant: variant,
+            attachment: message.imageAttachment,
+            videoAttachment: message.videoAttachment
         )
+
+        // Re-upload the persisted ciphertext for any attachment so the
+        // recipient's descriptor resolves. Same bytes → same SHA-256, so
+        // this is idempotent when the earlier failure was fan-out-only.
+        let blobs = await attachmentBlobs(for: message)
 
         let recipients = group.memberProfiles
             .filter { $0.key != myBlsHex }
             .map { $0.value.inboxPublicKey }
 
-        let (finalStatus, failureReason) = await fanOut(payload: payload, recipients: recipients)
-        await messageRepository.updateStatus(
-            id: messageID,
-            status: finalStatus,
+        _ = await uploadAndFanOut(
+            blobs: blobs.map { ($0.blob, $0.mimeType) },
+            payload: payload,
+            recipients: recipients,
+            messageID: messageID,
             groupID: groupID,
             owner: group.ownerIdentityID,
-            failureReason: failureReason
+            sentBlobShas: blobs.map(\.sha)
         )
+    }
+
+    /// Delete an outgoing message locally (used from the failed-media
+    /// menu) and evict its outbox blob(s). No network side effects — a
+    /// message that never sent has nothing to recall.
+    func delete(groupID: String, messageID: UUID) async {
+        guard let activeID = await identity.currentSelectedID() else { return }
+        let groups = await groupRepository.currentGroups()
+        guard let group = groups.first(where: {
+            $0.id == groupID && $0.ownerIdentityID == activeID
+        }) else { return }
+        let messages = await messageRepository.currentMessages(
+            groupID: groupID, owner: group.ownerIdentityID
+        )
+        if let message = messages.first(where: { $0.id == messageID }) {
+            for sha in attachmentShas(of: message) { await outbox?.remove(sha: sha) }
+        }
+        await messageRepository.delete(
+            id: messageID, groupID: groupID, owner: group.ownerIdentityID
+        )
+    }
+
+    /// The persisted outbox blobs backing a message's attachment(s), in
+    /// upload order (poster before video). Empty for a text message or
+    /// when the outbox no longer has the bytes.
+    private func attachmentBlobs(
+        for message: ChatMessage
+    ) async -> [(sha: String, blob: Data, mimeType: String)] {
+        var out: [(String, Data, String)] = []
+        if let image = message.imageAttachment,
+           let blob = await outbox?.load(sha: image.sha256) {
+            out.append((image.sha256, blob, image.mimeType))
+        }
+        if let video = message.videoAttachment {
+            if let posterBlob = await outbox?.load(sha: video.poster.sha256) {
+                out.append((video.poster.sha256, posterBlob, video.poster.mimeType))
+            }
+            if let videoBlob = await outbox?.load(sha: video.sha256) {
+                out.append((video.sha256, videoBlob, video.mimeType))
+            }
+        }
+        return out.map { (sha: $0.0, blob: $0.1, mimeType: $0.2) }
+    }
+
+    /// All attachment blob SHA-256s referenced by a message (for outbox
+    /// eviction on delete).
+    private func attachmentShas(of message: ChatMessage) -> [String] {
+        var shas: [String] = []
+        if let image = message.imageAttachment { shas.append(image.sha256) }
+        if let video = message.videoAttachment {
+            shas.append(video.poster.sha256)
+            shas.append(video.sha256)
+        }
+        return shas
+    }
+
+    /// Upload each attachment blob then fan the payload out, updating the
+    /// message's status as it goes. Shared by `sendImage` / `sendVideo` /
+    /// `retry`. An upload failure marks the message `.failed` and keeps
+    /// the outbox blob(s) for a later resend (no fan-out — recipients
+    /// never get a descriptor pointing at a missing blob). On a confirmed
+    /// `.sent` the outbox blob(s) in `sentBlobShas` are evicted.
+    private func uploadAndFanOut(
+        blobs: [(Data, String)],
+        payload: ChatMessagePayload,
+        recipients: [Data],
+        messageID: UUID,
+        groupID: String,
+        owner: IdentityID,
+        sentBlobShas: [String]
+    ) async -> MessageStatus {
+        for (blob, mimeType) in blobs {
+            do {
+                _ = try await blossomClient.upload(blob, mimeType: mimeType)
+            } catch {
+                await messageRepository.updateStatus(
+                    id: messageID, status: .failed, groupID: groupID,
+                    owner: owner, failureReason: .unknown
+                )
+                return .failed
+            }
+        }
+        let (finalStatus, failureReason) = await fanOut(payload: payload, recipients: recipients)
+        await messageRepository.updateStatus(
+            id: messageID, status: finalStatus, groupID: groupID,
+            owner: owner, failureReason: failureReason
+        )
+        if finalStatus == .sent {
+            for sha in sentBlobShas { await outbox?.remove(sha: sha) }
+        }
+        return finalStatus
     }
 
     /// Encode the payload, seal one envelope per recipient, ship
@@ -631,5 +728,29 @@ actor SendMessageInteractor {
         hasher.update(data: inboxPublicKey)
         let hash = hasher.finalize()
         return hash.prefix(8).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+private extension ChatMessage {
+    /// Copy with a new delivery `status` (attachments + fields preserved).
+    /// Used by the send/resend paths to return the message reflecting the
+    /// final outcome; the persisted row already carries the same status +
+    /// its failure reason.
+    func withStatus(_ status: MessageStatus) -> ChatMessage {
+        ChatMessage(
+            id: id,
+            groupID: groupID,
+            ownerIdentityID: ownerIdentityID,
+            senderBlsPubkeyHex: senderBlsPubkeyHex,
+            body: body,
+            sentAt: sentAt,
+            direction: direction,
+            status: status,
+            replyToMessageID: replyToMessageID,
+            groupType: groupType,
+            failureReason: status == .failed ? failureReason : nil,
+            imageAttachment: imageAttachment,
+            videoAttachment: videoAttachment
+        )
     }
 }

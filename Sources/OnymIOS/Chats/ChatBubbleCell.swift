@@ -103,6 +103,12 @@ final class ChatBubbleCell: UITableViewCell {
     private let playOverlay = UIImageView()
     /// Duration pill (`m:ss`) shown at the poster's corner for a video.
     private let durationLabel = UILabel()
+    /// Spinner shown over an outgoing attachment while it's uploading /
+    /// fanning out (`.pending`). Hidden once sent or failed.
+    private let attachmentSpinner = UIActivityIndicatorView(style: .medium)
+    /// Red "failed" badge shown over an outgoing attachment that didn't
+    /// send; tapping the media opens the Resend / Delete menu.
+    private let attachmentFailedBadge = UIImageView()
     private let statusImageView = UIImageView()
     /// Second checkmark, sat just left of `statusImageView` and shown
     /// only for `.delivered` / `.read` so the pair reads as a
@@ -284,6 +290,18 @@ final class ChatBubbleCell: UITableViewCell {
             imageLoader: imageLoader,
             onTap: message.videoAttachment != nil ? onVideoTapped : onImageTapped
         )
+        applyAttachmentSendState(message)
+
+        // Failed media uses the tap-for-options overlay (Resend / Delete)
+        // rather than the verbose text-retry label — hide that label and
+        // keep the compact status glyph below the bubble.
+        let hasAttachment = message.imageAttachment != nil || message.videoAttachment != nil
+        if hasAttachment, message.direction == .outgoing, message.status == .failed {
+            failureLabel.isHidden = true
+            failureLabel.text = nil
+            failureBottomConstraint.isActive = false
+            statusBottomConstraint.isActive = true
+        }
 
         // Retry tap is only installed when the message is failed
         // *and* the host provided a retry callback. Cell reuse:
@@ -716,6 +734,27 @@ final class ChatBubbleCell: UITableViewCell {
         durationLabel.isHidden = true
         attachmentImageView.addSubview(durationLabel)
 
+        // Upload spinner (pending) over a dimming scrim so it reads on
+        // any poster. Both hidden unless the send is in flight.
+        attachmentSpinner.translatesAutoresizingMaskIntoConstraints = false
+        attachmentSpinner.color = .white
+        attachmentSpinner.hidesWhenStopped = true
+        attachmentImageView.addSubview(attachmentSpinner)
+
+        attachmentFailedBadge.translatesAutoresizingMaskIntoConstraints = false
+        attachmentFailedBadge.contentMode = .scaleAspectFit
+        attachmentFailedBadge.tintColor = UIColor(OnymTokens.red)
+        attachmentFailedBadge.image = UIImage(
+            systemName: "exclamationmark.circle.fill",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 40, weight: .regular)
+        )
+        attachmentFailedBadge.isHidden = true
+        attachmentFailedBadge.layer.shadowColor = UIColor.black.cgColor
+        attachmentFailedBadge.layer.shadowOpacity = 0.4
+        attachmentFailedBadge.layer.shadowRadius = 4
+        attachmentFailedBadge.layer.shadowOffset = .zero
+        attachmentImageView.addSubview(attachmentFailedBadge)
+
         NSLayoutConstraint.activate([
             playOverlay.centerXAnchor.constraint(equalTo: attachmentImageView.centerXAnchor),
             playOverlay.centerYAnchor.constraint(equalTo: attachmentImageView.centerYAnchor),
@@ -727,7 +766,39 @@ final class ChatBubbleCell: UITableViewCell {
                 equalTo: attachmentImageView.bottomAnchor, constant: -6),
             durationLabel.heightAnchor.constraint(equalToConstant: 16),
             durationLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 34),
+            attachmentSpinner.centerXAnchor.constraint(equalTo: attachmentImageView.centerXAnchor),
+            attachmentSpinner.centerYAnchor.constraint(equalTo: attachmentImageView.centerYAnchor),
+            attachmentFailedBadge.centerXAnchor.constraint(equalTo: attachmentImageView.centerXAnchor),
+            attachmentFailedBadge.centerYAnchor.constraint(equalTo: attachmentImageView.centerYAnchor),
+            attachmentFailedBadge.widthAnchor.constraint(equalToConstant: 44),
+            attachmentFailedBadge.heightAnchor.constraint(equalToConstant: 44),
         ])
+    }
+
+    /// Show the upload spinner (`.pending`) or the failed badge
+    /// (`.failed`) over an outgoing attachment, and hide the play glyph
+    /// while a send is in flight so it doesn't compete with the spinner.
+    /// No-op (all hidden) for incoming rows, sent rows, and text.
+    private func applyAttachmentSendState(_ message: ChatMessage) {
+        let hasAttachment = message.imageAttachment != nil || message.videoAttachment != nil
+        guard hasAttachment, message.direction == .outgoing else {
+            attachmentSpinner.stopAnimating()
+            attachmentFailedBadge.isHidden = true
+            return
+        }
+        switch message.status {
+        case .pending:
+            attachmentSpinner.startAnimating()
+            attachmentFailedBadge.isHidden = true
+            playOverlay.isHidden = true
+        case .failed:
+            attachmentSpinner.stopAnimating()
+            attachmentFailedBadge.isHidden = false
+            playOverlay.isHidden = true
+        default:
+            attachmentSpinner.stopAnimating()
+            attachmentFailedBadge.isHidden = true
+        }
     }
 
     /// Formats a duration in seconds as `m:ss` (e.g. `1:07`, `0:09`).

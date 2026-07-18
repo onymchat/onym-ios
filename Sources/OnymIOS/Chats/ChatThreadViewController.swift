@@ -52,6 +52,9 @@ final class ChatThreadViewController: UIViewController {
     /// Fired when a message's video poster is tapped (host presents the
     /// full-screen player).
     var onVideoTapped: ((ChatMessage) -> Void)?
+    /// Fired when a *failed* outgoing attachment is tapped (host presents
+    /// the Resend / Delete menu).
+    var onAttachmentActionsRequested: ((ChatMessage) -> Void)?
     /// When set (e.g. opened from Search), the cold open lands on this
     /// message — scrolled to the middle and flashed — instead of at the
     /// bottom. Cleared after it's consumed so later snapshots behave
@@ -617,6 +620,19 @@ final class ChatThreadViewController: UIViewController {
                           reply?.isUnavailable == false else { return nil }
                     return { [weak self] in self?.scrollAndHighlight(messageID: targetID) }
                 }()
+                // A failed outgoing attachment taps into the Resend /
+                // Delete menu instead of the full-screen viewer.
+                let isFailedOutgoingAttachment = message.direction == .outgoing
+                    && message.status == .failed
+                    && (message.imageAttachment != nil || message.videoAttachment != nil)
+                let imageTap: (() -> Void)? = message.imageAttachment == nil ? nil : { [weak self] in
+                    if isFailedOutgoingAttachment { self?.onAttachmentActionsRequested?(message) }
+                    else { self?.onImageTapped?(message) }
+                }
+                let videoTap: (() -> Void)? = message.videoAttachment == nil ? nil : { [weak self] in
+                    if isFailedOutgoingAttachment { self?.onAttachmentActionsRequested?(message) }
+                    else { self?.onVideoTapped?(message) }
+                }
                 bubble.configure(
                     message: message,
                     sender: sender,
@@ -625,12 +641,8 @@ final class ChatThreadViewController: UIViewController {
                     onQuoteTapped: quoteTap,
                     onSwipeToReply: { [weak self] in self?.armReply(for: id) },
                     imageLoader: self?.imageLoader,
-                    onImageTapped: message.imageAttachment == nil
-                        ? nil
-                        : { [weak self] in self?.onImageTapped?(message) },
-                    onVideoTapped: message.videoAttachment == nil
-                        ? nil
-                        : { [weak self] in self?.onVideoTapped?(message) }
+                    onImageTapped: imageTap,
+                    onVideoTapped: videoTap
                 )
             }
             return cell

@@ -198,6 +198,10 @@ struct OnymIOSApp: App {
         videoEncoder = ChatVideoEncoder.encode(fromVideoURL:)
         #endif
 
+        // Outbox: persists sealed media blobs so a failed send can be
+        // resent (survives app restart) by re-uploading the exact bytes.
+        let chatOutbox = ChatOutbox()
+
         // Nostr-relays config — drives the inbox transport's
         // connections + the Settings → Transport → Nostr screen.
         // First-launch path inside the actor seeds with the Onym
@@ -374,7 +378,9 @@ struct OnymIOSApp: App {
                 groupRepository: groupRepository,
                 blossomClient: blossomClient,
                 blossomServerURL: URLSessionBlossomClient.defaultBaseURL.absoluteString,
-                videoEncoder: videoEncoder
+                videoEncoder: videoEncoder,
+                outbox: chatOutbox,
+                imageLoader: imageLoader
             ),
             chatReceiptSender: ChatReceiptSender(
                 identity: repository,

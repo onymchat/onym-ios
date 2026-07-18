@@ -40,6 +40,7 @@ final class SendMessageInteractorTests: XCTestCase {
     private var groups: GroupRepository!
     private var messages: MessageRepository!
     private var blossom: FakeBlossomClient!
+    private var outbox: ChatOutbox!
     private var interactor: SendMessageInteractor!
 
     // Set after `bootstrap()`. The active identity's BLS hex —
@@ -76,6 +77,10 @@ final class SendMessageInteractorTests: XCTestCase {
         )
         messages = MessageRepository(store: SwiftDataMessageStore.inMemory())
         blossom = FakeBlossomClient()
+        outbox = ChatOutbox(
+            directory: FileManager.default.temporaryDirectory
+                .appendingPathComponent("outbox-\(UUID().uuidString)")
+        )
 
         interactor = SendMessageInteractor(
             identity: identity,
@@ -83,7 +88,8 @@ final class SendMessageInteractorTests: XCTestCase {
             messageRepository: messages,
             groupRepository: groups,
             blossomClient: blossom,
-            blossomServerURL: "https://blossom.test"
+            blossomServerURL: "https://blossom.test",
+            outbox: outbox
         )
     }
 
@@ -129,17 +135,54 @@ final class SendMessageInteractorTests: XCTestCase {
         XCTAssertEqual(stored[0].imageAttachment?.sha256, attachment.sha256)
     }
 
-    func test_sendImage_uploadFailure_throws_andPersistsNothing() async throws {
+    func test_sendImage_uploadFailure_marksFailed_keepsOptimisticBubble() async throws {
+        // The bubble is now inserted optimistically *before* the upload,
+        // so an upload failure leaves a `.failed` message (resendable),
+        // not a thrown error / nothing.
         let groupID = await seedGroupWithTwoPeers()
         await blossom.setFailing(true)
-        do {
-            _ = try await interactor.sendImage(groupID: groupID, imageData: Self.makeJPEG())
-            XCTFail("expected upload failure")
-        } catch {
-            // expected
-        }
+        let result = try await interactor.sendImage(groupID: groupID, imageData: Self.makeJPEG())
+        XCTAssertEqual(result.status, .failed)
         let stored = await messages.currentMessages(groupID: groupID, owner: currentIdentityID)
-        XCTAssertTrue(stored.isEmpty, "a failed upload must not leave a dangling bubble")
+        XCTAssertEqual(stored.count, 1)
+        XCTAssertEqual(stored[0].status, .failed)
+        XCTAssertNotNil(stored[0].imageAttachment)
+        // Nothing was fanned out — recipients never get a dangling blob.
+        let sends = await transport.recordedSends
+        XCTAssertTrue(sends.isEmpty)
+    }
+
+    func test_resend_failedImage_reuploadsFromOutbox_andSends() async throws {
+        // Fail the upload → failed bubble; the ciphertext stays in the
+        // outbox. Flip the server healthy, resend → uploaded + sent, with
+        // the attachment intact (the old retry dropped it).
+        let groupID = await seedGroupWithTwoPeers()
+        await blossom.setFailing(true)
+        let failed = try await interactor.sendImage(groupID: groupID, imageData: Self.makeJPEG())
+        XCTAssertEqual(failed.status, .failed)
+        let sha = try XCTUnwrap(failed.imageAttachment?.sha256)
+
+        await blossom.setFailing(false)
+        await interactor.retry(groupID: groupID, messageID: failed.id)
+
+        let stored = await messages.currentMessages(groupID: groupID, owner: currentIdentityID)
+        XCTAssertEqual(stored.count, 1)
+        XCTAssertEqual(stored[0].status, .sent)
+        XCTAssertEqual(stored[0].imageAttachment?.sha256, sha,
+                       "resend must preserve the image attachment")
+        let uploaded = await blossom.storedSha256s
+        XCTAssertTrue(uploaded.contains(sha), "resend must re-upload the blob")
+    }
+
+    func test_delete_removesFailedMessage() async throws {
+        let groupID = await seedGroupWithTwoPeers()
+        await blossom.setFailing(true)
+        let failed = try await interactor.sendImage(groupID: groupID, imageData: Self.makeJPEG())
+        XCTAssertEqual(failed.status, .failed)
+
+        await interactor.delete(groupID: groupID, messageID: failed.id)
+        let stored = await messages.currentMessages(groupID: groupID, owner: currentIdentityID)
+        XCTAssertTrue(stored.isEmpty, "deleting a failed media message removes the bubble")
     }
 
     nonisolated private static func makeJPEG() -> Data {
@@ -175,7 +218,8 @@ final class SendMessageInteractorTests: XCTestCase {
             groupRepository: groups,
             blossomClient: blossom,
             blossomServerURL: "https://blossom.test",
-            videoEncoder: encoder
+            videoEncoder: encoder,
+            outbox: outbox
         )
     }
 
@@ -227,18 +271,18 @@ final class SendMessageInteractorTests: XCTestCase {
         XCTAssertTrue(stored.isEmpty)
     }
 
-    func test_sendVideo_uploadFailure_throws_andPersistsNothing() async throws {
+    func test_sendVideo_uploadFailure_marksFailed_keepsOptimisticBubble() async throws {
         let groupID = await seedGroupWithTwoPeers()
         await blossom.setFailing(true)
         let sut = makeVideoInteractor { _ in Self.cannedVideoEncoded() }
-        do {
-            _ = try await sut.sendVideo(groupID: groupID, videoURL: Self.dummyVideoURL())
-            XCTFail("expected upload failure")
-        } catch SendMessageInteractor.SendError.videoUploadFailed {
-            // expected
-        }
+        let result = try await sut.sendVideo(groupID: groupID, videoURL: Self.dummyVideoURL())
+        XCTAssertEqual(result.status, .failed)
         let stored = await messages.currentMessages(groupID: groupID, owner: currentIdentityID)
-        XCTAssertTrue(stored.isEmpty, "a failed upload must not leave a dangling bubble")
+        XCTAssertEqual(stored.count, 1)
+        XCTAssertEqual(stored[0].status, .failed)
+        XCTAssertNotNil(stored[0].videoAttachment)
+        let sends = await transport.recordedSends
+        XCTAssertTrue(sends.isEmpty)
     }
 
     func test_sendVideo_oversizeBlob_throwsVideoTooLarge() async throws {
