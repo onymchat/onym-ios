@@ -10,6 +10,7 @@ struct OnymIOSApp: App {
     private let messageRepository: MessageRepository
     private let imageLoader: ChatImageLoader
     private let videoLoader: ChatVideoLoader
+    private let voiceLoader: ChatVoiceLoader
     private let inboxTransport: any InboxTransport
     private let nostrRelaysRepository: NostrRelaysRepository
     private let incomingInvitations: IncomingInvitationsRepository
@@ -182,6 +183,8 @@ struct OnymIOSApp: App {
         self.imageLoader = imageLoader
         let videoLoader = ChatVideoLoader(blossomClient: blossomClient)
         self.videoLoader = videoLoader
+        let voiceLoader = ChatVoiceLoader(blossomClient: blossomClient)
+        self.voiceLoader = voiceLoader
 
         // Video encoder for outgoing videos. The real encoder runs
         // AVFoundation transcoding; under `--ui-loopback` (which can't
@@ -196,6 +199,20 @@ struct OnymIOSApp: App {
         }
         #else
         videoEncoder = ChatVideoEncoder.encode(fromVideoURL:)
+        #endif
+
+        // Voice encoder for outgoing voice messages. Same harness swap as
+        // the video encoder — the loopback harness can't read a real
+        // recording, so a canned clip drives seal → upload → fan-out.
+        let voiceEncoder: @Sendable (URL) async -> ChatVoiceEncoder.Encoded?
+        #if DEBUG
+        if args.contains("--ui-loopback") {
+            voiceEncoder = { _ in Self.debugTestVoiceEncoded() }
+        } else {
+            voiceEncoder = ChatVoiceEncoder.encode(fromAudioURL:)
+        }
+        #else
+        voiceEncoder = ChatVoiceEncoder.encode(fromAudioURL:)
         #endif
 
         // Outbox: persists sealed media blobs so a failed send can be
@@ -371,6 +388,7 @@ struct OnymIOSApp: App {
             messageRepository: messageRepository,
             imageLoader: imageLoader,
             videoLoader: videoLoader,
+            voiceLoader: voiceLoader,
             sendMessageInteractor: SendMessageInteractor(
                 identity: repository,
                 inboxTransport: inboxTransport,
@@ -379,6 +397,7 @@ struct OnymIOSApp: App {
                 blossomClient: blossomClient,
                 blossomServerURL: URLSessionBlossomClient.defaultBaseURL.absoluteString,
                 videoEncoder: videoEncoder,
+                voiceEncoder: voiceEncoder,
                 outbox: chatOutbox,
                 imageLoader: imageLoader
             ),
@@ -407,6 +426,20 @@ struct OnymIOSApp: App {
             height: poster.height,
             durationSeconds: 3,
             poster: poster
+        )
+    }
+
+    static func debugTestVoiceEncoded() -> ChatVoiceEncoder.Encoded? {
+        // A canned clip for the loopback harness — the bytes only need to
+        // round-trip through seal → upload → fan-out; a ramped waveform
+        // gives the bubble something to render.
+        let waveform = (0..<ChatVoiceEncoder.waveformBarCount).map { i in
+            UInt8((Double(i) / Double(ChatVoiceEncoder.waveformBarCount) * 255).rounded())
+        }
+        return ChatVoiceEncoder.Encoded(
+            m4a: Data("uitest-voice-blob".utf8),
+            durationSeconds: 4,
+            waveform: waveform
         )
     }
     #endif

@@ -19,6 +19,7 @@ struct SearchView: View {
     let setGroupAvatar: @MainActor (String, Data?) async -> Void
     let imageLoader: ChatImageLoader
     let videoLoader: ChatVideoLoader
+    let voiceLoader: ChatVoiceLoader
 
     @State private var query = ""
     @State private var results: [MessageSearchResult] = []
@@ -45,6 +46,7 @@ struct SearchView: View {
                 setGroupAvatar: setGroupAvatar,
                 imageLoader: imageLoader,
                 videoLoader: videoLoader,
+                voiceLoader: voiceLoader,
                 scrollToMessageID: result.messageID
             )
         }

@@ -80,6 +80,14 @@ struct ChatMessagePayload: Codable, Equatable, Sendable {
     /// is the (possibly empty) caption and the flat single fields are nil.
     let attachments: [ChatMediaAttachment]?
 
+    /// Optional encrypted voice message attached to this message. Additive
+    /// + optional exactly like `attachment`, so it ships under
+    /// `version = 1`: a sender that omits it decodes to `nil` on any
+    /// receiver, and an older receiver ignores the unknown key. A voice
+    /// message never carries a caption or rides in an album. See
+    /// `ChatVoiceAttachment`.
+    let voiceAttachment: ChatVoiceAttachment?
+
     init(
         version: Int,
         messageID: UUID,
@@ -90,7 +98,8 @@ struct ChatMessagePayload: Codable, Equatable, Sendable {
         variant: ChatMessageVariant,
         attachment: ChatImageAttachment? = nil,
         videoAttachment: ChatVideoAttachment? = nil,
-        attachments: [ChatMediaAttachment]? = nil
+        attachments: [ChatMediaAttachment]? = nil,
+        voiceAttachment: ChatVoiceAttachment? = nil
     ) {
         self.version = version
         self.messageID = messageID
@@ -102,6 +111,7 @@ struct ChatMessagePayload: Codable, Equatable, Sendable {
         self.attachment = attachment
         self.videoAttachment = videoAttachment
         self.attachments = attachments
+        self.voiceAttachment = voiceAttachment
     }
 
     enum CodingKeys: String, CodingKey {
@@ -115,6 +125,7 @@ struct ChatMessagePayload: Codable, Equatable, Sendable {
         case attachment
         case videoAttachment = "video_attachment"
         case attachments
+        case voiceAttachment = "voice_attachment"
     }
 }
 

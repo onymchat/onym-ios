@@ -34,6 +34,7 @@ struct RootView: View {
                         messageRepository: dependencies.messageRepository,
                         imageLoader: dependencies.imageLoader,
                         videoLoader: dependencies.videoLoader,
+                        voiceLoader: dependencies.voiceLoader,
                         sendMessageInteractor: dependencies.sendMessageInteractor,
                         chatReceiptSender: dependencies.chatReceiptSender,
                         makeCreateGroupFlow: dependencies.makeCreateGroupFlow,
@@ -67,7 +68,8 @@ struct RootView: View {
                         makeShareInviteFlow: dependencies.makeShareInviteFlow,
                         setGroupAvatar: dependencies.setGroupAvatar,
                         imageLoader: dependencies.imageLoader,
-                        videoLoader: dependencies.videoLoader
+                        videoLoader: dependencies.videoLoader,
+                        voiceLoader: dependencies.voiceLoader
                     )
                 }
             }

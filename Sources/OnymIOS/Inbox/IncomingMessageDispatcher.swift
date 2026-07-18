@@ -735,7 +735,11 @@ struct IncomingMessageDispatcher: Sendable {
             videoAttachment: payload.videoAttachment,
             // Multi-media album (if any). Each item's poster loads lazily
             // like a single image/video.
-            albumAttachments: payload.attachments
+            albumAttachments: payload.attachments,
+            // Encrypted voice message (if any). The waveform + duration
+            // render from the descriptor; the audio blob downloads on play
+            // (`ChatVoiceLoader`).
+            voiceAttachment: payload.voiceAttachment
         )
         await messageRepository.insert(message)
 

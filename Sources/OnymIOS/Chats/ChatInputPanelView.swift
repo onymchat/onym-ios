@@ -19,11 +19,14 @@ final class ChatInputPanelView: UIView {
     /// trimmed of leading/trailing whitespace. PR 8 will wire this
     /// to `SendMessageInteractor.send`.
     var onSendTapped: ((String) -> Void)?
-    /// Tapped the attach (photo) button. The host presents a picker.
+    /// Tapped the attach button. The host presents the combined
+    /// photo + video picker.
     var onAttachTapped: (() -> Void)?
 
-    /// Tapped the attach-video button. The host presents a video picker.
-    var onAttachVideoTapped: (() -> Void)?
+    /// A voice message finished recording (mic released past the minimum
+    /// hold, not cancelled). Receives the recorded `.m4a` file URL; the
+    /// host encrypts + uploads it via `SendMessageInteractor.sendVoice`.
+    var onSendVoiceTapped: ((URL) -> Void)?
 
     /// Tapped Send while media is staged in the preview strip. The host
     /// sends the staged items (as one album) and clears the strip.
@@ -64,9 +67,27 @@ final class ChatInputPanelView: UIView {
     private let textView = UITextView()
     private let placeholderLabel = UILabel()
     private let sendButton = UIButton(type: .system)
+    /// Voice-record button, shown on the trailing edge when the composer is
+    /// empty (no text, no staged media). Held to record; released to send.
+    private let micButton = UIButton(type: .system)
+    /// Single leading attach button (paperclip) → combined photo/video picker.
     private let attachButton = UIButton(type: .system)
-    private let attachVideoButton = UIButton(type: .system)
     private var textViewHeightConstraint: NSLayoutConstraint!
+
+    // Voice recording. The recorder captures to a temp `.m4a`; the overlay
+    // (red dot + elapsed timer + "slide to cancel") covers the text field
+    // while a recording is in flight. A leftward slide past
+    // `cancelSlideThreshold` arms cancel-on-release.
+    private let voiceRecorder = ChatVoiceRecorder()
+    private let recordingOverlay = UIView()
+    private let recordingDot = UIView()
+    private let recordingTimeLabel = UILabel()
+    private let recordingHintLabel = UILabel()
+    private var recordingTimer: Timer?
+    private var isRecording = false
+    private var recordingWillCancel = false
+    /// Leftward drag (points) past which releasing cancels instead of sends.
+    private let cancelSlideThreshold: CGFloat = 80
 
     // Reply banner — shown above the composer while a reply is armed.
     // Accent bar + "Replying to {name}" + a one-line snippet + a
@@ -155,7 +176,7 @@ final class ChatInputPanelView: UIView {
         var sendConfig = UIButton.Configuration.plain()
         sendConfig.image = UIImage(
             systemName: "arrow.up.circle.fill",
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: 28, weight: .regular)
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .regular)
         )
         sendConfig.contentInsets = .zero
         sendButton.configuration = sendConfig
@@ -166,33 +187,98 @@ final class ChatInputPanelView: UIView {
         sendButton.accessibilityLabel = "Send"
         addSubview(sendButton)
 
+        // Mic (voice-record) button — a circular button on the trailing
+        // edge shown when the composer is empty. Held to record; released
+        // past the minimum hold to send; slid left to cancel.
+        var micConfig = UIButton.Configuration.plain()
+        micConfig.image = UIImage(
+            systemName: "mic.fill",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .regular)
+        )
+        micConfig.contentInsets = .zero
+        micButton.configuration = micConfig
+        micButton.tintColor = UIColor(OnymTokens.text2)
+        micButton.backgroundColor = UIColor(OnymTokens.surface3)
+        micButton.layer.cornerRadius = 18
+        micButton.layer.cornerCurve = .continuous
+        micButton.translatesAutoresizingMaskIntoConstraints = false
+        micButton.accessibilityIdentifier = "chat.input.mic"
+        micButton.accessibilityLabel = "Record voice message"
+        let micHold = UILongPressGestureRecognizer(
+            target: self, action: #selector(handleMicHold(_:))
+        )
+        micHold.minimumPressDuration = 0.2
+        micButton.addGestureRecognizer(micHold)
+        // Under the UI-test loopback harness a press-and-hold can't be
+        // driven, so a plain tap sends a canned voice message. No-op in a
+        // normal build (see the guard in `tappedMicDebug`).
+        micButton.addTarget(self, action: #selector(tappedMicDebug), for: .touchUpInside)
+        addSubview(micButton)
+
+        // Single leading attach button (paperclip) → combined picker,
+        // styled as a circular button to match the composer's round chrome.
         var attachConfig = UIButton.Configuration.plain()
         attachConfig.image = UIImage(
-            systemName: "photo.on.rectangle",
+            systemName: "paperclip",
             withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .regular)
         )
         attachConfig.contentInsets = .zero
         attachButton.configuration = attachConfig
         attachButton.tintColor = UIColor(OnymTokens.text2)
+        attachButton.backgroundColor = UIColor(OnymTokens.surface3)
+        attachButton.layer.cornerRadius = 18
+        attachButton.layer.cornerCurve = .continuous
         attachButton.addTarget(self, action: #selector(tappedAttach), for: .touchUpInside)
         attachButton.translatesAutoresizingMaskIntoConstraints = false
         attachButton.accessibilityIdentifier = "chat.input.attach"
-        attachButton.accessibilityLabel = "Attach photo"
+        attachButton.accessibilityLabel = "Attach photo or video"
         addSubview(attachButton)
 
-        var videoConfig = UIButton.Configuration.plain()
-        videoConfig.image = UIImage(
-            systemName: "video",
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .regular)
-        )
-        videoConfig.contentInsets = .zero
-        attachVideoButton.configuration = videoConfig
-        attachVideoButton.tintColor = UIColor(OnymTokens.text2)
-        attachVideoButton.addTarget(self, action: #selector(tappedAttachVideo), for: .touchUpInside)
-        attachVideoButton.translatesAutoresizingMaskIntoConstraints = false
-        attachVideoButton.accessibilityIdentifier = "chat.input.attach_video"
-        attachVideoButton.accessibilityLabel = "Attach video"
-        addSubview(attachVideoButton)
+        buildRecordingOverlay()
+    }
+
+    /// The record-time overlay that covers the text field: a pulsing red
+    /// dot, an elapsed `m:ss` timer, and a "slide to cancel" hint. Hidden
+    /// until a recording starts.
+    private func buildRecordingOverlay() {
+        recordingOverlay.translatesAutoresizingMaskIntoConstraints = false
+        recordingOverlay.backgroundColor = UIColor(OnymTokens.bg)
+        recordingOverlay.layer.cornerRadius = 18
+        recordingOverlay.layer.cornerCurve = .continuous
+        recordingOverlay.isHidden = true
+        recordingOverlay.accessibilityIdentifier = "chat.input.recording"
+        addSubview(recordingOverlay)
+
+        recordingDot.translatesAutoresizingMaskIntoConstraints = false
+        recordingDot.backgroundColor = UIColor.systemRed
+        recordingDot.layer.cornerRadius = 4
+        recordingOverlay.addSubview(recordingDot)
+
+        recordingTimeLabel.translatesAutoresizingMaskIntoConstraints = false
+        recordingTimeLabel.font = .monospacedDigitSystemFont(ofSize: 15, weight: .regular)
+        recordingTimeLabel.textColor = UIColor(OnymTokens.text)
+        recordingTimeLabel.text = "0:00"
+        recordingOverlay.addSubview(recordingTimeLabel)
+
+        recordingHintLabel.translatesAutoresizingMaskIntoConstraints = false
+        recordingHintLabel.font = .preferredFont(forTextStyle: .subheadline)
+        recordingHintLabel.textColor = UIColor(OnymTokens.text3)
+        recordingHintLabel.text = "‹ slide to cancel"
+        recordingHintLabel.textAlignment = .center
+        recordingOverlay.addSubview(recordingHintLabel)
+
+        NSLayoutConstraint.activate([
+            recordingDot.leadingAnchor.constraint(equalTo: recordingOverlay.leadingAnchor, constant: 14),
+            recordingDot.centerYAnchor.constraint(equalTo: recordingOverlay.centerYAnchor),
+            recordingDot.widthAnchor.constraint(equalToConstant: 8),
+            recordingDot.heightAnchor.constraint(equalToConstant: 8),
+
+            recordingTimeLabel.leadingAnchor.constraint(equalTo: recordingDot.trailingAnchor, constant: 8),
+            recordingTimeLabel.centerYAnchor.constraint(equalTo: recordingOverlay.centerYAnchor),
+
+            recordingHintLabel.centerXAnchor.constraint(equalTo: recordingOverlay.centerXAnchor),
+            recordingHintLabel.centerYAnchor.constraint(equalTo: recordingOverlay.centerYAnchor),
+        ])
     }
 
     private func buildReplyBanner() {
@@ -405,20 +491,17 @@ final class ChatInputPanelView: UIView {
             replyBannerSnippet.topAnchor.constraint(equalTo: replyBannerTitle.bottomAnchor, constant: 1),
             replyBannerSnippet.bottomAnchor.constraint(equalTo: replyBanner.bottomAnchor),
 
-            attachButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+            attachButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
             attachButton.bottomAnchor.constraint(equalTo: textView.bottomAnchor),
-            attachButton.widthAnchor.constraint(equalToConstant: 34),
-            attachButton.heightAnchor.constraint(equalToConstant: 34),
+            attachButton.widthAnchor.constraint(equalToConstant: 36),
+            attachButton.heightAnchor.constraint(equalToConstant: 36),
 
-            attachVideoButton.leadingAnchor.constraint(equalTo: attachButton.trailingAnchor, constant: 2),
-            attachVideoButton.bottomAnchor.constraint(equalTo: textView.bottomAnchor),
-            attachVideoButton.widthAnchor.constraint(equalToConstant: 34),
-            attachVideoButton.heightAnchor.constraint(equalToConstant: 34),
-
-            textView.leadingAnchor.constraint(equalTo: attachVideoButton.trailingAnchor, constant: 4),
+            textView.leadingAnchor.constraint(equalTo: attachButton.trailingAnchor, constant: 6),
             textView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
             textViewHeightConstraint,
 
+            // Send + mic share the trailing slot — exactly one is visible
+            // for a given composer state (see `refreshAfterTextChange`).
             sendButton.leadingAnchor.constraint(equalTo: textView.trailingAnchor, constant: 6),
             sendButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
             // Bottom-aligned to the text view's bottom so a growing
@@ -426,6 +509,17 @@ final class ChatInputPanelView: UIView {
             sendButton.bottomAnchor.constraint(equalTo: textView.bottomAnchor),
             sendButton.widthAnchor.constraint(equalToConstant: 36),
             sendButton.heightAnchor.constraint(equalToConstant: 36),
+
+            micButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            micButton.bottomAnchor.constraint(equalTo: textView.bottomAnchor),
+            micButton.widthAnchor.constraint(equalToConstant: 36),
+            micButton.heightAnchor.constraint(equalToConstant: 36),
+
+            // Record-time overlay sits exactly over the text field.
+            recordingOverlay.leadingAnchor.constraint(equalTo: textView.leadingAnchor),
+            recordingOverlay.trailingAnchor.constraint(equalTo: textView.trailingAnchor),
+            recordingOverlay.topAnchor.constraint(equalTo: textView.topAnchor),
+            recordingOverlay.bottomAnchor.constraint(equalTo: textView.bottomAnchor),
 
             // Placeholder is positioned via static `textContainerInset`
             // values captured at constraint-creation time. The inset is
@@ -529,7 +623,15 @@ final class ChatInputPanelView: UIView {
         // content is still empty).
         let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
         // Staged media alone is enough to send (no caption required).
-        sendButton.isEnabled = !trimmed.isEmpty || hasPendingMedia
+        let hasContent = !trimmed.isEmpty || hasPendingMedia
+        sendButton.isEnabled = hasContent
+        // Right-side toggle: mic when the composer is empty, send otherwise.
+        // While recording, the mic stays put (the finger is on it) and the
+        // overlay covers the field regardless.
+        if !isRecording {
+            sendButton.isHidden = !hasContent
+            micButton.isHidden = hasContent
+        }
         placeholderLabel.isHidden = !body.isEmpty
     }
 
@@ -558,8 +660,118 @@ final class ChatInputPanelView: UIView {
         onAttachTapped?()
     }
 
-    @objc private func tappedAttachVideo() {
-        onAttachVideoTapped?()
+    /// Loopback-harness-only: a plain tap on the mic sends a canned voice
+    /// message (the injected test encoder ignores the URL). No-op otherwise.
+    @objc private func tappedMicDebug() {
+        #if DEBUG
+        guard ProcessInfo.processInfo.arguments.contains("--ui-loopback") else { return }
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("uitest-voice-\(UUID().uuidString)")
+            .appendingPathExtension("m4a")
+        onSendVoiceTapped?(url)
+        #endif
+    }
+
+    // MARK: - Voice recording
+
+    @objc private func handleMicHold(_ gesture: UILongPressGestureRecognizer) {
+        switch gesture.state {
+        case .began:
+            beginRecording()
+        case .changed:
+            // Slide left past the threshold to arm cancel-on-release.
+            let dx = gesture.location(in: micButton).x - micButton.bounds.midX
+            let willCancel = dx < -cancelSlideThreshold
+            if willCancel != recordingWillCancel {
+                recordingWillCancel = willCancel
+                recordingHintLabel.text = willCancel ? "release to cancel" : "‹ slide to cancel"
+                recordingHintLabel.textColor = willCancel
+                    ? UIColor.systemRed : UIColor(OnymTokens.text3)
+            }
+        case .ended:
+            finishRecording(cancelled: recordingWillCancel)
+        case .cancelled, .failed:
+            finishRecording(cancelled: true)
+        default:
+            break
+        }
+    }
+
+    private func beginRecording() {
+        guard !isRecording else { return }
+        isRecording = true
+        recordingWillCancel = false
+        Task { @MainActor in
+            do {
+                try await voiceRecorder.start()
+                // The hold may have ended (or been cancelled) while the
+                // permission prompt / session activation was in flight.
+                guard isRecording else {
+                    voiceRecorder.cancel()
+                    return
+                }
+                showRecordingOverlay()
+            } catch {
+                // Permission denied or capture failed — silently reset to
+                // the idle composer.
+                isRecording = false
+                hideRecordingOverlay()
+            }
+        }
+    }
+
+    private func finishRecording(cancelled: Bool) {
+        guard isRecording else { return }
+        isRecording = false
+        stopRecordingTimer()
+        hideRecordingOverlay()
+
+        if cancelled {
+            voiceRecorder.cancel()
+            return
+        }
+        guard let result = voiceRecorder.stop() else { return }
+        // Discard an accidental tap (too short to be a real message).
+        guard result.duration >= ChatVoiceRecorder.minimumDuration else {
+            try? FileManager.default.removeItem(at: result.url)
+            return
+        }
+        onSendVoiceTapped?(result.url)
+    }
+
+    private func showRecordingOverlay() {
+        recordingHintLabel.text = "‹ slide to cancel"
+        recordingHintLabel.textColor = UIColor(OnymTokens.text3)
+        recordingTimeLabel.text = "0:00"
+        recordingOverlay.isHidden = false
+        // Pulse the red dot while recording.
+        recordingDot.layer.removeAllAnimations()
+        UIView.animate(
+            withDuration: 0.6, delay: 0, options: [.repeat, .autoreverse, .allowUserInteraction]
+        ) { [weak self] in
+            self?.recordingDot.alpha = 0.2
+        }
+        startRecordingTimer()
+    }
+
+    private func hideRecordingOverlay() {
+        recordingOverlay.isHidden = true
+        recordingDot.layer.removeAllAnimations()
+        recordingDot.alpha = 1
+    }
+
+    private func startRecordingTimer() {
+        recordingTimer?.invalidate()
+        recordingTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            let seconds = Int(self.voiceRecorder.duration)
+            self.recordingTimeLabel.text = String(format: "%d:%02d", seconds / 60, seconds % 60)
+        }
+    }
+
+    private func stopRecordingTimer() {
+        recordingTimer?.invalidate()
+        recordingTimer = nil
     }
 }
 

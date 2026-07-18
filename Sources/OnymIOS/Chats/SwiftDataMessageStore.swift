@@ -129,6 +129,7 @@ actor SwiftDataMessageStore: MessageStore {
             existing.encryptedAttachmentJSON = encoded.encryptedAttachmentJSON
             existing.encryptedVideoAttachmentJSON = encoded.encryptedVideoAttachmentJSON
             existing.encryptedAlbumJSON = encoded.encryptedAlbumJSON
+            existing.encryptedVoiceAttachmentJSON = encoded.encryptedVoiceAttachmentJSON
             try? context.save()
             return false
         }
@@ -194,6 +195,9 @@ actor SwiftDataMessageStore: MessageStore {
         let encryptedAlbum = try message.albumAttachments.map { album in
             try StorageEncryption.encrypt(JSONEncoder().encode(album))
         }
+        let encryptedVoice = try message.voiceAttachment.map { attachment in
+            try StorageEncryption.encrypt(JSONEncoder().encode(attachment))
+        }
         return PersistedMessage(
             id: message.id.uuidString,
             groupID: message.groupID,
@@ -208,7 +212,8 @@ actor SwiftDataMessageStore: MessageStore {
             encryptedBody: try StorageEncryption.encrypt(message.body),
             encryptedAttachmentJSON: encryptedAttachment,
             encryptedVideoAttachmentJSON: encryptedVideoAttachment,
-            encryptedAlbumJSON: encryptedAlbum
+            encryptedAlbumJSON: encryptedAlbum,
+            encryptedVoiceAttachmentJSON: encryptedVoice
         )
     }
 
@@ -235,6 +240,9 @@ actor SwiftDataMessageStore: MessageStore {
         let albumAttachments: [ChatMediaAttachment]? = row.encryptedAlbumJSON
             .flatMap { try? StorageEncryption.decrypt($0) }
             .flatMap { try? JSONDecoder().decode([ChatMediaAttachment].self, from: $0) }
+        let voiceAttachment: ChatVoiceAttachment? = row.encryptedVoiceAttachmentJSON
+            .flatMap { try? StorageEncryption.decrypt($0) }
+            .flatMap { try? JSONDecoder().decode(ChatVoiceAttachment.self, from: $0) }
         return ChatMessage(
             id: id,
             groupID: row.groupID,
@@ -249,7 +257,8 @@ actor SwiftDataMessageStore: MessageStore {
             failureReason: row.failureReasonRaw.flatMap(SendFailureReason.init(rawValue:)),
             imageAttachment: imageAttachment,
             videoAttachment: videoAttachment,
-            albumAttachments: albumAttachments
+            albumAttachments: albumAttachments,
+            voiceAttachment: voiceAttachment
         )
     }
 }

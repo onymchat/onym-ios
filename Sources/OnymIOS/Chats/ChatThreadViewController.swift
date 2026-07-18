@@ -47,6 +47,8 @@ final class ChatThreadViewController: UIViewController {
 
     /// Loader used by bubbles to fetch + decrypt image attachments.
     var imageLoader: ChatImageLoader?
+    /// Loader used by voice bubbles to fetch + decrypt audio for playback.
+    var voiceLoader: ChatVoiceLoader?
     /// Fired when a message's image is tapped (host presents full-screen).
     var onImageTapped: ((ChatMessage) -> Void)?
     /// Fired when a message's video poster is tapped (host presents the
@@ -64,11 +66,11 @@ final class ChatThreadViewController: UIViewController {
     /// normally.
     var openAtMessageID: UUID?
     /// Fired when the composer's attach button is tapped (host presents
-    /// the photo picker).
+    /// the combined photo/video picker).
     var onAttachTapped: (() -> Void)?
-    /// Fired when the composer's attach-video button is tapped (host
-    /// presents the video picker).
-    var onAttachVideoTapped: (() -> Void)?
+    /// Fired when a voice message finishes recording (host encrypts +
+    /// uploads it). Receives the recorded `.m4a` file URL.
+    var onSendVoiceTapped: ((URL) -> Void)?
     /// Fired when Send is tapped with media staged in the preview strip
     /// (host sends the album + clears the strip).
     var onSendMedia: (() -> Void)?
@@ -629,10 +631,11 @@ final class ChatThreadViewController: UIViewController {
                     return { [weak self] in self?.scrollAndHighlight(messageID: targetID) }
                 }()
                 // A failed outgoing attachment taps into the Resend /
-                // Delete menu instead of the full-screen viewer/gallery.
+                // Delete menu instead of the full-screen viewer/gallery or
+                // (for voice) inline playback.
                 let isFailedOutgoingAttachment = message.direction == .outgoing
                     && message.status == .failed
-                    && !message.media.isEmpty
+                    && (!message.media.isEmpty || message.voiceAttachment != nil)
                 let imageTap: (() -> Void)? = message.imageAttachment == nil ? nil : { [weak self] in
                     if isFailedOutgoingAttachment { self?.onAttachmentActionsRequested?(message) }
                     else { self?.onImageTapped?(message) }
@@ -645,6 +648,12 @@ final class ChatThreadViewController: UIViewController {
                     if isFailedOutgoingAttachment { self?.onAttachmentActionsRequested?(message) }
                     else { self?.onAlbumItemTapped?(message, index) }
                 } : nil
+                // A failed voice bubble routes taps to the Resend/Delete
+                // menu; otherwise the cell handles play/pause internally.
+                let voiceFailedTap: (() -> Void)? = (isFailedOutgoingAttachment
+                    && message.voiceAttachment != nil) ? { [weak self] in
+                        self?.onAttachmentActionsRequested?(message)
+                    } : nil
                 bubble.configure(
                     message: message,
                     sender: sender,
@@ -653,9 +662,11 @@ final class ChatThreadViewController: UIViewController {
                     onQuoteTapped: quoteTap,
                     onSwipeToReply: { [weak self] in self?.armReply(for: id) },
                     imageLoader: self?.imageLoader,
+                    voiceLoader: self?.voiceLoader,
                     onImageTapped: imageTap,
                     onVideoTapped: videoTap,
-                    onAlbumItemTapped: albumTap
+                    onAlbumItemTapped: albumTap,
+                    onVoiceFailedTapped: voiceFailedTap
                 )
             }
             return cell
@@ -690,8 +701,8 @@ final class ChatThreadViewController: UIViewController {
         inputPanel.onAttachTapped = { [weak self] in
             self?.onAttachTapped?()
         }
-        inputPanel.onAttachVideoTapped = { [weak self] in
-            self?.onAttachVideoTapped?()
+        inputPanel.onSendVoiceTapped = { [weak self] url in
+            self?.onSendVoiceTapped?(url)
         }
         inputPanel.onSendMediaTapped = { [weak self] in
             self?.onSendMedia?()

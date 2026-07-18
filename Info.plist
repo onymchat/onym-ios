@@ -35,6 +35,8 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Onym uses the camera to scan invite-key QR codes when you add someone to a group.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Onym uses the microphone to record voice messages you send in a chat.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

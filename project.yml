@@ -84,6 +84,11 @@ targets:
         # via AVFoundation's QR metadata output and never leaves the
         # process; we only consume the decoded string payload.
         NSCameraUsageDescription: Onym uses the camera to scan invite-key QR codes when you add someone to a group.
+        # Microphone access is requested only when the user holds the mic
+        # button in the chat composer to record a voice message
+        # (`ChatVoiceRecorder`). Audio is AES-GCM-encrypted on-device
+        # before it's uploaded; the plaintext never leaves the process.
+        NSMicrophoneUsageDescription: Onym uses the microphone to record voice messages you send in a chat.
     entitlements:
       path: OnymIOS.entitlements
       properties:

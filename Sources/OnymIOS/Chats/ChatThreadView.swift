@@ -32,16 +32,18 @@ struct ChatThreadView: View {
     let imageLoader: ChatImageLoader
     /// Fetches + decrypts video blobs for the full-screen player.
     let videoLoader: ChatVideoLoader
+    /// Fetches + decrypts voice blobs for inline playback.
+    let voiceLoader: ChatVoiceLoader
     /// When non-nil (opened from Search), the thread cold-opens scrolled
     /// to this message and flashes it, instead of opening at the bottom.
     var scrollToMessageID: UUID? = nil
 
     @Environment(\.dismiss) private var dismiss
     @State private var showMembers: Bool = false
-    @State private var showPhotoPicker: Bool = false
+    /// One combined picker for both photos and videos (the composer now has
+    /// a single paperclip attach button).
+    @State private var showMediaPicker: Bool = false
     @State private var pickedItems: [PhotosPickerItem] = []
-    @State private var showVideoPicker: Bool = false
-    @State private var pickedVideoItems: [PhotosPickerItem] = []
     /// Media staged in the composer's preview strip, awaiting the Send
     /// confirmation. Sent together as one album (or a single message if
     /// only one item survives).
@@ -122,45 +124,42 @@ struct ChatThreadView: View {
                 galleryContext = AlbumGalleryContext(items: message.media, startIndex: index)
             },
             onAttachTapped: { handleAttachTapped() },
-            onAttachVideoTapped: { handleAttachVideoTapped() },
+            onSendVoiceTapped: { url in handleSendVoice(url: url) },
+            voiceLoader: voiceLoader,
             pendingMedia: pendingMedia.map { (id: $0.id, thumbnail: $0.thumbnail) },
             onSendMedia: { handleSendPendingMedia() },
             onRemovePendingMedia: { id in pendingMedia.removeAll { $0.id == id } }
         )
+        // One combined picker for photos + videos. Each pick is classified
+        // in `onChange` by its content type.
         .photosPicker(
-            isPresented: $showPhotoPicker, selection: $pickedItems,
-            maxSelectionCount: 10, matching: .images
-        )
-        .photosPicker(
-            isPresented: $showVideoPicker, selection: $pickedVideoItems,
-            maxSelectionCount: 10, matching: .videos
+            isPresented: $showMediaPicker, selection: $pickedItems,
+            maxSelectionCount: 10, matching: .any(of: [.images, .videos])
         )
         .onChange(of: pickedItems) { _, items in
             guard !items.isEmpty else { return }
             Task {
                 for item in items {
-                    guard let data = try? await item.loadTransferable(type: Data.self),
-                          let thumb = UIImage(data: data) else { continue }
-                    pendingMedia.append(PendingMediaItem(
-                        thumbnail: thumb, source: .image(data)
-                    ))
+                    let isVideo = item.supportedContentTypes.contains {
+                        $0.conforms(to: .movie) || $0.conforms(to: .audiovisualContent)
+                    }
+                    if isVideo {
+                        guard let movie = try? await item.loadTransferable(type: PickedMovie.self)
+                        else { continue }
+                        let thumb = await Self.videoThumbnail(for: movie.url)
+                            ?? UIImage(systemName: "video") ?? UIImage()
+                        pendingMedia.append(PendingMediaItem(
+                            thumbnail: thumb, source: .video(movie.url)
+                        ))
+                    } else {
+                        guard let data = try? await item.loadTransferable(type: Data.self),
+                              let thumb = UIImage(data: data) else { continue }
+                        pendingMedia.append(PendingMediaItem(
+                            thumbnail: thumb, source: .image(data)
+                        ))
+                    }
                 }
                 pickedItems = []
-            }
-        }
-        .onChange(of: pickedVideoItems) { _, items in
-            guard !items.isEmpty else { return }
-            Task {
-                for item in items {
-                    guard let movie = try? await item.loadTransferable(type: PickedMovie.self)
-                    else { continue }
-                    let thumb = await Self.videoThumbnail(for: movie.url)
-                        ?? UIImage(systemName: "video") ?? UIImage()
-                    pendingMedia.append(PendingMediaItem(
-                        thumbnail: thumb, source: .video(movie.url)
-                    ))
-                }
-                pickedVideoItems = []
             }
         }
         .fullScreenCover(item: $fullScreen) { item in
@@ -261,10 +260,10 @@ struct ChatThreadView: View {
         }
     }
 
-    /// Attach button tapped: open the system photo picker (multi-select),
-    /// which stages picks in the preview strip. Under the UI-test loopback
-    /// harness (which can't drive PHPicker), stage a generated test image
-    /// so the strip + Send flow can be exercised.
+    /// Attach button tapped: open the combined photo+video picker
+    /// (multi-select), which stages picks in the preview strip. Under the
+    /// UI-test loopback harness (which can't drive PHPicker), stage a
+    /// generated test image so the strip + Send flow can be exercised.
     private func handleAttachTapped() {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--ui-loopback") {
@@ -274,24 +273,16 @@ struct ChatThreadView: View {
             return
         }
         #endif
-        showPhotoPicker = true
+        showMediaPicker = true
     }
 
-    /// Attach-video button tapped: open the system video picker
-    /// (multi-select), staging picks in the preview strip. Under the
-    /// UI-test loopback harness, stage a canned video (the interactor's
-    /// injected test encoder ignores the URL).
-    private func handleAttachVideoTapped() {
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("--ui-loopback") {
-            let dummyURL = FileManager.default.temporaryDirectory
-                .appendingPathComponent("uitest-video").appendingPathExtension("mov")
-            let thumb = UIImage(data: Self.debugTestImageData()) ?? UIImage()
-            pendingMedia.append(PendingMediaItem(thumbnail: thumb, source: .video(dummyURL)))
-            return
-        }
-        #endif
-        showVideoPicker = true
+    /// Voice message recorded (mic button released past the minimum hold):
+    /// fire-and-forget send. The interactor inserts the optimistic bubble
+    /// before the upload.
+    private func handleSendVoice(url: URL) {
+        let interactor = sendMessageInteractor
+        let groupID = groupID
+        Task { try? await interactor.sendVoice(groupID: groupID, audioURL: url) }
     }
 
     /// Send the staged media as one album (or a single message if only
@@ -367,7 +358,8 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
     let onAttachmentActionsRequested: (ChatMessage) -> Void
     let onAlbumItemTapped: (ChatMessage, Int) -> Void
     let onAttachTapped: () -> Void
-    let onAttachVideoTapped: () -> Void
+    let onSendVoiceTapped: (URL) -> Void
+    let voiceLoader: ChatVoiceLoader
     let pendingMedia: [(id: UUID, thumbnail: UIImage)]
     let onSendMedia: () -> Void
     let onRemovePendingMedia: (UUID) -> Void
@@ -389,7 +381,8 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         vc.onAttachmentActionsRequested = onAttachmentActionsRequested
         vc.onAlbumItemTapped = onAlbumItemTapped
         vc.onAttachTapped = onAttachTapped
-        vc.onAttachVideoTapped = onAttachVideoTapped
+        vc.onSendVoiceTapped = onSendVoiceTapped
+        vc.voiceLoader = voiceLoader
         vc.onSendMedia = onSendMedia
         vc.onRemovePendingMedia = onRemovePendingMedia
         vc.loadViewIfNeeded()
@@ -417,7 +410,8 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         vc.onAttachmentActionsRequested = onAttachmentActionsRequested
         vc.onAlbumItemTapped = onAlbumItemTapped
         vc.onAttachTapped = onAttachTapped
-        vc.onAttachVideoTapped = onAttachVideoTapped
+        vc.onSendVoiceTapped = onSendVoiceTapped
+        vc.voiceLoader = voiceLoader
         vc.onSendMedia = onSendMedia
         vc.onRemovePendingMedia = onRemovePendingMedia
         vc.update(groupName: groupName, memberCount: memberCount)

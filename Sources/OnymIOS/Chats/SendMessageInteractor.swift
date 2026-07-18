@@ -24,6 +24,10 @@ actor SendMessageInteractor {
     /// the UI-test harness can supply a canned encoding instead of
     /// running AVFoundation on a real clip. Defaults to the real encoder.
     private let videoEncoder: @Sendable (URL) async -> ChatVideoEncoder.Encoded?
+    /// Reads a recorded `.m4a` into wire form (bytes + duration + waveform).
+    /// Injected so the UI-test harness can supply a canned encoding instead
+    /// of reading a real file. Defaults to the real encoder.
+    private let voiceEncoder: @Sendable (URL) async -> ChatVoiceEncoder.Encoded?
     /// Persists sealed blobs so a failed media send can be resent (even
     /// after an app restart) by re-uploading the exact ciphertext.
     private let outbox: ChatOutbox?
@@ -60,6 +64,8 @@ actor SendMessageInteractor {
         case videoUploadFailed(String)
         /// The transcoded + encrypted video exceeds the upload cap.
         case videoTooLarge
+        /// The recorded voice clip couldn't be read / encoded.
+        case voiceEncodeFailed
     }
 
     init(
@@ -73,6 +79,7 @@ actor SendMessageInteractor {
         ),
         blossomServerURL: String = URLSessionBlossomClient.defaultBaseURL.absoluteString,
         videoEncoder: @escaping @Sendable (URL) async -> ChatVideoEncoder.Encoded? = ChatVideoEncoder.encode(fromVideoURL:),
+        voiceEncoder: @escaping @Sendable (URL) async -> ChatVoiceEncoder.Encoded? = ChatVoiceEncoder.encode(fromAudioURL:),
         outbox: ChatOutbox? = nil,
         imageLoader: ChatImageLoader? = nil
     ) {
@@ -85,6 +92,7 @@ actor SendMessageInteractor {
         self.outbox = outbox
         self.imageLoader = imageLoader
         self.videoEncoder = videoEncoder
+        self.voiceEncoder = voiceEncoder
     }
 
     /// Returns the locally-persisted `ChatMessage` after the fan-out
@@ -566,6 +574,114 @@ actor SendMessageInteractor {
         return pending.withStatus(finalStatus)
     }
 
+    /// Send a voice message. Encrypts the recorded `.m4a` and inserts the
+    /// optimistic bubble **before** the upload (mirroring `sendImage`), so
+    /// the sender sees the voice bubble immediately (waveform + duration
+    /// render from the descriptor) with a loading indicator. The sealed
+    /// ciphertext is persisted in the outbox first, so an upload/fan-out
+    /// failure leaves a `.failed` bubble the user can resend (re-uploading
+    /// the identical bytes) or delete. Only precondition problems (no
+    /// identity, unknown group, unreadable clip) throw; network failures
+    /// surface as a `.failed` status.
+    @discardableResult
+    func sendVoice(
+        groupID: String,
+        audioURL: URL,
+        now: Date = Date()
+    ) async throws -> ChatMessage {
+        guard let active = await identity.currentIdentity(),
+              let activeID = await identity.currentSelectedID() else {
+            throw SendError.noIdentityLoaded
+        }
+        let groups = await groupRepository.currentGroups()
+        guard let group = groups.first(where: {
+            $0.id == groupID && $0.ownerIdentityID == activeID
+        }) else {
+            throw SendError.unknownGroup
+        }
+        let myBlsHex = active.blsPublicKey.map { String(format: "%02x", $0) }.joined()
+        guard group.memberProfiles[myBlsHex] != nil else {
+            throw SendError.senderNotAMember
+        }
+        let variant: ChatMessageVariant
+        switch group.groupType {
+        case .tyranny:
+            // A voice message never carries a caption.
+            variant = .tyranny(body: "")
+        case .oneOnOne, .anarchy, .democracy, .oligarchy:
+            throw SendError.unknownGroup
+        }
+
+        guard let encoded = await voiceEncoder(audioURL) else {
+            throw SendError.voiceEncodeFailed
+        }
+        let sealed: ChatImageCrypto.Sealed
+        do {
+            sealed = try ChatImageCrypto.seal(encoded.m4a)
+        } catch {
+            throw SendError.voiceEncodeFailed
+        }
+        guard sealed.blob.count <= Self.maxUploadBytes else {
+            throw SendError.videoTooLarge
+        }
+
+        let voiceAttachment = ChatVoiceAttachment(
+            sha256: sealed.sha256Hex,
+            mimeType: "audio/mp4",
+            byteSize: sealed.blob.count,
+            durationSeconds: encoded.durationSeconds,
+            encKey: sealed.key,
+            waveform: encoded.waveform,
+            server: blossomServerURL
+        )
+
+        // Persist the ciphertext for resend. No image prime — the bubble
+        // renders from the waveform descriptor, not a thumbnail.
+        await outbox?.store(sha: sealed.sha256Hex, blob: sealed.blob)
+
+        let messageID = UUID()
+        let sentAtMillis = Int64(now.timeIntervalSince1970 * 1000)
+        let payload = ChatMessagePayload(
+            version: 1,
+            messageID: messageID,
+            groupID: group.groupIDData,
+            senderBlsPubkeyHex: myBlsHex,
+            sentAtMillis: sentAtMillis,
+            replyToMessageID: nil,
+            variant: variant,
+            voiceAttachment: voiceAttachment
+        )
+        let pending = ChatMessage(
+            id: messageID,
+            groupID: groupID,
+            ownerIdentityID: group.ownerIdentityID,
+            senderBlsPubkeyHex: myBlsHex,
+            body: "",
+            sentAt: now,
+            direction: .outgoing,
+            status: .pending,
+            replyToMessageID: nil,
+            groupType: group.groupType,
+            voiceAttachment: voiceAttachment
+        )
+        // Optimistic insert BEFORE the upload.
+        await messageRepository.insert(pending)
+
+        let recipients = group.memberProfiles
+            .filter { $0.key != myBlsHex }
+            .map { $0.value.inboxPublicKey }
+        let finalStatus = await uploadAndFanOut(
+            blobs: [(sealed.blob, "audio/mp4")],
+            payload: payload,
+            recipients: recipients,
+            messageID: messageID,
+            groupID: groupID,
+            owner: group.ownerIdentityID,
+            sentBlobShas: [sealed.sha256Hex]
+        )
+        return pending.withStatus(finalStatus)
+    }
+
     /// Retry a previously-failed outgoing message. Looks up the row
     /// by `messageID`, flips status back to `.pending` so the UI
     /// shows the in-flight glyph, then re-runs the fan-out using the
@@ -636,7 +752,8 @@ actor SendMessageInteractor {
             variant: variant,
             attachment: message.imageAttachment,
             videoAttachment: message.videoAttachment,
-            attachments: message.albumAttachments
+            attachments: message.albumAttachments,
+            voiceAttachment: message.voiceAttachment
         )
 
         // Re-upload the persisted ciphertext for any attachment so the
@@ -702,13 +819,21 @@ actor SendMessageInteractor {
                 }
             }
         }
+        // Voice lives outside `media` (it's not an image/video grid item),
+        // so re-upload its blob explicitly.
+        if let voice = message.voiceAttachment,
+           let blob = await outbox?.load(sha: voice.sha256) {
+            out.append((voice.sha256, blob, voice.mimeType))
+        }
         return out
     }
 
     /// All blob SHA-256s referenced by a message's media (for outbox
-    /// eviction on delete). Covers single-media and albums.
+    /// eviction on delete). Covers single-media, albums, and voice.
     private func attachmentShas(of message: ChatMessage) -> [String] {
-        message.media.flatMap { $0.blobShas }
+        var shas = message.media.flatMap { $0.blobShas }
+        if let voice = message.voiceAttachment { shas.append(voice.sha256) }
+        return shas
     }
 
     /// Upload each attachment blob then fan the payload out, updating the
@@ -879,7 +1004,8 @@ private extension ChatMessage {
             failureReason: status == .failed ? failureReason : nil,
             imageAttachment: imageAttachment,
             videoAttachment: videoAttachment,
-            albumAttachments: albumAttachments
+            albumAttachments: albumAttachments,
+            voiceAttachment: voiceAttachment
         )
     }
 }

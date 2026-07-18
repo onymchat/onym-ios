@@ -39,6 +39,10 @@ struct AppDependencies {
     /// like `imageLoader` so the on-disk decrypted-clip cache is reused
     /// across thread opens.
     let videoLoader: ChatVideoLoader
+    /// Fetches + decrypts voice blobs for playback. Shared like
+    /// `videoLoader` so the on-disk decrypted-clip cache is reused across
+    /// thread opens.
+    let voiceLoader: ChatVoiceLoader
     /// Stateless façade over identity + transport + repositories
     /// for outgoing chat messages. Safe to share across screens
     /// (it's an actor); each chat-thread view captures it and

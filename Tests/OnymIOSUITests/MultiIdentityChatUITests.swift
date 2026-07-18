@@ -172,38 +172,25 @@ final class MultiIdentityChatUITests: XCTestCase {
                       "Alice never received + rendered the image")
         thread.back()
 
-        // ───────── Alice → Bob: video message ─────────
-        // Under `--ui-loopback` the attach-video button sends a canned
-        // video (PHPicker + AVFoundation transcoding can't run from
-        // XCUITest); both the poster and video blobs round-trip through
-        // the in-memory Blossom fake. The bubble exposes the poster as
-        // `chat.bubble.video`.
+        // ───────── Alice → Bob: voice message ─────────
+        // Under `--ui-loopback` a plain tap on the mic button sends a
+        // canned voice clip (a real press-and-hold recording can't be
+        // driven from XCUITest); the audio blob round-trips through the
+        // in-memory Blossom fake. The bubble exposes the player button as
+        // `chat.bubble.voice.play`.
         switchIdentity(app, to: "Alice")
         openChat(app)
         XCTAssertTrue(thread.waitReady(), "Alice's chat thread never opened")
-        // Two-step: attach stages the video, then Send confirms.
-        app.buttons["chat.input.attach_video"].tap()
-        XCTAssertTrue(app.buttons["chat.input.media_strip.remove"].firstMatch.waitForExistence(timeout: 10),
-                      "attaching a video never staged it in the preview strip")
-        app.buttons["chat.input.send"].tap()
-        XCTAssertTrue(app.images["chat.bubble.video"].waitForExistence(timeout: 25),
-                      "Alice's sent video bubble never rendered")
-
-        // Tap the video → full-screen player opens; swipe down → it
-        // dismisses (there's no close button; swipe is the only dismiss).
-        app.images["chat.bubble.video"].tap()
-        let videoPlayer = app.descendants(matching: .any)["chat.video.fullscreen"]
-        XCTAssertTrue(videoPlayer.waitForExistence(timeout: 10),
-                      "tapping the video never opened the full-screen player")
-        app.swipeDown(velocity: .fast)
-        XCTAssertTrue(waitForDisappearance(of: videoPlayer, timeout: 10),
-                      "swiping down never dismissed the full-screen video player")
+        // The mic button is shown when the composer is empty.
+        app.buttons["chat.input.mic"].tap()
+        XCTAssertTrue(app.buttons["chat.bubble.voice.play"].waitForExistence(timeout: 25),
+                      "Alice's sent voice bubble never rendered")
         thread.back()
 
         switchIdentity(app, to: "Bob")
         openChat(app)
-        XCTAssertTrue(app.images["chat.bubble.video"].waitForExistence(timeout: 25),
-                      "Bob never received + rendered the video")
+        XCTAssertTrue(app.buttons["chat.bubble.voice.play"].waitForExistence(timeout: 25),
+                      "Bob never received + rendered the voice message")
         thread.back()
 
         // ───────── Album: two images → one grid message ─────────

@@ -82,6 +82,13 @@ struct ChatMessage: Equatable, Sendable, Identifiable {
     /// messages (which use `imageAttachment` / `videoAttachment`).
     let albumAttachments: [ChatMediaAttachment]?
 
+    /// Encrypted voice message attached to this message, if any. Mirrors
+    /// `ChatMessagePayload.voiceAttachment`. The bubble renders the
+    /// waveform + duration from the descriptor and only downloads the
+    /// audio blob on play (see `ChatVoiceLoader`). Mutually exclusive with
+    /// the image/video/album fields.
+    let voiceAttachment: ChatVoiceAttachment?
+
     /// Canonical media list for rendering: the album when present, else
     /// the single image/video wrapped in a one-element list, else empty.
     var media: [ChatMediaAttachment] {
@@ -105,7 +112,8 @@ struct ChatMessage: Equatable, Sendable, Identifiable {
         failureReason: SendFailureReason? = nil,
         imageAttachment: ChatImageAttachment? = nil,
         videoAttachment: ChatVideoAttachment? = nil,
-        albumAttachments: [ChatMediaAttachment]? = nil
+        albumAttachments: [ChatMediaAttachment]? = nil,
+        voiceAttachment: ChatVoiceAttachment? = nil
     ) {
         self.id = id
         self.groupID = groupID
@@ -121,6 +129,7 @@ struct ChatMessage: Equatable, Sendable, Identifiable {
         self.imageAttachment = imageAttachment
         self.videoAttachment = videoAttachment
         self.albumAttachments = albumAttachments
+        self.voiceAttachment = voiceAttachment
     }
 }
 

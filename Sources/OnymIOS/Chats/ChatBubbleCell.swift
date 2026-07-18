@@ -217,6 +217,12 @@ final class ChatBubbleCell: UITableViewCell {
     private var albumAspectConstraint: NSLayoutConstraint?
     /// Fired when an album tile is tapped: (messageID-less) tile index.
     private var onAlbumTapIndex: ((Int) -> Void)?
+
+    /// Inline voice-message player, shown in place of the image/album when
+    /// the message carries a `ChatVoiceAttachment`.
+    private let voiceView = ChatVoiceMessageView()
+    private var voiceTopToBubbleConstraint: NSLayoutConstraint!
+    private var bodyTopToVoiceConstraint: NSLayoutConstraint!
     /// Pins the bubble to a fixed (max) width whenever it carries an
     /// attachment, so the image/poster frame is fully determined by the
     /// attachment's known aspect ratio *before* the blob loads. Without
@@ -248,6 +254,13 @@ final class ChatBubbleCell: UITableViewCell {
     /// Caller (the diffable data source's cell provider) invokes
     /// this on every dequeue *and* every reconfigure — status flips
     /// on the same UUID land here too.
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        // Stop any in-flight voice playback so a recycled cell doesn't keep
+        // audio going for a scrolled-away message.
+        voiceView.reset()
+    }
+
     func configure(
         message: ChatMessage,
         sender: ChatSenderDisplay = .unknown,
@@ -256,9 +269,11 @@ final class ChatBubbleCell: UITableViewCell {
         onQuoteTapped: (() -> Void)? = nil,
         onSwipeToReply: (() -> Void)? = nil,
         imageLoader: ChatImageLoader? = nil,
+        voiceLoader: ChatVoiceLoader? = nil,
         onImageTapped: (() -> Void)? = nil,
         onVideoTapped: (() -> Void)? = nil,
-        onAlbumItemTapped: ((Int) -> Void)? = nil
+        onAlbumItemTapped: ((Int) -> Void)? = nil,
+        onVoiceFailedTapped: (() -> Void)? = nil
     ) {
         // Reuse safety: a cell recycled mid-drag must start at rest.
         resetSwipeState()
@@ -294,7 +309,16 @@ final class ChatBubbleCell: UITableViewCell {
         applyNameHeader(sender)
         applyReplyQuote(reply, direction: message.direction, onTap: onQuoteTapped)
         let media = message.media
-        if media.count > 1 {
+        if let voice = message.voiceAttachment {
+            applyVoice(
+                voice,
+                voiceLoader: voiceLoader,
+                direction: message.direction,
+                status: message.status,
+                accent: sender.accent,
+                onFailedTap: onVoiceFailedTapped
+            )
+        } else if media.count > 1 {
             applyAlbum(media, imageLoader: imageLoader, onTapIndex: onAlbumItemTapped)
         } else {
             applyAttachment(
@@ -309,7 +333,7 @@ final class ChatBubbleCell: UITableViewCell {
         // Failed media uses the tap-for-options overlay (Resend / Delete)
         // rather than the verbose text-retry label — hide that label and
         // keep the compact status glyph below the bubble.
-        let hasAttachment = !message.media.isEmpty
+        let hasAttachment = !message.media.isEmpty || message.voiceAttachment != nil
         if hasAttachment, message.direction == .outgoing, message.status == .failed {
             failureLabel.isHidden = true
             failureLabel.text = nil
@@ -450,6 +474,11 @@ final class ChatBubbleCell: UITableViewCell {
         albumAspectConstraint?.isActive = false
         albumAspectConstraint = nil
 
+        // Tear down any voice layout from a recycled cell.
+        voiceView.isHidden = true
+        voiceTopToBubbleConstraint.isActive = false
+        bodyTopToVoiceConstraint.isActive = false
+
         // A video renders its poster; a photo renders itself.
         let attachment = image ?? video?.poster
         guard let attachment else {
@@ -558,6 +587,58 @@ final class ChatBubbleCell: UITableViewCell {
         albumGridView.configure(items: items, imageLoader: imageLoader) { [weak self] index in
             self?.onAlbumTapIndex?(index)
         }
+        voiceView.isHidden = true
+        voiceTopToBubbleConstraint.isActive = false
+        bodyTopToVoiceConstraint.isActive = false
+    }
+
+    /// Render a voice message: the inline `ChatVoiceMessageView` in place of
+    /// the image/album, pinned across the top of the bubble. The bubble
+    /// takes the fixed attachment width so the player is a consistent size.
+    private func applyVoice(
+        _ voice: ChatVoiceAttachment,
+        voiceLoader: ChatVoiceLoader?,
+        direction: MessageDirection,
+        status: MessageStatus,
+        accent: OnymAccent,
+        onFailedTap: (() -> Void)?
+    ) {
+        // Tear down the single-image + album layouts.
+        attachmentAspectConstraint?.isActive = false
+        attachmentAspectConstraint = nil
+        attachmentImageView.isHidden = true
+        attachmentImageView.image = nil
+        playOverlay.isHidden = true
+        durationLabel.isHidden = true
+        attachmentSpinner.stopAnimating()
+        attachmentFailedBadge.isHidden = true
+        imageTopToBubbleConstraint.isActive = false
+        bodyTopToImageConstraint.isActive = false
+        albumGridView.isHidden = true
+        albumTopToBubbleConstraint.isActive = false
+        bodyTopToAlbumConstraint.isActive = false
+        albumAspectConstraint?.isActive = false
+        albumAspectConstraint = nil
+
+        voiceView.isHidden = false
+        bodyTopToBubbleConstraint.isActive = false
+        bodyTopToQuoteConstraint.isActive = false
+        voiceTopToBubbleConstraint.isActive = true
+        bodyTopToVoiceConstraint.isActive = true
+        attachmentBubbleWidthConstraint.isActive = true
+
+        let tint = direction == .outgoing
+            ? UIColor(OnymTokens.onAccent)
+            : UIColor(accent.color)
+        voiceView.configure(
+            voice: voice,
+            loader: voiceLoader,
+            tint: tint,
+            trackColor: tint.withAlphaComponent(0.3),
+            status: status,
+            direction: direction,
+            onFailedTap: onFailedTap
+        )
     }
 
     // MARK: - Swipe to reply
@@ -771,6 +852,9 @@ final class ChatBubbleCell: UITableViewCell {
         albumGridView.translatesAutoresizingMaskIntoConstraints = false
         albumGridView.isHidden = true
         bubble.addSubview(albumGridView)
+
+        voiceView.isHidden = true
+        bubble.addSubview(voiceView)
 
         // Video-only overlays, layered on top of the poster. Hidden for
         // photos; toggled in `applyAttachment`.
@@ -1017,7 +1101,17 @@ final class ChatBubbleCell: UITableViewCell {
             equalTo: albumGridView.bottomAnchor, constant: 6
         )
 
+        // Voice player toggle constraints (parallel to the image/album).
+        voiceTopToBubbleConstraint = voiceView.topAnchor.constraint(
+            equalTo: bubble.topAnchor, constant: 6
+        )
+        bodyTopToVoiceConstraint = bodyLabel.topAnchor.constraint(
+            equalTo: voiceView.bottomAnchor, constant: 2
+        )
+
         NSLayoutConstraint.activate([
+            voiceView.leadingAnchor.constraint(equalTo: bubble.leadingAnchor, constant: 8),
+            voiceView.trailingAnchor.constraint(equalTo: bubble.trailingAnchor, constant: -8),
             albumGridView.leadingAnchor.constraint(equalTo: bubble.leadingAnchor, constant: 4),
             albumGridView.trailingAnchor.constraint(equalTo: bubble.trailingAnchor, constant: -4),
             attachmentImageView.leadingAnchor.constraint(equalTo: bubble.leadingAnchor, constant: 4),

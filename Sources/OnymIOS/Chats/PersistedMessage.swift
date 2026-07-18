@@ -73,6 +73,11 @@ final class PersistedMessage {
     /// `nil` for text / single-media). Same at-rest encryption + optional
     /// lightweight-migration shape as the other attachment columns.
     var encryptedAlbumJSON: Data?
+    /// AES-GCM-encrypted JSON of the `ChatVoiceAttachment` (or `nil` for a
+    /// message with no voice). Same at-rest encryption + optional
+    /// lightweight-migration shape as the other attachment columns; carries
+    /// the per-clip key + the waveform.
+    var encryptedVoiceAttachmentJSON: Data?
 
     init(
         id: String,
@@ -88,7 +93,8 @@ final class PersistedMessage {
         encryptedBody: Data,
         encryptedAttachmentJSON: Data? = nil,
         encryptedVideoAttachmentJSON: Data? = nil,
-        encryptedAlbumJSON: Data? = nil
+        encryptedAlbumJSON: Data? = nil,
+        encryptedVoiceAttachmentJSON: Data? = nil
     ) {
         self.id = id
         self.groupID = groupID
@@ -104,5 +110,6 @@ final class PersistedMessage {
         self.encryptedAttachmentJSON = encryptedAttachmentJSON
         self.encryptedVideoAttachmentJSON = encryptedVideoAttachmentJSON
         self.encryptedAlbumJSON = encryptedAlbumJSON
+        self.encryptedVoiceAttachmentJSON = encryptedVoiceAttachmentJSON
     }
 }

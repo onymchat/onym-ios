@@ -342,6 +342,117 @@ final class SendMessageInteractorTests: XCTestCase {
             .appendingPathComponent("test-video").appendingPathExtension("mov")
     }
 
+    // MARK: - Voice send
+
+    nonisolated private static func cannedVoiceEncoded(
+        m4a: Data = Data("m4a".utf8)
+    ) -> ChatVoiceEncoder.Encoded {
+        ChatVoiceEncoder.Encoded(
+            m4a: m4a,
+            durationSeconds: 6,
+            waveform: (0..<ChatVoiceEncoder.waveformBarCount).map { UInt8($0 % 256) }
+        )
+    }
+
+    private func makeVoiceInteractor(
+        encoder: @escaping @Sendable (URL) async -> ChatVoiceEncoder.Encoded?
+    ) -> SendMessageInteractor {
+        SendMessageInteractor(
+            identity: identity,
+            inboxTransport: transport,
+            messageRepository: messages,
+            groupRepository: groups,
+            blossomClient: blossom,
+            blossomServerURL: "https://blossom.test",
+            voiceEncoder: encoder,
+            outbox: outbox
+        )
+    }
+
+    private static func dummyVoiceURL() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("test-voice").appendingPathExtension("m4a")
+    }
+
+    func test_sendVoice_uploadsBlob_andPersistsAttachment() async throws {
+        let groupID = await seedGroupWithTwoPeers()
+        let sut = makeVoiceInteractor { _ in Self.cannedVoiceEncoded() }
+
+        let result = try await sut.sendVoice(groupID: groupID, audioURL: Self.dummyVoiceURL())
+
+        XCTAssertEqual(result.status, .sent)
+        XCTAssertEqual(result.direction, .outgoing)
+        // A voice message carries no caption.
+        XCTAssertEqual(result.body, "")
+        let voice = try XCTUnwrap(result.voiceAttachment)
+        XCTAssertEqual(voice.mimeType, "audio/mp4")
+        XCTAssertEqual(voice.server, "https://blossom.test")
+        XCTAssertEqual(voice.encKey.count, 32)
+        XCTAssertEqual(voice.durationSeconds, 6)
+        XCTAssertEqual(voice.waveform.count, ChatVoiceEncoder.waveformBarCount)
+
+        // The ciphertext blob was uploaded under its sha256.
+        let uploaded = await blossom.storedSha256s
+        XCTAssertTrue(uploaded.contains(voice.sha256))
+
+        // Fanned out to the two peers, and persisted with the voice attachment.
+        let sends = await transport.recordedSends
+        XCTAssertEqual(sends.count, 2)
+        let stored = await messages.currentMessages(groupID: groupID, owner: currentIdentityID)
+        XCTAssertEqual(stored.count, 1)
+        XCTAssertEqual(stored[0].voiceAttachment?.sha256, voice.sha256)
+    }
+
+    func test_sendVoice_encodeFailure_throws_andPersistsNothing() async throws {
+        let groupID = await seedGroupWithTwoPeers()
+        let sut = makeVoiceInteractor { _ in nil }
+        do {
+            _ = try await sut.sendVoice(groupID: groupID, audioURL: Self.dummyVoiceURL())
+            XCTFail("expected encode failure")
+        } catch SendMessageInteractor.SendError.voiceEncodeFailed {
+            // expected
+        }
+        let stored = await messages.currentMessages(groupID: groupID, owner: currentIdentityID)
+        XCTAssertTrue(stored.isEmpty)
+    }
+
+    func test_sendVoice_uploadFailure_marksFailed_keepsOptimisticBubble() async throws {
+        let groupID = await seedGroupWithTwoPeers()
+        await blossom.setFailing(true)
+        let sut = makeVoiceInteractor { _ in Self.cannedVoiceEncoded() }
+        let result = try await sut.sendVoice(groupID: groupID, audioURL: Self.dummyVoiceURL())
+        XCTAssertEqual(result.status, .failed)
+        let stored = await messages.currentMessages(groupID: groupID, owner: currentIdentityID)
+        XCTAssertEqual(stored.count, 1)
+        XCTAssertEqual(stored[0].status, .failed)
+        XCTAssertNotNil(stored[0].voiceAttachment)
+        let sends = await transport.recordedSends
+        XCTAssertTrue(sends.isEmpty)
+    }
+
+    func test_resend_failedVoice_reuploadsFromOutbox_andSends() async throws {
+        let groupID = await seedGroupWithTwoPeers()
+        await blossom.setFailing(true)
+        let sut = makeVoiceInteractor { _ in Self.cannedVoiceEncoded() }
+        let failed = try await sut.sendVoice(groupID: groupID, audioURL: Self.dummyVoiceURL())
+        XCTAssertEqual(failed.status, .failed)
+        let sha = try XCTUnwrap(failed.voiceAttachment?.sha256)
+
+        // Network recovers; resend re-uploads the identical ciphertext.
+        await blossom.setFailing(false)
+        await sut.retry(groupID: groupID, messageID: failed.id)
+
+        let stored = await messages.currentMessages(groupID: groupID, owner: currentIdentityID)
+        XCTAssertEqual(stored.count, 1)
+        XCTAssertEqual(stored[0].status, .sent)
+        // Re-sent with the voice attachment intact, uploaded under the same sha.
+        XCTAssertEqual(stored[0].voiceAttachment?.sha256, sha)
+        let uploaded = await blossom.storedSha256s
+        XCTAssertTrue(uploaded.contains(sha))
+        let sends = await transport.recordedSends
+        XCTAssertEqual(sends.count, 2)
+    }
+
     // MARK: - Happy path
 
     func test_send_persistsAsSent_andFansOutToOtherMembers() async throws {
