@@ -591,6 +591,28 @@ final class ChatBubbleCellTests: XCTestCase {
         XCTAssertFalse(poster?.isHidden ?? true)
     }
 
+    func test_attachment_bubbleSizedFromMetadata_beforeBlobLoads() {
+        // No imageLoader is passed, so the attachment view holds only the
+        // blurhash placeholder (~32pt intrinsic). The bubble must still be
+        // sized from the attachment's known aspect ratio — a fixed
+        // fraction of the width — so it won't jump when the real blob
+        // lands and replaces the placeholder.
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+        cell.contentView.frame = CGRect(x: 0, y: 0, width: 320, height: 400)
+        cell.configure(message: makeMessage(direction: .incoming, videoAttachment: sampleVideo()))
+        cell.contentView.layoutIfNeeded()
+
+        guard let poster = find(in: cell.contentView, identifier: "chat.bubble.video") else {
+            return XCTFail("video poster view not found")
+        }
+        // maxWidthFraction 0.75 of 320 → 240pt bubble; poster is inset 4pt
+        // on each side → 232pt. Well above the placeholder's ~32pt.
+        XCTAssertEqual(poster.frame.width, 320 * 0.75 - 8, accuracy: 1,
+                       "attachment must take the fixed bubble width up front, not the placeholder size")
+        // Height follows the metadata aspect ratio (720/1280 = 0.5625).
+        XCTAssertEqual(poster.frame.height, poster.frame.width * 0.5625, accuracy: 1)
+    }
+
     func test_reconfigureVideoToText_hidesAttachment() {
         let id = UUID()
         let cell = ChatBubbleCell(style: .default, reuseIdentifier: nil)

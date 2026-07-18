@@ -203,6 +203,14 @@ final class ChatBubbleCell: UITableViewCell {
     private var imageTopToBubbleConstraint: NSLayoutConstraint!
     private var bodyTopToImageConstraint: NSLayoutConstraint!
     private var attachmentAspectConstraint: NSLayoutConstraint?
+    /// Pins the bubble to a fixed (max) width whenever it carries an
+    /// attachment, so the image/poster frame is fully determined by the
+    /// attachment's known aspect ratio *before* the blob loads. Without
+    /// it the bubble hugs the image view's intrinsic size — tiny for the
+    /// blurhash placeholder, large once the real image lands — so the
+    /// bubble visibly jumps when the download resolves. Inactive for
+    /// text-only messages (they keep hugging their content width).
+    private var attachmentBubbleWidthConstraint: NSLayoutConstraint!
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
@@ -413,6 +421,7 @@ final class ChatBubbleCell: UITableViewCell {
             durationLabel.isHidden = true
             imageTopToBubbleConstraint.isActive = false
             bodyTopToImageConstraint.isActive = false
+            attachmentBubbleWidthConstraint.isActive = false
             return
         }
 
@@ -437,6 +446,10 @@ final class ChatBubbleCell: UITableViewCell {
         bodyTopToQuoteConstraint.isActive = false
         imageTopToBubbleConstraint.isActive = true
         bodyTopToImageConstraint.isActive = true
+        // Fix the bubble width so the frame is stable from first layout —
+        // the aspect ratio below is known from the attachment metadata, so
+        // width + ratio fully determine the size before the blob loads.
+        attachmentBubbleWidthConstraint.isActive = true
 
         // Aspect ratio from the sender's decoded dimensions (clamped so a
         // panorama or a sliver doesn't blow up the row).
@@ -851,6 +864,12 @@ final class ChatBubbleCell: UITableViewCell {
         )
         bodyTopToImageConstraint = bodyLabel.topAnchor.constraint(
             equalTo: attachmentImageView.bottomAnchor, constant: 6
+        )
+        // Fixed bubble width for attachment messages (toggled in
+        // `applyAttachment`). Equal — not ≤ — so the frame is known up
+        // front and doesn't grow when the blob loads.
+        attachmentBubbleWidthConstraint = bubble.widthAnchor.constraint(
+            equalTo: contentView.widthAnchor, multiplier: maxWidthFraction
         )
 
         NSLayoutConstraint.activate([
