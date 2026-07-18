@@ -129,7 +129,10 @@ final class ChatInputPanelView: UIView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        backgroundColor = UIColor(OnymTokens.surface2)
+        // The composer floats on the chat background — the attach/mic
+        // circles and the text-field pill are the only filled chrome, so
+        // they read as separated buttons rather than sitting inside a bar.
+        backgroundColor = UIColor(OnymTokens.bg)
         buildSubviews()
         buildReplyBanner()
         buildMediaStrip()
@@ -152,10 +155,14 @@ final class ChatInputPanelView: UIView {
         textView.font = .preferredFont(forTextStyle: .body)
         textView.adjustsFontForContentSizeCategory = true
         textView.textColor = UIColor(OnymTokens.text)
-        textView.backgroundColor = UIColor(OnymTokens.bg)
-        textView.layer.cornerRadius = 18
+        // Mid-grey pill on the near-black background (matches the attach /
+        // mic circles, distinct from the panel behind them).
+        textView.backgroundColor = UIColor(OnymTokens.surface3)
+        textView.layer.cornerRadius = 20
         textView.layer.cornerCurve = .continuous
-        textView.textContainerInset = UIEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
+        // Taller vertical inset so the single-line pill matches the 40pt
+        // attach / mic circle height; roomier horizontal inset for the pill.
+        textView.textContainerInset = UIEdgeInsets(top: 10, left: 14, bottom: 10, right: 14)
         textView.textContainer.lineFragmentPadding = 0
         textView.delegate = self
         textView.translatesAutoresizingMaskIntoConstraints = false
@@ -173,14 +180,20 @@ final class ChatInputPanelView: UIView {
         placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
         textView.addSubview(placeholderLabel)
 
+        // Send: a filled accent circle with a white up-arrow — same 40pt
+        // circular chrome as the attach / mic buttons, clearly separated
+        // from the text-field pill.
         var sendConfig = UIButton.Configuration.plain()
         sendConfig.image = UIImage(
-            systemName: "arrow.up.circle.fill",
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .regular)
+            systemName: "arrow.up",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
         )
         sendConfig.contentInsets = .zero
         sendButton.configuration = sendConfig
-        sendButton.tintColor = UIColor(OnymAccent.blue.color)
+        sendButton.tintColor = UIColor(OnymTokens.onAccent)
+        sendButton.backgroundColor = UIColor(OnymAccent.blue.color)
+        sendButton.layer.cornerRadius = 20
+        sendButton.layer.cornerCurve = .continuous
         sendButton.addTarget(self, action: #selector(tappedSend), for: .touchUpInside)
         sendButton.translatesAutoresizingMaskIntoConstraints = false
         sendButton.accessibilityIdentifier = "chat.input.send"
@@ -199,7 +212,7 @@ final class ChatInputPanelView: UIView {
         micButton.configuration = micConfig
         micButton.tintColor = UIColor(OnymTokens.text2)
         micButton.backgroundColor = UIColor(OnymTokens.surface3)
-        micButton.layer.cornerRadius = 18
+        micButton.layer.cornerRadius = 20
         micButton.layer.cornerCurve = .continuous
         micButton.translatesAutoresizingMaskIntoConstraints = false
         micButton.accessibilityIdentifier = "chat.input.mic"
@@ -226,7 +239,7 @@ final class ChatInputPanelView: UIView {
         attachButton.configuration = attachConfig
         attachButton.tintColor = UIColor(OnymTokens.text2)
         attachButton.backgroundColor = UIColor(OnymTokens.surface3)
-        attachButton.layer.cornerRadius = 18
+        attachButton.layer.cornerRadius = 20
         attachButton.layer.cornerCurve = .continuous
         attachButton.addTarget(self, action: #selector(tappedAttach), for: .touchUpInside)
         attachButton.translatesAutoresizingMaskIntoConstraints = false
@@ -242,8 +255,8 @@ final class ChatInputPanelView: UIView {
     /// until a recording starts.
     private func buildRecordingOverlay() {
         recordingOverlay.translatesAutoresizingMaskIntoConstraints = false
-        recordingOverlay.backgroundColor = UIColor(OnymTokens.bg)
-        recordingOverlay.layer.cornerRadius = 18
+        recordingOverlay.backgroundColor = UIColor(OnymTokens.surface3)
+        recordingOverlay.layer.cornerRadius = 20
         recordingOverlay.layer.cornerCurve = .continuous
         recordingOverlay.isHidden = true
         recordingOverlay.accessibilityIdentifier = "chat.input.recording"
@@ -491,29 +504,31 @@ final class ChatInputPanelView: UIView {
             replyBannerSnippet.topAnchor.constraint(equalTo: replyBannerTitle.bottomAnchor, constant: 1),
             replyBannerSnippet.bottomAnchor.constraint(equalTo: replyBanner.bottomAnchor),
 
-            attachButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            // Standalone circular attach button, gapped off the pill.
+            attachButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
             attachButton.bottomAnchor.constraint(equalTo: textView.bottomAnchor),
-            attachButton.widthAnchor.constraint(equalToConstant: 36),
-            attachButton.heightAnchor.constraint(equalToConstant: 36),
+            attachButton.widthAnchor.constraint(equalToConstant: 40),
+            attachButton.heightAnchor.constraint(equalToConstant: 40),
 
-            textView.leadingAnchor.constraint(equalTo: attachButton.trailingAnchor, constant: 6),
+            textView.leadingAnchor.constraint(equalTo: attachButton.trailingAnchor, constant: 10),
             textView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
             textViewHeightConstraint,
 
             // Send + mic share the trailing slot — exactly one is visible
-            // for a given composer state (see `refreshAfterTextChange`).
-            sendButton.leadingAnchor.constraint(equalTo: textView.trailingAnchor, constant: 6),
-            sendButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            // for a given composer state (see `refreshAfterTextChange`) —
+            // and both float as a circle gapped off the pill.
+            sendButton.leadingAnchor.constraint(equalTo: textView.trailingAnchor, constant: 10),
+            sendButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
             // Bottom-aligned to the text view's bottom so a growing
             // text view keeps the send button on the last line.
             sendButton.bottomAnchor.constraint(equalTo: textView.bottomAnchor),
-            sendButton.widthAnchor.constraint(equalToConstant: 36),
-            sendButton.heightAnchor.constraint(equalToConstant: 36),
+            sendButton.widthAnchor.constraint(equalToConstant: 40),
+            sendButton.heightAnchor.constraint(equalToConstant: 40),
 
-            micButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            micButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
             micButton.bottomAnchor.constraint(equalTo: textView.bottomAnchor),
-            micButton.widthAnchor.constraint(equalToConstant: 36),
-            micButton.heightAnchor.constraint(equalToConstant: 36),
+            micButton.widthAnchor.constraint(equalToConstant: 40),
+            micButton.heightAnchor.constraint(equalToConstant: 40),
 
             // Record-time overlay sits exactly over the text field.
             recordingOverlay.leadingAnchor.constraint(equalTo: textView.leadingAnchor),
