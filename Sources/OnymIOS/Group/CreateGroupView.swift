@@ -160,24 +160,6 @@ private struct OnymQuietButton: View {
     }
 }
 
-/// Top-left close affordance — 32pt tap target rendering an ✕ glyph
-/// in `text2`. Mirrors the Android `IconButton(Icons.Close)` used at
-/// the start of the Create Group top bar.
-private struct OnymTopBarCloseButton: View {
-    var action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: "xmark")
-                .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(OnymTokens.text2)
-                .frame(width: 32, height: 32)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-}
-
 // MARK: - Step 1: name + accent + governance
 
 private struct CreateGroupStep1View: View {
@@ -186,12 +168,7 @@ private struct CreateGroupStep1View: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ZStack(alignment: .leading) {
-                OnymNavTitle(title: "New Group", subtitle: "Step 1 of 2")
-                OnymTopBarCloseButton(action: flow.onClose)
-                    .padding(.leading, 8)
-                    .accessibilityIdentifier("create_group.step1.close")
-            }
+            OnymNavTitle(title: "New Group", subtitle: "Step 1 of 2")
             ScrollView {
                 VStack(spacing: 0) {
                     avatar
@@ -199,8 +176,8 @@ private struct CreateGroupStep1View: View {
                     nameFootnote
                     OnymSectionLabel(text: "Accent color")
                     accentRow
-                    OnymSectionLabel(text: "How it\u{2019}s run")
-                    governancePicker
+                    OnymSectionLabel(text: "Group type")
+                    founderExplanation
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 16)
@@ -214,12 +191,12 @@ private struct CreateGroupStep1View: View {
     private var avatar: some View {
         GroupAvatarPickerButton(
             imageData: $flow.avatarImageData,
-            size: 92,
+            size: 112,
             accent: accentColor,
             conceptText: flow.effectiveName
         )
-        .padding(.top, 10)
-        .padding(.bottom, 18)
+        .padding(.top, 12)
+        .padding(.bottom, 20)
     }
 
     private var nameField: some View {
@@ -302,116 +279,54 @@ private struct CreateGroupStep1View: View {
         .padding(.horizontal, 4)
     }
 
-    private var governancePicker: some View {
-        HStack(spacing: 10) {
-            ForEach(OnymUIGovernance.allCases) { g in
-                governanceCard(g)
+    /// Founder is the only group type today, so the picker is replaced by
+    /// a short explanation of what it means (no "Soon"/coming-soon types —
+    /// App Store / Play don't allow shipping visibly-incomplete features).
+    private var founderExplanation: some View {
+        HStack(alignment: .top, spacing: 12) {
+            OnymGovIcon(type: .tyranny, accent: accentColor, size: 34, dimmed: false)
+                .frame(width: 44, height: 44)
+                .background(accentColor.opacity(0.14))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Founder")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(OnymTokens.text)
+                Text("You're the founder — you decide who joins and manage the group's settings. Everyone can chat and share; only you control membership.")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(OnymTokens.text2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            Spacer(minLength: 0)
         }
-    }
-
-    private func governanceCard(_ g: OnymUIGovernance) -> some View {
-        let selected = flow.governance == g && g.isAvailable
-        let available = g.isAvailable
-        return Button {
-            guard available else { return }
-            flow.governance = g
-        } label: {
-            governanceCardLabel(g, selected: selected, available: available)
-        }
-        .buttonStyle(.plain)
-        .disabled(!available)
-    }
-
-    private func governanceCardLabel(
-        _ g: OnymUIGovernance,
-        selected: Bool,
-        available: Bool
-    ) -> some View {
-        let labelColor: Color = selected
-            ? accentColor
-            : (available ? OnymTokens.text : OnymTokens.text2)
-        let bgTint: Color = selected ? accentColor.opacity(0.18) : .clear
-        let strokeColor: Color = selected ? accentColor : OnymTokens.hairline
-        let strokeWidth: CGFloat = selected ? 1.5 : 1
-        let shadowColor: Color = selected ? accentColor.opacity(0.14) : .clear
-
-        return VStack(spacing: 8) {
-            governanceCardIconBlock(g, selected: selected, available: available)
-            Text(g.label)
-                .font(.system(size: 13, weight: .semibold))
-                .tracking(-0.13)
-                .foregroundStyle(labelColor)
-            Text(g.sub)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(OnymTokens.text2)
-                .padding(.top, -4)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 14)
-        .padding(.bottom, 12)
-        .padding(.horizontal, 10)
-        .background(bgTint)
+        .padding(14)
         .background(OnymTokens.surface2)
         .overlay(
-            RoundedRectangle(cornerRadius: 18)
-                .stroke(strokeColor, lineWidth: strokeWidth)
+            RoundedRectangle(cornerRadius: 18).stroke(OnymTokens.hairline, lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 18))
-        .shadow(color: shadowColor, radius: 4)
-        .opacity(available ? 1 : 0.55)
-    }
-
-    private func governanceCardIconBlock(
-        _ g: OnymUIGovernance,
-        selected: Bool,
-        available: Bool
-    ) -> some View {
-        ZStack(alignment: .topTrailing) {
-            OnymGovIcon(
-                type: g,
-                accent: selected ? accentColor : OnymTokens.text,
-                size: 42,
-                dimmed: !selected || !available
-            )
-            .frame(maxWidth: .infinity, alignment: .center)
-
-            if !available {
-                Text("Soon")
-                    .font(.system(size: 9, weight: .semibold))
-                    .tracking(0.5)
-                    .foregroundStyle(OnymTokens.text3)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(OnymTokens.surface3)
-                    .clipShape(Capsule())
-                    .offset(x: 6, y: -4)
-            }
-
-            if selected {
-                ZStack {
-                    Circle().fill(accentColor)
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(OnymTokens.onAccent)
-                }
-                .frame(width: 18, height: 18)
-                .offset(x: 6, y: -4)
-            }
-        }
+        .accessibilityIdentifier("create_group.step1.founder_explanation")
     }
 
     private var footer: some View {
-        OnymPrimaryButton(
-            title: flow.canAdvanceToStep2 ? "Next \u{00B7} Add people" : "Name your group to continue",
-            enabled: flow.canAdvanceToStep2,
-            accent: accentColor,
-            action: flow.tappedNext
-        )
-        .accessibilityIdentifier("create_group.step1.next_button")
+        VStack(spacing: 4) {
+            OnymPrimaryButton(
+                title: flow.canAdvanceToStep2 ? "Next \u{00B7} Add people" : "Name your group to continue",
+                enabled: flow.canAdvanceToStep2,
+                accent: accentColor,
+                action: flow.tappedNext
+            )
+            .accessibilityIdentifier("create_group.step1.next_button")
+
+            // Close moved out of the top bar to a tertiary button under the
+            // primary CTA.
+            OnymQuietButton(title: "Close", action: flow.onClose)
+                .accessibilityIdentifier("create_group.step1.close")
+        }
         .padding(.horizontal, 16)
         .padding(.top, 12)
-        .padding(.bottom, 22)
+        .padding(.bottom, 12)
         .background(OnymTokens.bg)
         .overlay(Rectangle().fill(OnymTokens.hairline).frame(height: 1), alignment: .top)
     }

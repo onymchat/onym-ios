@@ -1452,7 +1452,6 @@
 
     },
     "Founder" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3491,6 +3490,9 @@
           }
         }
       }
+    },
+    "You're the founder — you decide who joins and manage the group's settings. Everyone can chat and share; only you control membership." : {
+
     },
     "Your group is ready" : {
       "localizations" : {
