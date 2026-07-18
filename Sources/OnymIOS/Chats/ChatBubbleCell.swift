@@ -250,17 +250,55 @@ final class ChatBubbleCell: UITableViewCell {
         fatalError("init(coder:) not implemented")
     }
 
-    /// Swap colors + alignment + status indicator for the message.
-    /// Caller (the diffable data source's cell provider) invokes
-    /// this on every dequeue *and* every reconfigure — status flips
-    /// on the same UUID land here too.
+    /// Reset a recycled cell to the plain-text baseline so it never
+    /// inherits the previous message's media layout — most visibly, a
+    /// short text bubble stretched to the fixed image/album/voice width
+    /// (`attachmentBubbleWidthConstraint`) or an aspect ratio left active
+    /// from an image it no longer shows. `configure` re-applies whatever
+    /// *this* message needs on top of the clean slate, so the bubble's
+    /// size is computed from scratch every dequeue.
     override func prepareForReuse() {
         super.prepareForReuse()
         // Stop any in-flight voice playback so a recycled cell doesn't keep
         // audio going for a scrolled-away message.
         voiceView.reset()
+
+        // Drop the fixed-width + aspect constraints that only a media /
+        // voice message installs — otherwise a reused text bubble keeps the
+        // 75%-of-width lock and renders full-width.
+        attachmentBubbleWidthConstraint.isActive = false
+        attachmentAspectConstraint?.isActive = false
+        attachmentAspectConstraint = nil
+        albumAspectConstraint?.isActive = false
+        albumAspectConstraint = nil
+
+        // Detach every media/voice top-pin; `configure` re-activates the
+        // one this message needs (and falls back to body-hangs-off-bubble).
+        imageTopToBubbleConstraint.isActive = false
+        bodyTopToImageConstraint.isActive = false
+        albumTopToBubbleConstraint.isActive = false
+        bodyTopToAlbumConstraint.isActive = false
+        voiceTopToBubbleConstraint.isActive = false
+        bodyTopToVoiceConstraint.isActive = false
+        bodyTopToQuoteConstraint.isActive = false
+        bodyTopToBubbleConstraint.isActive = true
+
+        // Hide + clear all media chrome.
+        attachmentImageView.isHidden = true
+        attachmentImageView.image = nil
+        albumGridView.isHidden = true
+        voiceView.isHidden = true
+        playOverlay.isHidden = true
+        durationLabel.isHidden = true
+        attachmentSpinner.stopAnimating()
+        attachmentFailedBadge.isHidden = true
+        currentImageSha = nil
     }
 
+    /// Swap colors + alignment + status indicator for the message.
+    /// Caller (the diffable data source's cell provider) invokes
+    /// this on every dequeue *and* every reconfigure — status flips
+    /// on the same UUID land here too.
     func configure(
         message: ChatMessage,
         sender: ChatSenderDisplay = .unknown,
