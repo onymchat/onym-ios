@@ -57,11 +57,17 @@ actor SendMessageInteractor {
     ) async throws -> ChatMessage {
         guard !body.isEmpty else { throw SendError.emptyBody }
 
-        guard let active = await identity.currentIdentity() else {
+        guard let active = await identity.currentIdentity(),
+              let activeID = await identity.currentSelectedID() else {
             throw SendError.noIdentityLoaded
         }
         let groups = await groupRepository.currentGroups()
-        guard let group = groups.first(where: { $0.id == groupID }) else {
+        // Scope to the active identity's copy: the same on-chain group
+        // id can belong to two local identities, and the message must
+        // be stamped with (and rendered under) the sender's identity.
+        guard let group = groups.first(where: {
+            $0.id == groupID && $0.ownerIdentityID == activeID
+        }) else {
             throw SendError.unknownGroup
         }
 
@@ -163,12 +169,14 @@ actor SendMessageInteractor {
     ///   - The group isn't on this device, no identity is loaded,
     ///     or the message's group type isn't supported by v1 chat.
     func retry(groupID: String, messageID: UUID) async {
-        // Resolve the group first so the message lookup can be scoped
-        // to the right owner (a group id can be shared across two
-        // local identities).
-        guard await identity.currentIdentity() != nil else { return }
+        // Resolve the active identity first so the group + message
+        // lookups can be scoped to the right owner (a group id can be
+        // shared across two local identities).
+        guard let activeID = await identity.currentSelectedID() else { return }
         let groups = await groupRepository.currentGroups()
-        guard let group = groups.first(where: { $0.id == groupID }) else { return }
+        guard let group = groups.first(where: {
+            $0.id == groupID && $0.ownerIdentityID == activeID
+        }) else { return }
 
         let messages = await messageRepository.currentMessages(
             groupID: groupID,

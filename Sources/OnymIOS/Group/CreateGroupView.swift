@@ -235,6 +235,7 @@ private struct CreateGroupStep1View: View {
                 .textInputAutocapitalization(.sentences)
                 .autocorrectionDisabled()
                 .submitLabel(.done)
+                .accessibilityIdentifier("create_group.step1.name_field")
                 .focused($nameFocused)
                 .onChange(of: nameFocused) { _, isFocused in
                     if isFocused { flow.tappedNameFieldFocused() }
@@ -407,6 +408,7 @@ private struct CreateGroupStep1View: View {
             accent: accentColor,
             action: flow.tappedNext
         )
+        .accessibilityIdentifier("create_group.step1.next_button")
         .padding(.horizontal, 16)
         .padding(.top, 12)
         .padding(.bottom, 22)
@@ -612,6 +614,7 @@ private struct CreateGroupStep2View: View {
                 accent: accentColor,
                 action: flow.tappedCreate
             )
+            .accessibilityIdentifier("create_group.step2.create_button")
 
             OnymQuietButton(title: "Back", action: flow.tappedBackFromStep2)
         }

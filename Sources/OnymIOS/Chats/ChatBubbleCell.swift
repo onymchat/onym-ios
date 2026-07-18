@@ -586,6 +586,9 @@ final class ChatBubbleCell: UITableViewCell {
         )
         statusImageView.isHidden = true
         statusImageView.accessibilityIdentifier = "chat.bubble.status"
+        // Expose the delivery-status glyph (Sending / Sent / Delivered /
+        // Read via `accessibilityLabel`) to VoiceOver + UI tests.
+        statusImageView.isAccessibilityElement = true
         contentView.addSubview(statusImageView)
 
         statusImageView2.translatesAutoresizingMaskIntoConstraints = false

@@ -114,4 +114,168 @@ final class UITestAnchorSelectionStore: AnchorSelectionStore, @unchecked Sendabl
     }
 }
 
+// MARK: - Loopback inbox transport (--ui-loopback)
+
+/// In-process `InboxTransport` for UI tests: routes payloads between
+/// local subscribers by inbox tag, with store-and-forward so a send
+/// that lands before the recipient subscribes is replayed on subscribe
+/// (mirrors a Nostr relay's catch-up window). Lets two identities on
+/// one device exchange invitations / messages / receipts with no
+/// network. Only wired when the app is launched with `--ui-loopback`.
+final class UITestLoopbackInboxTransport: InboxTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var buffers: [String: [InboundInbox]] = [:]
+    private var subscribers: [String: [UUID: AsyncStream<InboundInbox>.Continuation]] = [:]
+    private var sequence = 0
+
+    func connect(to endpoints: [TransportEndpoint]) async {}
+    func disconnect() async {}
+
+    @discardableResult
+    func send(_ payload: Data, to inbox: TransportInboxID) async throws -> PublishReceipt {
+        let tag = inbox.rawValue
+        lock.lock()
+        sequence += 1
+        let message = InboundInbox(
+            inbox: inbox,
+            payload: payload,
+            receivedAt: Date(),
+            messageID: "loopback-\(sequence)"
+        )
+        buffers[tag, default: []].append(message)
+        let liveConts = Array((subscribers[tag] ?? [:]).values)
+        lock.unlock()
+
+        for continuation in liveConts { continuation.yield(message) }
+        return PublishReceipt(messageID: message.messageID, acceptedBy: 1)
+    }
+
+    func subscribe(inbox: TransportInboxID) -> AsyncStream<InboundInbox> {
+        let tag = inbox.rawValue
+        return AsyncStream { continuation in
+            let id = UUID()
+            lock.lock()
+            subscribers[tag, default: [:]][id] = continuation
+            // Snapshot the backlog *after* registering so a concurrent
+            // send is delivered live rather than dropped — and excluded
+            // from the snapshot so it isn't also replayed (no dup).
+            let backlog = buffers[tag] ?? []
+            lock.unlock()
+
+            for message in backlog { continuation.yield(message) }
+
+            continuation.onTermination = { [weak self] _ in
+                guard let self else { return }
+                self.lock.lock()
+                self.subscribers[tag]?.removeValue(forKey: id)
+                self.lock.unlock()
+            }
+        }
+    }
+
+    func unsubscribe(inbox: TransportInboxID) async {
+        lock.lock()
+        subscribers[inbox.rawValue] = nil
+        lock.unlock()
+    }
+}
+
+// MARK: - In-memory chain ledger (--ui-loopback)
+
+/// Shared in-memory stand-in for the SEP contract's on-chain state.
+/// One instance is created per app launch and fed to both the write
+/// path (`create_group` / `update_commitment`) and the read path
+/// (`get_commitment`), so a group anchored by one identity verifies
+/// against the exact same `(commitment, epoch)` when another identity
+/// materializes it. The Poseidon proof/commitment itself stays real
+/// FFI — only the relayer/chain round-trip is faked.
+final class UITestChainLedger: @unchecked Sendable {
+    private let lock = NSLock()
+    private var entries: [String: SEPCommitmentEntry] = [:]
+
+    func recordCreate(groupIDHex: String, commitment: Data) {
+        lock.withLock {
+            entries[groupIDHex] = SEPCommitmentEntry(
+                commitment: commitment, epoch: 0, timestamp: nil, tier: nil, active: nil
+            )
+        }
+    }
+
+    /// `update_commitment` advances the epoch by one and swaps in the
+    /// new commitment (the approver computes `newEpoch = epoch + 1`
+    /// locally, so this must match).
+    func recordUpdate(groupIDHex: String, commitmentNew: Data) {
+        lock.withLock {
+            let oldEpoch = entries[groupIDHex]?.epoch ?? 0
+            entries[groupIDHex] = SEPCommitmentEntry(
+                commitment: commitmentNew, epoch: oldEpoch + 1,
+                timestamp: nil, tier: nil, active: nil
+            )
+        }
+    }
+
+    func commitment(groupIDHex: String) -> SEPCommitmentEntry? {
+        lock.withLock { entries[groupIDHex] }
+    }
+}
+
+/// Fake `SEPContractTransport` backed by a `UITestChainLedger`.
+/// Dispatches on the invocation's `function`, round-tripping the
+/// generic payload/response through JSON so it stays type-safe without
+/// knowing the concrete Codable types.
+struct UITestSEPContractTransport: SEPContractTransport {
+    let ledger: UITestChainLedger
+
+    private struct CreatePeek: Decodable { let group_id: Data; let commitment: Data }
+    private struct UpdatePeek: Decodable { let group_id: Data; let publicInputs: [Data] }
+    private struct GroupIDPeek: Decodable { let group_id: Data }
+
+    func invoke<Payload: Encodable & Sendable, Response: Decodable & Sendable>(
+        _ invocation: SEPContractInvocation<Payload>,
+        responseType: Response.Type
+    ) async throws -> Response {
+        let encoder = JSONEncoder()
+        let decoder = JSONDecoder()
+        let payloadData = try encoder.encode(invocation.payload)
+
+        switch invocation.function {
+        case "create_group":
+            let peek = try decoder.decode(CreatePeek.self, from: payloadData)
+            ledger.recordCreate(groupIDHex: Self.hex(peek.group_id), commitment: peek.commitment)
+            return try Self.reencode(
+                SEPSubmissionResponse(accepted: true, transactionHash: "uitest-create", message: nil),
+                as: Response.self, encoder: encoder, decoder: decoder
+            )
+        case "update_commitment":
+            let peek = try decoder.decode(UpdatePeek.self, from: payloadData)
+            // Tyranny update PI is [c_old, epoch_old, c_new, admin_pk, group_id_fr];
+            // c_new is index 2.
+            let commitmentNew = peek.publicInputs.count > 2 ? peek.publicInputs[2] : Data()
+            ledger.recordUpdate(groupIDHex: Self.hex(peek.group_id), commitmentNew: commitmentNew)
+            return try Self.reencode(
+                SEPSubmissionResponse(accepted: true, transactionHash: "uitest-update", message: nil),
+                as: Response.self, encoder: encoder, decoder: decoder
+            )
+        case "get_commitment":
+            let peek = try decoder.decode(GroupIDPeek.self, from: payloadData)
+            guard let entry = ledger.commitment(groupIDHex: Self.hex(peek.group_id)) else {
+                throw SEPError.invalidResponse(statusCode: 404, body: "group not anchored")
+            }
+            return try Self.reencode(entry, as: Response.self, encoder: encoder, decoder: decoder)
+        default:
+            throw SEPError.invalidResponse(statusCode: 400, body: "unsupported \(invocation.function)")
+        }
+    }
+
+    private static func reencode<T: Encodable, R: Decodable>(
+        _ value: T, as: R.Type, encoder: JSONEncoder, decoder: JSONDecoder
+    ) throws -> R {
+        try decoder.decode(R.self, from: try encoder.encode(value))
+    }
+
+    private static func hex(_ data: Data) -> String {
+        data.map { String(format: "%02x", $0) }.joined()
+    }
+}
+
 #endif

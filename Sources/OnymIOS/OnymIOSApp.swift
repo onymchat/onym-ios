@@ -16,6 +16,15 @@ struct OnymIOSApp: App {
     private let groupStateVerifier: GroupStateVerifier
     private let introKeyStore: any IntroKeyStore
     private let introRequestStore: any IntroRequestStore
+    /// Factory for the per-request SEP contract transport. Normally
+    /// `URLSessionSEPContractTransport`; swapped for an in-memory
+    /// ledger-backed fake under `--ui-loopback` so a Tyranny group
+    /// anchors + verifies offline in UI tests.
+    private let contractTransportFactory: @Sendable (URL) -> any SEPContractTransport
+    /// DEBUG-only: a deeplink URL passed via `--open-url <url>` (with
+    /// `--ui-testing`). Surfaced as `pendingCapability` at launch so a
+    /// UI test can drive the Join flow without Safari.
+    private let initialDeeplinkURL: URL?
 
     /// Captured intro capability from a Universal Link or custom-
     /// scheme deeplink (`https://onym.app/join?c=…` /
@@ -107,10 +116,45 @@ struct OnymIOSApp: App {
         // WindowGroup .task before the fanout interactor starts. The
         // transport itself is just a Nostr-WebSocket client; nothing
         // here picks the URL.
-        let inboxTransport = NostrInboxTransport(
-            signerProvider: OnymNostrSignerProvider()
-        )
+        // UI-test loopback wiring (`--ui-loopback`): swap the Nostr
+        // transport for an in-process loopback and the relayer/chain
+        // round-trip for an in-memory ledger, so two on-device
+        // identities exchange messages and a Tyranny group anchors +
+        // verifies with no network. No-op in Release / normal runs.
+        let inboxTransport: any InboxTransport
+        let contractTransportFactory: @Sendable (URL) -> any SEPContractTransport
+        #if DEBUG
+        if args.contains("--ui-loopback") {
+            inboxTransport = UITestLoopbackInboxTransport()
+            let ledger = UITestChainLedger()
+            contractTransportFactory = { _ in UITestSEPContractTransport(ledger: ledger) }
+        } else {
+            inboxTransport = NostrInboxTransport(signerProvider: OnymNostrSignerProvider())
+            contractTransportFactory = { url in
+                URLSessionSEPContractTransport(endpoint: url, authToken: RelayerSecrets.authToken)
+            }
+        }
+        #else
+        inboxTransport = NostrInboxTransport(signerProvider: OnymNostrSignerProvider())
+        contractTransportFactory = { url in
+            URLSessionSEPContractTransport(endpoint: url, authToken: RelayerSecrets.authToken)
+        }
+        #endif
         self.inboxTransport = inboxTransport
+        self.contractTransportFactory = contractTransportFactory
+
+        // DEBUG deeplink injection for UI tests (see `initialDeeplinkURL`).
+        #if DEBUG
+        if args.contains("--ui-testing"),
+           let flagIndex = args.firstIndex(of: "--open-url"),
+           flagIndex + 1 < args.count {
+            self.initialDeeplinkURL = URL(string: args[flagIndex + 1])
+        } else {
+            self.initialDeeplinkURL = nil
+        }
+        #else
+        self.initialDeeplinkURL = nil
+        #endif
 
         // Nostr-relays config — drives the inbox transport's
         // connections + the Settings → Transport → Nostr screen.
@@ -156,7 +200,8 @@ struct OnymIOSApp: App {
             groupRepository: groupRepository,
             inboxTransport: inboxTransport,
             relayers: relayerRepository,
-            contracts: contractsRepository
+            contracts: contractsRepository,
+            makeContractTransport: contractTransportFactory
         )
         let approveRequestsFlow = ApproveRequestsFlow(approver: joinRequestApprover)
 
@@ -234,7 +279,8 @@ struct OnymIOSApp: App {
                     contracts: contractsRepository,
                     groups: groupRepository,
                     inboxTransport: inboxTransport,
-                    introducer: inviteIntroducer
+                    introducer: inviteIntroducer,
+                    makeContractTransport: contractTransportFactory
                 ))
             },
             makeShareInviteFlow: { @MainActor in
@@ -400,7 +446,8 @@ struct OnymIOSApp: App {
                     let chainStateReader = CachingChainStateReader(
                         inner: SEPContractChainStateReader(
                             relayers: relayerRepository,
-                            contracts: contractsRepository
+                            contracts: contractsRepository,
+                            makeContractTransport: contractTransportFactory
                         )
                     )
                     let dispatcher = IncomingMessageDispatcher(
@@ -463,6 +510,18 @@ struct OnymIOSApp: App {
                     if let cap = DeeplinkCapture.introCapability(from: url) {
                         pendingCapability = cap
                     }
+                }
+                .task {
+                    // DEBUG-only: deliver a `--open-url` deeplink at
+                    // launch so a UI test can drive the Join flow
+                    // without Safari. No-op in Release.
+                    #if DEBUG
+                    if pendingCapability == nil,
+                       let url = initialDeeplinkURL,
+                       let cap = DeeplinkCapture.introCapability(from: url) {
+                        pendingCapability = cap
+                    }
+                    #endif
                 }
                 .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
                     // Universal Link warm-start (e.g. backgrounded

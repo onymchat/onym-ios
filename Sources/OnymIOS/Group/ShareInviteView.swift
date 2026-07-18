@@ -123,6 +123,14 @@ struct ShareInviteView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
                 .accessibilityIdentifier("share_invite.copy_button")
+                #if DEBUG
+                // Expose the raw invite link to UI tests via the
+                // accessibility tree so they can read it WITHOUT the
+                // system "paste from …" prompt that a UIPasteboard read
+                // triggers. DEBUG-only so VoiceOver never reads the raw
+                // capability aloud in Release.
+                .accessibilityValue(link)
+                #endif
             }
             .padding(.top, 24)
         case .failed(let reason):
