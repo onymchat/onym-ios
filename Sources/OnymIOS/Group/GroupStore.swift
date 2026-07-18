@@ -20,10 +20,15 @@ protocol GroupStore: Sendable {
     /// Convenience for the post-anchor flow: flip
     /// `isPublishedOnChain` to true and update the commitment to
     /// whatever the relayer's `get_state` returned. No-op if the row
-    /// is missing.
-    func markPublished(id: String, commitment: Data?) async
+    /// is missing. Scoped to the composite `(id, ownerIDString)` so a
+    /// group joined by more than one local identity flips only the
+    /// creating identity's row.
+    func markPublished(id: String, ownerIDString: String, commitment: Data?) async
 
-    func delete(id: String) async
+    /// Delete the single row for `(id, ownerIDString)`. Scoped to the
+    /// owner so deleting a chat for one identity leaves another
+    /// identity's copy of the same group intact.
+    func delete(id: String, ownerIDString: String) async
 
     /// Delete every row whose `ownerIdentityIDString` matches.
     /// `ownerIDString` is the UUID-string form of the removed

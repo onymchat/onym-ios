@@ -189,7 +189,7 @@ struct IncomingMessageDispatcher: Sendable {
             ChatReceiptPayload.self,
             from: envelope.plaintext
         ) {
-            await applyReceipt(receipt)
+            await applyReceipt(receipt, ownerIdentityID: ownerIdentityID)
             return
         }
 
@@ -744,7 +744,7 @@ struct IncomingMessageDispatcher: Sendable {
     /// `.delivered` / `.read` (monotonic — `MessageRepository`
     /// enforces). Read receipts are honored only when this device also
     /// sends them (symmetric).
-    private func applyReceipt(_ receipt: ChatReceiptPayload) async {
+    private func applyReceipt(_ receipt: ChatReceiptPayload, ownerIdentityID: IdentityID) async {
         let newStatus: MessageStatus
         switch receipt.kind {
         case .delivered:
@@ -756,7 +756,12 @@ struct IncomingMessageDispatcher: Sendable {
         let groupIDHex = receipt.groupID
             .map { String(format: "%02x", $0) }.joined()
         for id in receipt.messageIDs {
-            await messageRepository.upgradeStatus(id: id, to: newStatus, groupID: groupIDHex)
+            await messageRepository.upgradeStatus(
+                id: id,
+                to: newStatus,
+                groupID: groupIDHex,
+                owner: ownerIdentityID
+            )
         }
     }
 }

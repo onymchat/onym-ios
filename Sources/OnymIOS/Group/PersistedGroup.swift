@@ -24,11 +24,22 @@ import SwiftData
 /// doesn't have to reason about CryptoKit types.
 @Model
 final class PersistedGroup {
-    @Attribute(.unique) var id: String
+    /// Uniqueness is the **composite** `(id, ownerIdentityIDString)`,
+    /// not `id` alone. The same on-chain group can be joined by more
+    /// than one identity on a single device (e.g. one identity invites
+    /// another to the same chat); each identity must keep its own row.
+    /// Keying on `id` alone made the second joiner's row overwrite the
+    /// first — "last invited identity wins", and the chat vanished for
+    /// the earlier one.
+    #Unique<PersistedGroup>([\.id, \.ownerIdentityIDString])
+
+    /// 64-char hex of the 32-byte group ID. Not unique on its own —
+    /// see the `#Unique` composite above.
+    var id: String
     /// UUID string of the identity that owns this row. Plain (not
     /// encrypted) so SwiftData `#Predicate` can filter on it. Owner
     /// IDs are random per-device UUIDs — no cross-device linkage,
-    /// nothing to leak.
+    /// nothing to leak. Part of the composite uniqueness key.
     var ownerIdentityIDString: String
     var createdAt: Date
     var epoch: Int64

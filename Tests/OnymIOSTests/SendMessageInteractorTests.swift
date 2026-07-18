@@ -88,7 +88,7 @@ final class SendMessageInteractorTests: XCTestCase {
         XCTAssertEqual(sends.count, 2,
                        "must fan out to N-1 members (skipping self)")
 
-        let stored = await messages.currentMessages(groupID: groupID)
+        let stored = await messages.currentMessages(groupID: groupID, owner: currentIdentityID)
         XCTAssertEqual(stored.count, 1)
         XCTAssertEqual(stored[0].status, .sent)
     }
@@ -131,7 +131,7 @@ final class SendMessageInteractorTests: XCTestCase {
         XCTAssertTrue(sends.isEmpty,
                       "no recipients → no transport sends")
 
-        let stored = await messages.currentMessages(groupID: groupID)
+        let stored = await messages.currentMessages(groupID: groupID, owner: currentIdentityID)
         XCTAssertEqual(stored.count, 1)
     }
 
@@ -147,7 +147,7 @@ final class SendMessageInteractorTests: XCTestCase {
         XCTAssertEqual(result.replyToMessageID, target,
                        "the returned message must carry the reply target")
 
-        let stored = await messages.currentMessages(groupID: groupID)
+        let stored = await messages.currentMessages(groupID: groupID, owner: currentIdentityID)
         XCTAssertEqual(stored.first?.replyToMessageID, target,
                        "the optimistically-inserted row must carry the reply target")
     }
@@ -169,7 +169,7 @@ final class SendMessageInteractorTests: XCTestCase {
         XCTAssertEqual(result.failureReason, .relayRejected,
                        "zero acceptances without a throw is an explicit relay refusal")
 
-        let stored = await messages.currentMessages(groupID: groupID)
+        let stored = await messages.currentMessages(groupID: groupID, owner: currentIdentityID)
         XCTAssertEqual(stored[0].status, .failed)
         XCTAssertEqual(stored[0].failureReason, .relayRejected,
                        "the persisted row must carry the reason so the UI can explain the red bang")
@@ -285,7 +285,7 @@ final class SendMessageInteractorTests: XCTestCase {
         await transport.setAcceptedBy(1)
         await interactor.retry(groupID: groupID, messageID: original.id)
 
-        let stored = await messages.currentMessages(groupID: groupID)
+        let stored = await messages.currentMessages(groupID: groupID, owner: currentIdentityID)
         XCTAssertEqual(stored.count, 1, "retry must not duplicate the row")
         XCTAssertEqual(stored[0].id, original.id, "retry must reuse the same message id")
         XCTAssertEqual(stored[0].status, .sent)
@@ -304,7 +304,7 @@ final class SendMessageInteractorTests: XCTestCase {
 
         await interactor.retry(groupID: groupID, messageID: original.id)
 
-        let stored = await messages.currentMessages(groupID: groupID)
+        let stored = await messages.currentMessages(groupID: groupID, owner: currentIdentityID)
         XCTAssertEqual(stored[0].status, .failed)
     }
 

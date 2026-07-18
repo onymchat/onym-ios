@@ -85,7 +85,7 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
             receivedAt: Date()
         )
 
-        let stored = await messages.currentMessages(groupID: groupIDHex)
+        let stored = await messages.currentMessages(groupID: groupIDHex, owner: owner)
         XCTAssertEqual(stored.count, 1)
         XCTAssertEqual(stored[0].body, "hello, group")
         XCTAssertEqual(stored[0].direction, .incoming)
@@ -110,7 +110,7 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
             receivedAt: Date()
         )
 
-        let stored = await messages.currentMessages(groupID: groupIDHex)
+        let stored = await messages.currentMessages(groupID: groupIDHex, owner: owner)
         XCTAssertEqual(stored.first?.replyToMessageID, target,
                        "an inbound reply must carry its target id onto the persisted message")
     }
@@ -135,7 +135,7 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
             receivedAt: Date()
         )
 
-        let stored = await messages.currentMessages(groupID: groupIDHex)
+        let stored = await messages.currentMessages(groupID: groupIDHex, owner: owner)
         XCTAssertTrue(stored.isEmpty,
                       "message for unknown group must not be persisted")
     }
@@ -158,7 +158,7 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
             receivedAt: Date()
         )
 
-        let stored = await messages.currentMessages(groupID: groupIDHex)
+        let stored = await messages.currentMessages(groupID: groupIDHex, owner: owner)
         XCTAssertTrue(stored.isEmpty,
                       "message from non-member must not be persisted")
     }
@@ -180,7 +180,7 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
             receivedAt: Date()
         )
 
-        let stored = await messages.currentMessages(groupID: groupIDHex)
+        let stored = await messages.currentMessages(groupID: groupIDHex, owner: owner)
         XCTAssertTrue(stored.isEmpty,
                       "envelope signed by wrong Ed25519 must be dropped (insider-spoof defense)")
     }
@@ -202,7 +202,7 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
             receivedAt: Date()
         )
 
-        let stored = await messages.currentMessages(groupID: groupIDHex)
+        let stored = await messages.currentMessages(groupID: groupIDHex, owner: owner)
         XCTAssertTrue(stored.isEmpty,
                       "envelope without a signature must be dropped")
     }
@@ -226,7 +226,7 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
             receivedAt: Date()
         )
 
-        let stored = await messages.currentMessages(groupID: groupIDHex)
+        let stored = await messages.currentMessages(groupID: groupIDHex, owner: owner)
         XCTAssertTrue(stored.isEmpty)
     }
 
@@ -293,12 +293,12 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
         )
 
         // First identity's group sees nothing.
-        let firstStored = await messages.currentMessages(groupID: groupIDHex)
+        let firstStored = await messages.currentMessages(groupID: groupIDHex, owner: owner)
         XCTAssertTrue(firstStored.isEmpty)
 
         // Second identity's group has the message even though it
         // wasn't the active identity at delivery time.
-        let secondStored = await messages.currentMessages(groupID: secondGroupHex)
+        let secondStored = await messages.currentMessages(groupID: secondGroupHex, owner: secondIdentity)
         XCTAssertEqual(secondStored.count, 1)
         XCTAssertEqual(secondStored[0].body, "for the second identity")
         XCTAssertEqual(secondStored[0].ownerIdentityID, secondIdentity)
@@ -326,7 +326,7 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
             receivedAt: Date()
         )
 
-        let stored = await messages.currentMessages(groupID: groupIDHex)
+        let stored = await messages.currentMessages(groupID: groupIDHex, owner: owner)
         XCTAssertEqual(stored.count, 1,
                        "second delivery of the same message id must be a no-op")
     }
@@ -412,7 +412,7 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
             messageID: "rcpt-1", ownerIdentityID: owner,
             payload: Data("envelope".utf8), receivedAt: Date()
         )
-        let stored = await messages.currentMessages(groupID: groupIDHex)
+        let stored = await messages.currentMessages(groupID: groupIDHex, owner: owner)
         XCTAssertEqual(stored.first { $0.id == outgoingID }?.status, .delivered)
     }
 
@@ -431,7 +431,7 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
         )
         await off.dispatch(messageID: "r", ownerIdentityID: owner,
                            payload: Data("e".utf8), receivedAt: Date())
-        var stored = await messages.currentMessages(groupID: groupIDHex)
+        var stored = await messages.currentMessages(groupID: groupIDHex, owner: owner)
         XCTAssertEqual(stored.first { $0.id == idOff }?.status, .delivered,
                        "read receipt must be ignored while read receipts are disabled")
 
@@ -443,7 +443,7 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
         )
         await on.dispatch(messageID: "r2", ownerIdentityID: owner,
                           payload: Data("e".utf8), receivedAt: Date())
-        stored = await messages.currentMessages(groupID: groupIDHex)
+        stored = await messages.currentMessages(groupID: groupIDHex, owner: owner)
         XCTAssertEqual(stored.first { $0.id == idOff }?.status, .read)
     }
 

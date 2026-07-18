@@ -1,26 +1,37 @@
 import Foundation
 
-/// Owns the `MessageStore` and exposes a per-group reactive snapshots
-/// stream. Mirrors `GroupRepository`: every successful mutation is
-/// followed by a fresh snapshot pushed to that group's subscribers;
-/// the current list is replayed on every new subscribe.
+/// Owns the `MessageStore` and exposes a reactive snapshots stream per
+/// `(group, owner identity)`. Mirrors `GroupRepository`: every
+/// successful mutation is followed by a fresh snapshot pushed to that
+/// thread's subscribers; the current list is replayed on every new
+/// subscribe.
 ///
-/// Keyed by groupID instead of by current identity because the chat
-/// screen subscribes to exactly one group at a time, and identity
-/// scope is already enforced upstream (only groups the active
-/// identity owns appear in the list, so only those will have a thread
-/// opened).
+/// Keyed by `(groupID, owner)` rather than `groupID` alone because the
+/// same on-chain group can be joined by more than one local identity
+/// on a single device (e.g. one identity invites another to the same
+/// chat). Each identity keeps its own thread — its own messages and
+/// its own send/receive direction. The inbox fan-out delivers to every
+/// identity's inbox concurrently regardless of which one is selected
+/// (`InboxFanoutInteractor`), so the owner has to be explicit rather
+/// than inferred from a "current identity".
 actor MessageRepository {
     private let store: any MessageStore
 
-    /// Per-group cache. Populated lazily on first subscribe or
-    /// mutation; one entry per group the UI has touched this session.
-    /// Kept narrow on purpose — the chat thread reads one group at a
+    /// Identifies one chat thread: a group as seen by one local
+    /// identity.
+    private struct ThreadKey: Hashable {
+        let groupID: String
+        let owner: IdentityID
+    }
+
+    /// Per-thread cache. Populated lazily on first subscribe or
+    /// mutation; one entry per thread the app has touched this session.
+    /// Kept narrow on purpose — the chat screen reads one thread at a
     /// time, so loading the entire messages table at startup would be
     /// wasted I/O.
-    private var cached: [String: [ChatMessage]] = [:]
+    private var cached: [ThreadKey: [ChatMessage]] = [:]
 
-    private var continuations: [String: [UUID: AsyncStream<[ChatMessage]>.Continuation]] = [:]
+    private var continuations: [ThreadKey: [UUID: AsyncStream<[ChatMessage]>.Continuation]] = [:]
 
     init(store: any MessageStore) {
         self.store = store
@@ -28,13 +39,13 @@ actor MessageRepository {
 
     // MARK: - Mutations
 
-    /// Idempotent on `message.id` (delegates to
-    /// `MessageStore.insertOrUpdate`). Receive-side replays and
+    /// Idempotent on `(message.id, message.ownerIdentityID)` (delegates
+    /// to `MessageStore.insertOrUpdate`). Receive-side replays and
     /// outgoing status flips both flow through here.
     @discardableResult
     func insert(_ message: ChatMessage) async -> Bool {
         let inserted = await store.insertOrUpdate(message)
-        await refresh(groupID: message.groupID)
+        await refresh(ThreadKey(groupID: message.groupID, owner: message.ownerIdentityID))
         return inserted
     }
 
@@ -48,10 +59,16 @@ actor MessageRepository {
         id: UUID,
         status: MessageStatus,
         groupID: String,
+        owner: IdentityID,
         failureReason: SendFailureReason? = nil
     ) async {
-        await store.updateStatus(id: id, status: status, failureReason: failureReason)
-        await refresh(groupID: groupID)
+        await store.updateStatus(
+            id: id,
+            ownerIDString: owner.rawValue.uuidString,
+            status: status,
+            failureReason: failureReason
+        )
+        await refresh(ThreadKey(groupID: groupID, owner: owner))
     }
 
     /// Raise an outgoing message's delivery status from an inbound
@@ -61,99 +78,106 @@ actor MessageRepository {
     /// after `.read`, a duplicate receipt, or a receipt for an unknown /
     /// incoming / failed row all do nothing). See
     /// `MessageStatus.deliveryRank`.
-    func upgradeStatus(id: UUID, to status: MessageStatus, groupID: String) async {
+    func upgradeStatus(id: UUID, to status: MessageStatus, groupID: String, owner: IdentityID) async {
         guard let newRank = status.deliveryRank else { return }
-        let messages = await currentMessages(groupID: groupID)
+        let messages = await currentMessages(groupID: groupID, owner: owner)
         guard let message = messages.first(where: { $0.id == id }),
               message.direction == .outgoing,
               let currentRank = message.status.deliveryRank,
               newRank > currentRank
         else { return }
-        await updateStatus(id: id, status: status, groupID: groupID)
+        await updateStatus(id: id, status: status, groupID: groupID, owner: owner)
     }
 
-    func delete(id: UUID, groupID: String) async {
-        await store.delete(id: id)
-        await refresh(groupID: groupID)
+    func delete(id: UUID, groupID: String, owner: IdentityID) async {
+        await store.delete(id: id, ownerIDString: owner.rawValue.uuidString)
+        await refresh(ThreadKey(groupID: groupID, owner: owner))
     }
 
-    /// Drop every message for one group. Wired into the group-delete
-    /// path so removing a group wipes its thread.
-    func removeForGroup(_ groupID: String) async {
-        await store.deleteGroup(groupID: groupID)
-        cached[groupID] = []
-        publish(groupID: groupID)
+    /// Drop every message for one thread. Wired into the group-delete
+    /// path so removing a chat wipes its thread — scoped to the owner
+    /// so another identity's copy of the same group is untouched.
+    func removeForGroup(_ groupID: String, owner: IdentityID) async {
+        await store.deleteGroup(groupID: groupID, ownerIDString: owner.rawValue.uuidString)
+        let key = ThreadKey(groupID: groupID, owner: owner)
+        cached[key] = []
+        publish(key)
     }
 
-    /// Cascade delete on identity removal. The store drops rows whose
-    /// `ownerIdentityID` matches; rows in the same group owned by a
-    /// different identity stay put, so each cached group has to be
-    /// refreshed (not wiped) and re-published.
+    /// Cascade delete on identity removal. The store drops every row
+    /// whose `ownerIdentityID` matches; only that identity's cached
+    /// threads need refreshing (other identities' rows — including in
+    /// the same group — stay put).
     func removeForOwner(_ id: IdentityID) async {
         await store.deleteOwner(id.rawValue.uuidString)
-        let groupIDs = Array(cached.keys)
-        for groupID in groupIDs {
-            await refresh(groupID: groupID)
+        let keys = cached.keys.filter { $0.owner == id }
+        for key in keys {
+            await refresh(key)
         }
     }
 
     // MARK: - Subscriptions
 
-    /// Reactive stream of messages for one group. Emits the current
+    /// Reactive stream of messages for one thread. Emits the current
     /// snapshot on subscribe and on every mutation that touches this
-    /// group. Other groups' mutations are silent.
-    nonisolated func snapshots(groupID: String) -> AsyncStream<[ChatMessage]> {
+    /// thread. Other threads' mutations are silent.
+    nonisolated func snapshots(groupID: String, owner: IdentityID) -> AsyncStream<[ChatMessage]> {
         AsyncStream { continuation in
             let subscriberID = UUID()
+            let key = ThreadKey(groupID: groupID, owner: owner)
             Task {
                 await self.subscribe(
-                    groupID: groupID,
+                    key: key,
                     subscriberID: subscriberID,
                     continuation: continuation
                 )
             }
             continuation.onTermination = { _ in
-                Task { await self.unsubscribe(groupID: groupID, subscriberID: subscriberID) }
+                Task { await self.unsubscribe(key: key, subscriberID: subscriberID) }
             }
         }
     }
 
     /// One-shot read. Useful for tests and for paths that need to
-    /// look at the current list without keeping a subscription.
-    func currentMessages(groupID: String) async -> [ChatMessage] {
-        if cached[groupID] == nil { await refresh(groupID: groupID) }
-        return cached[groupID] ?? []
+    /// look at the current thread without keeping a subscription.
+    func currentMessages(groupID: String, owner: IdentityID) async -> [ChatMessage] {
+        let key = ThreadKey(groupID: groupID, owner: owner)
+        if cached[key] == nil { await refresh(key) }
+        return cached[key] ?? []
     }
 
     // MARK: - Private
 
     private func subscribe(
-        groupID: String,
+        key: ThreadKey,
         subscriberID: UUID,
         continuation: AsyncStream<[ChatMessage]>.Continuation
     ) async {
-        if cached[groupID] == nil {
-            await refresh(groupID: groupID)
+        if cached[key] == nil {
+            await refresh(key)
         }
-        continuations[groupID, default: [:]][subscriberID] = continuation
-        continuation.yield(cached[groupID] ?? [])
+        continuations[key, default: [:]][subscriberID] = continuation
+        continuation.yield(cached[key] ?? [])
     }
 
-    private func unsubscribe(groupID: String, subscriberID: UUID) {
-        continuations[groupID]?.removeValue(forKey: subscriberID)
-        if continuations[groupID]?.isEmpty == true {
-            continuations.removeValue(forKey: groupID)
+    private func unsubscribe(key: ThreadKey, subscriberID: UUID) {
+        continuations[key]?.removeValue(forKey: subscriberID)
+        if continuations[key]?.isEmpty == true {
+            continuations.removeValue(forKey: key)
         }
     }
 
-    private func refresh(groupID: String) async {
-        cached[groupID] = await store.list(groupID: groupID)
-        publish(groupID: groupID)
+    private func refresh(_ key: ThreadKey) async {
+        cached[key] = await store.list(
+            groupID: key.groupID,
+            ownerIDString: key.owner.rawValue.uuidString
+        )
+        publish(key)
     }
 
-    private func publish(groupID: String) {
-        let view = cached[groupID] ?? []
-        guard let subscribers = continuations[groupID] else { return }
+    private func publish(_ key: ThreadKey) {
+        let view = cached[key] ?? []
+        guard let subscribers = continuations[key] else { return }
         for continuation in subscribers.values {
             continuation.yield(view)
         }

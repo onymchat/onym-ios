@@ -28,8 +28,22 @@ import SwiftData
 /// CryptoKit types.
 @Model
 final class PersistedMessage {
-    @Attribute(.unique) var id: String
+    /// Uniqueness is the **composite** `(id, ownerIdentityIDString)`,
+    /// not `id` alone. The wire `messageID` is minted once by the
+    /// sender and fanned out to every recipient inbox, so when two
+    /// local identities are both members of a group the same id lands
+    /// twice — once per identity. Keying on `id` alone let the second
+    /// arrival overwrite the first (and could flip an outgoing row to
+    /// incoming). Each identity keeps its own row. Mirrors the
+    /// composite key on `PersistedGroup`.
+    #Unique<PersistedMessage>([\.id, \.ownerIdentityIDString])
+
+    /// UUID string of the wire `messageID`. Not unique on its own —
+    /// see the `#Unique` composite above.
+    var id: String
     var groupID: String
+    /// Part of the composite uniqueness key; scopes reads and
+    /// receive-side dedup to one identity.
     var ownerIdentityIDString: String
     var sentAt: Date
     var directionRaw: String

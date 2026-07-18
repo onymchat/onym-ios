@@ -128,6 +128,7 @@ actor SendMessageInteractor {
             id: messageID,
             status: finalStatus,
             groupID: groupID,
+            owner: group.ownerIdentityID,
             failureReason: failureReason
         )
 
@@ -162,15 +163,21 @@ actor SendMessageInteractor {
     ///   - The group isn't on this device, no identity is loaded,
     ///     or the message's group type isn't supported by v1 chat.
     func retry(groupID: String, messageID: UUID) async {
-        let messages = await messageRepository.currentMessages(groupID: groupID)
+        // Resolve the group first so the message lookup can be scoped
+        // to the right owner (a group id can be shared across two
+        // local identities).
+        guard await identity.currentIdentity() != nil else { return }
+        let groups = await groupRepository.currentGroups()
+        guard let group = groups.first(where: { $0.id == groupID }) else { return }
+
+        let messages = await messageRepository.currentMessages(
+            groupID: groupID,
+            owner: group.ownerIdentityID
+        )
         guard let message = messages.first(where: { $0.id == messageID }),
               message.direction == .outgoing,
               message.status == .failed
         else { return }
-
-        guard await identity.currentIdentity() != nil else { return }
-        let groups = await groupRepository.currentGroups()
-        guard let group = groups.first(where: { $0.id == groupID }) else { return }
 
         let myBlsHex = message.senderBlsPubkeyHex
         guard group.memberProfiles[myBlsHex] != nil else { return }
@@ -190,7 +197,8 @@ actor SendMessageInteractor {
         await messageRepository.updateStatus(
             id: messageID,
             status: .pending,
-            groupID: groupID
+            groupID: groupID,
+            owner: group.ownerIdentityID
         )
 
         let payload = ChatMessagePayload(
@@ -212,6 +220,7 @@ actor SendMessageInteractor {
             id: messageID,
             status: finalStatus,
             groupID: groupID,
+            owner: group.ownerIdentityID,
             failureReason: failureReason
         )
     }

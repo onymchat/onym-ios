@@ -76,11 +76,14 @@ actor SwiftDataGroupStore: GroupStore {
         guard let encoded = try? Self.encode(group) else { return false }
 
         let id = group.id
+        let owner = encoded.ownerIdentityIDString
+        // Match on the composite (id, owner): a second identity joining
+        // the same on-chain group gets its own row rather than clobbering
+        // the first identity's.
         let descriptor = FetchDescriptor<PersistedGroup>(
-            predicate: #Predicate { $0.id == id }
+            predicate: #Predicate { $0.id == id && $0.ownerIdentityIDString == owner }
         )
         if let existing = try? context.fetch(descriptor).first {
-            existing.ownerIdentityIDString = encoded.ownerIdentityIDString
             existing.epoch = encoded.epoch
             existing.tierRaw = encoded.tierRaw
             existing.groupTypeRaw = encoded.groupTypeRaw
@@ -103,9 +106,9 @@ actor SwiftDataGroupStore: GroupStore {
         return true
     }
 
-    func markPublished(id: String, commitment: Data?) {
+    func markPublished(id: String, ownerIDString: String, commitment: Data?) {
         let descriptor = FetchDescriptor<PersistedGroup>(
-            predicate: #Predicate { $0.id == id }
+            predicate: #Predicate { $0.id == id && $0.ownerIdentityIDString == ownerIDString }
         )
         guard let row = try? context.fetch(descriptor).first else { return }
         row.isPublishedOnChain = true
@@ -116,9 +119,9 @@ actor SwiftDataGroupStore: GroupStore {
         try? context.save()
     }
 
-    func delete(id: String) {
+    func delete(id: String, ownerIDString: String) {
         let descriptor = FetchDescriptor<PersistedGroup>(
-            predicate: #Predicate { $0.id == id }
+            predicate: #Predicate { $0.id == id && $0.ownerIdentityIDString == ownerIDString }
         )
         if let rows = try? context.fetch(descriptor) {
             for row in rows { context.delete(row) }

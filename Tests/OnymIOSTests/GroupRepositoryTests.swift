@@ -49,7 +49,7 @@ final class GroupRepositoryTests: XCTestCase {
         _ = await iterator.next()
 
         let onchainCommitment = Data(repeating: 0x42, count: 32)
-        await repo.markPublished(id: group.id, commitment: onchainCommitment)
+        await repo.markPublished(id: group.id, ownerID: ownerA, commitment: onchainCommitment)
 
         let next = await iterator.next()
         XCTAssertEqual(next?.first?.isPublishedOnChain, true)
@@ -65,7 +65,7 @@ final class GroupRepositoryTests: XCTestCase {
         var iterator = repo.snapshots.makeAsyncIterator()
         _ = await iterator.next()
 
-        await repo.delete(id: group.id)
+        await repo.delete(id: group.id, ownerID: ownerA)
         let next = await iterator.next()
         XCTAssertEqual(next?.count, 0)
     }
@@ -182,7 +182,7 @@ private actor InMemoryGroupStore: GroupStore {
         return isNew
     }
 
-    func markPublished(id: String, commitment: Data?) {
+    func markPublished(id: String, ownerIDString: String, commitment: Data?) {
         guard var existing = rows[id] else { return }
         existing.isPublishedOnChain = true
         if let commitment {
@@ -191,7 +191,7 @@ private actor InMemoryGroupStore: GroupStore {
         rows[id] = existing
     }
 
-    func delete(id: String) {
+    func delete(id: String, ownerIDString: String) {
         rows.removeValue(forKey: id)
     }
 

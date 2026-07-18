@@ -193,14 +193,14 @@ private actor JoinTestableInMemoryGroupStore: GroupStore {
         return isNew
     }
 
-    func markPublished(id: String, commitment: Data?) {
+    func markPublished(id: String, ownerIDString: String, commitment: Data?) {
         guard var existing = rows[id] else { return }
         existing.isPublishedOnChain = true
         if let commitment { existing.commitment = commitment }
         rows[id] = existing
     }
 
-    func delete(id: String) { rows.removeValue(forKey: id) }
+    func delete(id: String, ownerIDString: String) { rows.removeValue(forKey: id) }
 
     func deleteOwner(_ ownerIDString: String) {
         rows = rows.filter { $0.value.ownerIdentityID.rawValue.uuidString != ownerIDString }

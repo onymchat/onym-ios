@@ -219,14 +219,14 @@ private actor TestableInMemoryGroupStore: GroupStore {
         return isNew
     }
 
-    func markPublished(id: String, commitment: Data?) {
+    func markPublished(id: String, ownerIDString: String, commitment: Data?) {
         guard var existing = rows[id] else { return }
         existing.isPublishedOnChain = true
         if let commitment { existing.commitment = commitment }
         rows[id] = existing
     }
 
-    func delete(id: String) {
+    func delete(id: String, ownerIDString: String) {
         rows.removeValue(forKey: id)
     }
 

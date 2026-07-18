@@ -146,7 +146,11 @@ final class SwiftDataGroupStoreTests: XCTestCase {
         _ = await store.insertOrUpdate(group)
 
         let onchainCommitment = Data(repeating: 0x42, count: 32)
-        await store.markPublished(id: group.id, commitment: onchainCommitment)
+        await store.markPublished(
+            id: group.id,
+            ownerIDString: group.ownerIdentityID.rawValue.uuidString,
+            commitment: onchainCommitment
+        )
 
         let listed = await store.list()
         XCTAssertTrue(listed[0].isPublishedOnChain)
@@ -154,7 +158,11 @@ final class SwiftDataGroupStoreTests: XCTestCase {
     }
 
     func test_markPublished_unknownIdIsNoOp() async {
-        await store.markPublished(id: "ff".repeated(32), commitment: nil)
+        await store.markPublished(
+            id: "ff".repeated(32),
+            ownerIDString: IdentityID().rawValue.uuidString,
+            commitment: nil
+        )
         let listed = await store.list()
         XCTAssertTrue(listed.isEmpty)
     }
@@ -167,9 +175,70 @@ final class SwiftDataGroupStoreTests: XCTestCase {
         let beforeDelete = await store.list()
         XCTAssertEqual(beforeDelete.count, 1)
 
-        await store.delete(id: group.id)
+        await store.delete(id: group.id, ownerIDString: group.ownerIdentityID.rawValue.uuidString)
         let afterDelete = await store.list()
         XCTAssertTrue(afterDelete.isEmpty)
+    }
+
+    // MARK: - Multi-identity (same group id, two owners)
+
+    /// Regression: two identities on one device joining the SAME
+    /// on-chain group must each keep their own row. Before the
+    /// composite `(id, owner)` key, the second `insertOrUpdate`
+    /// overwrote the first identity's owner — "last invited identity
+    /// wins" and the chat vanished for the earlier one.
+    func test_insertOrUpdate_sameGroupIdDifferentOwners_keepsBothRows() async {
+        let sharedID = "fe".repeated(32)
+        let ownerA = IdentityID()
+        let ownerB = IdentityID()
+        let groupA = makeGroup(id: sharedID, name: "A's copy", ownerIdentityID: ownerA)
+        let groupB = makeGroup(id: sharedID, name: "B's copy", ownerIdentityID: ownerB)
+
+        let insertedA = await store.insertOrUpdate(groupA)
+        let insertedB = await store.insertOrUpdate(groupB)
+        XCTAssertTrue(insertedA)
+        XCTAssertTrue(insertedB, "second owner must be a fresh insert, not an in-place overwrite")
+
+        let listed = await store.list()
+        XCTAssertEqual(listed.count, 2, "both identities keep their own row")
+        let owners = Set(listed.map(\.ownerIdentityID))
+        XCTAssertEqual(owners, [ownerA, ownerB])
+    }
+
+    /// Deleting a group for one identity leaves the other identity's
+    /// copy of the same group id intact.
+    func test_delete_isScopedToOwner() async {
+        let sharedID = "fd".repeated(32)
+        let ownerA = IdentityID()
+        let ownerB = IdentityID()
+        _ = await store.insertOrUpdate(makeGroup(id: sharedID, name: "A", ownerIdentityID: ownerA))
+        _ = await store.insertOrUpdate(makeGroup(id: sharedID, name: "B", ownerIdentityID: ownerB))
+
+        await store.delete(id: sharedID, ownerIDString: ownerA.rawValue.uuidString)
+
+        let listed = await store.list()
+        XCTAssertEqual(listed.map(\.ownerIdentityID), [ownerB])
+    }
+
+    /// `markPublished` flips only the addressed identity's row.
+    func test_markPublished_isScopedToOwner() async {
+        let sharedID = "fc".repeated(32)
+        let ownerA = IdentityID()
+        let ownerB = IdentityID()
+        _ = await store.insertOrUpdate(makeGroup(id: sharedID, name: "A", ownerIdentityID: ownerA))
+        _ = await store.insertOrUpdate(makeGroup(id: sharedID, name: "B", ownerIdentityID: ownerB))
+
+        await store.markPublished(
+            id: sharedID,
+            ownerIDString: ownerA.rawValue.uuidString,
+            commitment: Data(repeating: 0x7, count: 32)
+        )
+
+        let listed = await store.list()
+        let a = listed.first { $0.ownerIdentityID == ownerA }
+        let b = listed.first { $0.ownerIdentityID == ownerB }
+        XCTAssertEqual(a?.isPublishedOnChain, true)
+        XCTAssertEqual(b?.isPublishedOnChain, false, "the other identity's row is untouched")
     }
 
     // MARK: - sort

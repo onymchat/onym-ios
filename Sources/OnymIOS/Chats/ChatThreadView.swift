@@ -90,11 +90,17 @@ struct ChatThreadView: View {
                 setGroupAvatar: setGroupAvatar
             )
         }
-        // Per-group subscription. `task(id:)` cancels + restarts when
+        // Per-thread subscription. `task(id:)` cancels + restarts when
         // groupID changes, so navigating into a different chat
-        // doesn't leak the previous group's stream.
+        // doesn't leak the previous group's stream. The owner scopes
+        // the stream to this identity's copy of the group — the same
+        // group id can belong to another local identity, and each keeps
+        // its own thread.
         .task(id: groupID) {
-            for await snapshot in messageRepository.snapshots(groupID: groupID) {
+            guard let owner = chatsFlow.groups
+                .first(where: { $0.id == groupID })?.ownerIdentityID
+            else { return }
+            for await snapshot in messageRepository.snapshots(groupID: groupID, owner: owner) {
                 messages = snapshot
                 // Read receipts: the thread is on-screen (this task is
                 // tied to its lifetime), so any incoming message here is

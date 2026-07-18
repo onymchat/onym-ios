@@ -257,7 +257,7 @@ struct CreateGroupInteractor: Sendable {
             avatarJPEG: avatar
         )
         _ = await groups.insert(group)
-        await groups.markPublished(id: group.id, commitment: proof.commitment)
+        await groups.markPublished(id: group.id, ownerID: group.ownerIdentityID, commitment: proof.commitment)
 
         // 8. Send durable invite offers. Each invitee gets a freshly-
         // minted per-invite intro key (the reply channel) wrapped in a
@@ -447,7 +447,7 @@ struct CreateGroupInteractor: Sendable {
             avatarJPEG: avatar
         )
         _ = await groups.insert(group)
-        await groups.markPublished(id: group.id, commitment: proof.commitment)
+        await groups.markPublished(id: group.id, ownerID: group.ownerIdentityID, commitment: proof.commitment)
 
         // 8. Send the single invitation — peer secret rides inside.
         onProgress(.sendingInvitations(total: 1))
@@ -630,7 +630,7 @@ struct CreateGroupInteractor: Sendable {
             avatarJPEG: avatar
         )
         _ = await groups.insert(group)
-        await groups.markPublished(id: group.id, commitment: proof.commitment)
+        await groups.markPublished(id: group.id, ownerID: group.ownerIdentityID, commitment: proof.commitment)
 
         // 8. Send invitations (if any). Anarchy invitations carry no
         // admin field and no peer secret — the receiver uses their

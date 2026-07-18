@@ -65,9 +65,11 @@ actor SwiftDataMessageStore: MessageStore {
 
     // MARK: - MessageStore
 
-    func list(groupID: String) -> [ChatMessage] {
+    func list(groupID: String, ownerIDString: String) -> [ChatMessage] {
         let descriptor = FetchDescriptor<PersistedMessage>(
-            predicate: #Predicate { $0.groupID == groupID },
+            predicate: #Predicate {
+                $0.groupID == groupID && $0.ownerIdentityIDString == ownerIDString
+            },
             sortBy: [SortDescriptor(\.sentAt, order: .forward)]
         )
         guard let rows = try? context.fetch(descriptor) else { return [] }
@@ -79,14 +81,17 @@ actor SwiftDataMessageStore: MessageStore {
         guard let encoded = try? Self.encode(message) else { return false }
 
         let id = message.id.uuidString
+        let owner = encoded.ownerIdentityIDString
+        // Match on the composite (id, owner): the same fanned-out wire
+        // message arriving at a second identity's inbox gets its own
+        // row rather than clobbering the first identity's.
         let descriptor = FetchDescriptor<PersistedMessage>(
-            predicate: #Predicate { $0.id == id }
+            predicate: #Predicate { $0.id == id && $0.ownerIdentityIDString == owner }
         )
         if let existing = try? context.fetch(descriptor).first {
             // Receive-side replays land here as no-op overwrites; the
             // outgoing pending → sent / failed flip uses the same path.
             existing.groupID = encoded.groupID
-            existing.ownerIdentityIDString = encoded.ownerIdentityIDString
             existing.sentAt = encoded.sentAt
             existing.directionRaw = encoded.directionRaw
             existing.statusRaw = encoded.statusRaw
@@ -104,10 +109,10 @@ actor SwiftDataMessageStore: MessageStore {
         return true
     }
 
-    func updateStatus(id: UUID, status: MessageStatus, failureReason: SendFailureReason?) {
+    func updateStatus(id: UUID, ownerIDString: String, status: MessageStatus, failureReason: SendFailureReason?) {
         let key = id.uuidString
         let descriptor = FetchDescriptor<PersistedMessage>(
-            predicate: #Predicate { $0.id == key }
+            predicate: #Predicate { $0.id == key && $0.ownerIdentityIDString == ownerIDString }
         )
         guard let row = try? context.fetch(descriptor).first else { return }
         row.statusRaw = status.rawValue
@@ -115,10 +120,10 @@ actor SwiftDataMessageStore: MessageStore {
         try? context.save()
     }
 
-    func delete(id: UUID) {
+    func delete(id: UUID, ownerIDString: String) {
         let key = id.uuidString
         let descriptor = FetchDescriptor<PersistedMessage>(
-            predicate: #Predicate { $0.id == key }
+            predicate: #Predicate { $0.id == key && $0.ownerIdentityIDString == ownerIDString }
         )
         if let rows = try? context.fetch(descriptor) {
             for row in rows { context.delete(row) }
@@ -126,9 +131,11 @@ actor SwiftDataMessageStore: MessageStore {
         try? context.save()
     }
 
-    func deleteGroup(groupID: String) {
+    func deleteGroup(groupID: String, ownerIDString: String) {
         let descriptor = FetchDescriptor<PersistedMessage>(
-            predicate: #Predicate { $0.groupID == groupID }
+            predicate: #Predicate {
+                $0.groupID == groupID && $0.ownerIdentityIDString == ownerIDString
+            }
         )
         if let rows = try? context.fetch(descriptor) {
             for row in rows { context.delete(row) }

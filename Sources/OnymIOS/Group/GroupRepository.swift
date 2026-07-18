@@ -38,14 +38,15 @@ actor GroupRepository {
 
     /// Mark a group as anchored on chain. The commitment, when
     /// supplied, replaces whatever was held in memory (the relayer's
-    /// `get_state` is the source of truth post-anchor).
-    func markPublished(id: String, commitment: Data?) async {
-        await store.markPublished(id: id, commitment: commitment)
+    /// `get_state` is the source of truth post-anchor). Scoped to the
+    /// owning identity — see `GroupStore.markPublished`.
+    func markPublished(id: String, ownerID: IdentityID, commitment: Data?) async {
+        await store.markPublished(id: id, ownerIDString: ownerID.rawValue.uuidString, commitment: commitment)
         await refreshFromStore()
     }
 
-    func delete(id: String) async {
-        await store.delete(id: id)
+    func delete(id: String, ownerID: IdentityID) async {
+        await store.delete(id: id, ownerIDString: ownerID.rawValue.uuidString)
         await refreshFromStore()
     }
 
