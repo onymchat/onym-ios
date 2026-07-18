@@ -155,6 +155,26 @@ final class MultiIdentityChatUITests: XCTestCase {
         openChat(app)
         XCTAssertTrue(app.images["chat.bubble.image"].waitForExistence(timeout: 25),
                       "Alice never received + rendered the image")
+        thread.back()
+
+        // ───────── Alice → Bob: video message ─────────
+        // Under `--ui-loopback` the attach-video button sends a canned
+        // video (PHPicker + AVFoundation transcoding can't run from
+        // XCUITest); both the poster and video blobs round-trip through
+        // the in-memory Blossom fake. The bubble exposes the poster as
+        // `chat.bubble.video`.
+        switchIdentity(app, to: "Alice")
+        openChat(app)
+        XCTAssertTrue(thread.waitReady(), "Alice's chat thread never opened")
+        app.buttons["chat.input.attach_video"].tap()
+        XCTAssertTrue(app.images["chat.bubble.video"].waitForExistence(timeout: 25),
+                      "Alice's sent video bubble never rendered")
+        thread.back()
+
+        switchIdentity(app, to: "Bob")
+        openChat(app)
+        XCTAssertTrue(app.images["chat.bubble.video"].waitForExistence(timeout: 25),
+                      "Bob never received + rendered the video")
     }
 
     // MARK: - Helpers
