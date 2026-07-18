@@ -45,6 +45,14 @@ final class ChatThreadViewController: UIViewController {
     /// this never fires for other statuses.
     var onRetryRequested: ((UUID) -> Void)?
 
+    /// Loader used by bubbles to fetch + decrypt image attachments.
+    var imageLoader: ChatImageLoader?
+    /// Fired when a message's image is tapped (host presents full-screen).
+    var onImageTapped: ((ChatMessage) -> Void)?
+    /// Fired when the composer's attach button is tapped (host presents
+    /// the photo picker).
+    var onAttachTapped: (() -> Void)?
+
     private let titleLabel = UILabel()
     private let memberCountLabel = UILabel()
     private let titleStack = UIStackView()
@@ -584,7 +592,11 @@ final class ChatThreadViewController: UIViewController {
                     reply: reply,
                     onRetry: retryHandler,
                     onQuoteTapped: quoteTap,
-                    onSwipeToReply: { [weak self] in self?.armReply(for: id) }
+                    onSwipeToReply: { [weak self] in self?.armReply(for: id) },
+                    imageLoader: self?.imageLoader,
+                    onImageTapped: message.imageAttachment == nil
+                        ? nil
+                        : { [weak self] in self?.onImageTapped?(message) }
                 )
             }
             return cell
@@ -615,6 +627,9 @@ final class ChatThreadViewController: UIViewController {
         // Tapping the banner's cancel button disarms the reply.
         inputPanel.onCancelReply = { [weak self] in
             self?.clearReply()
+        }
+        inputPanel.onAttachTapped = { [weak self] in
+            self?.onAttachTapped?()
         }
     }
 

@@ -1,3 +1,4 @@
+import PhotosUI
 import SwiftUI
 
 /// SwiftUI host for `ChatThreadViewController`. The chat screen is
@@ -24,9 +25,15 @@ struct ChatThreadView: View {
     let chatReceiptSender: any ChatReceiptSending
     let makeShareInviteFlow: @MainActor () -> ShareInviteFlow
     let setGroupAvatar: @MainActor (String, Data?) async -> Void
+    /// Fetches + decrypts image attachments for the bubbles + viewer.
+    let imageLoader: ChatImageLoader
 
     @Environment(\.dismiss) private var dismiss
     @State private var showMembers: Bool = false
+    @State private var showPhotoPicker: Bool = false
+    @State private var pickedItem: PhotosPickerItem?
+    /// The attachment shown in the full-screen viewer, if any.
+    @State private var fullScreen: FullScreenAttachment?
     /// Incoming message IDs we've already emitted a read receipt for,
     /// so re-renders while the thread stays open don't re-send.
     @State private var ackedReadIDs: Set<UUID> = []
@@ -77,8 +84,32 @@ struct ChatThreadView: View {
                 Task {
                     await interactor.retry(groupID: groupID, messageID: messageID)
                 }
-            }
+            },
+            imageLoader: imageLoader,
+            onImageTapped: { message in
+                if let attachment = message.imageAttachment {
+                    fullScreen = FullScreenAttachment(attachment: attachment)
+                }
+            },
+            onAttachTapped: { handleAttachTapped() }
         )
+        .photosPicker(isPresented: $showPhotoPicker, selection: $pickedItem, matching: .images)
+        .onChange(of: pickedItem) { _, item in
+            guard let item else { return }
+            let interactor = sendMessageInteractor
+            let groupID = groupID
+            Task {
+                if let data = try? await item.loadTransferable(type: Data.self) {
+                    try? await interactor.sendImage(groupID: groupID, imageData: data)
+                }
+                pickedItem = nil
+            }
+        }
+        .fullScreenCover(item: $fullScreen) { item in
+            FullScreenImageView(attachment: item.attachment, imageLoader: imageLoader) {
+                fullScreen = nil
+            }
+        }
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .navigationDestination(isPresented: $showMembers) {
@@ -136,6 +167,37 @@ struct ChatThreadView: View {
         }
     }
 
+    /// Attach button tapped: open the system photo picker. Under the
+    /// UI-test loopback harness (which can't drive PHPicker), send a
+    /// generated test image directly instead.
+    private func handleAttachTapped() {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--ui-loopback") {
+            let interactor = sendMessageInteractor
+            let groupID = groupID
+            let data = Self.debugTestImageData()
+            Task { try? await interactor.sendImage(groupID: groupID, imageData: data) }
+            return
+        }
+        #endif
+        showPhotoPicker = true
+    }
+
+    #if DEBUG
+    /// A small solid-colour JPEG for the UI test's image-send path.
+    static func debugTestImageData() -> Data {
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(
+            size: CGSize(width: 240, height: 160), format: format
+        ).image { ctx in
+            UIColor.systemGreen.setFill()
+            ctx.fill(CGRect(x: 0, y: 0, width: 240, height: 160))
+        }
+        return image.jpegData(compressionQuality: 0.8) ?? Data()
+    }
+    #endif
+
     private var currentGroupName: String {
         chatsFlow.groups.first { $0.id == groupID }?.name ?? "Chat"
     }
@@ -165,6 +227,9 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
     let onShowMembers: () -> Void
     let onSendTapped: (String, UUID?) -> Void
     let onRetryRequested: (UUID) -> Void
+    let imageLoader: ChatImageLoader
+    let onImageTapped: (ChatMessage) -> Void
+    let onAttachTapped: () -> Void
 
     func makeUIViewController(context: Context) -> ChatThreadViewController {
         let vc = ChatThreadViewController()
@@ -172,6 +237,9 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         vc.onShowMembers = onShowMembers
         vc.onSendTapped = onSendTapped
         vc.onRetryRequested = onRetryRequested
+        vc.imageLoader = imageLoader
+        vc.onImageTapped = onImageTapped
+        vc.onAttachTapped = onAttachTapped
         vc.loadViewIfNeeded()
         vc.update(groupName: groupName, memberCount: memberCount)
         // Profiles before messages — the first sender-display build
@@ -190,8 +258,47 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         vc.onShowMembers = onShowMembers
         vc.onSendTapped = onSendTapped
         vc.onRetryRequested = onRetryRequested
+        vc.imageLoader = imageLoader
+        vc.onImageTapped = onImageTapped
+        vc.onAttachTapped = onAttachTapped
         vc.update(groupName: groupName, memberCount: memberCount)
         vc.update(memberProfiles: memberProfiles)
         vc.update(messages: messages)
+    }
+}
+
+/// Identifiable wrapper so the full-screen viewer can be driven by
+/// `.fullScreenCover(item:)`.
+private struct FullScreenAttachment: Identifiable {
+    let id = UUID()
+    let attachment: ChatImageAttachment
+}
+
+/// Full-screen image viewer: black backdrop, the decrypted image, tap
+/// anywhere to dismiss.
+private struct FullScreenImageView: View {
+    let attachment: ChatImageAttachment
+    let imageLoader: ChatImageLoader
+    let onDismiss: () -> Void
+
+    @State private var image: UIImage?
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .accessibilityIdentifier("chat.image.fullscreen")
+            } else {
+                ProgressView().tint(.white)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { onDismiss() }
+        .task {
+            image = try? await imageLoader.image(for: attachment)
+        }
     }
 }

@@ -278,4 +278,28 @@ struct UITestSEPContractTransport: SEPContractTransport {
     }
 }
 
+// MARK: - In-memory Blossom (--ui-loopback)
+
+/// In-process `BlossomClient` for UI tests: stores blobs by their
+/// SHA-256 so image upload/download round-trips with no network. One
+/// instance is shared between the send path and `ChatImageLoader` so a
+/// just-uploaded blob is immediately fetchable by the other identity.
+final class UITestBlossomClient: BlossomClient, @unchecked Sendable {
+    private let lock = NSLock()
+    private var blobs: [String: Data] = [:]
+
+    func upload(_ blob: Data, mimeType: String) async throws -> BlobDescriptor {
+        let sha = ChatImageCrypto.sha256Hex(blob)
+        lock.withLock { blobs[sha] = blob }
+        return BlobDescriptor(sha256: sha, url: "uitest://blossom/\(sha)", size: blob.count)
+    }
+
+    func download(sha256: String) async throws -> Data {
+        guard let data = (lock.withLock { blobs[sha256] }) else {
+            throw BlossomError.badStatus(404)
+        }
+        return data
+    }
+}
+
 #endif

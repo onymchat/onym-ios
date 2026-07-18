@@ -8,6 +8,7 @@ struct OnymIOSApp: App {
     private let contractsRepository: ContractsRepository
     private let groupRepository: GroupRepository
     private let messageRepository: MessageRepository
+    private let imageLoader: ChatImageLoader
     private let inboxTransport: any InboxTransport
     private let nostrRelaysRepository: NostrRelaysRepository
     private let incomingInvitations: IncomingInvitationsRepository
@@ -155,6 +156,29 @@ struct OnymIOSApp: App {
         #else
         self.initialDeeplinkURL = nil
         #endif
+
+        // Blossom client + image loader for image messages. Swapped for
+        // an in-memory store under `--ui-loopback` so image send/receive
+        // round-trips with no network; one shared instance so the loader
+        // can read back what the sender uploaded.
+        let blossomClient: any BlossomClient
+        #if DEBUG
+        if args.contains("--ui-loopback") {
+            blossomClient = UITestBlossomClient()
+        } else {
+            blossomClient = URLSessionBlossomClient(
+                baseURL: URLSessionBlossomClient.defaultBaseURL,
+                signerProvider: OnymNostrSignerProvider()
+            )
+        }
+        #else
+        blossomClient = URLSessionBlossomClient(
+            baseURL: URLSessionBlossomClient.defaultBaseURL,
+            signerProvider: OnymNostrSignerProvider()
+        )
+        #endif
+        let imageLoader = ChatImageLoader(blossomClient: blossomClient)
+        self.imageLoader = imageLoader
 
         // Nostr-relays config — drives the inbox transport's
         // connections + the Settings → Transport → Nostr screen.
@@ -323,11 +347,14 @@ struct OnymIOSApp: App {
             approveRequestsFlow: approveRequestsFlow,
             pendingInvitesFlow: pendingInvitesFlow,
             messageRepository: messageRepository,
+            imageLoader: imageLoader,
             sendMessageInteractor: SendMessageInteractor(
                 identity: repository,
                 inboxTransport: inboxTransport,
                 messageRepository: messageRepository,
-                groupRepository: groupRepository
+                groupRepository: groupRepository,
+                blossomClient: blossomClient,
+                blossomServerURL: URLSessionBlossomClient.defaultBaseURL.absoluteString
             ),
             chatReceiptSender: ChatReceiptSender(
                 identity: repository,

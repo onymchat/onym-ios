@@ -11,6 +11,7 @@ struct ChatsView: View {
     let approveRequestsFlow: ApproveRequestsFlow
     let pendingInvitesFlow: PendingInvitesFlow
     let messageRepository: MessageRepository
+    let imageLoader: ChatImageLoader
     let sendMessageInteractor: SendMessageInteractor
     let chatReceiptSender: any ChatReceiptSending
     let makeCreateGroupFlow: @MainActor () -> CreateGroupFlow
@@ -215,7 +216,8 @@ struct ChatsView: View {
                 sendMessageInteractor: sendMessageInteractor,
                 chatReceiptSender: chatReceiptSender,
                 makeShareInviteFlow: makeShareInviteFlow,
-                setGroupAvatar: setGroupAvatar
+                setGroupAvatar: setGroupAvatar,
+                imageLoader: imageLoader
             )
         }
     }

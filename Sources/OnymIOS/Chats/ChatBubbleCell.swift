@@ -87,6 +87,16 @@ final class ChatBubbleCell: UITableViewCell {
 
     private let bubble = UIView()
     private let bodyLabel = UILabel()
+    /// Image attachment view (shown when `message.imageAttachment != nil`).
+    /// Sits above the caption; the blurhash placeholder renders first,
+    /// then the decrypted image swaps in from `ChatImageLoader`.
+    private let attachmentImageView = UIImageView()
+    /// SHA-256 of the attachment currently being loaded — guards the
+    /// async image set against cell reuse.
+    private var currentImageSha: String?
+    /// Fired when the attachment image is tapped (full-screen viewer).
+    private var onImageTapped: (() -> Void)?
+    private var imageTapRecognizer: UITapGestureRecognizer?
     private let statusImageView = UIImageView()
     /// Second checkmark, sat just left of `statusImageView` and shown
     /// only for `.delivered` / `.read` so the pair reads as a
@@ -180,6 +190,13 @@ final class ChatBubbleCell: UITableViewCell {
     // hangs off the quote container's bottom. Exactly one is active.
     private var bodyTopToBubbleConstraint: NSLayoutConstraint!
     private var bodyTopToQuoteConstraint: NSLayoutConstraint!
+    // Image-attachment toggle constraints. Active only when the message
+    // carries an image: the image pins to the bubble top and the body
+    // (caption) hangs off the image's bottom. The aspect constraint is
+    // recreated per `configure` from the attachment's w/h.
+    private var imageTopToBubbleConstraint: NSLayoutConstraint!
+    private var bodyTopToImageConstraint: NSLayoutConstraint!
+    private var attachmentAspectConstraint: NSLayoutConstraint?
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
@@ -209,7 +226,9 @@ final class ChatBubbleCell: UITableViewCell {
         reply: ChatReplyQuote? = nil,
         onRetry: (() -> Void)? = nil,
         onQuoteTapped: (() -> Void)? = nil,
-        onSwipeToReply: (() -> Void)? = nil
+        onSwipeToReply: (() -> Void)? = nil,
+        imageLoader: ChatImageLoader? = nil,
+        onImageTapped: (() -> Void)? = nil
     ) {
         // Reuse safety: a cell recycled mid-drag must start at rest.
         resetSwipeState()
@@ -244,6 +263,9 @@ final class ChatBubbleCell: UITableViewCell {
         }
         applyNameHeader(sender)
         applyReplyQuote(reply, direction: message.direction, onTap: onQuoteTapped)
+        applyAttachment(
+            message.imageAttachment, imageLoader: imageLoader, onTap: onImageTapped
+        )
 
         // Retry tap is only installed when the message is failed
         // *and* the host provided a retry callback. Cell reuse:
@@ -351,6 +373,66 @@ final class ChatBubbleCell: UITableViewCell {
 
     @objc private func tappedQuote() {
         onQuoteTapped?()
+    }
+
+    /// Show or hide the image attachment, re-pinning the body (caption)
+    /// below the image when present. Renders the BlurHash placeholder
+    /// synchronously, then swaps in the decrypted image from
+    /// `ChatImageLoader`. Reuse-safe via `currentImageSha`.
+    private func applyAttachment(
+        _ attachment: ChatImageAttachment?,
+        imageLoader: ChatImageLoader?,
+        onTap: (() -> Void)?
+    ) {
+        // Tear down the previous aspect constraint + async guard.
+        attachmentAspectConstraint?.isActive = false
+        attachmentAspectConstraint = nil
+        onImageTapped = onTap
+
+        guard let attachment else {
+            currentImageSha = nil
+            attachmentImageView.isHidden = true
+            attachmentImageView.image = nil
+            imageTopToBubbleConstraint.isActive = false
+            bodyTopToImageConstraint.isActive = false
+            return
+        }
+
+        currentImageSha = attachment.sha256
+        attachmentImageView.isHidden = false
+        // Image drives the body's top; the normal body-top toggles yield.
+        bodyTopToBubbleConstraint.isActive = false
+        bodyTopToQuoteConstraint.isActive = false
+        imageTopToBubbleConstraint.isActive = true
+        bodyTopToImageConstraint.isActive = true
+
+        // Aspect ratio from the sender's decoded dimensions (clamped so a
+        // panorama or a sliver doesn't blow up the row).
+        let ratio: CGFloat
+        if attachment.width > 0 {
+            ratio = min(1.6, max(0.5, CGFloat(attachment.height) / CGFloat(attachment.width)))
+        } else {
+            ratio = 0.75
+        }
+        let aspect = attachmentImageView.heightAnchor.constraint(
+            equalTo: attachmentImageView.widthAnchor, multiplier: ratio
+        )
+        aspect.isActive = true
+        attachmentAspectConstraint = aspect
+
+        // Placeholder now, decrypted image when it loads.
+        attachmentImageView.image = Blurhash.decode(
+            attachment.blurhash, size: CGSize(width: 32, height: max(1, round(32 * ratio)))
+        )
+        guard let imageLoader else { return }
+        let sha = attachment.sha256
+        Task { [weak self] in
+            let image = try? await imageLoader.image(for: attachment)
+            await MainActor.run {
+                guard let self, self.currentImageSha == sha, let image else { return }
+                self.attachmentImageView.image = image
+            }
+        }
     }
 
     // MARK: - Swipe to reply
@@ -545,6 +627,25 @@ final class ChatBubbleCell: UITableViewCell {
         bodyLabel.font = .preferredFont(forTextStyle: .body)
         bodyLabel.adjustsFontForContentSizeCategory = true
         bubble.addSubview(bodyLabel)
+
+        attachmentImageView.translatesAutoresizingMaskIntoConstraints = false
+        attachmentImageView.contentMode = .scaleAspectFill
+        attachmentImageView.clipsToBounds = true
+        attachmentImageView.layer.cornerRadius = 10
+        attachmentImageView.layer.cornerCurve = .continuous
+        attachmentImageView.isHidden = true
+        attachmentImageView.isUserInteractionEnabled = true
+        attachmentImageView.accessibilityIdentifier = "chat.bubble.image"
+        attachmentImageView.isAccessibilityElement = true
+        attachmentImageView.accessibilityLabel = "Photo"
+        let imageTap = UITapGestureRecognizer(target: self, action: #selector(tappedImage))
+        attachmentImageView.addGestureRecognizer(imageTap)
+        imageTapRecognizer = imageTap
+        bubble.addSubview(attachmentImageView)
+    }
+
+    @objc private func tappedImage() {
+        onImageTapped?()
     }
 
     private func buildQuote() {
@@ -665,7 +766,17 @@ final class ChatBubbleCell: UITableViewCell {
             equalTo: quoteContainer.bottomAnchor, constant: 6
         )
 
+        // Image-attachment toggle constraints (inactive by default).
+        imageTopToBubbleConstraint = attachmentImageView.topAnchor.constraint(
+            equalTo: bubble.topAnchor, constant: 4
+        )
+        bodyTopToImageConstraint = bodyLabel.topAnchor.constraint(
+            equalTo: attachmentImageView.bottomAnchor, constant: 6
+        )
+
         NSLayoutConstraint.activate([
+            attachmentImageView.leadingAnchor.constraint(equalTo: bubble.leadingAnchor, constant: 4),
+            attachmentImageView.trailingAnchor.constraint(equalTo: bubble.trailingAnchor, constant: -4),
             bubble.widthAnchor.constraint(
                 lessThanOrEqualTo: contentView.widthAnchor,
                 multiplier: maxWidthFraction

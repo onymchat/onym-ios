@@ -19,6 +19,8 @@ final class ChatInputPanelView: UIView {
     /// trimmed of leading/trailing whitespace. PR 8 will wire this
     /// to `SendMessageInteractor.send`.
     var onSendTapped: ((String) -> Void)?
+    /// Tapped the attach (photo) button. The host presents a picker.
+    var onAttachTapped: (() -> Void)?
 
     /// Invoked when the user taps the reply banner's cancel button.
     /// The host clears its armed reply target and calls
@@ -48,6 +50,7 @@ final class ChatInputPanelView: UIView {
     private let textView = UITextView()
     private let placeholderLabel = UILabel()
     private let sendButton = UIButton(type: .system)
+    private let attachButton = UIButton(type: .system)
     private var textViewHeightConstraint: NSLayoutConstraint!
 
     // Reply banner — shown above the composer while a reply is armed.
@@ -132,6 +135,20 @@ final class ChatInputPanelView: UIView {
         sendButton.accessibilityIdentifier = "chat.input.send"
         sendButton.accessibilityLabel = "Send"
         addSubview(sendButton)
+
+        var attachConfig = UIButton.Configuration.plain()
+        attachConfig.image = UIImage(
+            systemName: "photo.on.rectangle",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .regular)
+        )
+        attachConfig.contentInsets = .zero
+        attachButton.configuration = attachConfig
+        attachButton.tintColor = UIColor(OnymTokens.text2)
+        attachButton.addTarget(self, action: #selector(tappedAttach), for: .touchUpInside)
+        attachButton.translatesAutoresizingMaskIntoConstraints = false
+        attachButton.accessibilityIdentifier = "chat.input.attach"
+        attachButton.accessibilityLabel = "Attach photo"
+        addSubview(attachButton)
     }
 
     private func buildReplyBanner() {
@@ -224,7 +241,12 @@ final class ChatInputPanelView: UIView {
             replyBannerSnippet.topAnchor.constraint(equalTo: replyBannerTitle.bottomAnchor, constant: 1),
             replyBannerSnippet.bottomAnchor.constraint(equalTo: replyBanner.bottomAnchor),
 
-            textView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            attachButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+            attachButton.bottomAnchor.constraint(equalTo: textView.bottomAnchor),
+            attachButton.widthAnchor.constraint(equalToConstant: 34),
+            attachButton.heightAnchor.constraint(equalToConstant: 34),
+
+            textView.leadingAnchor.constraint(equalTo: attachButton.trailingAnchor, constant: 4),
             textView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
             textViewHeightConstraint,
 
@@ -354,6 +376,10 @@ final class ChatInputPanelView: UIView {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty else { return }
         onSendTapped?(body)
+    }
+
+    @objc private func tappedAttach() {
+        onAttachTapped?()
     }
 }
 
