@@ -58,7 +58,17 @@ struct RootView: View {
 
             Tab("Search", systemImage: "magnifyingglass", value: .search, role: .search) {
                 NavigationStack {
-                    SearchView()
+                    SearchView(
+                        messageRepository: dependencies.messageRepository,
+                        chatsFlow: dependencies.makeChatsFlow(),
+                        identitiesFlow: dependencies.identitiesFlow,
+                        sendMessageInteractor: dependencies.sendMessageInteractor,
+                        chatReceiptSender: dependencies.chatReceiptSender,
+                        makeShareInviteFlow: dependencies.makeShareInviteFlow,
+                        setGroupAvatar: dependencies.setGroupAvatar,
+                        imageLoader: dependencies.imageLoader,
+                        videoLoader: dependencies.videoLoader
+                    )
                 }
             }
         }

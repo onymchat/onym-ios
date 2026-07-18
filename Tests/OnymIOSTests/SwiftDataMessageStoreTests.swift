@@ -239,6 +239,55 @@ final class SwiftDataMessageStoreTests: XCTestCase {
         XCTAssertEqual(b.map(\.body), ["b"])
     }
 
+    // ─── search ───────────────────────────────────────────────────
+
+    func test_search_matchesBodySubstring_caseInsensitive_newestFirst() async {
+        let groupA = "aa".repeated(32)
+        let groupB = "bb".repeated(32)
+        _ = await store.insertOrUpdate(makeMessage(
+            groupID: groupA, body: "Let's meet at noon",
+            sentAt: Date(timeIntervalSince1970: 1_700_000_000)))
+        _ = await store.insertOrUpdate(makeMessage(
+            groupID: groupB, body: "MEETING moved to 3pm",
+            sentAt: Date(timeIntervalSince1970: 1_700_000_500)))
+        _ = await store.insertOrUpdate(makeMessage(
+            groupID: groupA, body: "unrelated chatter",
+            sentAt: Date(timeIntervalSince1970: 1_700_000_900)))
+
+        let hits = await store.search(
+            ownerIDString: kOwner.rawValue.uuidString, query: "meet", limit: 200
+        )
+        // Both "meet at noon" and "MEETING" match (case-insensitive),
+        // newest first; "unrelated chatter" is excluded.
+        XCTAssertEqual(hits.map(\.body), ["MEETING moved to 3pm", "Let's meet at noon"])
+    }
+
+    func test_search_isOwnerScoped() async {
+        let ownerA = IdentityID()
+        let ownerB = IdentityID()
+        _ = await store.insertOrUpdate(makeMessage(ownerIdentityID: ownerA, body: "secret plan A"))
+        _ = await store.insertOrUpdate(makeMessage(ownerIdentityID: ownerB, body: "secret plan B"))
+
+        let a = await store.search(ownerIDString: ownerA.rawValue.uuidString, query: "secret", limit: 200)
+        XCTAssertEqual(a.map(\.body), ["secret plan A"])
+    }
+
+    func test_search_emptyQuery_returnsNothing() async {
+        _ = await store.insertOrUpdate(makeMessage(body: "anything"))
+        let hits = await store.search(ownerIDString: kOwner.rawValue.uuidString, query: "   ", limit: 200)
+        XCTAssertTrue(hits.isEmpty)
+    }
+
+    func test_search_respectsLimit() async {
+        for i in 0..<5 {
+            _ = await store.insertOrUpdate(makeMessage(
+                id: UUID(), body: "match \(i)",
+                sentAt: Date(timeIntervalSince1970: TimeInterval(1_700_000_000 + i))))
+        }
+        let hits = await store.search(ownerIDString: kOwner.rawValue.uuidString, query: "match", limit: 3)
+        XCTAssertEqual(hits.count, 3)
+    }
+
     func test_list_sortsBySentAtAscending() async {
         let groupID = "cc".repeated(32)
         let older = makeMessage(

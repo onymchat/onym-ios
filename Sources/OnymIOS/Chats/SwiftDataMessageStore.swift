@@ -76,6 +76,32 @@ actor SwiftDataMessageStore: MessageStore {
         return rows.compactMap(Self.decode)
     }
 
+    /// Full-text-ish search across all of one identity's messages, newest
+    /// first. Bodies are encrypted at rest, so this decrypts every row
+    /// for the owner and filters by a case-insensitive substring match on
+    /// the plaintext body — the SQL layer can't see into the ciphertext.
+    /// `limit` caps the returned rows so a broad query on a large history
+    /// doesn't build an unbounded result list. An empty/whitespace query
+    /// returns nothing.
+    func search(ownerIDString: String, query: String, limit: Int = 200) -> [ChatMessage] {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !needle.isEmpty else { return [] }
+        let descriptor = FetchDescriptor<PersistedMessage>(
+            predicate: #Predicate { $0.ownerIdentityIDString == ownerIDString },
+            sortBy: [SortDescriptor(\.sentAt, order: .reverse)]
+        )
+        guard let rows = try? context.fetch(descriptor) else { return [] }
+        var results: [ChatMessage] = []
+        for row in rows {
+            guard let message = Self.decode(row) else { continue }
+            if message.body.lowercased().contains(needle) {
+                results.append(message)
+                if results.count >= limit { break }
+            }
+        }
+        return results
+    }
+
     @discardableResult
     func insertOrUpdate(_ message: ChatMessage) -> Bool {
         guard let encoded = try? Self.encode(message) else { return false }

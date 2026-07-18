@@ -52,6 +52,11 @@ final class ChatThreadViewController: UIViewController {
     /// Fired when a message's video poster is tapped (host presents the
     /// full-screen player).
     var onVideoTapped: ((ChatMessage) -> Void)?
+    /// When set (e.g. opened from Search), the cold open lands on this
+    /// message — scrolled to the middle and flashed — instead of at the
+    /// bottom. Cleared after it's consumed so later snapshots behave
+    /// normally.
+    var openAtMessageID: UUID?
     /// Fired when the composer's attach button is tapped (host presents
     /// the photo picker).
     var onAttachTapped: (() -> Void)?
@@ -305,6 +310,26 @@ final class ChatThreadViewController: UIViewController {
     /// masked.
     private func jumpToBottomForColdOpen() {
         tableView.layoutIfNeeded()
+        // Opened-from-search: land on the target message rather than the
+        // bottom. Position without animation (masked while the table is
+        // still hidden), then flash it once revealed.
+        if let target = openAtMessageID, dataSource.indexPath(for: target) != nil {
+            openAtMessageID = nil
+            if let indexPath = dataSource.indexPath(for: target) {
+                tableView.scrollToRow(at: indexPath, at: .middle, animated: false)
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                if let indexPath = self.dataSource.indexPath(for: target) {
+                    self.tableView.scrollToRow(at: indexPath, at: .middle, animated: false)
+                    if let cell = self.tableView.cellForRow(at: indexPath) as? ChatBubbleCell {
+                        cell.flashHighlight()
+                    }
+                }
+                if self.tableView.alpha == 0 { self.tableView.alpha = 1 }
+            }
+            return
+        }
         scrollToBottom(animated: false)
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }

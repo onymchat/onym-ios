@@ -146,6 +146,15 @@ actor MessageRepository {
         return cached[key] ?? []
     }
 
+    /// Case-insensitive substring search over `owner`'s message bodies
+    /// across every group, newest first. Delegates straight to the store
+    /// (no per-thread caching — search is a cold, cross-group read).
+    func search(owner: IdentityID, query: String, limit: Int = 200) async -> [ChatMessage] {
+        await store.search(
+            ownerIDString: owner.rawValue.uuidString, query: query, limit: limit
+        )
+    }
+
     // MARK: - Private
 
     private func subscribe(

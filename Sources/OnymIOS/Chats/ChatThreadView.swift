@@ -32,6 +32,9 @@ struct ChatThreadView: View {
     let imageLoader: ChatImageLoader
     /// Fetches + decrypts video blobs for the full-screen player.
     let videoLoader: ChatVideoLoader
+    /// When non-nil (opened from Search), the thread cold-opens scrolled
+    /// to this message and flashes it, instead of opening at the bottom.
+    var scrollToMessageID: UUID? = nil
 
     @Environment(\.dismiss) private var dismiss
     @State private var showMembers: Bool = false
@@ -95,6 +98,7 @@ struct ChatThreadView: View {
                 }
             },
             imageLoader: imageLoader,
+            scrollToMessageID: scrollToMessageID,
             onImageTapped: { message in
                 if let attachment = message.imageAttachment {
                     fullScreen = FullScreenAttachment(attachment: attachment)
@@ -281,6 +285,7 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
     let onSendTapped: (String, UUID?) -> Void
     let onRetryRequested: (UUID) -> Void
     let imageLoader: ChatImageLoader
+    let scrollToMessageID: UUID?
     let onImageTapped: (ChatMessage) -> Void
     let onVideoTapped: (ChatMessage) -> Void
     let onAttachTapped: () -> Void
@@ -288,6 +293,11 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> ChatThreadViewController {
         let vc = ChatThreadViewController()
+        // Set the cold-open target BEFORE the first `update(messages:)`
+        // so the initial snapshot lands on it. Only set here (not in
+        // `updateUIViewController`) so a later SwiftUI re-render doesn't
+        // re-arm the jump after the user has scrolled away.
+        vc.openAtMessageID = scrollToMessageID
         vc.onBack = onBack
         vc.onShowMembers = onShowMembers
         vc.onSendTapped = onSendTapped

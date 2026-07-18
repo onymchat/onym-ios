@@ -14,6 +14,12 @@ protocol MessageStore: Sendable {
     /// rows (and its own send/receive direction).
     func list(groupID: String, ownerIDString: String) async -> [ChatMessage]
 
+    /// Case-insensitive substring search over one identity's message
+    /// bodies across all groups, newest first (capped at `limit`). Bodies
+    /// are encrypted at rest, so the store decrypts and filters in memory.
+    /// An empty query returns nothing.
+    func search(ownerIDString: String, query: String, limit: Int) async -> [ChatMessage]
+
     /// Idempotent on the composite `(message.id, ownerIdentityID)`.
     /// New row → insert. Same id+owner → update in place; used both
     /// for receive-side replays (no-op result on the second insert)

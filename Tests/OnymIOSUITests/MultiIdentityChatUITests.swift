@@ -175,6 +175,25 @@ final class MultiIdentityChatUITests: XCTestCase {
         openChat(app)
         XCTAssertTrue(app.images["chat.bubble.video"].waitForExistence(timeout: 25),
                       "Bob never received + rendered the video")
+        thread.back()
+
+        // ───────── Search: find a message + open its chat ─────────
+        // As Alice, search her messages for Bob's text, tap the result,
+        // and assert it opens the chat thread scrolled to that message.
+        switchIdentity(app, to: "Alice")
+        let search = SearchScreen(app: app)
+        search.tapSearchTab()
+        search.search(for: "Hello from Bob")
+        let hit = search.result(containing: "Hello from Bob")
+        XCTAssertTrue(hit.waitForExistence(timeout: 10),
+                      "search result for 'Hello from Bob' never appeared")
+        hit.tap()
+        // Tapping the result opens the thread (composer present) with the
+        // matched message rendered — proving search → open-at-message.
+        XCTAssertTrue(app.textViews["chat.input.textview"].waitForExistence(timeout: 15),
+                      "tapping a search result never opened the chat thread")
+        XCTAssertTrue(app.staticTexts["Hello from Bob"].waitForExistence(timeout: 15),
+                      "the searched message wasn't shown in the opened thread")
     }
 
     // MARK: - Helpers

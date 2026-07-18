@@ -331,6 +331,19 @@ private actor InMemoryMessageStore: MessageStore {
             .sorted { $0.sentAt < $1.sentAt }
     }
 
+    func search(ownerIDString: String, query: String, limit: Int) -> [ChatMessage] {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !needle.isEmpty else { return [] }
+        return rows.values
+            .filter {
+                $0.ownerIdentityID.rawValue.uuidString == ownerIDString
+                    && $0.body.lowercased().contains(needle)
+            }
+            .sorted { $0.sentAt > $1.sentAt }
+            .prefix(limit)
+            .map { $0 }
+    }
+
     @discardableResult
     func insertOrUpdate(_ message: ChatMessage) -> Bool {
         let key = Key(id: message.id, owner: message.ownerIdentityID)
