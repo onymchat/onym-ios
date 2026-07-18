@@ -200,7 +200,6 @@ struct ChatsView: View {
                 Text("Create a group & share a link")
                     .font(.headline)
                     .frame(maxWidth: 300)
-                    .frame(height: 50)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
@@ -214,7 +213,7 @@ struct ChatsView: View {
                     .font(.subheadline.weight(.medium))
             }
             .buttonStyle(.borderless)
-            .padding(.top, 6)
+            .padding(.top, 18)
             .accessibilityIdentifier("chats.scan_join_empty_cta")
 
             Spacer(minLength: 0)
