@@ -74,7 +74,7 @@ struct ShareInviteView: View {
                 .controlSize(.large)
                 .padding(.top, 24)
                 .accessibilityIdentifier("share_invite.minting")
-        case .ready(let link, let groupName):
+        case .ready(let link, _):
             VStack(spacing: 12) {
                 SettingsQRCode(value: link, size: 220)
                     .padding(14)
@@ -90,11 +90,10 @@ struct ShareInviteView: View {
                     .multilineTextAlignment(.center)
                     .padding(.bottom, 4)
 
-                ShareLink(
-                    item: link,
-                    subject: Text(groupName ?? "Onym invite"),
-                    message: Text(IntroCapability.shareText(link: link, groupName: groupName))
-                ) {
+                // Share ONLY the plain link — no `message:` (a second,
+                // group-name-decorated item), so the share sheet hands off
+                // a single item.
+                ShareLink(item: link) {
                     HStack(spacing: 8) {
                         Image(systemName: "square.and.arrow.up")
                         Text("Share invite link")
