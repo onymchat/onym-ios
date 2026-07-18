@@ -1158,7 +1158,11 @@
         }
       }
     },
+    "Create a group & share a link" : {
+
+    },
     "Create an end-to-end encrypted group anchored on Stellar." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1175,6 +1179,7 @@
       }
     },
     "Create Group" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1905,6 +1910,7 @@
       }
     },
     "No chats yet" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2967,6 +2973,9 @@
         }
       }
     },
+    "Spin up an encrypted group and share one link — that's it." : {
+
+    },
     "Start a chat by scanning" : {
       "localizations" : {
         "en" : {
@@ -2982,6 +2991,9 @@
           }
         }
       }
+    },
+    "Start a private chat" : {
+
     },
     "Stellar Soroban contract ID" : {
       "localizations" : {

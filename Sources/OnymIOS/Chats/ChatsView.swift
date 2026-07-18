@@ -150,37 +150,63 @@ struct ChatsView: View {
     // MARK: - Empty state
 
     private var emptyState: some View {
-        VStack(spacing: 18) {
-            Spacer()
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
+
             ZStack {
                 Circle()
                     .fill(Color.accentColor.opacity(0.10))
-                    .frame(width: 88, height: 88)
-                Image(systemName: "bubble.left.and.bubble.right.fill")
-                    .font(.system(size: 36, weight: .regular))
+                    .frame(width: 96, height: 96)
+                Image(systemName: "lock.shield.fill")
+                    .font(.system(size: 42, weight: .regular))
                     .foregroundStyle(Color.accentColor)
             }
-            VStack(spacing: 6) {
-                Text("No chats yet")
-                    .font(.title3.weight(.semibold))
-                Text("Create an end-to-end encrypted group anchored on Stellar.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
+            .padding(.bottom, 20)
+
+            // Lead with the value, not "you have nothing" — turn the empty
+            // state into a pitch for starting the first chat.
+            Text("Start a private chat")
+                .font(.title2.weight(.bold))
+            Text("Spin up an encrypted group and share one link — that's it.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+                .padding(.top, 6)
+
+            VStack(alignment: .leading, spacing: 16) {
+                benefitRow(
+                    icon: "lock.fill",
+                    title: "End-to-end encrypted",
+                    detail: "Only your group can read what's sent."
+                )
+                benefitRow(
+                    icon: "person.badge.key.fill",
+                    title: "No phone number, no email",
+                    detail: "Your identity is a key you own — not your contact info."
+                )
+                benefitRow(
+                    icon: "point.3.connected.trianglepath.dotted",
+                    title: "No central server",
+                    detail: "Group membership is anchored on Stellar, not owned by us."
+                )
             }
+            .padding(.horizontal, 32)
+            .padding(.top, 28)
+
             Button {
                 showCreateGroup = true
             } label: {
-                Text("Create Group")
+                Text("Create a group & share a link")
                     .font(.headline)
-                    .frame(maxWidth: 220)
+                    .frame(maxWidth: 300)
                     .frame(height: 50)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            .padding(.top, 4)
+            .padding(.top, 32)
             .accessibilityIdentifier("chats.create_group_empty_cta")
+
             Button {
                 showScanner = true
             } label: {
@@ -188,10 +214,32 @@ struct ChatsView: View {
                     .font(.subheadline.weight(.medium))
             }
             .buttonStyle(.borderless)
+            .padding(.top, 6)
             .accessibilityIdentifier("chats.scan_join_empty_cta")
-            Spacer()
+
+            Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// One privacy-benefit line in the empty state: accent icon + a bold
+    /// title over a muted one-line detail.
+    private func benefitRow(icon: String, title: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 24, height: 22)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
     }
 
     // MARK: - Populated list
