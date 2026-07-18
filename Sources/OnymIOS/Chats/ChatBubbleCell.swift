@@ -209,6 +209,14 @@ final class ChatBubbleCell: UITableViewCell {
     private var imageTopToBubbleConstraint: NSLayoutConstraint!
     private var bodyTopToImageConstraint: NSLayoutConstraint!
     private var attachmentAspectConstraint: NSLayoutConstraint?
+    /// Album grid (2+ media items). Shown in place of the single
+    /// `attachmentImageView` when the message carries an album.
+    private let albumGridView = AlbumGridView()
+    private var albumTopToBubbleConstraint: NSLayoutConstraint!
+    private var bodyTopToAlbumConstraint: NSLayoutConstraint!
+    private var albumAspectConstraint: NSLayoutConstraint?
+    /// Fired when an album tile is tapped: (messageID-less) tile index.
+    private var onAlbumTapIndex: ((Int) -> Void)?
     /// Pins the bubble to a fixed (max) width whenever it carries an
     /// attachment, so the image/poster frame is fully determined by the
     /// attachment's known aspect ratio *before* the blob loads. Without
@@ -249,7 +257,8 @@ final class ChatBubbleCell: UITableViewCell {
         onSwipeToReply: (() -> Void)? = nil,
         imageLoader: ChatImageLoader? = nil,
         onImageTapped: (() -> Void)? = nil,
-        onVideoTapped: (() -> Void)? = nil
+        onVideoTapped: (() -> Void)? = nil,
+        onAlbumItemTapped: ((Int) -> Void)? = nil
     ) {
         // Reuse safety: a cell recycled mid-drag must start at rest.
         resetSwipeState()
@@ -284,18 +293,23 @@ final class ChatBubbleCell: UITableViewCell {
         }
         applyNameHeader(sender)
         applyReplyQuote(reply, direction: message.direction, onTap: onQuoteTapped)
-        applyAttachment(
-            image: message.imageAttachment,
-            video: message.videoAttachment,
-            imageLoader: imageLoader,
-            onTap: message.videoAttachment != nil ? onVideoTapped : onImageTapped
-        )
+        let media = message.media
+        if media.count > 1 {
+            applyAlbum(media, imageLoader: imageLoader, onTapIndex: onAlbumItemTapped)
+        } else {
+            applyAttachment(
+                image: message.imageAttachment,
+                video: message.videoAttachment,
+                imageLoader: imageLoader,
+                onTap: message.videoAttachment != nil ? onVideoTapped : onImageTapped
+            )
+        }
         applyAttachmentSendState(message)
 
         // Failed media uses the tap-for-options overlay (Resend / Delete)
         // rather than the verbose text-retry label — hide that label and
         // keep the compact status glyph below the bubble.
-        let hasAttachment = message.imageAttachment != nil || message.videoAttachment != nil
+        let hasAttachment = !message.media.isEmpty
         if hasAttachment, message.direction == .outgoing, message.status == .failed {
             failureLabel.isHidden = true
             failureLabel.text = nil
@@ -429,6 +443,13 @@ final class ChatBubbleCell: UITableViewCell {
         attachmentAspectConstraint = nil
         onImageTapped = onTap
 
+        // Ensure any album layout from a recycled cell is torn down.
+        albumGridView.isHidden = true
+        albumTopToBubbleConstraint.isActive = false
+        bodyTopToAlbumConstraint.isActive = false
+        albumAspectConstraint?.isActive = false
+        albumAspectConstraint = nil
+
         // A video renders its poster; a photo renders itself.
         let attachment = image ?? video?.poster
         guard let attachment else {
@@ -495,6 +516,47 @@ final class ChatBubbleCell: UITableViewCell {
                 guard let self, self.currentImageSha == sha, let image else { return }
                 self.attachmentImageView.image = image
             }
+        }
+    }
+
+    /// Render an album (2+ items) as a grid in place of the single image.
+    private func applyAlbum(
+        _ items: [ChatMediaAttachment],
+        imageLoader: ChatImageLoader?,
+        onTapIndex: ((Int) -> Void)?
+    ) {
+        // Tear down the single-image layout.
+        attachmentAspectConstraint?.isActive = false
+        attachmentAspectConstraint = nil
+        attachmentImageView.isHidden = true
+        attachmentImageView.image = nil
+        playOverlay.isHidden = true
+        durationLabel.isHidden = true
+        attachmentSpinner.stopAnimating()
+        attachmentFailedBadge.isHidden = true
+        imageTopToBubbleConstraint.isActive = false
+        bodyTopToImageConstraint.isActive = false
+
+        albumGridView.isHidden = false
+        bodyTopToBubbleConstraint.isActive = false
+        bodyTopToQuoteConstraint.isActive = false
+        albumTopToBubbleConstraint.isActive = true
+        bodyTopToAlbumConstraint.isActive = true
+        attachmentBubbleWidthConstraint.isActive = true
+
+        // Aspect from the row count: one row is a wide 2-up strip, two
+        // rows a square-ish 2×2. Known up front, so no jump on load.
+        let rows = AlbumGridView.rowCount(for: items.count)
+        albumAspectConstraint?.isActive = false
+        let aspect = albumGridView.heightAnchor.constraint(
+            equalTo: albumGridView.widthAnchor, multiplier: rows == 1 ? 0.5 : 1.0
+        )
+        aspect.isActive = true
+        albumAspectConstraint = aspect
+
+        onAlbumTapIndex = onTapIndex
+        albumGridView.configure(items: items, imageLoader: imageLoader) { [weak self] index in
+            self?.onAlbumTapIndex?(index)
         }
     }
 
@@ -705,6 +767,10 @@ final class ChatBubbleCell: UITableViewCell {
         attachmentImageView.addGestureRecognizer(imageTap)
         imageTapRecognizer = imageTap
         bubble.addSubview(attachmentImageView)
+
+        albumGridView.translatesAutoresizingMaskIntoConstraints = false
+        albumGridView.isHidden = true
+        bubble.addSubview(albumGridView)
 
         // Video-only overlays, layered on top of the poster. Hidden for
         // photos; toggled in `applyAttachment`.
@@ -943,7 +1009,17 @@ final class ChatBubbleCell: UITableViewCell {
             equalTo: contentView.widthAnchor, multiplier: maxWidthFraction
         )
 
+        // Album grid toggle constraints (parallel to the single image).
+        albumTopToBubbleConstraint = albumGridView.topAnchor.constraint(
+            equalTo: bubble.topAnchor, constant: 4
+        )
+        bodyTopToAlbumConstraint = bodyLabel.topAnchor.constraint(
+            equalTo: albumGridView.bottomAnchor, constant: 6
+        )
+
         NSLayoutConstraint.activate([
+            albumGridView.leadingAnchor.constraint(equalTo: bubble.leadingAnchor, constant: 4),
+            albumGridView.trailingAnchor.constraint(equalTo: bubble.trailingAnchor, constant: -4),
             attachmentImageView.leadingAnchor.constraint(equalTo: bubble.leadingAnchor, constant: 4),
             attachmentImageView.trailingAnchor.constraint(equalTo: bubble.trailingAnchor, constant: -4),
             bubble.widthAnchor.constraint(
