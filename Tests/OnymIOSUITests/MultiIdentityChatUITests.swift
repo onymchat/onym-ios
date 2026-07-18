@@ -234,16 +234,14 @@ final class MultiIdentityChatUITests: XCTestCase {
 
     private func addIdentity(_ app: XCUIApplication, name: String) {
         let settings = SettingsScreen(app: app)
-        settings.tapSettingsTab()
-        settings.tapIdentities()
-        let identities = IdentitiesScreen(app: app)
-        _ = identities.waitForReady()
-        identities.tapAdd()
-        identities.typeAddName(name)
-        identities.tapAddSubmit()
-        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", name)).firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 8),
-                      "newly-added identity '\(name)' never appeared")
+        settings.addIdentityViaCarousel(name: name)
+        // On create the carousel jumps to the new identity's QR page, so
+        // its alias appears as a static text.
+        let alias = app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@", name)
+        ).firstMatch
+        XCTAssertTrue(alias.waitForExistence(timeout: 8),
+                      "newly-added identity '\(name)' never appeared in the carousel")
     }
 
     /// Switch the active identity via the Chats toolbar picker, matching

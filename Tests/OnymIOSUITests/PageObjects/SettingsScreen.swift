@@ -41,10 +41,38 @@ struct SettingsScreen {
         app.buttons["settings.backup_recovery_phrase_row"]
     }
 
-    /// Identities NavigationLink — top-of-Security row added by the
-    /// multi-identity stack (PR #56). Drills into `IdentitiesView`.
-    var identitiesRow: XCUIElement {
-        firstMatching("settings.identities_row")
+    /// Swipe the carousel left once. A paged `TabView` doesn't expose its
+    /// scroll view as a queryable element, so we drag by coordinates across
+    /// the carousel's vertical band (just under the "Settings" title, over
+    /// the QR) — element-free and reliable.
+    func swipeCarouselLeft() {
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.30))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.30))
+        start.press(forDuration: 0.05, thenDragTo: end)
+    }
+
+    /// Swipe the carousel left until the "add identity" page (with its
+    /// inline name field) is on screen. Bounded so a missing page can't
+    /// spin forever.
+    func swipeCarouselToAddPage(maxSwipes: Int = 8) {
+        tapSettingsTab()
+        let addField = app.textFields["identity.add.name_field"]
+        var n = 0
+        while !addField.exists && n < maxSwipes {
+            swipeCarouselLeft()
+            n += 1
+        }
+    }
+
+    /// Add a new identity through the carousel's add page.
+    func addIdentityViaCarousel(name: String) {
+        swipeCarouselToAddPage()
+        let field = app.textFields["identity.add.name_field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5),
+                      "carousel add-identity field never appeared")
+        field.tap()
+        field.typeText(name)
+        app.buttons["identity.add.create_button"].tap()
     }
 
     /// Network → Relayer NavigationLink. Lives behind a chevron row.
@@ -98,12 +126,6 @@ struct SettingsScreen {
         anchorsRow.tap()
     }
 
-    func tapIdentities() {
-        tapSettingsTab()
-        XCTAssertTrue(identitiesRow.waitForExistence(timeout: 5),
-                      "settings identities row never appeared")
-        identitiesRow.tap()
-    }
 
     /// SwiftUI's NavigationLink renders as different XCUIElement types
     /// depending on iOS version + form context. Try a few likely

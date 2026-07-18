@@ -338,6 +338,9 @@
         }
       }
     },
+    "A fresh key — separate contacts and chats from your other identities." : {
+
+    },
     "Active" : {
       "localizations" : {
         "en" : {
@@ -353,6 +356,9 @@
           }
         }
       }
+    },
+    "ACTIVE" : {
+
     },
     "Active identity" : {
       "localizations" : {
@@ -371,6 +377,7 @@
       }
     },
     "ACTIVE IDENTITY" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -435,6 +442,9 @@
           }
         }
       }
+    },
+    "Add identity" : {
+
     },
     "Add Identity" : {
       "localizations" : {
@@ -1195,6 +1205,9 @@
         }
       }
     },
+    "Create identity" : {
+
+    },
     "Create the group, then share the invite link — they can join later without sharing any keys." : {
       "localizations" : {
         "en" : {
@@ -1555,6 +1568,7 @@
       }
     },
     "Have someone scan this code with Onym to open a private chat with %@." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1715,6 +1729,7 @@
       }
     },
     "INVITE KEY" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2977,6 +2992,7 @@
 
     },
     "Start a chat by scanning" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2991,6 +3007,9 @@
           }
         }
       }
+    },
+    "Start a chat by scanning · BLS %@…" : {
+
     },
     "Start a private chat" : {
 
@@ -3044,6 +3063,9 @@
           }
         }
       }
+    },
+    "Swipe here to switch" : {
+
     },
     "SX" : {
       "localizations" : {

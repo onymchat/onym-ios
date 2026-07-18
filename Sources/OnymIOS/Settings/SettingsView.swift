@@ -17,7 +17,8 @@ struct SettingsView: View {
     let identitiesFlow: IdentitiesFlow
 
     @State private var showRecoveryPhrase = false
-    @State private var showShareKey = false
+    /// The identity whose invite-key share view is presented, if any.
+    @State private var shareIdentity: IdentitySummary?
 
     /// Persisted in `UserDefaults` under the same key
     /// `UserDefaultsNetworkPreference` reads. Toggling here changes
@@ -34,8 +35,12 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 0) {
                 SettingsLargeTitle("Settings")
 
-                identityHero
-                qrHero
+                IdentityCarouselCard(
+                    flow: identitiesFlow,
+                    onBackup: { showRecoveryPhrase = true },
+                    onShare: { shareIdentity = $0 }
+                )
+                .padding(.bottom, 4)
 
                 if let count = unbackedCount, count > 0 {
                     notBackedUpBanner(count: count)
@@ -43,19 +48,6 @@ struct SettingsView: View {
 
                 SettingsSectionLabel("SECURITY")
                 SettingsCard {
-                    NavigationLink {
-                        IdentitiesView(flow: identitiesFlow)
-                    } label: {
-                        SettingsRow(
-                            title: "Identities",
-                            subtitle: identitySubtitle
-                        ) {
-                            SettingsIconTile(symbol: "person.2.fill", bg: SettingsTile.purple)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("settings.identities_row")
-
                     NavigationLink {
                         PrivacyEncryptionView(identitiesFlow: identitiesFlow)
                     } label: {
@@ -222,122 +214,15 @@ struct SettingsView: View {
         .sheet(isPresented: $showRecoveryPhrase) {
             RecoveryPhraseBackupView(flow: makeBackupFlow())
         }
-        .sheet(isPresented: $showShareKey) {
-            if let active = activeSummary {
-                NavigationStack {
-                    ShareKeyView(identity: active, blsPrefix: identitiesFlow.blsPrefix(of: active))
-                }
+        .sheet(item: $shareIdentity) { summary in
+            NavigationStack {
+                ShareKeyView(identity: summary, blsPrefix: identitiesFlow.blsPrefix(of: summary))
             }
         }
     }
 
     // MARK: - Hero cards
 
-    private var activeSummary: IdentitySummary? {
-        guard let id = identitiesFlow.currentID else { return nil }
-        return identitiesFlow.identities.first { $0.id == id }
-    }
-
-    private var identityHero: some View {
-        NavigationLink {
-            IdentitiesView(flow: identitiesFlow)
-        } label: {
-            HStack(spacing: 14) {
-                ZStack(alignment: .bottomTrailing) {
-                    Circle()
-                        .fill(LinearGradient(
-                            colors: [
-                                Color.dynamic(light: Color(red: 0.933, green: 0.961, blue: 1.0),
-                                              dark: Color(red: 10/255, green: 132/255, blue: 255/255).opacity(0.18)),
-                                Color.dynamic(light: Color(red: 0.878, green: 0.933, blue: 0.996),
-                                              dark: Color(red: 10/255, green: 132/255, blue: 255/255).opacity(0.10))
-                            ],
-                            startPoint: .topLeading, endPoint: .bottomTrailing
-                        ))
-                        .frame(width: 56, height: 56)
-                        .overlay(Circle().stroke(OnymAccent.blue.color, lineWidth: 1.5))
-                        .overlay(OnymMark(size: 36, color: OnymAccent.blue.color))
-                    Circle()
-                        .fill(OnymTokens.green)
-                        .frame(width: 16, height: 16)
-                        .overlay(Circle().stroke(OnymTokens.surface2, lineWidth: 2))
-                        .offset(x: 2, y: 2)
-                }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("ACTIVE IDENTITY")
-                        .font(.system(size: 11.5, weight: .medium))
-                        .tracking(0.22)
-                        .foregroundStyle(OnymTokens.text2)
-                    Text(activeSummary?.name ?? "No identity")
-                        .font(.system(size: 19, weight: .semibold))
-                        .foregroundStyle(OnymTokens.text)
-                        .tracking(-0.19)
-                    if let summary = activeSummary {
-                        Text("BLS \(identitiesFlow.blsPrefix(of: summary))…")
-                            .font(.system(size: 11.5, design: .monospaced))
-                            .foregroundStyle(OnymTokens.text2)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                }
-                Spacer(minLength: 8)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(OnymTokens.text3)
-            }
-            .padding(16)
-            .background(OnymTokens.surface2,
-                        in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .padding(.horizontal, 16)
-            .padding(.bottom, 4)
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("settings.identity_hero")
-    }
-
-    private var qrHero: some View {
-        Button {
-            if activeSummary != nil { showShareKey = true }
-        } label: {
-            HStack(spacing: 16) {
-                let payload = activeSummary?.inboxPublicKey ?? Data(count: 16)
-                SettingsQRCode(value: settingsInviteURL(blsPublicKey: payload), size: 92)
-                    .padding(8)
-                    .background(OnymTokens.surface2,
-                                in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(OnymTokens.hairline, lineWidth: 1))
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("INVITE KEY")
-                        .font(.system(size: 11.5, weight: .medium))
-                        .tracking(0.46)
-                        .foregroundStyle(OnymTokens.text2)
-                    Text("Start a chat by scanning")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(OnymTokens.text)
-                        .tracking(-0.16)
-                    Text("Have someone scan this code with Onym to open a private chat with \(activeSummary?.name ?? "this identity").")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(OnymTokens.text2)
-                        .lineSpacing(2)
-                        .lineLimit(3)
-                }
-                Spacer(minLength: 4)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(OnymTokens.text3)
-            }
-            .padding(18)
-            .background(OnymTokens.surface2,
-                        in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("settings.invite_hero")
-    }
 
     private func notBackedUpBanner(count: Int) -> some View {
         Button { showRecoveryPhrase = true } label: {
@@ -382,11 +267,6 @@ struct SettingsView: View {
     }
 
     // MARK: - Subtitles
-
-    private var identitySubtitle: String {
-        let total = identitiesFlow.identities.count
-        return total <= 1 ? "Manage your identity" : "\(total) identities · switch active"
-    }
 
     private var aboutSubtitle: String {
         let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"

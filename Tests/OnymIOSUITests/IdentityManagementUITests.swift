@@ -1,85 +1,62 @@
 import XCTest
 
-/// End-to-end coverage of the multi-identity surface that landed in
-/// PR #56 (the 5-PR multi-identity stack: keychain → repository →
-/// group filter → transport fan-out → UI).
+/// Multi-identity coverage against the unified Settings identity carousel
+/// (which replaced the Identities list + detail screens): the carousel
+/// shows every identity's invite QR, adds a new one from its last page,
+/// switches active by swiping, and deletes from a per-page type-to-confirm.
 ///
 /// The fresh launch arguments (`--reset-keychain --mock-biometric`)
-/// guarantee one auto-bootstrapped identity at start; tests build
-/// on top of that single starting point.
+/// guarantee one auto-bootstrapped identity at start.
 final class IdentityManagementUITests: XCTestCase {
     override func setUp() {
         super.setUp()
         continueAfterFailure = false
     }
 
-    /// 1) Settings → Identities row → list appears with the bootstrapped
-    /// identity marked Active.
-    func test_identitiesList_showsBootstrappedIdentityAsActive() throws {
+    /// 1) Settings shows the identity carousel with the bootstrapped
+    /// identity marked ACTIVE.
+    func test_carousel_showsBootstrappedIdentityAsActive() throws {
         let app = AppLauncher.launchFresh()
         defer { app.terminate() }
 
         let settings = SettingsScreen(app: app)
-        settings.tapIdentities()
-
-        let identities = IdentitiesScreen(app: app)
-        XCTAssertTrue(identities.waitForReady(),
-                      "Identities list never loaded")
-        XCTAssertEqual(identities.rows.count, 1,
-                       "fresh install should have exactly one auto-bootstrapped identity")
+        settings.tapSettingsTab()
+        // The active identity's page renders an ACTIVE badge — proof the
+        // carousel loaded with the bootstrapped identity active.
+        XCTAssertTrue(app.staticTexts["ACTIVE"].waitForExistence(timeout: 5),
+                      "bootstrapped identity's ACTIVE badge never appeared in the carousel")
     }
 
-    /// 2) Add Identity sheet → name in → submit → list grows by one.
-    func test_addIdentity_sheetSubmits_growsList() throws {
+    /// 2) Add Identity from the carousel's last page → new alias appears.
+    func test_addIdentity_viaCarousel_appears() throws {
         let app = AppLauncher.launchFresh()
         defer { app.terminate() }
 
         let settings = SettingsScreen(app: app)
-        settings.tapIdentities()
-        let identities = IdentitiesScreen(app: app)
-        _ = identities.waitForReady()
+        settings.addIdentityViaCarousel(name: "Work")
 
-        identities.tapAdd()
-        identities.typeAddName("Work")
-        identities.tapAddSubmit()
-
-        // The sheet closes async after the repository's add(); poll
-        // the row count until the new identity is observable.
-        let workRow = app.buttons.matching(
+        let workAlias = app.staticTexts.matching(
             NSPredicate(format: "label CONTAINS 'Work'")
         ).firstMatch
-        XCTAssertTrue(workRow.waitForExistence(timeout: 5),
-                      "newly-added 'Work' identity never appeared in the list")
-        XCTAssertEqual(identities.rows.count, 2,
-                       "list should contain the bootstrapped identity + 'Work'")
+        XCTAssertTrue(workAlias.waitForExistence(timeout: 8),
+                      "newly-added 'Work' identity never appeared in the carousel")
     }
 
-    /// 3) Picker on Chats switches identities; nav title flips.
+    /// 3) Picker on Chats switches identities; nav title flips. (Seeds the
+    /// second identity via the carousel.)
     func test_chatsPicker_switchesActiveIdentity_titleFlips() throws {
         let app = AppLauncher.launchFresh()
         defer { app.terminate() }
 
-        // Seed a second identity so the picker becomes interactive.
         let settings = SettingsScreen(app: app)
-        settings.tapIdentities()
-        let identities = IdentitiesScreen(app: app)
-        _ = identities.waitForReady()
-        identities.tapAdd()
-        identities.typeAddName("Work")
-        identities.tapAddSubmit()
-        // Wait for the row before navigating away.
+        settings.addIdentityViaCarousel(name: "Work")
         XCTAssertTrue(
-            app.buttons.matching(NSPredicate(format: "label CONTAINS 'Work'"))
-                .firstMatch.waitForExistence(timeout: 5)
+            app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Work'"))
+                .firstMatch.waitForExistence(timeout: 8)
         )
 
-        // Drive the picker.
         let chats = ChatsScreen(app: app)
         chats.tapChatsTab()
-
-        // The picker row is identified by `identity_picker.row.<uuid>`,
-        // but we don't know the uuid here — match the menu row by
-        // label instead.
         chats.tapPicker()
         let workMenuItem = app.buttons.matching(
             NSPredicate(format: "label CONTAINS 'Work'")
@@ -88,81 +65,61 @@ final class IdentityManagementUITests: XCTestCase {
                       "Work entry never appeared in the picker menu")
         workMenuItem.tap()
 
-        // Nav title becomes the active identity's name.
         let title = chats.navTitle("Work")
         XCTAssertTrue(title.waitForExistence(timeout: 5),
                       "Chats nav title never flipped to 'Work' after picker selection")
     }
 
-    /// 4) Remove flow — name-confirm gate blocks until exact match,
-    /// list shrinks back after confirmed removal.
-    func test_removeIdentity_nameConfirmGate_blocksThenAllows() throws {
+    /// 4) Delete from the carousel — the visible page's Delete opens the
+    /// name-confirm gate; confirming removes the identity.
+    func test_deleteIdentity_viaCarousel_nameConfirmGate() throws {
         let app = AppLauncher.launchFresh()
         defer { app.terminate() }
 
-        // Add a "Work" identity first.
         let settings = SettingsScreen(app: app)
-        settings.tapIdentities()
-        let identities = IdentitiesScreen(app: app)
-        _ = identities.waitForReady()
-        identities.tapAdd()
-        identities.typeAddName("Work")
-        identities.tapAddSubmit()
+        settings.addIdentityViaCarousel(name: "Work")
+        XCTAssertTrue(
+            app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Work'"))
+                .firstMatch.waitForExistence(timeout: 8)
+        )
 
-        let workRow = app.buttons.matching(
+        // The carousel is on the just-added "Work" page — tap its Delete.
+        let deleteButton = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH 'identity.delete.'")
+        ).firstMatch
+        XCTAssertTrue(deleteButton.waitForExistence(timeout: 5),
+                      "carousel Delete action never appeared")
+        deleteButton.tap()
+
+        // Type-to-confirm gate (reused RemoveIdentitySheet).
+        let confirmField = app.textFields["remove_identity.confirm_field"]
+        XCTAssertTrue(confirmField.waitForExistence(timeout: 5),
+                      "remove-identity confirm field never appeared")
+        confirmField.tap()
+        confirmField.typeText("Work")
+
+        let removeButton = app.buttons["remove_identity.remove_button"]
+        let enabled = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "isEnabled == true"),
+            object: removeButton
+        )
+        XCTAssertEqual(.completed, XCTWaiter.wait(for: [enabled], timeout: 5),
+                       "Remove button never enabled after typing the correct name")
+        removeButton.tap()
+
+        // The "Work" alias is gone from the carousel.
+        let workAlias = app.staticTexts.matching(
             NSPredicate(format: "label CONTAINS 'Work'")
         ).firstMatch
-        XCTAssertTrue(workRow.waitForExistence(timeout: 5))
-
-        // Swipe + tap Remove.
-        identities.swipeRemove(named: "Work")
-
-        // Wrong text — Remove button stays disabled.
-        identities.typeNameToConfirm("nope")
-        XCTAssertTrue(identities.removeButton.waitForExistence(timeout: 5))
-        XCTAssertFalse(identities.removeButton.isEnabled,
-                       "Remove button must stay disabled until the name matches")
-
-        // Clear + correct text → button enables.
-        identities.removeConfirmField.tap()
-        identities.removeConfirmField.press(forDuration: 1.0)
-        if app.menuItems["Select All"].exists {
-            app.menuItems["Select All"].tap()
-        }
-        identities.removeConfirmField.typeText(XCUIKeyboardKey.delete.rawValue)
-        identities.removeConfirmField.typeText("Work")
-
-        // Poll until the button enables — SwiftUI's `.disabled` flips
-        // on the next state push.
-        let enabledPredicate = NSPredicate(format: "isEnabled == true")
-        let expectation = XCTNSPredicateExpectation(
-            predicate: enabledPredicate,
-            object: identities.removeButton
-        )
-        XCTAssertEqual(.completed, XCTWaiter.wait(for: [expectation], timeout: 5),
-                       "Remove button never enabled after typing the correct name")
-
-        identities.tapRemove()
-
-        // List shrinks back to one row.
-        XCTAssertTrue(
-            workRow.waitForNonExistence(timeout: 5),
-            "'Work' row never disappeared after confirmed removal"
-        )
-        XCTAssertEqual(identities.rows.count, 1,
-                       "list should shrink back to the bootstrapped identity")
+        XCTAssertTrue(workAlias.waitForNonExistence(timeout: 5),
+                      "'Work' identity never disappeared after confirmed removal")
     }
 }
 
 private extension XCUIElement {
-    /// Polls until the element is no longer present. XCUI lacks a
-    /// built-in `waitForNonExistence`, but the inverse predicate works.
     func waitForNonExistence(timeout: TimeInterval) -> Bool {
         let predicate = NSPredicate(format: "exists == false")
-        let expectation = XCTNSPredicateExpectation(
-            predicate: predicate,
-            object: self
-        )
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: self)
         return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
     }
 }

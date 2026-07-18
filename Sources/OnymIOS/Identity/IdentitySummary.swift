@@ -8,7 +8,7 @@ import Foundation
 /// pair; broadcast via the `identities` stream so SwiftUI views can
 /// render the picker without ever crossing into the actor's secret-
 /// material path.
-struct IdentitySummary: Hashable, Sendable {
+struct IdentitySummary: Hashable, Sendable, Identifiable {
     let id: IdentityID
     let name: String
     /// 48-byte arkworks-compressed BLS12-381 G1 public key. Hex-prefix

@@ -225,7 +225,7 @@ private struct AddIdentitySheet: View {
 
 // MARK: - Remove sheet
 
-private struct RemoveIdentitySheet: View {
+struct RemoveIdentitySheet: View {
     @Bindable var flow: IdentitiesFlow
     let summary: IdentitySummary
 
