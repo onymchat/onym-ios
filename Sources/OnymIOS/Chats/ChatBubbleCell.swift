@@ -78,7 +78,22 @@ struct ChatReplyQuote {
 /// invokes `onRetryRequested`, which the controller wires to
 /// `SendMessageInteractor.retry`.
 final class ChatBubbleCell: UITableViewCell {
+    /// Separate reuse pools for text vs media/voice bubbles. A media cell
+    /// activates the fixed 75%-width constraint; keeping text bubbles in
+    /// their own pool means a short text message can never dequeue a cell
+    /// that still carries that lock (which rendered it full-width). Same
+    /// cell class, two identifiers — the provider picks by message content.
+    static let textReuseID = "ChatBubbleCell.text"
+    static let mediaReuseID = "ChatBubbleCell.media"
+    /// Generic identifier for unit tests that construct a cell directly;
+    /// the production table registers the two pool identifiers above.
     static let reuseID = "ChatBubbleCell"
+
+    /// Whether a message renders as a media/voice bubble (picks the
+    /// media reuse pool) vs a plain text bubble.
+    static func hasMedia(_ message: ChatMessage) -> Bool {
+        !message.media.isEmpty || message.voiceAttachment != nil
+    }
 
     /// Max bubble width as a fraction of the cell's content width.
     /// Matches the usual messenger convention — long messages wrap

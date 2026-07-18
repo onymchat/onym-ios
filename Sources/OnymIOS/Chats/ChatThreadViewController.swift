@@ -593,7 +593,10 @@ final class ChatThreadViewController: UIViewController {
         // Self-sizing rows — bubble height grows with body text.
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 44
-        tableView.register(ChatBubbleCell.self, forCellReuseIdentifier: ChatBubbleCell.reuseID)
+        // Two reuse pools (text vs media/voice) so a text bubble never
+        // recycles a cell that still carries a media width lock.
+        tableView.register(ChatBubbleCell.self, forCellReuseIdentifier: ChatBubbleCell.textReuseID)
+        tableView.register(ChatBubbleCell.self, forCellReuseIdentifier: ChatBubbleCell.mediaReuseID)
         tableView.keyboardDismissMode = .interactive
         view.addSubview(tableView)
 
@@ -617,12 +620,18 @@ final class ChatThreadViewController: UIViewController {
         dataSource = UITableViewDiffableDataSource<Section, UUID>(
             tableView: tableView
         ) { [weak self] tableView, indexPath, id in
+            // Pick the reuse pool from the message content so a text bubble
+            // never recycles a media cell (with its 75%-width lock still on).
+            let message = self?.messagesByID[id]
+            let reuseID = (message.map(ChatBubbleCell.hasMedia) ?? false)
+                ? ChatBubbleCell.mediaReuseID
+                : ChatBubbleCell.textReuseID
             let cell = tableView.dequeueReusableCell(
-                withIdentifier: ChatBubbleCell.reuseID,
+                withIdentifier: reuseID,
                 for: indexPath
             )
             if let bubble = cell as? ChatBubbleCell,
-               let message = self?.messagesByID[id] {
+               let message {
                 let retryHandler: (() -> Void)? = {
                     guard message.direction == .outgoing,
                           message.status == .failed else { return nil }
