@@ -77,6 +77,20 @@ struct ChatMessage: Equatable, Sendable, Identifiable {
     /// `ChatVideoLoader`).
     let videoAttachment: ChatVideoAttachment?
 
+    /// A multi-media album (2+ items) attached to this message. Mirrors
+    /// `ChatMessagePayload.attachments`. `nil` for text + single-media
+    /// messages (which use `imageAttachment` / `videoAttachment`).
+    let albumAttachments: [ChatMediaAttachment]?
+
+    /// Canonical media list for rendering: the album when present, else
+    /// the single image/video wrapped in a one-element list, else empty.
+    var media: [ChatMediaAttachment] {
+        if let albumAttachments, !albumAttachments.isEmpty { return albumAttachments }
+        if let imageAttachment { return [.image(imageAttachment)] }
+        if let videoAttachment { return [.video(videoAttachment)] }
+        return []
+    }
+
     init(
         id: UUID,
         groupID: String,
@@ -90,7 +104,8 @@ struct ChatMessage: Equatable, Sendable, Identifiable {
         groupType: SEPGroupType,
         failureReason: SendFailureReason? = nil,
         imageAttachment: ChatImageAttachment? = nil,
-        videoAttachment: ChatVideoAttachment? = nil
+        videoAttachment: ChatVideoAttachment? = nil,
+        albumAttachments: [ChatMediaAttachment]? = nil
     ) {
         self.id = id
         self.groupID = groupID
@@ -105,6 +120,7 @@ struct ChatMessage: Equatable, Sendable, Identifiable {
         self.failureReason = failureReason
         self.imageAttachment = imageAttachment
         self.videoAttachment = videoAttachment
+        self.albumAttachments = albumAttachments
     }
 }
 

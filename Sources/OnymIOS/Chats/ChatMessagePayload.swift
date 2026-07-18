@@ -73,6 +73,13 @@ struct ChatMessagePayload: Codable, Equatable, Sendable {
     /// `ChatVideoAttachment`.
     let videoAttachment: ChatVideoAttachment?
 
+    /// A multi-media **album** (2+ items, mixed image/video) attached to
+    /// this message. Additive + optional: single-media messages leave
+    /// this `nil` and use `attachment` / `videoAttachment` above; an
+    /// older receiver ignores the unknown key. When present, `variant.body`
+    /// is the (possibly empty) caption and the flat single fields are nil.
+    let attachments: [ChatMediaAttachment]?
+
     init(
         version: Int,
         messageID: UUID,
@@ -82,7 +89,8 @@ struct ChatMessagePayload: Codable, Equatable, Sendable {
         replyToMessageID: UUID?,
         variant: ChatMessageVariant,
         attachment: ChatImageAttachment? = nil,
-        videoAttachment: ChatVideoAttachment? = nil
+        videoAttachment: ChatVideoAttachment? = nil,
+        attachments: [ChatMediaAttachment]? = nil
     ) {
         self.version = version
         self.messageID = messageID
@@ -93,6 +101,7 @@ struct ChatMessagePayload: Codable, Equatable, Sendable {
         self.variant = variant
         self.attachment = attachment
         self.videoAttachment = videoAttachment
+        self.attachments = attachments
     }
 
     enum CodingKeys: String, CodingKey {
@@ -105,6 +114,7 @@ struct ChatMessagePayload: Codable, Equatable, Sendable {
         case variant
         case attachment
         case videoAttachment = "video_attachment"
+        case attachments
     }
 }
 

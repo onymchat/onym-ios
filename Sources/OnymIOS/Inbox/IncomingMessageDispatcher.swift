@@ -732,7 +732,10 @@ struct IncomingMessageDispatcher: Sendable {
             imageAttachment: payload.attachment,
             // Encrypted video (if any). Only the small poster loads on
             // render; the video blob downloads on play (`ChatVideoLoader`).
-            videoAttachment: payload.videoAttachment
+            videoAttachment: payload.videoAttachment,
+            // Multi-media album (if any). Each item's poster loads lazily
+            // like a single image/video.
+            albumAttachments: payload.attachments
         )
         await messageRepository.insert(message)
 

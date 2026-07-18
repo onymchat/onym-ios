@@ -437,6 +437,135 @@ actor SendMessageInteractor {
         return pending.withStatus(finalStatus)
     }
 
+    /// Send a multi-media **album** — several picked images/videos as one
+    /// message (one caption, one status, one read receipt), rendered as a
+    /// grid. Each item is encoded + sealed and its ciphertext persisted
+    /// to the outbox; the single optimistic bubble is inserted before the
+    /// uploads (all posters/images primed so the grid renders at once),
+    /// then every blob uploads and the payload fans out. An upload/
+    /// fan-out failure marks the whole album `.failed` (resendable).
+    ///
+    /// Items that can't be encoded are skipped; if none survive, throws
+    /// `imageEncodeFailed`. A single surviving item collapses to a normal
+    /// single-media message.
+    @discardableResult
+    func sendAlbum(
+        groupID: String,
+        sources: [ChatMediaSource],
+        caption: String = "",
+        now: Date = Date()
+    ) async throws -> ChatMessage {
+        guard let active = await identity.currentIdentity(),
+              let activeID = await identity.currentSelectedID() else {
+            throw SendError.noIdentityLoaded
+        }
+        let groups = await groupRepository.currentGroups()
+        guard let group = groups.first(where: {
+            $0.id == groupID && $0.ownerIdentityID == activeID
+        }) else {
+            throw SendError.unknownGroup
+        }
+        let myBlsHex = active.blsPublicKey.map { String(format: "%02x", $0) }.joined()
+        guard group.memberProfiles[myBlsHex] != nil else {
+            throw SendError.senderNotAMember
+        }
+        let variant: ChatMessageVariant
+        switch group.groupType {
+        case .tyranny:
+            variant = .tyranny(body: caption)
+        case .oneOnOne, .anarchy, .democracy, .oligarchy:
+            throw SendError.unknownGroup
+        }
+
+        // Encode + seal each item; collect the descriptors + the blobs to
+        // upload. Un-encodable items are skipped.
+        var items: [ChatMediaAttachment] = []
+        var uploads: [(Data, String)] = []
+        var shas: [String] = []
+        for source in sources {
+            switch source {
+            case .image(let data):
+                guard let encoded = ChatImageEncoder.encode(fromImageData: data),
+                      let sealed = try? ChatImageCrypto.seal(encoded.jpeg) else { continue }
+                let attachment = ChatImageAttachment(
+                    sha256: sealed.sha256Hex, mimeType: "image/jpeg",
+                    byteSize: sealed.blob.count, width: encoded.width, height: encoded.height,
+                    encKey: sealed.key, blurhash: encoded.blurhash, server: blossomServerURL
+                )
+                await outbox?.store(sha: sealed.sha256Hex, blob: sealed.blob)
+                await imageLoader?.prime(sha256: sealed.sha256Hex, plaintext: encoded.jpeg)
+                items.append(.image(attachment))
+                uploads.append((sealed.blob, "image/jpeg"))
+                shas.append(sealed.sha256Hex)
+            case .video(let url):
+                guard let encoded = await videoEncoder(url),
+                      let posterSealed = try? ChatImageCrypto.seal(encoded.poster.jpeg),
+                      let videoSealed = try? ChatImageCrypto.seal(encoded.mp4),
+                      videoSealed.blob.count <= Self.maxUploadBytes else { continue }
+                let poster = ChatImageAttachment(
+                    sha256: posterSealed.sha256Hex, mimeType: "image/jpeg",
+                    byteSize: posterSealed.blob.count, width: encoded.poster.width,
+                    height: encoded.poster.height, encKey: posterSealed.key,
+                    blurhash: encoded.poster.blurhash, server: blossomServerURL
+                )
+                let videoAttachment = ChatVideoAttachment(
+                    sha256: videoSealed.sha256Hex, mimeType: "video/mp4",
+                    byteSize: videoSealed.blob.count, width: encoded.width, height: encoded.height,
+                    durationSeconds: encoded.durationSeconds, encKey: videoSealed.key,
+                    poster: poster, server: blossomServerURL
+                )
+                await outbox?.store(sha: posterSealed.sha256Hex, blob: posterSealed.blob)
+                await outbox?.store(sha: videoSealed.sha256Hex, blob: videoSealed.blob)
+                await imageLoader?.prime(sha256: posterSealed.sha256Hex, plaintext: encoded.poster.jpeg)
+                items.append(.video(videoAttachment))
+                uploads.append((posterSealed.blob, "image/jpeg"))
+                uploads.append((videoSealed.blob, "video/mp4"))
+                shas.append(posterSealed.sha256Hex)
+                shas.append(videoSealed.sha256Hex)
+            }
+        }
+        guard !items.isEmpty else { throw SendError.imageEncodeFailed }
+
+        let messageID = UUID()
+        let sentAtMillis = Int64(now.timeIntervalSince1970 * 1000)
+        // A single surviving item collapses to a normal single-media
+        // message (so the album model only kicks in for 2+ items).
+        let singleImage: ChatImageAttachment? = items.count == 1 ? items[0].asImage : nil
+        let singleVideo: ChatVideoAttachment? = items.count == 1 ? items[0].asVideo : nil
+        let album: [ChatMediaAttachment]? = items.count > 1 ? items : nil
+        let payload = ChatMessagePayload(
+            version: 1,
+            messageID: messageID,
+            groupID: group.groupIDData,
+            senderBlsPubkeyHex: myBlsHex,
+            sentAtMillis: sentAtMillis,
+            replyToMessageID: nil,
+            variant: variant,
+            attachment: singleImage,
+            videoAttachment: singleVideo,
+            attachments: album
+        )
+        let pending = ChatMessage(
+            id: messageID, groupID: groupID, ownerIdentityID: group.ownerIdentityID,
+            senderBlsPubkeyHex: myBlsHex, body: caption, sentAt: now,
+            direction: .outgoing, status: .pending, replyToMessageID: nil,
+            groupType: group.groupType,
+            imageAttachment: singleImage, videoAttachment: singleVideo,
+            albumAttachments: album
+        )
+        await messageRepository.insert(pending)
+
+        let recipients = group.memberProfiles
+            .filter { $0.key != myBlsHex }
+            .map { $0.value.inboxPublicKey }
+        let finalStatus = await uploadAndFanOut(
+            blobs: uploads, payload: payload, recipients: recipients,
+            messageID: messageID, groupID: groupID, owner: group.ownerIdentityID,
+            sentBlobShas: shas
+        )
+        return pending.withStatus(finalStatus)
+    }
+
     /// Retry a previously-failed outgoing message. Looks up the row
     /// by `messageID`, flips status back to `.pending` so the UI
     /// shows the in-flight glyph, then re-runs the fan-out using the
@@ -506,7 +635,8 @@ actor SendMessageInteractor {
             replyToMessageID: message.replyToMessageID,
             variant: variant,
             attachment: message.imageAttachment,
-            videoAttachment: message.videoAttachment
+            videoAttachment: message.videoAttachment,
+            attachments: message.albumAttachments
         )
 
         // Re-upload the persisted ciphertext for any attachment so the
@@ -549,38 +679,36 @@ actor SendMessageInteractor {
         )
     }
 
-    /// The persisted outbox blobs backing a message's attachment(s), in
-    /// upload order (poster before video). Empty for a text message or
-    /// when the outbox no longer has the bytes.
+    /// The persisted outbox blobs backing a message's media, in upload
+    /// order (poster before video within a clip). Covers single-media and
+    /// albums via `ChatMessage.media`. Empty for text or when the outbox
+    /// no longer has the bytes.
     private func attachmentBlobs(
         for message: ChatMessage
     ) async -> [(sha: String, blob: Data, mimeType: String)] {
-        var out: [(String, Data, String)] = []
-        if let image = message.imageAttachment,
-           let blob = await outbox?.load(sha: image.sha256) {
-            out.append((image.sha256, blob, image.mimeType))
-        }
-        if let video = message.videoAttachment {
-            if let posterBlob = await outbox?.load(sha: video.poster.sha256) {
-                out.append((video.poster.sha256, posterBlob, video.poster.mimeType))
+        var out: [(sha: String, blob: Data, mimeType: String)] = []
+        for item in message.media {
+            switch item {
+            case .image(let image):
+                if let blob = await outbox?.load(sha: image.sha256) {
+                    out.append((image.sha256, blob, image.mimeType))
+                }
+            case .video(let video):
+                if let posterBlob = await outbox?.load(sha: video.poster.sha256) {
+                    out.append((video.poster.sha256, posterBlob, video.poster.mimeType))
+                }
+                if let videoBlob = await outbox?.load(sha: video.sha256) {
+                    out.append((video.sha256, videoBlob, video.mimeType))
+                }
             }
-            if let videoBlob = await outbox?.load(sha: video.sha256) {
-                out.append((video.sha256, videoBlob, video.mimeType))
-            }
         }
-        return out.map { (sha: $0.0, blob: $0.1, mimeType: $0.2) }
+        return out
     }
 
-    /// All attachment blob SHA-256s referenced by a message (for outbox
-    /// eviction on delete).
+    /// All blob SHA-256s referenced by a message's media (for outbox
+    /// eviction on delete). Covers single-media and albums.
     private func attachmentShas(of message: ChatMessage) -> [String] {
-        var shas: [String] = []
-        if let image = message.imageAttachment { shas.append(image.sha256) }
-        if let video = message.videoAttachment {
-            shas.append(video.poster.sha256)
-            shas.append(video.sha256)
-        }
-        return shas
+        message.media.flatMap { $0.blobShas }
     }
 
     /// Upload each attachment blob then fan the payload out, updating the
@@ -750,7 +878,8 @@ private extension ChatMessage {
             groupType: groupType,
             failureReason: status == .failed ? failureReason : nil,
             imageAttachment: imageAttachment,
-            videoAttachment: videoAttachment
+            videoAttachment: videoAttachment,
+            albumAttachments: albumAttachments
         )
     }
 }

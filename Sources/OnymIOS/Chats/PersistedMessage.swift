@@ -69,6 +69,10 @@ final class PersistedMessage {
     /// migration shape as `encryptedAttachmentJSON`; carries the
     /// per-video key + the poster descriptor.
     var encryptedVideoAttachmentJSON: Data?
+    /// AES-GCM-encrypted JSON of the `[ChatMediaAttachment]` album (or
+    /// `nil` for text / single-media). Same at-rest encryption + optional
+    /// lightweight-migration shape as the other attachment columns.
+    var encryptedAlbumJSON: Data?
 
     init(
         id: String,
@@ -83,7 +87,8 @@ final class PersistedMessage {
         encryptedSenderBlsPubkeyHex: Data,
         encryptedBody: Data,
         encryptedAttachmentJSON: Data? = nil,
-        encryptedVideoAttachmentJSON: Data? = nil
+        encryptedVideoAttachmentJSON: Data? = nil,
+        encryptedAlbumJSON: Data? = nil
     ) {
         self.id = id
         self.groupID = groupID
@@ -98,5 +103,6 @@ final class PersistedMessage {
         self.encryptedBody = encryptedBody
         self.encryptedAttachmentJSON = encryptedAttachmentJSON
         self.encryptedVideoAttachmentJSON = encryptedVideoAttachmentJSON
+        self.encryptedAlbumJSON = encryptedAlbumJSON
     }
 }

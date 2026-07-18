@@ -128,6 +128,7 @@ actor SwiftDataMessageStore: MessageStore {
             existing.encryptedBody = encoded.encryptedBody
             existing.encryptedAttachmentJSON = encoded.encryptedAttachmentJSON
             existing.encryptedVideoAttachmentJSON = encoded.encryptedVideoAttachmentJSON
+            existing.encryptedAlbumJSON = encoded.encryptedAlbumJSON
             try? context.save()
             return false
         }
@@ -190,6 +191,9 @@ actor SwiftDataMessageStore: MessageStore {
         let encryptedVideoAttachment = try message.videoAttachment.map { attachment in
             try StorageEncryption.encrypt(JSONEncoder().encode(attachment))
         }
+        let encryptedAlbum = try message.albumAttachments.map { album in
+            try StorageEncryption.encrypt(JSONEncoder().encode(album))
+        }
         return PersistedMessage(
             id: message.id.uuidString,
             groupID: message.groupID,
@@ -203,7 +207,8 @@ actor SwiftDataMessageStore: MessageStore {
             encryptedSenderBlsPubkeyHex: try StorageEncryption.encrypt(message.senderBlsPubkeyHex),
             encryptedBody: try StorageEncryption.encrypt(message.body),
             encryptedAttachmentJSON: encryptedAttachment,
-            encryptedVideoAttachmentJSON: encryptedVideoAttachment
+            encryptedVideoAttachmentJSON: encryptedVideoAttachment,
+            encryptedAlbumJSON: encryptedAlbum
         )
     }
 
@@ -227,6 +232,9 @@ actor SwiftDataMessageStore: MessageStore {
         let videoAttachment: ChatVideoAttachment? = row.encryptedVideoAttachmentJSON
             .flatMap { try? StorageEncryption.decrypt($0) }
             .flatMap { try? JSONDecoder().decode(ChatVideoAttachment.self, from: $0) }
+        let albumAttachments: [ChatMediaAttachment]? = row.encryptedAlbumJSON
+            .flatMap { try? StorageEncryption.decrypt($0) }
+            .flatMap { try? JSONDecoder().decode([ChatMediaAttachment].self, from: $0) }
         return ChatMessage(
             id: id,
             groupID: row.groupID,
@@ -240,7 +248,8 @@ actor SwiftDataMessageStore: MessageStore {
             groupType: groupType,
             failureReason: row.failureReasonRaw.flatMap(SendFailureReason.init(rawValue:)),
             imageAttachment: imageAttachment,
-            videoAttachment: videoAttachment
+            videoAttachment: videoAttachment,
+            albumAttachments: albumAttachments
         )
     }
 }

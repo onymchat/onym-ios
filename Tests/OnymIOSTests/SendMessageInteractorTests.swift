@@ -185,6 +185,43 @@ final class SendMessageInteractorTests: XCTestCase {
         XCTAssertTrue(stored.isEmpty, "deleting a failed media message removes the bubble")
     }
 
+    // MARK: - Album send
+
+    func test_sendAlbum_multipleImages_oneMessageWithAlbum_allBlobsUploaded() async throws {
+        let groupID = await seedGroupWithTwoPeers()
+        let result = try await interactor.sendAlbum(
+            groupID: groupID,
+            sources: [.image(Self.makeJPEG()), .image(Self.makeJPEG()), .image(Self.makeJPEG())]
+        )
+        XCTAssertEqual(result.status, .sent)
+        let album = try XCTUnwrap(result.albumAttachments)
+        XCTAssertEqual(album.count, 3)
+
+        // Exactly one persisted message carrying the whole album.
+        let stored = await messages.currentMessages(groupID: groupID, owner: currentIdentityID)
+        XCTAssertEqual(stored.count, 1)
+        XCTAssertEqual(stored[0].albumAttachments?.count, 3)
+
+        // Every item's blob was uploaded.
+        let uploaded = await blossom.storedSha256s
+        for item in album {
+            for sha in item.blobShas { XCTAssertTrue(uploaded.contains(sha)) }
+        }
+        // One message → one envelope per peer (two peers).
+        let sends = await transport.recordedSends
+        XCTAssertEqual(sends.count, 2)
+    }
+
+    func test_sendAlbum_singleItem_collapsesToSingleMedia() async throws {
+        let groupID = await seedGroupWithTwoPeers()
+        let result = try await interactor.sendAlbum(
+            groupID: groupID, sources: [.image(Self.makeJPEG())]
+        )
+        XCTAssertEqual(result.status, .sent)
+        XCTAssertNil(result.albumAttachments, "a one-item album collapses to single media")
+        XCTAssertNotNil(result.imageAttachment)
+    }
+
     nonisolated private static func makeJPEG() -> Data {
         let format = UIGraphicsImageRendererFormat.default()
         format.scale = 1

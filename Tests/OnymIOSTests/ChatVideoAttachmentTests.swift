@@ -45,6 +45,34 @@ final class ChatVideoAttachmentTests: XCTestCase {
         )
     }
 
+    func test_payload_withAlbum_roundTrips_mixedMedia() throws {
+        let album: [ChatMediaAttachment] = [
+            .image(samplePoster()),
+            .video(sampleAttachment()),
+        ]
+        let payload = ChatMessagePayload(
+            version: 1,
+            messageID: UUID(),
+            groupID: Data(repeating: 0x22, count: 32),
+            senderBlsPubkeyHex: String(repeating: "cd", count: 48),
+            sentAtMillis: 1_700_000_000_000,
+            replyToMessageID: nil,
+            variant: .tyranny(body: "album"),
+            attachments: album
+        )
+        let data = try JSONEncoder().encode(payload)
+        let decoded = try JSONDecoder().decode(ChatMessagePayload.self, from: data)
+        XCTAssertEqual(decoded, payload)
+        XCTAssertEqual(decoded.attachments?.count, 2)
+        XCTAssertEqual(decoded.attachments?[0].isVideo, false)
+        XCTAssertEqual(decoded.attachments?[1].isVideo, true)
+
+        // Discriminated union on the wire + snake_case within items.
+        let json = String(data: data, encoding: .utf8) ?? ""
+        XCTAssertTrue(json.contains("\"attachments\""))
+        XCTAssertTrue(json.contains("\"kind\""))
+    }
+
     func test_payload_withVideo_roundTrips() throws {
         let payload = makePayload(video: sampleAttachment())
         let data = try JSONEncoder().encode(payload)
