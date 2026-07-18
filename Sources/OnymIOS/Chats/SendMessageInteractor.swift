@@ -16,6 +16,10 @@ actor SendMessageInteractor {
     private let inboxTransport: any InboxTransport
     private let messageRepository: MessageRepository
     private let groupRepository: GroupRepository
+    private let blossomClient: any BlossomClient
+    /// Base URL stamped into `ChatImageAttachment.server` so receivers
+    /// fetch from the same server the sender uploaded to.
+    private let blossomServerURL: String
 
     enum SendError: Error, Equatable {
         case noIdentityLoaded
@@ -30,18 +34,29 @@ actor SendMessageInteractor {
         /// refuses to ship them — a no-op send would burn a relay
         /// publish for nothing.
         case emptyBody
+        /// The picked image couldn't be decoded / re-encoded.
+        case imageEncodeFailed
+        /// Encrypting or uploading the image blob to Blossom failed.
+        case imageUploadFailed(String)
     }
 
     init(
         identity: IdentityRepository,
         inboxTransport: any InboxTransport,
         messageRepository: MessageRepository,
-        groupRepository: GroupRepository
+        groupRepository: GroupRepository,
+        blossomClient: any BlossomClient = URLSessionBlossomClient(
+            baseURL: URLSessionBlossomClient.defaultBaseURL,
+            signerProvider: OnymNostrSignerProvider()
+        ),
+        blossomServerURL: String = URLSessionBlossomClient.defaultBaseURL.absoluteString
     ) {
         self.identity = identity
         self.inboxTransport = inboxTransport
         self.messageRepository = messageRepository
         self.groupRepository = groupRepository
+        self.blossomClient = blossomClient
+        self.blossomServerURL = blossomServerURL
     }
 
     /// Returns the locally-persisted `ChatMessage` after the fan-out
@@ -150,6 +165,126 @@ actor SendMessageInteractor {
             replyToMessageID: pending.replyToMessageID,
             groupType: pending.groupType,
             failureReason: failureReason
+        )
+    }
+
+    /// Send an image message. Encodes + AES-GCM-encrypts the image,
+    /// uploads the ciphertext blob to Blossom, then ships a normal
+    /// `ChatMessagePayload` carrying a `ChatImageAttachment` (+ optional
+    /// caption). The optimistic bubble is inserted *before* the fan-out
+    /// (with the full attachment, since the SHA-256 is known right after
+    /// the local encrypt), but *after* a successful upload so receivers
+    /// never get an attachment pointing at a missing blob. Upload
+    /// failure throws before anything is persisted or fanned out.
+    @discardableResult
+    func sendImage(
+        groupID: String,
+        imageData: Data,
+        caption: String = "",
+        now: Date = Date()
+    ) async throws -> ChatMessage {
+        guard let active = await identity.currentIdentity(),
+              let activeID = await identity.currentSelectedID() else {
+            throw SendError.noIdentityLoaded
+        }
+        let groups = await groupRepository.currentGroups()
+        guard let group = groups.first(where: {
+            $0.id == groupID && $0.ownerIdentityID == activeID
+        }) else {
+            throw SendError.unknownGroup
+        }
+        let myBlsHex = active.blsPublicKey.map { String(format: "%02x", $0) }.joined()
+        guard group.memberProfiles[myBlsHex] != nil else {
+            throw SendError.senderNotAMember
+        }
+        let variant: ChatMessageVariant
+        switch group.groupType {
+        case .tyranny:
+            variant = .tyranny(body: caption)
+        case .oneOnOne, .anarchy, .democracy, .oligarchy:
+            throw SendError.unknownGroup
+        }
+
+        // Encode → encrypt → upload. All before the optimistic insert so
+        // a failed upload leaves no dangling bubble.
+        guard let encoded = ChatImageEncoder.encode(fromImageData: imageData) else {
+            throw SendError.imageEncodeFailed
+        }
+        let sealed: ChatImageCrypto.Sealed
+        do {
+            sealed = try ChatImageCrypto.seal(encoded.jpeg)
+        } catch {
+            throw SendError.imageUploadFailed("encrypt: \(error)")
+        }
+        do {
+            _ = try await blossomClient.upload(sealed.blob, mimeType: "image/jpeg")
+        } catch {
+            throw SendError.imageUploadFailed(String(describing: error))
+        }
+
+        let attachment = ChatImageAttachment(
+            sha256: sealed.sha256Hex,
+            mimeType: "image/jpeg",
+            byteSize: sealed.blob.count,
+            width: encoded.width,
+            height: encoded.height,
+            encKey: sealed.key,
+            blurhash: encoded.blurhash,
+            server: blossomServerURL
+        )
+
+        let messageID = UUID()
+        let sentAtMillis = Int64(now.timeIntervalSince1970 * 1000)
+        let payload = ChatMessagePayload(
+            version: 1,
+            messageID: messageID,
+            groupID: group.groupIDData,
+            senderBlsPubkeyHex: myBlsHex,
+            sentAtMillis: sentAtMillis,
+            replyToMessageID: nil,
+            variant: variant,
+            attachment: attachment
+        )
+
+        let pending = ChatMessage(
+            id: messageID,
+            groupID: groupID,
+            ownerIdentityID: group.ownerIdentityID,
+            senderBlsPubkeyHex: myBlsHex,
+            body: caption,
+            sentAt: now,
+            direction: .outgoing,
+            status: .pending,
+            replyToMessageID: nil,
+            groupType: group.groupType,
+            imageAttachment: attachment
+        )
+        await messageRepository.insert(pending)
+
+        let recipients = group.memberProfiles
+            .filter { $0.key != myBlsHex }
+            .map { $0.value.inboxPublicKey }
+        let (finalStatus, failureReason) = await fanOut(payload: payload, recipients: recipients)
+        await messageRepository.updateStatus(
+            id: messageID,
+            status: finalStatus,
+            groupID: groupID,
+            owner: group.ownerIdentityID,
+            failureReason: failureReason
+        )
+        return ChatMessage(
+            id: pending.id,
+            groupID: pending.groupID,
+            ownerIdentityID: pending.ownerIdentityID,
+            senderBlsPubkeyHex: pending.senderBlsPubkeyHex,
+            body: pending.body,
+            sentAt: pending.sentAt,
+            direction: pending.direction,
+            status: finalStatus,
+            replyToMessageID: pending.replyToMessageID,
+            groupType: pending.groupType,
+            failureReason: failureReason,
+            imageAttachment: pending.imageAttachment
         )
     }
 

@@ -1,6 +1,30 @@
 import CryptoKit
+import UIKit
 import XCTest
 @testable import OnymIOS
+
+/// In-memory `BlossomClient` fake for the send tests — records uploaded
+/// blobs by their sha256 and can be flipped to fail.
+actor FakeBlossomClient: BlossomClient {
+    private var blobs: [String: Data] = [:]
+    private var failing = false
+
+    var storedSha256s: [String] { Array(blobs.keys) }
+
+    func setFailing(_ value: Bool) { failing = value }
+
+    func upload(_ blob: Data, mimeType: String) async throws -> BlobDescriptor {
+        if failing { throw BlossomError.badStatus(500) }
+        let sha = ChatImageCrypto.sha256Hex(blob)
+        blobs[sha] = blob
+        return BlobDescriptor(sha256: sha, url: "https://blossom.test/\(sha)", size: blob.count)
+    }
+
+    func download(sha256: String) async throws -> Data {
+        guard let data = blobs[sha256] else { throw BlossomError.badStatus(404) }
+        return data
+    }
+}
 
 /// Behavioral tests for `SendMessageInteractor`. Uses a real
 /// `IdentityRepository` (test-namespaced keychain, in-memory
@@ -15,6 +39,7 @@ final class SendMessageInteractorTests: XCTestCase {
     private var transport: RecordingInboxTransport!
     private var groups: GroupRepository!
     private var messages: MessageRepository!
+    private var blossom: FakeBlossomClient!
     private var interactor: SendMessageInteractor!
 
     // Set after `bootstrap()`. The active identity's BLS hex —
@@ -50,12 +75,15 @@ final class SendMessageInteractorTests: XCTestCase {
             currentIdentityID: currentIdentityID
         )
         messages = MessageRepository(store: SwiftDataMessageStore.inMemory())
+        blossom = FakeBlossomClient()
 
         interactor = SendMessageInteractor(
             identity: identity,
             inboxTransport: transport,
             messageRepository: messages,
-            groupRepository: groups
+            groupRepository: groups,
+            blossomClient: blossom,
+            blossomServerURL: "https://blossom.test"
         )
     }
 
@@ -70,6 +98,58 @@ final class SendMessageInteractorTests: XCTestCase {
         mySendingPubkey = nil
         currentIdentityID = nil
         try await super.tearDown()
+    }
+
+    // MARK: - Image send
+
+    func test_sendImage_uploadsBlob_andPersistsAttachment() async throws {
+        let groupID = await seedGroupWithTwoPeers()
+        let imageData = Self.makeJPEG()
+
+        let result = try await interactor.sendImage(
+            groupID: groupID, imageData: imageData, caption: "pic"
+        )
+        XCTAssertEqual(result.status, .sent)
+        XCTAssertEqual(result.body, "pic")
+        let attachment = try XCTUnwrap(result.imageAttachment)
+        XCTAssertEqual(attachment.mimeType, "image/jpeg")
+        XCTAssertEqual(attachment.server, "https://blossom.test")
+        XCTAssertEqual(attachment.encKey.count, 32)
+        XCTAssertFalse(attachment.blurhash.isEmpty)
+
+        // The ciphertext blob was uploaded under its sha256.
+        let uploaded = await blossom.storedSha256s
+        XCTAssertTrue(uploaded.contains(attachment.sha256))
+
+        // Fanned out to the two peers, and persisted with the attachment.
+        let sends = await transport.recordedSends
+        XCTAssertEqual(sends.count, 2)
+        let stored = await messages.currentMessages(groupID: groupID, owner: currentIdentityID)
+        XCTAssertEqual(stored.count, 1)
+        XCTAssertEqual(stored[0].imageAttachment?.sha256, attachment.sha256)
+    }
+
+    func test_sendImage_uploadFailure_throws_andPersistsNothing() async throws {
+        let groupID = await seedGroupWithTwoPeers()
+        await blossom.setFailing(true)
+        do {
+            _ = try await interactor.sendImage(groupID: groupID, imageData: Self.makeJPEG())
+            XCTFail("expected upload failure")
+        } catch {
+            // expected
+        }
+        let stored = await messages.currentMessages(groupID: groupID, owner: currentIdentityID)
+        XCTAssertTrue(stored.isEmpty, "a failed upload must not leave a dangling bubble")
+    }
+
+    private static func makeJPEG() -> Data {
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        let img = UIGraphicsImageRenderer(size: CGSize(width: 16, height: 16), format: format).image { ctx in
+            UIColor.systemOrange.setFill()
+            ctx.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
+        }
+        return img.jpegData(compressionQuality: 0.8)!
     }
 
     // MARK: - Happy path
