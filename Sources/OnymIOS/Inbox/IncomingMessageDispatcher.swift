@@ -725,7 +725,11 @@ struct IncomingMessageDispatcher: Sendable {
             // content from outside this group because rendering only
             // looks up local rows.
             replyToMessageID: payload.replyToMessageID,
-            groupType: group.groupType
+            groupType: group.groupType,
+            // Encrypted image (if any). The blob is fetched + decrypted
+            // lazily at render time (`ChatImageLoader`); nothing is
+            // downloaded on receipt.
+            imageAttachment: payload.attachment
         )
         await messageRepository.insert(message)
 

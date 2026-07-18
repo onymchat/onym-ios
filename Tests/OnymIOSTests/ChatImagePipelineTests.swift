@@ -83,6 +83,33 @@ final class ChatImagePipelineTests: XCTestCase {
         XCTAssertFalse(event.sig.isEmpty)
     }
 
+    // MARK: - ChatImageLoader
+
+    func test_loader_downloadsDecryptsAndCaches() async throws {
+        let encoded = try XCTUnwrap(ChatImageEncoder.encode(
+            solidImage(color: .systemIndigo, size: CGSize(width: 40, height: 30))
+        ))
+        let sealed = try ChatImageCrypto.seal(encoded.jpeg)
+        let blossom = FakeBlossomClient()
+        _ = try await blossom.upload(sealed.blob, mimeType: "image/jpeg")
+
+        let attachment = ChatImageAttachment(
+            sha256: sealed.sha256Hex, mimeType: "image/jpeg", byteSize: sealed.blob.count,
+            width: encoded.width, height: encoded.height, encKey: sealed.key,
+            blurhash: encoded.blurhash, server: nil
+        )
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("loadertest-\(UUID().uuidString)")
+        let loader = ChatImageLoader(blossomClient: blossom, cacheDirectory: tmp)
+
+        let image = try await loader.image(for: attachment)
+        XCTAssertGreaterThan(image.size.width, 0)
+        // Cached on disk → resolvable even if the server "goes away".
+        await blossom.setFailing(true)
+        let again = try await loader.image(for: attachment)
+        XCTAssertEqual(again.size, image.size)
+    }
+
     // MARK: - Helpers
 
     private func solidImage(color: UIColor, size: CGSize) -> UIImage {
