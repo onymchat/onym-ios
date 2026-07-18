@@ -114,6 +114,53 @@ final class IdentityManagementUITests: XCTestCase {
         XCTAssertTrue(workAlias.waitForNonExistence(timeout: 5),
                       "'Work' identity never disappeared after confirmed removal")
     }
+
+    /// 5) Rename from the carousel — tapping the alias opens the rename
+    /// sheet prefilled with the current name; saving updates the alias.
+    func test_renameIdentity_viaCarousel_updatesAlias() throws {
+        let app = AppLauncher.launchFresh()
+        defer { app.terminate() }
+
+        let settings = SettingsScreen(app: app)
+        settings.addIdentityViaCarousel(name: "Work")
+        XCTAssertTrue(
+            app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Work'"))
+                .firstMatch.waitForExistence(timeout: 8)
+        )
+
+        // The carousel is on the just-added "Work" page — tap its alias to
+        // rename.
+        let renameButton = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH 'identity.rename.'")
+        ).firstMatch
+        XCTAssertTrue(renameButton.waitForExistence(timeout: 5),
+                      "carousel rename affordance never appeared")
+        renameButton.tap()
+
+        let nameField = app.textFields["rename_identity.name_field"]
+        XCTAssertTrue(nameField.waitForExistence(timeout: 5),
+                      "rename name field never appeared")
+        nameField.tap()
+        // Clear the prefilled "Work", then type the new name.
+        if let value = nameField.value as? String {
+            nameField.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue,
+                                      count: value.count))
+        }
+        nameField.typeText("Job")
+        app.buttons["rename_identity.save_button"].tap()
+
+        // The alias flips to "Job"; "Work" is gone.
+        XCTAssertTrue(
+            app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Job'"))
+                .firstMatch.waitForExistence(timeout: 5),
+            "carousel alias never updated to 'Job' after rename"
+        )
+        XCTAssertTrue(
+            app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Work'"))
+                .firstMatch.waitForNonExistence(timeout: 5),
+            "old 'Work' alias never disappeared after rename"
+        )
+    }
 }
 
 private extension XCUIElement {

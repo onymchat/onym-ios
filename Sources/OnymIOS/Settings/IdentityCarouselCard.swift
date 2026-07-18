@@ -24,6 +24,7 @@ struct IdentityCarouselCard: View {
 
     @State private var selection: String = ""
     @State private var selectTask: Task<Void, Never>?
+    @State private var renameTarget: IdentitySummary?
     @FocusState private var addNameFocused: Bool
 
     var body: some View {
@@ -66,6 +67,9 @@ struct IdentityCarouselCard: View {
         .padding(.top, 4)
         .sheet(item: removalBinding) { summary in
             RemoveIdentitySheet(flow: flow, summary: summary)
+        }
+        .sheet(item: $renameTarget) { summary in
+            RenameIdentitySheet(flow: flow, summary: summary)
         }
     }
 
@@ -137,11 +141,22 @@ struct IdentityCarouselCard: View {
                         lineWidth: isActive ? 2 : 1))
 
             VStack(spacing: 3) {
-                Text(summary.name)
-                    .font(.system(size: 20, weight: .bold))
-                    .tracking(-0.2)
-                    .foregroundStyle(isActive ? OnymAccent.blue.color : OnymTokens.text)
-                    .lineLimit(1)
+                Button {
+                    renameTarget = summary
+                } label: {
+                    HStack(spacing: 5) {
+                        Text(summary.name)
+                            .font(.system(size: 20, weight: .bold))
+                            .tracking(-0.2)
+                            .foregroundStyle(isActive ? OnymAccent.blue.color : OnymTokens.text)
+                            .lineLimit(1)
+                        Image(systemName: "pencil")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(OnymTokens.text3)
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("identity.rename.\(summary.id.rawValue.uuidString)")
                 if isActive {
                     Text("ACTIVE")
                         .font(.system(size: 10, weight: .bold))
@@ -272,5 +287,93 @@ struct IdentityCarouselCard: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+}
+
+/// Rename sheet reached by tapping an identity's alias in the carousel.
+/// A rename is a local, display-only change — it never touches the keys or
+/// the invite link. Prefilled with the current name; empty input is a no-op.
+struct RenameIdentitySheet: View {
+    @Bindable var flow: IdentitiesFlow
+    let summary: IdentitySummary
+    @Environment(\.dismiss) private var dismiss
+    @State private var text: String
+    @FocusState private var focused: Bool
+
+    /// Cap matches the inline editor / Android (`MAX_IDENTITY_NAME_LENGTH`).
+    private static let maxLength = 30
+
+    init(flow: IdentitiesFlow, summary: IdentitySummary) {
+        self.flow = flow
+        self.summary = summary
+        _text = State(initialValue: summary.name)
+    }
+
+    private var trimmed: String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    private var canSave: Bool { !trimmed.isEmpty }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("A name only you see. It doesn't change your keys or your invite link.")
+                        .font(.callout)
+                        .foregroundStyle(OnymTokens.text2)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 16)
+
+                    SettingsCard {
+                        TextField("Identity name", text: $text)
+                            .textInputAutocapitalization(.words)
+                            .autocorrectionDisabled()
+                            .focused($focused)
+                            .font(.system(size: 16.5))
+                            .submitLabel(.done)
+                            .onSubmit(save)
+                            .onChange(of: text) { _, newValue in
+                                if newValue.count > Self.maxLength {
+                                    text = String(newValue.prefix(Self.maxLength))
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            .accessibilityIdentifier("rename_identity.name_field")
+                    }
+
+                    Button(action: save) {
+                        Text("Save")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity, minHeight: 50)
+                            .background(OnymAccent.blue.color,
+                                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canSave)
+                    .opacity(canSave ? 1 : 0.5)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .accessibilityIdentifier("rename_identity.save_button")
+                }
+                .padding(.bottom, 24)
+            }
+            .background(OnymTokens.surface.ignoresSafeArea())
+            .navigationTitle("Rename Identity")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+            .onAppear { focused = true }
+        }
+    }
+
+    private func save() {
+        guard canSave else { return }
+        flow.rename(summary.id, newName: trimmed)
+        dismiss()
     }
 }
