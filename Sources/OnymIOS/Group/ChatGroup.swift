@@ -74,6 +74,12 @@ struct ChatGroup: Identifiable, Equatable, Sendable {
     /// Defaulted so existing construction sites need no change.
     var avatarJPEG: Data? = nil
 
+    /// When the local user last opened / read this thread. Drives the
+    /// chat-list unread badge (incoming messages with `sentAt > lastReadAt`
+    /// are unread). `nil` = never opened (everything counts as unread).
+    /// Defaulted so existing construction sites need no change.
+    var lastReadAt: Date? = nil
+
     /// Group ID as the raw 32-byte payload (parsed back from `id`).
     /// Used directly when building chain payloads + invitations.
     var groupIDData: Data {

@@ -197,9 +197,9 @@ struct ChatsView: View {
     // MARK: - Populated list
 
     private var groupList: some View {
-        List(flow.groups) { group in
-            NavigationLink(value: group.id) {
-                ChatsRow(group: group)
+        List(flow.items) { item in
+            NavigationLink(value: item.group.id) {
+                ChatsRow(item: item)
             }
             .listRowSeparator(.visible)
         }
@@ -228,7 +228,9 @@ struct ChatsView: View {
 }
 
 private struct ChatsRow: View {
-    let group: ChatGroup
+    let item: ChatListItem
+
+    private var group: ChatGroup { item.group }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -248,19 +250,27 @@ private struct ChatsRow: View {
                     .font(.system(size: 16, weight: .semibold))
                     .lineLimit(1)
                 HStack(spacing: 6) {
-                    Image(systemName: "lock.fill")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                    if item.latestPreview == nil {
+                        Image(systemName: "lock.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                     Text(subtitle)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        // Unread rows read a touch stronger than the muted
+                        // "no messages / metadata" line.
+                        .foregroundStyle(item.unreadCount > 0 ? .primary : .secondary)
                         .lineLimit(1)
+                        .accessibilityIdentifier("chats.row.subtitle.\(group.id)")
                 }
             }
 
             Spacer(minLength: 0)
 
-            if group.isPublishedOnChain {
+            if item.unreadCount > 0 {
+                UnreadBadge(count: item.unreadCount)
+                    .accessibilityIdentifier("chats.row.unread.\(group.id)")
+            } else if group.isPublishedOnChain {
                 Image(systemName: "checkmark.seal.fill")
                     .font(.caption)
                     .foregroundStyle(Color.green)
@@ -271,7 +281,13 @@ private struct ChatsRow: View {
         .accessibilityIdentifier("chats.row.\(group.id)")
     }
 
+    /// Latest message preview when the group has messages; otherwise the
+    /// governance + member-count metadata (so a brand-new chat still shows
+    /// something meaningful).
     private var subtitle: String {
+        if let preview = item.latestPreview, !preview.isEmpty {
+            return preview
+        }
         let count = group.memberProfiles.count
         let memberText: String?
         switch count {
@@ -281,6 +297,21 @@ private struct ChatsRow: View {
         }
         let parts = [group.groupType.label.capitalized, memberText].compactMap { $0 }
         return parts.joined(separator: " · ")
+    }
+}
+
+/// Red pill showing the unread-message count on a chat row (caps at 99+).
+private struct UnreadBadge: View {
+    let count: Int
+
+    var body: some View {
+        Text(count > 99 ? "99+" : "\(count)")
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 6)
+            .frame(minWidth: 20, minHeight: 20)
+            .background(Color.red, in: Capsule())
+            .accessibilityLabel("\(count) unread")
     }
 }
 

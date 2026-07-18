@@ -25,6 +25,12 @@ protocol GroupStore: Sendable {
     /// creating identity's row.
     func markPublished(id: String, ownerIDString: String, commitment: Data?) async
 
+    /// Stamp the group's last-read marker (chat-list unread badge). No-op
+    /// if the row is missing. Scoped to `(id, ownerIDString)` so opening a
+    /// thread as one identity doesn't clear another identity's unread
+    /// state for the same group.
+    func markRead(id: String, ownerIDString: String, at date: Date) async
+
     /// Delete the single row for `(id, ownerIDString)`. Scoped to the
     /// owner so deleting a chat for one identity leaves another
     /// identity's copy of the same group intact.

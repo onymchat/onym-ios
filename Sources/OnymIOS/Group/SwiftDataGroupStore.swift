@@ -119,6 +119,15 @@ actor SwiftDataGroupStore: GroupStore {
         try? context.save()
     }
 
+    func markRead(id: String, ownerIDString: String, at date: Date) {
+        let descriptor = FetchDescriptor<PersistedGroup>(
+            predicate: #Predicate { $0.id == id && $0.ownerIdentityIDString == ownerIDString }
+        )
+        guard let row = try? context.fetch(descriptor).first else { return }
+        row.lastReadAt = date
+        try? context.save()
+    }
+
     func delete(id: String, ownerIDString: String) {
         let descriptor = FetchDescriptor<PersistedGroup>(
             predicate: #Predicate { $0.id == id && $0.ownerIdentityIDString == ownerIDString }
@@ -163,6 +172,7 @@ actor SwiftDataGroupStore: GroupStore {
             tierRaw: group.tier.rawValue,
             groupTypeRaw: group.groupType.rawValue,
             isPublishedOnChain: group.isPublishedOnChain,
+            lastReadAt: group.lastReadAt,
             encryptedName: try StorageEncryption.encrypt(group.name),
             encryptedGroupSecret: try StorageEncryption.encrypt(group.groupSecret),
             encryptedMembersJSON: try StorageEncryption.encrypt(membersJSON),
@@ -221,7 +231,8 @@ actor SwiftDataGroupStore: GroupStore {
             adminPubkeyHex: adminPubkeyHex,
             adminEd25519PubkeyHex: adminEd25519PubkeyHex,
             isPublishedOnChain: row.isPublishedOnChain,
-            avatarJPEG: avatarJPEG
+            avatarJPEG: avatarJPEG,
+            lastReadAt: row.lastReadAt
         )
     }
 }

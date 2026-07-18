@@ -200,6 +200,12 @@ private actor JoinTestableInMemoryGroupStore: GroupStore {
         rows[id] = existing
     }
 
+    func markRead(id: String, ownerIDString: String, at date: Date) {
+        guard var existing = rows[id] else { return }
+        existing.lastReadAt = date
+        rows[id] = existing
+    }
+
     func delete(id: String, ownerIDString: String) { rows.removeValue(forKey: id) }
 
     func deleteOwner(_ ownerIDString: String) {

@@ -231,6 +231,12 @@ struct ChatThreadView: View {
                 // "read". Gated by the symmetric setting, batched per
                 // sender, and de-duped via `ackedReadIDs`.
                 await sendReadReceipts(for: snapshot)
+                // Clear the chat-list unread badge: mark the group read up
+                // to the newest message the user is now looking at. No-op
+                // in the repo when it isn't newer than the stored marker.
+                if let newest = snapshot.map(\.sentAt).max() {
+                    await chatsFlow.markRead(groupID: groupID, upTo: newest)
+                }
             }
         }
     }

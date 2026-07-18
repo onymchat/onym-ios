@@ -46,6 +46,11 @@ final class PersistedGroup {
     var tierRaw: Int
     var groupTypeRaw: String
     var isPublishedOnChain: Bool
+    /// When the local user last opened / read this thread — drives the
+    /// chat-list unread badge. Plain (a timestamp isn't user-identifying)
+    /// and optional so SwiftData's lightweight migration lands the column
+    /// on existing rows without a wipe; `nil` = never opened.
+    var lastReadAt: Date?
 
     var encryptedName: Data
     var encryptedGroupSecret: Data
@@ -73,6 +78,7 @@ final class PersistedGroup {
         tierRaw: Int,
         groupTypeRaw: String,
         isPublishedOnChain: Bool,
+        lastReadAt: Date? = nil,
         encryptedName: Data,
         encryptedGroupSecret: Data,
         encryptedMembersJSON: Data,
@@ -90,6 +96,7 @@ final class PersistedGroup {
         self.tierRaw = tierRaw
         self.groupTypeRaw = groupTypeRaw
         self.isPublishedOnChain = isPublishedOnChain
+        self.lastReadAt = lastReadAt
         self.encryptedName = encryptedName
         self.encryptedGroupSecret = encryptedGroupSecret
         self.encryptedMembersJSON = encryptedMembersJSON

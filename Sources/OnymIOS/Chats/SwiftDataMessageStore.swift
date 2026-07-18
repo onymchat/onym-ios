@@ -76,6 +76,32 @@ actor SwiftDataMessageStore: MessageStore {
         return rows.compactMap(Self.decode)
     }
 
+    func latestMessage(groupID: String, ownerIDString: String) -> ChatMessage? {
+        var descriptor = FetchDescriptor<PersistedMessage>(
+            predicate: #Predicate {
+                $0.groupID == groupID && $0.ownerIdentityIDString == ownerIDString
+            },
+            sortBy: [SortDescriptor(\.sentAt, order: .reverse)]
+        )
+        descriptor.fetchLimit = 1
+        guard let row = try? context.fetch(descriptor).first else { return nil }
+        return Self.decode(row)
+    }
+
+    func unreadCount(groupID: String, ownerIDString: String, since: Date) -> Int {
+        // Plain columns only (direction + sentAt) → no decryption needed.
+        let incoming = MessageDirection.incoming.rawValue
+        let descriptor = FetchDescriptor<PersistedMessage>(
+            predicate: #Predicate {
+                $0.groupID == groupID
+                    && $0.ownerIdentityIDString == ownerIDString
+                    && $0.directionRaw == incoming
+                    && $0.sentAt > since
+            }
+        )
+        return (try? context.fetchCount(descriptor)) ?? 0
+    }
+
     /// Full-text-ish search across all of one identity's messages, newest
     /// first. Bodies are encrypted at rest, so this decrypts every row
     /// for the owner and filters by a case-insensitive substring match on

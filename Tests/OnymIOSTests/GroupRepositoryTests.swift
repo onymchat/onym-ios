@@ -56,6 +56,25 @@ final class GroupRepositoryTests: XCTestCase {
         XCTAssertEqual(next?.first?.commitment, onchainCommitment)
     }
 
+    func test_markRead_stampsLastReadAt_andIgnoresOlderMarks() async throws {
+        let store = InMemoryGroupStore()
+        let group = makeGroup(id: "ee".repeated(32), name: "G", owner: ownerA)
+        await store.preload([group])
+        let repo = GroupRepository(store: store, currentIdentityID: ownerA)
+        var iterator = repo.snapshots.makeAsyncIterator()
+        _ = await iterator.next()
+
+        let readAt = Date(timeIntervalSince1970: 2_000)
+        await repo.markRead(id: group.id, ownerID: ownerA, at: readAt)
+        var groups = await repo.currentGroups()
+        XCTAssertEqual(groups.first?.lastReadAt, readAt)
+
+        // An older mark is a no-op (the marker only ever moves forward).
+        await repo.markRead(id: group.id, ownerID: ownerA, at: Date(timeIntervalSince1970: 1_000))
+        groups = await repo.currentGroups()
+        XCTAssertEqual(groups.first?.lastReadAt, readAt)
+    }
+
     func test_delete_emptiesSnapshot() async throws {
         let store = InMemoryGroupStore()
         let group = makeGroup(id: "dd".repeated(32), name: "G", owner: ownerA)
@@ -188,6 +207,12 @@ private actor InMemoryGroupStore: GroupStore {
         if let commitment {
             existing.commitment = commitment
         }
+        rows[id] = existing
+    }
+
+    func markRead(id: String, ownerIDString: String, at date: Date) {
+        guard var existing = rows[id] else { return }
+        existing.lastReadAt = date
         rows[id] = existing
     }
 

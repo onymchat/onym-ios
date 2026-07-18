@@ -45,6 +45,20 @@ actor GroupRepository {
         await refreshFromStore()
     }
 
+    /// Stamp a group's last-read marker (chat-list unread badge) and
+    /// re-yield snapshots so the list clears the badge. No-op if `date`
+    /// isn't newer than the current marker, so the frequent "thread is
+    /// open" callers don't trigger a write + snapshot on every repaint.
+    func markRead(id: String, ownerID: IdentityID, at date: Date) async {
+        let ownerString = ownerID.rawValue.uuidString
+        let current = cached.first {
+            $0.id == id && $0.ownerIdentityID == ownerID
+        }?.lastReadAt
+        if let current, current >= date { return }
+        await store.markRead(id: id, ownerIDString: ownerString, at: date)
+        await refreshFromStore()
+    }
+
     func delete(id: String, ownerID: IdentityID) async {
         await store.delete(id: id, ownerIDString: ownerID.rawValue.uuidString)
         await refreshFromStore()

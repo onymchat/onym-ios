@@ -33,6 +33,10 @@ actor MessageRepository {
 
     private var continuations: [ThreadKey: [UUID: AsyncStream<[ChatMessage]>.Continuation]] = [:]
 
+    /// Subscribers to the coarse cross-thread "something changed" signal
+    /// (see `changes()`). Keyed by a per-subscriber UUID.
+    private var changeContinuations: [UUID: AsyncStream<Void>.Continuation] = [:]
+
     init(store: any MessageStore) {
         self.store = store
     }
@@ -102,6 +106,7 @@ actor MessageRepository {
         let key = ThreadKey(groupID: groupID, owner: owner)
         cached[key] = []
         publish(key)
+        notifyChange()
     }
 
     /// Cascade delete on identity removal. The store drops every row
@@ -155,6 +160,38 @@ actor MessageRepository {
         )
     }
 
+    // MARK: - Chat-list aggregates
+
+    /// The most recent message for one thread (chat-list subtitle + sort).
+    func latestMessage(groupID: String, owner: IdentityID) async -> ChatMessage? {
+        await store.latestMessage(
+            groupID: groupID, ownerIDString: owner.rawValue.uuidString
+        )
+    }
+
+    /// Count of incoming messages in one thread received after `since`
+    /// (chat-list unread badge).
+    func unreadCount(groupID: String, owner: IdentityID, since: Date) async -> Int {
+        await store.unreadCount(
+            groupID: groupID, ownerIDString: owner.rawValue.uuidString, since: since
+        )
+    }
+
+    /// Coarse "some thread's messages changed" signal — fires on any
+    /// insert / status flip / delete (and once on subscribe, to prime).
+    /// The chat list listens so it can recompute each group's latest
+    /// message + unread count and re-sort; the payload is intentionally
+    /// empty (the list re-reads the store cheaply on each ping).
+    nonisolated func changes() -> AsyncStream<Void> {
+        AsyncStream { continuation in
+            let id = UUID()
+            Task { await self.addChangeSubscriber(id, continuation) }
+            continuation.onTermination = { _ in
+                Task { await self.removeChangeSubscriber(id) }
+            }
+        }
+    }
+
     // MARK: - Private
 
     private func subscribe(
@@ -182,6 +219,7 @@ actor MessageRepository {
             ownerIDString: key.owner.rawValue.uuidString
         )
         publish(key)
+        notifyChange()
     }
 
     private func publish(_ key: ThreadKey) {
@@ -190,5 +228,21 @@ actor MessageRepository {
         for continuation in subscribers.values {
             continuation.yield(view)
         }
+    }
+
+    private func addChangeSubscriber(
+        _ id: UUID,
+        _ continuation: AsyncStream<Void>.Continuation
+    ) {
+        changeContinuations[id] = continuation
+        continuation.yield(())  // prime so the list computes immediately
+    }
+
+    private func removeChangeSubscriber(_ id: UUID) {
+        changeContinuations.removeValue(forKey: id)
+    }
+
+    private func notifyChange() {
+        for continuation in changeContinuations.values { continuation.yield(()) }
     }
 }

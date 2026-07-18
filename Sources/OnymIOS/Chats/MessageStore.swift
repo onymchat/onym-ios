@@ -14,6 +14,17 @@ protocol MessageStore: Sendable {
     /// rows (and its own send/receive direction).
     func list(groupID: String, ownerIDString: String) async -> [ChatMessage]
 
+    /// The most recent message (any direction) for one group owned by
+    /// `ownerIDString`, or `nil` when the group has no messages. Drives
+    /// the chat-list row subtitle + the list's most-recent-first sort.
+    func latestMessage(groupID: String, ownerIDString: String) async -> ChatMessage?
+
+    /// Count of *incoming* messages in one group (owned by `ownerIDString`)
+    /// received after `since` — the chat-list unread badge. `since` is the
+    /// group's last-read marker; pass `.distantPast` to count everything.
+    /// Uses only plain (unencrypted) columns, so it's a cheap fetch-count.
+    func unreadCount(groupID: String, ownerIDString: String, since: Date) async -> Int
+
     /// Case-insensitive substring search over one identity's message
     /// bodies across all groups, newest first (capped at `limit`). Bodies
     /// are encrypted at rest, so the store decrypts and filters in memory.

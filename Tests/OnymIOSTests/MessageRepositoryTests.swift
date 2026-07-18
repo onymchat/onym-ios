@@ -291,7 +291,8 @@ final class MessageRepositoryTests: XCTestCase {
         ownerIdentityID: IdentityID = kOwnerA,
         body: String = "hi",
         sentAt: Date = Date(timeIntervalSince1970: 1_700_000_000),
-        status: MessageStatus = .sent
+        status: MessageStatus = .sent,
+        direction: MessageDirection = .outgoing
     ) -> ChatMessage {
         ChatMessage(
             id: id,
@@ -300,11 +301,54 @@ final class MessageRepositoryTests: XCTestCase {
             senderBlsPubkeyHex: "11".repeated(48),
             body: body,
             sentAt: sentAt,
-            direction: .outgoing,
+            direction: direction,
             status: status,
             replyToMessageID: nil,
             groupType: .tyranny
         )
+    }
+
+    // MARK: - Chat-list aggregates
+
+    func test_latestMessage_returnsMostRecentBySentAt() async {
+        let store = InMemoryMessageStore()
+        let old = makeMessage(groupID: groupA, body: "old",
+                              sentAt: Date(timeIntervalSince1970: 1_000))
+        let new = makeMessage(groupID: groupA, body: "new",
+                              sentAt: Date(timeIntervalSince1970: 2_000))
+        await store.preload([old, new])
+        let repo = MessageRepository(store: store)
+
+        let latest = await repo.latestMessage(groupID: groupA, owner: kOwnerA)
+        XCTAssertEqual(latest?.body, "new")
+        // A group with no messages has no latest.
+        let none = await repo.latestMessage(groupID: "empty", owner: kOwnerA)
+        XCTAssertNil(none)
+    }
+
+    func test_unreadCount_countsIncomingAfterMarker() async {
+        let store = InMemoryMessageStore()
+        let marker = Date(timeIntervalSince1970: 1_500)
+        await store.preload([
+            // Before the marker → read.
+            makeMessage(groupID: groupA, body: "seen",
+                        sentAt: Date(timeIntervalSince1970: 1_000), direction: .incoming),
+            // After the marker, incoming → unread (x2).
+            makeMessage(groupID: groupA, body: "u1",
+                        sentAt: Date(timeIntervalSince1970: 2_000), direction: .incoming),
+            makeMessage(groupID: groupA, body: "u2",
+                        sentAt: Date(timeIntervalSince1970: 3_000), direction: .incoming),
+            // After the marker but outgoing → never unread.
+            makeMessage(groupID: groupA, body: "mine",
+                        sentAt: Date(timeIntervalSince1970: 4_000), direction: .outgoing),
+        ])
+        let repo = MessageRepository(store: store)
+
+        let unread = await repo.unreadCount(groupID: groupA, owner: kOwnerA, since: marker)
+        XCTAssertEqual(unread, 2)
+        // distantPast counts every incoming message.
+        let all = await repo.unreadCount(groupID: groupA, owner: kOwnerA, since: .distantPast)
+        XCTAssertEqual(all, 3)
     }
 }
 
@@ -329,6 +373,21 @@ private actor InMemoryMessageStore: MessageStore {
         rows.values
             .filter { $0.groupID == groupID && $0.ownerIdentityID.rawValue.uuidString == ownerIDString }
             .sorted { $0.sentAt < $1.sentAt }
+    }
+
+    func latestMessage(groupID: String, ownerIDString: String) -> ChatMessage? {
+        rows.values
+            .filter { $0.groupID == groupID && $0.ownerIdentityID.rawValue.uuidString == ownerIDString }
+            .max { $0.sentAt < $1.sentAt }
+    }
+
+    func unreadCount(groupID: String, ownerIDString: String, since: Date) -> Int {
+        rows.values.filter {
+            $0.groupID == groupID
+                && $0.ownerIdentityID.rawValue.uuidString == ownerIDString
+                && $0.direction == .incoming
+                && $0.sentAt > since
+        }.count
     }
 
     func search(ownerIDString: String, query: String, limit: Int) -> [ChatMessage] {

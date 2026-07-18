@@ -98,6 +98,25 @@ struct ChatMessage: Equatable, Sendable, Identifiable {
         return []
     }
 
+    /// One-line preview for the chat-list row subtitle. Media messages
+    /// (which carry no/empty body) render a label; text renders its body.
+    /// Own messages get a "You: " prefix to disambiguate in a group.
+    var chatListPreview: String {
+        let content: String
+        if voiceAttachment != nil {
+            content = "Voice message"
+        } else if let album = albumAttachments, !album.isEmpty {
+            content = "Album"
+        } else if videoAttachment != nil {
+            content = "Video"
+        } else if imageAttachment != nil {
+            content = "Photo"
+        } else {
+            content = body
+        }
+        return direction == .outgoing ? "You: \(content)" : content
+    }
+
     init(
         id: UUID,
         groupID: String,

@@ -380,7 +380,7 @@ struct OnymIOSApp: App {
                 )
             },
             makeChatsFlow: { @MainActor in
-                ChatsFlow(repository: groupRepository)
+                ChatsFlow(repository: groupRepository, messages: messageRepository)
             },
             identitiesFlow: identitiesFlow,
             approveRequestsFlow: approveRequestsFlow,
