@@ -1,0 +1,13 @@
+Onym needs no account, login, or demo credentials.
+
+On first launch the app auto-creates a local cryptographic identity — there is no sign-up, phone number, or email. Everything works from a fresh install.
+
+To exercise the core flow:
+1. Open the app — an identity is created automatically (Settings tab shows it with an invite QR).
+2. On the Chats tab, tap the compose button to create an encrypted group, then tap "Share invite link" to get a join link.
+3. A second install (or another device) can open that link to request to join; the group admin approves it in "Join requests".
+
+Notes for review:
+- Messages are end-to-end encrypted; Onym operates no central message server. By default the app talks to public Nostr relays (message/invite transport) and Blossom servers (media) on Stellar testnet — no real funds are involved.
+- Face ID / biometrics is used only to gate viewing the local recovery phrase; it never leaves the device.
+- No user tracking, no ads, no third-party analytics.

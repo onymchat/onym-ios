@@ -1,0 +1,1 @@
+Spin up an end-to-end encrypted group and share one link. No phone number, no email, no central server — your identity is a key only you hold.

@@ -88,3 +88,9 @@ Resources/RelayerSecrets.json
 # gets wiped after its PR merges. Nothing in this directory is build
 # input or the source of truth.
 .claude/
+
+# App Store Connect API key — never commit the private key
+*.p8
+AuthKey_*.p8
+fastlane/*.p8
+fastlane/api_key*.json

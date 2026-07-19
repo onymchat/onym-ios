@@ -1,0 +1,12 @@
+# Shared config for `fastlane deliver` and the `upload_metadata` lane.
+# Screenshots are intentionally out of scope; this pushes the App Store
+# listing text (fastlane/metadata/) only — no binary, no review submit.
+app_identifier("app.onym.ios")
+metadata_path("./fastlane/metadata")
+
+skip_binary_upload(true)
+skip_screenshots(true)
+force(true)                       # non-interactive: no HTML preview prompt
+submit_for_review(false)
+run_precheck_before_submit(false)
+precheck_include_in_app_purchases(false)

@@ -1,0 +1,10 @@
+The first release of Onym.
+
+- End-to-end encrypted group chats
+- No phone number or email — your identity is a key you own
+- Create a group and share a single invite link
+- Bring your own Nostr relays and Blossom media servers
+- Multiple identities, switchable with a tap
+- Recovery-phrase backup
+
+Thanks for trying Onym. Feedback and issues: github.com/onymchat/onym-ios

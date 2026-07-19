@@ -1,0 +1,26 @@
+Onym is a private messenger built on one idea: your conversations are yours.
+
+END-TO-END ENCRYPTED
+Only the people in your group can read what's sent. Onym's servers never see your messages.
+
+NO PHONE NUMBER, NO EMAIL
+Your identity is a cryptographic key you own — not your contact info. Create one in seconds, and make as many as you like.
+
+NO CENTRAL SERVER
+Group membership is anchored on the Stellar network, not owned by us. There's no company account that can lock you out.
+
+START A CHAT WITH ONE LINK
+Spin up an encrypted group and share a single invite link. People join later without exchanging any keys.
+
+BRING YOUR OWN INFRASTRUCTURE
+Onym carries messages and media over open Nostr relays and Blossom servers. Use the defaults, or point the app at your own instances for maximum privacy.
+
+MULTIPLE IDENTITIES
+Keep contacts and chats cleanly separated. Switch between identities with a tap.
+
+YOU HOLD THE KEYS
+A recovery phrase restores your identity on a new device. Lose it and no one — including us — can recover it.
+
+Onym doesn't ask who you are. No accounts, no profiles, no tracking, no ads. Just private conversations you control.
+
+Built by people who think privacy is a right.

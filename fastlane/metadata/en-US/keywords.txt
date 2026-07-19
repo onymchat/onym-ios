@@ -1,0 +1,1 @@
+encrypted,private,messenger,secure,privacy,e2e,decentralized,nostr,stellar,anonymous,group chat

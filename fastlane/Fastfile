@@ -39,4 +39,44 @@ platform :ios do
       output_name: "OnymIOS.ipa"
     )
   end
+
+  desc "Upload App Store metadata to App Store Connect (no binary, no screenshots)"
+  desc ""
+  desc "Reads an App Store Connect API key from the environment:"
+  desc "  ASC_KEY_ID              — the key's Key ID"
+  desc "  ASC_ISSUER_ID           — your App Store Connect Issuer ID"
+  desc "  ASC_KEY_PATH            — path to the .p8 file            (or…)"
+  desc "  ASC_KEY_CONTENT         — the .p8 contents, inline        (use in CI)"
+  desc "  ASC_KEY_CONTENT_BASE64  — 'true' if ASC_KEY_CONTENT is base64-encoded"
+  desc "  ASC_APP_VERSION         — optional; the version whose metadata to edit"
+  desc ""
+  desc "Metadata lives in fastlane/metadata/ (committed). Screenshots are"
+  desc "out of scope and skipped; no binary is uploaded and nothing is"
+  desc "submitted for review — this only pushes the listing text."
+  lane :upload_metadata do
+    api_key = app_store_connect_api_key(
+      key_id: ENV.fetch("ASC_KEY_ID"),
+      issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+      key_filepath: ENV["ASC_KEY_PATH"],
+      key_content: ENV["ASC_KEY_CONTENT"],
+      is_key_content_base64: ENV["ASC_KEY_CONTENT_BASE64"] == "true",
+      in_house: false
+    )
+
+    deliver(
+      api_key: api_key,
+      app_identifier: "app.onym.ios",
+      app_version: ENV["ASC_APP_VERSION"],
+      metadata_path: "./fastlane/metadata",
+      # Text-only push: no binary, no screenshots, no review submission.
+      skip_binary_upload: true,
+      skip_screenshots: true,
+      skip_metadata: false,
+      # Non-interactive: don't open the HTML preview / prompt.
+      force: true,
+      run_precheck_before_submit: false,
+      precheck_include_in_app_purchases: false,
+      submit_for_review: false
+    )
+  end
 end
