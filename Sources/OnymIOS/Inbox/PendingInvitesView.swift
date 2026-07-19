@@ -10,32 +10,28 @@ struct PendingInvitesView: View {
     let onClose: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            topBar
-            if let error = flow.lastError {
-                errorBanner(error)
+        NavigationStack {
+            VStack(spacing: 0) {
+                if let error = flow.lastError {
+                    errorBanner(error)
+                }
+                if flow.pending.isEmpty && flow.verifying.isEmpty {
+                    emptyState
+                } else {
+                    inviteList
+                }
             }
-            if flow.pending.isEmpty && flow.verifying.isEmpty {
-                emptyState
-            } else {
-                inviteList
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(OnymTokens.bg.ignoresSafeArea())
+            .navigationTitle("Invitations")
+            .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done", action: onClose)
+                        .accessibilityIdentifier("pending_invites.done_button")
+                }
             }
         }
-        .background(OnymTokens.bg)
-    }
-
-    private var topBar: some View {
-        HStack {
-            Text("Invitations")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(OnymTokens.text)
-            Spacer()
-            Button("Done", action: onClose)
-                .font(.system(size: 16))
-                .foregroundStyle(OnymAccent.blue.color)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
     }
 
     private func errorBanner(_ message: String) -> some View {

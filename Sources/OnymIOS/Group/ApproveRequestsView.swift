@@ -15,21 +15,31 @@ struct ApproveRequestsView: View {
     let onClose: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            topBar
-            if let success = flow.lastSuccessMessage {
-                successBanner(success)
+        NavigationStack {
+            VStack(spacing: 0) {
+                if let success = flow.lastSuccessMessage {
+                    successBanner(success)
+                }
+                if let error = flow.lastError {
+                    errorBanner(error)
+                }
+                if flow.pending.isEmpty {
+                    emptyState
+                } else {
+                    requestList
+                }
             }
-            if let error = flow.lastError {
-                errorBanner(error)
-            }
-            if flow.pending.isEmpty {
-                emptyState
-            } else {
-                requestList
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(OnymTokens.bg.ignoresSafeArea())
+            .navigationTitle("Join requests")
+            .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Close", action: onClose)
+                        .accessibilityIdentifier("approve_requests.close_button")
+                }
             }
         }
-        .background(OnymTokens.bg)
     }
 
     // MARK: - Success
@@ -58,31 +68,6 @@ struct ApproveRequestsView: View {
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
         .accessibilityIdentifier("approve_requests.success_banner")
-    }
-
-    // MARK: - Top bar
-
-    private var topBar: some View {
-        HStack {
-            Button(action: onClose) {
-                HStack(spacing: 4) {
-                    Image(systemName: "chevron.left")
-                    Text("Close")
-                }
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(OnymTokens.text2)
-            }
-            .accessibilityIdentifier("approve_requests.close_button")
-            Spacer()
-            Text("Join requests")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(OnymTokens.text)
-            Spacer()
-            Spacer().frame(width: 60)
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 6)
-        .padding(.bottom, 8)
     }
 
     // MARK: - Error

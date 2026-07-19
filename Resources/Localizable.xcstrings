@@ -419,6 +419,9 @@
         }
       }
     },
+    "Add a greeting, group rules, or policy…" : {
+
+    },
     "Add Custom URL" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -998,6 +1001,7 @@
       }
     },
     "Close" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1713,7 +1717,11 @@
         }
       }
     },
+    "INVITATION" : {
+
+    },
     "Invitations" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1827,6 +1835,7 @@
       }
     },
     "Join requests" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3022,6 +3031,9 @@
           }
         }
       }
+    },
+    "Shown to people before they accept your invite. Optional." : {
+
     },
     "Soon" : {
       "localizations" : {
