@@ -17,6 +17,7 @@ struct SearchView: View {
     let chatReceiptSender: any ChatReceiptSending
     let makeShareInviteFlow: @MainActor () -> ShareInviteFlow
     let setGroupAvatar: @MainActor (String, Data?) async -> Void
+    let setGroupName: @MainActor (String, String) async -> Void
     let imageLoader: ChatImageLoader
     let videoLoader: ChatVideoLoader
     let voiceLoader: ChatVoiceLoader
@@ -44,6 +45,7 @@ struct SearchView: View {
                 chatReceiptSender: chatReceiptSender,
                 makeShareInviteFlow: makeShareInviteFlow,
                 setGroupAvatar: setGroupAvatar,
+                setGroupName: setGroupName,
                 imageLoader: imageLoader,
                 videoLoader: videoLoader,
                 voiceLoader: voiceLoader,

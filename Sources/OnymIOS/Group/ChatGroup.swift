@@ -17,7 +17,10 @@ struct ChatGroup: Identifiable, Equatable, Sendable {
     /// by it so switching identities hides the other one's groups.
     /// Removing an identity wipes every group with a matching owner.
     let ownerIdentityID: IdentityID
-    let name: String
+    /// Mutable so the admin can rename the group post-creation
+    /// (`GroupAvatarBroadcaster.setName` + `GroupNamePayload`). Persisted
+    /// via `PersistedGroup.encryptedName`.
+    var name: String
     /// 32-byte shared secret. Used for `topicTag` derivation and message
     /// key HKDF — both still TBD on iOS, but the value must be sealed
     /// into the invitation now so receivers can rebuild the same key.

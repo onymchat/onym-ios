@@ -166,6 +166,20 @@ struct IncomingMessageDispatcher: Sendable {
             return
         }
 
+        // Fast path 1.6: GroupNamePayload — admin renamed the group.
+        // Group-state delta like the avatar above; its unique `name_*`
+        // keys keep it from decoding as any other payload.
+        if let nameMsg = try? JSONDecoder().decode(
+            GroupNamePayload.self,
+            from: envelope.plaintext
+        ) {
+            await applyName(
+                nameMsg,
+                senderEd25519PublicKey: envelope.senderEd25519PublicKey
+            )
+            return
+        }
+
         // Fast path 2: GroupInvitationPayload — materialize a local
         // group under `ownerIdentityID`. Skips the invitations queue
         // because the group is now visible in the chat list.
@@ -644,6 +658,33 @@ struct IncomingMessageDispatcher: Sendable {
         guard group.avatarJPEG != payload.avatar else { return }
         var updated = group
         updated.avatarJPEG = payload.avatar
+        await groupRepository.insert(updated)
+    }
+
+    /// Apply an admin group-rename (`GroupNamePayload`). Same admin gate
+    /// as `applyAvatar`: when the group has a stored admin Ed25519 key,
+    /// the envelope's verified signer must match it or the rename is
+    /// dropped. Idempotent + ignores a blank name.
+    private func applyName(
+        _ payload: GroupNamePayload,
+        senderEd25519PublicKey: Data?
+    ) async {
+        let trimmed = payload.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let groups = await groupRepository.currentGroups()
+        guard let group = groups.first(where: { $0.groupIDData == payload.groupID }) else {
+            return
+        }
+        if let storedAdmin = group.adminEd25519PubkeyHex {
+            guard let senderEd25519PublicKey else { return }
+            let senderHex = senderEd25519PublicKey
+                .map { String(format: "%02x", $0) }.joined()
+                .lowercased()
+            guard senderHex == storedAdmin.lowercased() else { return }
+        }
+        guard group.name != trimmed else { return }
+        var updated = group
+        updated.name = trimmed
         await groupRepository.insert(updated)
     }
 

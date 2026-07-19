@@ -57,4 +57,8 @@ struct AppDependencies {
     /// `GroupAvatarPayload` out to members. Backs the admin-only picker
     /// in `ChatMembersView`; `nil` JPEG clears the photo.
     let setGroupAvatar: @MainActor (_ groupIDHex: String, _ jpeg: Data?) async -> Void
+    /// Admin renames a group: applies it locally and fans a
+    /// `GroupNamePayload` out to members. Backs the admin-only rename
+    /// affordance in `ChatMembersView`.
+    let setGroupName: @MainActor (_ groupIDHex: String, _ name: String) async -> Void
 }

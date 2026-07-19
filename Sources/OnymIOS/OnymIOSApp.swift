@@ -443,6 +443,9 @@ struct OnymIOSApp: App {
             ),
             setGroupAvatar: { groupIDHex, jpeg in
                 await groupAvatarBroadcaster.setAvatar(groupIDHex: groupIDHex, jpeg: jpeg)
+            },
+            setGroupName: { groupIDHex, name in
+                await groupAvatarBroadcaster.setName(groupIDHex: groupIDHex, name: name)
             }
         )
     }

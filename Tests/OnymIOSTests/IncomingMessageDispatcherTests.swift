@@ -360,6 +360,71 @@ final class IncomingMessageDispatcherTests: XCTestCase {
                        "admin-signed avatar update is applied")
     }
 
+    // MARK: - Rename path (GroupNamePayload)
+
+    func test_name_appliedWhenSenderMatchesStoredAdmin() async throws {
+        let groupID = Data(repeating: 0xAB, count: 32)
+        let adminEd25519 = Data(repeating: 0xED, count: 32)
+        await seedGroup(
+            groupID: groupID,
+            memberProfiles: [:],
+            adminEd25519PubkeyHex: "ed".repeated(32)
+        )
+        let plaintext = try Self.encode(name: Self.makeName(groupID: groupID, name: "Renamed"))
+        let decrypter = FakeInvitationEnvelopeDecrypter(
+            mode: .fixed(plaintext),
+            senderEd25519PublicKey: adminEd25519
+        )
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
+        )
+        await dispatcher.dispatch(
+            messageID: "name-ok",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+        let after = await groups.currentGroups()
+        XCTAssertEqual(after.first { $0.groupIDData == groupID }?.name, "Renamed",
+                       "admin-signed rename is applied")
+    }
+
+    func test_name_rejectedWhenSenderDoesNotMatchStoredAdmin() async throws {
+        let groupID = Data(repeating: 0xAB, count: 32)
+        await seedGroup(
+            groupID: groupID,
+            memberProfiles: [:],
+            adminEd25519PubkeyHex: "ed".repeated(32)
+        )
+        let plaintext = try Self.encode(name: Self.makeName(groupID: groupID, name: "Hacked"))
+        let decrypter = FakeInvitationEnvelopeDecrypter(
+            mode: .fixed(plaintext),
+            senderEd25519PublicKey: Data(repeating: 0xBA, count: 32)  // imposter
+        )
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
+        )
+        await dispatcher.dispatch(
+            messageID: "name-imposter",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+        let after = await groups.currentGroups()
+        XCTAssertEqual(after.first { $0.groupIDData == groupID }?.name, "Family",
+                       "imposter rename must not mutate the group name")
+    }
+
     func test_avatar_rejectedWhenSenderDoesNotMatchStoredAdmin() async throws {
         let groupID = Data(repeating: 0xAB, count: 32)
         await seedGroup(
@@ -918,6 +983,18 @@ final class IncomingMessageDispatcherTests: XCTestCase {
 
     private static func encode(avatar: GroupAvatarPayload) throws -> Data {
         try JSONEncoder().encode(avatar)
+    }
+    private static func encode(name: GroupNamePayload) throws -> Data {
+        try JSONEncoder().encode(name)
+    }
+    private static func makeName(groupID: Data, name: String) -> GroupNamePayload {
+        GroupNamePayload(
+            version: 1,
+            groupID: groupID,
+            senderBlsPubkeyHex: "aa".repeated(48),
+            sentAtMillis: 1_700_000_000_000,
+            name: name
+        )
     }
 
     /// Compute the real Tyranny commitment for a given (members,

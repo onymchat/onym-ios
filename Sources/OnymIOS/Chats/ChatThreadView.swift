@@ -28,6 +28,7 @@ struct ChatThreadView: View {
     let chatReceiptSender: any ChatReceiptSending
     let makeShareInviteFlow: @MainActor () -> ShareInviteFlow
     let setGroupAvatar: @MainActor (String, Data?) async -> Void
+    let setGroupName: @MainActor (String, String) async -> Void
     /// Fetches + decrypts image attachments for the bubbles + viewer.
     let imageLoader: ChatImageLoader
     /// Fetches + decrypts video blobs for the full-screen player.
@@ -237,7 +238,8 @@ struct ChatThreadView: View {
                 chatsFlow: chatsFlow,
                 identitiesFlow: identitiesFlow,
                 makeShareInviteFlow: makeShareInviteFlow,
-                setGroupAvatar: setGroupAvatar
+                setGroupAvatar: setGroupAvatar,
+                setGroupName: setGroupName
             )
         }
         // Per-thread subscription. `task(id:)` cancels + restarts when

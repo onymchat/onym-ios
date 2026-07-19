@@ -23,8 +23,12 @@ struct ChatMembersView: View {
     @Bindable var identitiesFlow: IdentitiesFlow
     let makeShareInviteFlow: @MainActor () -> ShareInviteFlow
     let setGroupAvatar: @MainActor (String, Data?) async -> Void
+    let setGroupName: @MainActor (String, String) async -> Void
 
     @State private var shareInviteFlow: ShareInviteFlow?
+    /// Drives the admin-only rename alert.
+    @State private var showRename = false
+    @State private var renameText = ""
 
     var body: some View {
         Group {
@@ -72,6 +76,18 @@ struct ChatMembersView: View {
                 flow: flow,
                 onDone: { shareInviteFlow = nil }
             )
+        }
+        .alert("Rename group", isPresented: $showRename) {
+            TextField("Group name", text: $renameText)
+                .accessibilityIdentifier("members.rename_field")
+            Button("Save") {
+                let name = renameText
+                Task { await setGroupName(groupID, name) }
+            }
+            .accessibilityIdentifier("members.rename_save")
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Everyone in the group will see the new name.")
         }
     }
 
@@ -147,21 +163,52 @@ struct ChatMembersView: View {
     /// photo-or-mark for everyone else.
     @ViewBuilder
     private func header(for group: ChatGroup) -> some View {
-        Group {
-            if canChangeAvatar {
-                GroupAvatarPickerButton(
-                    imageData: avatarBinding,
-                    size: 72,
-                    accent: OnymAccent.blue.color,
-                    conceptText: group.name
-                )
+        VStack(spacing: 8) {
+            Group {
+                if canChangeAvatar {
+                    GroupAvatarPickerButton(
+                        imageData: avatarBinding,
+                        size: 72,
+                        accent: OnymAccent.blue.color,
+                        conceptText: group.name
+                    )
+                } else {
+                    OnymGroupAvatar(size: 72, imageData: group.avatarJPEG)
+                }
+            }
+            // Group name. Admin can rename (pencil affordance); everyone
+            // else sees it read-only.
+            if canChangeName {
+                Button {
+                    renameText = group.name
+                    showRename = true
+                } label: {
+                    HStack(spacing: 5) {
+                        Text(group.name)
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(OnymTokens.text)
+                            .lineLimit(1)
+                        Image(systemName: "pencil")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(OnymTokens.text3)
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("members.rename_button")
             } else {
-                OnymGroupAvatar(size: 72, imageData: group.avatarJPEG)
+                Text(group.name)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(OnymTokens.text)
+                    .lineLimit(1)
             }
         }
         .padding(.top, 16)
         .padding(.bottom, 4)
     }
+
+    /// Same admin gate as the avatar: only the Tyranny admin can rename,
+    /// because only their broadcast passes the receiver's admin check.
+    private var canChangeName: Bool { canShareInvite }
 
     private func list(for group: ChatGroup) -> some View {
         ScrollView {
