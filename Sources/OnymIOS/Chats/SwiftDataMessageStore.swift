@@ -209,6 +209,15 @@ actor SwiftDataMessageStore: MessageStore {
         try? context.save()
     }
 
+    func deleteAll() {
+        // Wipe every row across all owners/groups. Groups live in a
+        // separate container (`Groups.store`), so this can't touch chats.
+        if let rows = try? context.fetch(FetchDescriptor<PersistedMessage>()) {
+            for row in rows { context.delete(row) }
+        }
+        try? context.save()
+    }
+
     // MARK: - Mapping
 
     private static func encode(_ message: ChatMessage) throws -> PersistedMessage {

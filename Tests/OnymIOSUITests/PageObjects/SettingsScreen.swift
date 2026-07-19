@@ -126,6 +126,25 @@ struct SettingsScreen {
         anchorsRow.tap()
     }
 
+    var clearMessagesRow: XCUIElement {
+        app.buttons["settings.clear_messages_row"]
+    }
+
+    /// Open Settings and tap the DATA → Clear Local Message Cache row.
+    /// The row sits low on the page (just above About), so scroll it into
+    /// view first; bounded so a missing row can't spin forever.
+    func tapClearMessages(maxSwipes: Int = 8) {
+        tapSettingsTab()
+        var n = 0
+        while !(clearMessagesRow.exists && clearMessagesRow.isHittable) && n < maxSwipes {
+            app.swipeUp()
+            n += 1
+        }
+        XCTAssertTrue(clearMessagesRow.waitForExistence(timeout: 5),
+                      "settings clear-messages row never appeared")
+        clearMessagesRow.tap()
+    }
+
 
     /// SwiftUI's NavigationLink renders as different XCUIElement types
     /// depending on iOS version + form context. Try a few likely

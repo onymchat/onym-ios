@@ -59,4 +59,9 @@ protocol MessageStore: Sendable {
     /// Cascade delete for `IdentityRepository.identityRemoved`. Same
     /// pattern as `GroupStore.deleteOwner`.
     func deleteOwner(_ ownerIDString: String) async
+
+    /// Wipe every message across all owners and groups (the Settings
+    /// "clear local message cache" action). Groups/chats live in a
+    /// separate store and are untouched.
+    func deleteAll() async
 }

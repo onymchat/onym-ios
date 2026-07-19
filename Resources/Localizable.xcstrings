@@ -341,6 +341,9 @@
     "A fresh key — separate contacts and chats from your other identities." : {
 
     },
+    "A name only you see. It doesn't change your keys or your invite link." : {
+
+    },
     "Active" : {
       "localizations" : {
         "en" : {
@@ -2725,6 +2728,9 @@
           }
         }
       }
+    },
+    "Save" : {
+
     },
     "Scan a QR to join" : {
       "extractionState" : "stale",

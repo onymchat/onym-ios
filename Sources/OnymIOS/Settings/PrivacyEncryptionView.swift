@@ -144,20 +144,8 @@ struct PrivacyEncryptionView: View {
                     }
                 }
                 SettingsFootnote("Read receipts are end-to-end encrypted, but they reveal you’re online. Turn off for stricter privacy.")
-
-                SettingsSectionLabel("DATA")
-                SettingsCard {
-                    SettingsRow(
-                        title: "Clear local message cache",
-                        subtitle: "Re-download from your relayer on next open",
-                        hasChevron: false,
-                        last: true,
-                        onTap: {}
-                    ) {
-                        SettingsIconTile(symbol: "trash.fill", bg: SettingsTile.red)
-                    }
-                }
-                SettingsFootnote("Onym never stores your messages on our servers. Cached messages live only on this device, encrypted by your identity keys.")
+                // The DATA section (Clear local message cache) moved to the
+                // Settings home, above About, where it does real work.
             }
             .padding(.bottom, 32)
         }

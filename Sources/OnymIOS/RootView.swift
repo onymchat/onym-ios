@@ -52,7 +52,8 @@ struct RootView: View {
                         makeRelayerSettingsFlow: dependencies.makeRelayerSettingsFlow,
                         makeNostrRelaySettingsFlow: dependencies.makeNostrRelaySettingsFlow,
                         makeAnchorsPickerFlow: dependencies.makeAnchorsPickerFlow,
-                        identitiesFlow: dependencies.identitiesFlow
+                        identitiesFlow: dependencies.identitiesFlow,
+                        onClearAllMessages: { await dependencies.messageRepository.removeAll() }
                     )
                 }
             }

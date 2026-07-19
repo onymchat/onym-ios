@@ -121,6 +121,19 @@ actor MessageRepository {
         }
     }
 
+    /// Wipe every message on the device (Settings "clear local message
+    /// cache"). Chats/groups are a separate store and survive. Empties
+    /// every cached thread and republishes so open chats and the chat
+    /// list update live.
+    func removeAll() async {
+        await store.deleteAll()
+        for key in cached.keys {
+            cached[key] = []
+            publish(key)
+        }
+        notifyChange()
+    }
+
     // MARK: - Subscriptions
 
     /// Reactive stream of messages for one thread. Emits the current

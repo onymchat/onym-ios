@@ -272,6 +272,39 @@ final class MessageRepositoryTests: XCTestCase {
         XCTAssertEqual(otherA.map(\.body), ["a-other"])
     }
 
+    func test_removeAll_emptiesEveryThreadAcrossOwners() async {
+        let owner = IdentityID()
+        let other = IdentityID()
+        let store = InMemoryMessageStore()
+        await store.preload([
+            makeMessage(groupID: groupA, ownerIdentityID: owner, body: "a-owner"),
+            makeMessage(groupID: groupB, ownerIdentityID: owner, body: "b-owner"),
+            makeMessage(groupID: groupA, ownerIdentityID: other, body: "a-other"),
+        ])
+        let repo = MessageRepository(store: store)
+
+        // Touch all three threads so they enter the cache + subscribe.
+        var iterOwnerA = repo.snapshots(groupID: groupA, owner: owner).makeAsyncIterator()
+        var iterOwnerB = repo.snapshots(groupID: groupB, owner: owner).makeAsyncIterator()
+        var iterOtherA = repo.snapshots(groupID: groupA, owner: other).makeAsyncIterator()
+        _ = await iterOwnerA.next()
+        _ = await iterOwnerB.next()
+        _ = await iterOtherA.next()
+
+        await repo.removeAll()
+
+        // Every thread drains regardless of owner or group.
+        let drainedA = await iterOwnerA.next()
+        let drainedB = await iterOwnerB.next()
+        let drainedOtherA = await iterOtherA.next()
+        XCTAssertEqual(drainedA, [])
+        XCTAssertEqual(drainedB, [])
+        XCTAssertEqual(drainedOtherA, [])
+        // A cold read of any thread is also empty.
+        let cold = await repo.currentMessages(groupID: groupA, owner: other)
+        XCTAssertEqual(cold, [])
+    }
+
     // MARK: - One-shot read
 
     func test_currentMessages_loadsFromStoreIfNotCached() async {
@@ -443,6 +476,10 @@ private actor InMemoryMessageStore: MessageStore {
 
     func deleteOwner(_ ownerIDString: String) {
         rows = rows.filter { $0.value.ownerIdentityID.rawValue.uuidString != ownerIDString }
+    }
+
+    func deleteAll() {
+        rows.removeAll()
     }
 }
 

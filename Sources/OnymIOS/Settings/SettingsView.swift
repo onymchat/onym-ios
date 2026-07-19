@@ -15,10 +15,17 @@ struct SettingsView: View {
     let makeNostrRelaySettingsFlow: @MainActor () -> NostrRelaySettingsFlow
     let makeAnchorsPickerFlow: @MainActor () -> AnchorsPickerFlow
     let identitiesFlow: IdentitiesFlow
+    /// Wipes every local message (keeps chats). Wired to
+    /// `MessageRepository.removeAll`. Runs behind a two-step confirm.
+    let onClearAllMessages: () async -> Void
 
     @State private var showRecoveryPhrase = false
     /// The identity whose invite-key share view is presented, if any.
     @State private var shareIdentity: IdentitySummary?
+
+    /// First / second gate of the "clear message cache" double-confirm.
+    @State private var showClearConfirm1 = false
+    @State private var showClearConfirm2 = false
 
     /// Persisted in `UserDefaults` under the same key
     /// `UserDefaultsNetworkPreference` reads. Toggling here changes
@@ -187,6 +194,24 @@ struct SettingsView: View {
                     }
                 }
 
+                SettingsSectionLabel("DATA")
+                SettingsCard {
+                    Button { showClearConfirm1 = true } label: {
+                        SettingsRow(
+                            title: "Clear Local Message Cache",
+                            titleColor: OnymTokens.red,
+                            subtitle: "Delete every message on this device. Your chats stay.",
+                            hasChevron: false,
+                            last: true
+                        ) {
+                            SettingsIconTile(symbol: "trash.fill", bg: SettingsTile.red)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("settings.clear_messages_row")
+                }
+                SettingsFootnote("Onym keeps no copy of your messages on any server — this device is the only place they live. Cleared messages can’t be downloaded again: relays hold them only briefly and may already have dropped them.")
+
                 SettingsSectionLabel("APP")
                 SettingsCard {
                     NavigationLink {
@@ -218,6 +243,22 @@ struct SettingsView: View {
             NavigationStack {
                 ShareKeyView(identity: summary, blsPrefix: identitiesFlow.blsPrefix(of: summary))
             }
+        }
+        // Double confirmation: the first alert explains what's lost and
+        // that it can't be re-downloaded; the second is a final are-you-sure.
+        .alert("Clear all messages?", isPresented: $showClearConfirm1) {
+            Button("Clear Messages", role: .destructive) { showClearConfirm2 = true }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently deletes every message stored on this device. Your chats stay in the list, but the messages inside them will be gone.\n\nOnym keeps no copy on its servers, and messages can’t be re-downloaded — relay copies are best-effort and may already have expired.")
+        }
+        .alert("Delete all messages?", isPresented: $showClearConfirm2) {
+            Button("Delete All Messages", role: .destructive) {
+                Task { await onClearAllMessages() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This can’t be undone.")
         }
     }
 
