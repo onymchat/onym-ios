@@ -31,6 +31,8 @@ struct ChatsView: View {
     @State private var scannedInvalid = false
     @State private var scanRejected = false
     @State private var joinCapability: IntroCapability?
+    /// The chat awaiting a swipe-to-delete confirmation, if any.
+    @State private var pendingDelete: ChatListItem?
 
     var body: some View {
         Group {
@@ -249,8 +251,39 @@ struct ChatsView: View {
                 ChatsRow(item: item)
             }
             .listRowSeparator(.visible)
+            // Swipe-to-delete with confirmation. Full-swipe is disabled so
+            // a stray swipe can't wipe a chat + its messages without the
+            // user confirming in the dialog below.
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button(role: .destructive) {
+                    pendingDelete = item
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+                .accessibilityIdentifier("chats.row.delete.\(item.group.id)")
+            }
         }
         .listStyle(.plain)
+        .confirmationDialog(
+            "Delete this chat?",
+            isPresented: Binding(
+                get: { pendingDelete != nil },
+                set: { if !$0 { pendingDelete = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingDelete
+        ) { item in
+            Button("Delete Chat", role: .destructive) {
+                let flow = flow
+                let groupID = item.group.id
+                Task { await flow.deleteChat(groupID: groupID) }
+            }
+            .accessibilityIdentifier("chats.delete.confirm")
+            Button("Cancel", role: .cancel) {}
+        } message: { item in
+            let name = item.group.name.isEmpty ? "this chat" : "“\(item.group.name)”"
+            Text("This removes \(name) and every message in it from this device. It can't be undone.")
+        }
         .navigationDestination(for: String.self) { groupID in
             // PR 5 of the chat stack: tapping a group opens the
             // UIKit chat thread instead of the members roster. The

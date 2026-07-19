@@ -54,6 +54,14 @@ struct CreateGroupScreen {
     func tapShareInvite() {
         app.buttons["create_group.share_invite_button"].tap()
     }
+
+    /// Dismiss the success screen (no invite share) back to the Chats
+    /// list. Used by flows that just need the group to exist.
+    func tapDone() {
+        let done = app.buttons["create_group.done_button"]
+        XCTAssertTrue(done.waitForExistence(timeout: 5), "create-group Done button missing")
+        done.tap()
+    }
 }
 
 // MARK: - Share Invite

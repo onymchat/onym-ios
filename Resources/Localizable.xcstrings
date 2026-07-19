@@ -3238,6 +3238,9 @@
     "This permanently deletes every message stored on this device. Your chats stay in the list, but the messages inside them will be gone.\n\nOnym keeps no copy on its servers, and messages can’t be re-downloaded — relay copies are best-effort and may already have expired." : {
 
     },
+    "This removes %@ and every message in it from this device. It can't be undone." : {
+
+    },
     "This request is for a group that isn’t on this device. Decline to clear it." : {
       "localizations" : {
         "en" : {

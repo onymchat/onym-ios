@@ -82,6 +82,20 @@ final class ChatsFlow {
         await repository.markRead(id: groupID, ownerID: owner, at: date)
     }
 
+    /// Delete a chat from this device: wipe its message thread, then
+    /// remove the group — both scoped to the owning identity, so another
+    /// identity's copy of the same group is untouched. Local-only: the
+    /// group may still exist on-chain, but this device's copy (and every
+    /// message in it) is gone. Both mutations re-yield snapshots /
+    /// fire the message-change signal, so `items` recomputes and the row
+    /// disappears without extra plumbing here.
+    func deleteChat(groupID: String) async {
+        guard let owner = groups.first(where: { $0.id == groupID })?.ownerIdentityID
+        else { return }
+        await messages.removeForGroup(groupID, owner: owner)
+        await repository.delete(id: groupID, ownerID: owner)
+    }
+
     /// Rebuild `items` from the current groups joined with each group's
     /// latest message + unread count.
     private func recompute() async {
