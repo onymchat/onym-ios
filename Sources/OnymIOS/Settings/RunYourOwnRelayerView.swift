@@ -53,7 +53,7 @@ struct RunYourOwnRelayerView: View {
                     }
                 }
 
-                SettingsFootnote("Need help? Open an issue on GitHub or join the dev chat.")
+                SettingsFootnote("Need help? Open an issue on GitHub.")
             }
             .padding(.bottom, 24)
         }
