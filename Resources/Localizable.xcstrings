@@ -1569,6 +1569,22 @@
         }
       }
     },
+    "Everyone in the group will see the new name." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Everyone in the group will see the new name."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Все участники группы увидят новое название."
+          }
+        }
+      }
+    },
     "Everything is encrypted" : {
       "localizations" : {
         "en" : {
@@ -3872,6 +3888,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ваш релеер — ваши правила"
+          }
+        }
+      }
+    },
+    "No messages yet. Say hi." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No messages yet. Say hi."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Пока нет сообщений. Поздоровайтесь."
+          }
+        }
+      }
+    },
+    "MEMBERS" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MEMBERS"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "УЧАСТНИКИ"
           }
         }
       }

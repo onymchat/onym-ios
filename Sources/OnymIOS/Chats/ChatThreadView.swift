@@ -68,6 +68,7 @@ struct ChatThreadView: View {
     var body: some View {
         ChatThreadControllerBridge(
             memberProfiles: currentMemberProfiles,
+            invitationMessage: currentInvitationMessage,
             messages: messages,
             onSendTapped: { body, replyToMessageID in
                 // Fire-and-forget. `SendMessageInteractor` does the
@@ -374,10 +375,16 @@ struct ChatThreadView: View {
     private var currentMemberProfiles: [String: MemberProfile] {
         chatsFlow.groups.first { $0.id == groupID }?.memberProfiles ?? [:]
     }
+
+    /// The group's invitation message, surfaced in the empty state.
+    private var currentInvitationMessage: String? {
+        chatsFlow.groups.first { $0.id == groupID }?.invitationMessage
+    }
 }
 
 private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
     let memberProfiles: [String: MemberProfile]
+    let invitationMessage: String?
     let messages: [ChatMessage]
     let onSendTapped: (String, UUID?) -> Void
     let onRetryRequested: (UUID) -> Void
@@ -417,6 +424,7 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         // Profiles before messages — the first sender-display build
         // reads the profiles to resolve names.
         vc.update(memberProfiles: memberProfiles)
+        vc.update(invitationMessage: invitationMessage)
         vc.update(messages: messages)
         vc.setPendingMedia(pendingMedia)
         return vc
@@ -440,6 +448,7 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         vc.onSendMedia = onSendMedia
         vc.onRemovePendingMedia = onRemovePendingMedia
         vc.update(memberProfiles: memberProfiles)
+        vc.update(invitationMessage: invitationMessage)
         vc.update(messages: messages)
         vc.setPendingMedia(pendingMedia)
     }

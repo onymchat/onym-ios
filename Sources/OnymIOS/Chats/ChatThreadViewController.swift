@@ -61,7 +61,12 @@ final class ChatThreadViewController: UIViewController {
     var onRemovePendingMedia: ((UUID) -> Void)?
 
     private let tableView = UITableView()
-    private let emptyStateLabel = UILabel()
+    /// The group's invitation message, surfaced in the empty state.
+    private var invitationMessage: String?
+    /// Rich empty state (invitation + members + privacy points), hosted
+    /// in the message-list region above the composer. Shown only when the
+    /// thread has no messages.
+    private lazy var emptyStateHost = UIHostingController(rootView: makeEmptyState())
     private let inputPanel = ChatInputPanelView()
 
     /// Full-width swipe-to-go-back pan. Borrows the system pop
@@ -212,6 +217,8 @@ final class ChatThreadViewController: UIViewController {
         guard memberProfiles != self.memberProfiles else { return }
         self.memberProfiles = memberProfiles
         rebuildSenderDisplays()
+        // Refresh the empty state's member roster.
+        emptyStateHost.rootView = makeEmptyState()
 
         // Repaint already-committed rows against the refreshed
         // names/colors. Reconfigure only the items actually in the
@@ -246,10 +253,9 @@ final class ChatThreadViewController: UIViewController {
         orderedMessages = sorted
         rebuildSenderDisplays()
 
-        // Empty state: visible iff the message list is empty. Lives
-        // behind the table view (added as a sibling); toggling
+        // Empty state: visible iff the message list is empty. Toggling
         // `isHidden` is cheap and survives keyboard show/hide.
-        emptyStateLabel.isHidden = !sorted.isEmpty
+        emptyStateHost.view.isHidden = !sorted.isEmpty
 
         var snapshot = NSDiffableDataSourceSnapshot<Section, UUID>()
         snapshot.appendSections([.main])
@@ -497,20 +503,37 @@ final class ChatThreadViewController: UIViewController {
         tableView.keyboardDismissMode = .interactive
         view.addSubview(tableView)
 
-        // Empty state — shown when the message list is empty, hidden
-        // as soon as the first message arrives. Positioned centered
-        // between the top bar and the input panel so it doesn't get
+        // Empty state — a hosted SwiftUI view filling the message-list
+        // region (above the input panel). Shown when the list is empty,
+        // hidden as soon as the first message arrives. Scrollable so its
+        // invitation + members + privacy content never gets clipped or
         // covered when the keyboard rises.
-        emptyStateLabel.text = "No messages yet. Say hi."
-        emptyStateLabel.textAlignment = .center
-        emptyStateLabel.numberOfLines = 0
-        emptyStateLabel.font = .preferredFont(forTextStyle: .body)
-        emptyStateLabel.adjustsFontForContentSizeCategory = true
-        emptyStateLabel.textColor = UIColor(OnymTokens.text3)
-        emptyStateLabel.translatesAutoresizingMaskIntoConstraints = false
-        emptyStateLabel.isHidden = true
-        emptyStateLabel.accessibilityIdentifier = "chat.empty_state"
-        view.addSubview(emptyStateLabel)
+        addChild(emptyStateHost)
+        emptyStateHost.view.backgroundColor = .clear
+        emptyStateHost.view.translatesAutoresizingMaskIntoConstraints = false
+        emptyStateHost.view.isHidden = true
+        emptyStateHost.view.accessibilityIdentifier = "chat.empty_state"
+        view.addSubview(emptyStateHost.view)
+        emptyStateHost.didMove(toParent: self)
+    }
+
+    /// Rebuild the empty-state SwiftUI view from the latest group
+    /// metadata (invitation + member aliases).
+    private func makeEmptyState() -> ChatEmptyStateView {
+        let names = memberProfiles.values
+            .map { $0.alias.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .map { $0.isEmpty ? "(unnamed)" : $0 }
+            .sorted { $0.lowercased() < $1.lowercased() }
+        return ChatEmptyStateView(invitationMessage: invitationMessage, memberNames: names)
+    }
+
+    /// Push the group's invitation message in (for the empty state).
+    /// Called by the SwiftUI wrapper on every render; refreshes the
+    /// empty state when it changes.
+    func update(invitationMessage: String?) {
+        guard invitationMessage != self.invitationMessage else { return }
+        self.invitationMessage = invitationMessage
+        emptyStateHost.rootView = makeEmptyState()
     }
 
     private func configureDataSource() {
@@ -673,17 +696,13 @@ final class ChatThreadViewController: UIViewController {
             tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             tableView.bottomAnchor.constraint(equalTo: inputPanel.topAnchor),
 
-            // Empty state — centered in the same region the table
-            // view occupies. Sits behind the table; toggled on
+            // Empty state — fills the same region the table view
+            // occupies (message list, above the composer). Toggled on
             // when the message list is empty.
-            emptyStateLabel.centerXAnchor.constraint(equalTo: tableView.centerXAnchor),
-            emptyStateLabel.centerYAnchor.constraint(equalTo: tableView.centerYAnchor),
-            emptyStateLabel.leadingAnchor.constraint(
-                greaterThanOrEqualTo: tableView.leadingAnchor, constant: 32
-            ),
-            emptyStateLabel.trailingAnchor.constraint(
-                lessThanOrEqualTo: tableView.trailingAnchor, constant: -32
-            ),
+            emptyStateHost.view.topAnchor.constraint(equalTo: tableView.topAnchor),
+            emptyStateHost.view.bottomAnchor.constraint(equalTo: tableView.bottomAnchor),
+            emptyStateHost.view.leadingAnchor.constraint(equalTo: tableView.leadingAnchor),
+            emptyStateHost.view.trailingAnchor.constraint(equalTo: tableView.trailingAnchor),
 
             // Input panel — bottom tracks the keyboard. With no
             // keyboard up, `keyboardLayoutGuide.topAnchor` equals

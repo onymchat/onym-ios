@@ -25,7 +25,7 @@ final class ChatThreadViewControllerTests: XCTestCase {
         let vc = ChatThreadViewController()
         vc.loadViewIfNeeded()
         vc.update(messages: [])
-        XCTAssertFalse(emptyStateLabel(in: vc)?.isHidden ?? true,
+        XCTAssertFalse(emptyStateView(in: vc)?.isHidden ?? true,
                        "empty state must be visible when there are no messages")
     }
 
@@ -33,7 +33,7 @@ final class ChatThreadViewControllerTests: XCTestCase {
         let vc = ChatThreadViewController()
         vc.loadViewIfNeeded()
         vc.update(messages: [makeMessage(body: "hi", direction: .incoming)])
-        XCTAssertTrue(emptyStateLabel(in: vc)?.isHidden ?? false,
+        XCTAssertTrue(emptyStateView(in: vc)?.isHidden ?? false,
                       "empty state must disappear once a message lands")
     }
 
@@ -46,7 +46,7 @@ final class ChatThreadViewControllerTests: XCTestCase {
         vc.loadViewIfNeeded()
         vc.update(messages: [makeMessage(body: "hi", direction: .incoming)])
         vc.update(messages: [])
-        XCTAssertFalse(emptyStateLabel(in: vc)?.isHidden ?? true)
+        XCTAssertFalse(emptyStateView(in: vc)?.isHidden ?? true)
     }
 
     // MARK: - Message list rendering (PR 6)
@@ -768,8 +768,8 @@ final class ChatThreadViewControllerTests: XCTestCase {
     // accessibility identifiers — same approach the create-group
     // UI tests use. Keeps the production code free of test seams.
 
-    private func emptyStateLabel(in vc: UIViewController) -> UILabel? {
-        find(in: vc.view, identifier: "chat.empty_state") as? UILabel
+    private func emptyStateView(in vc: UIViewController) -> UIView? {
+        find(in: vc.view, identifier: "chat.empty_state")
     }
 
     private func find(in view: UIView, identifier: String) -> UIView? {
