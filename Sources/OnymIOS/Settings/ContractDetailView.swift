@@ -75,7 +75,7 @@ struct ContractDetailView: View {
                         subtitle: "onymchat/onym-contracts @ \(release.release)",
                         subtitleMono: true,
                         hasChevron: false,
-                        onTap: { open(Self.contractsRepoURL.absoluteString + "/tree/\(release.release)") }
+                        onTap: { open(Self.contractsRepoURL.absoluteString + "/releases/tag/\(release.release)") }
                     ) {
                         SettingsIconTile(symbol: "chevron.left.forwardslash.chevron.right",
                                          bg: OnymTokens.text)
