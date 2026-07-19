@@ -33,6 +33,15 @@
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!-- Export compliance. Onym uses non-exempt encryption (end-to-end
+	     message/media encryption with AES-256-GCM + X25519, beyond
+	     HTTPS), so this is `true`. The app ships only industry-standard,
+	     publicly documented algorithms — it qualifies for US License
+	     Exception ENC (ECCN 5D992.c, mass market) via a self-classification
+	     report, and needs a French encryption declaration to be sold in
+	     France. See docs/compliance/. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>Onym uses the camera to scan invite-key QR codes when you add someone to a group.</string>
 	<key>NSMicrophoneUsageDescription</key>
