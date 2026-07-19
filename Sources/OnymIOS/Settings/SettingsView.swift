@@ -135,6 +135,7 @@ struct SettingsView: View {
                     SettingsRow(
                         title: "Send read receipts",
                         subtitle: "You'll only see others' read status if this is on",
+                        subtitleLineLimit: nil,
                         hasChevron: false
                     ) {
                         SettingsIconTile(

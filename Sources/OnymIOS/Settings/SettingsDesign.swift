@@ -230,6 +230,9 @@ struct SettingsRow<Tile: View, Right: View>: View {
     var titleMono: Bool = false
     var subtitle: String? = nil
     var subtitleMono: Bool = false
+    /// Subtitle line cap. `1` (default) middle-truncates on overflow;
+    /// pass `nil` to let a longer subtitle wrap freely.
+    var subtitleLineLimit: Int? = 1
     var hasChevron: Bool = true
     var inset: CGFloat = 60
     var last: Bool = false
@@ -266,7 +269,7 @@ struct SettingsRow<Tile: View, Right: View>: View {
                                   ? .system(size: 12.5, design: .monospaced)
                                   : .system(size: 12.5))
                             .foregroundStyle(OnymTokens.text2)
-                            .lineLimit(1)
+                            .lineLimit(subtitleLineLimit)
                             .truncationMode(.middle)
                     }
                 }
@@ -296,6 +299,7 @@ extension SettingsRow where Right == EmptyView {
         titleMono: Bool = false,
         subtitle: String? = nil,
         subtitleMono: Bool = false,
+        subtitleLineLimit: Int? = 1,
         hasChevron: Bool = true,
         inset: CGFloat = 60,
         last: Bool = false,
@@ -307,6 +311,7 @@ extension SettingsRow where Right == EmptyView {
         self.titleMono = titleMono
         self.subtitle = subtitle
         self.subtitleMono = subtitleMono
+        self.subtitleLineLimit = subtitleLineLimit
         self.hasChevron = hasChevron
         self.inset = inset
         self.last = last

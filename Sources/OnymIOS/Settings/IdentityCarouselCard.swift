@@ -26,7 +26,19 @@ struct IdentityCarouselCard: View {
     @State private var selectTask: Task<Void, Never>?
     @State private var renameTarget: IdentitySummary?
     @State private var showRestore = false
+    /// Carousel height = the tallest page's intrinsic content height (a
+    /// paged TabView won't self-size, so pages report their height via
+    /// `CarouselHeightKey` and we take the max).
+    @State private var carouselHeight: CGFloat = 300
     @FocusState private var addNameFocused: Bool
+
+    /// Transparent probe that reports its page's content height so the
+    /// carousel can size to the tallest page (see `carouselHeight`).
+    private var carouselHeightReader: some View {
+        GeometryReader { proxy in
+            Color.clear.preference(key: CarouselHeightKey.self, value: proxy.size.height)
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -42,7 +54,13 @@ struct IdentityCarouselCard: View {
             // frame, overlapping the shorter add-page content (the Create
             // button). Hide them and draw our own row below the carousel.
             .tabViewStyle(.page(indexDisplayMode: .never))
-            .frame(height: 460)
+            .frame(height: carouselHeight)
+            .onPreferenceChange(CarouselHeightKey.self) { height in
+                // Grow only, to the tallest page ever measured. Monotonic so
+                // swiping between pages of different content never shrinks the
+                // frame back (no per-swipe height jump).
+                if height > carouselHeight { carouselHeight = height }
+            }
             .accessibilityIdentifier("identity.carousel")
             .onChange(of: selection) { _, newValue in settle(on: newValue) }
             .onChange(of: flow.identities.count) { old, new in
@@ -174,12 +192,14 @@ struct IdentityCarouselCard: View {
                         .font(.system(size: 11))
                         .foregroundStyle(OnymTokens.text3)
                 }
-                Text("Start a chat by scanning · BLS \(flow.blsPrefix(of: summary))…")
-                    .font(.system(size: 11, design: .monospaced))
+                Text("Start a chat by scanning")
+                    .font(.system(size: 11))
                     .foregroundStyle(OnymTokens.text2)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
                     .padding(.top, 2)
+                Text("BLS \(flow.blsPrefix(of: summary))")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(OnymTokens.text3)
+                    .multilineTextAlignment(.center)
             }
 
             HStack(spacing: 10) {
@@ -203,6 +223,9 @@ struct IdentityCarouselCard: View {
             .padding(.top, 2)
         }
         .padding(20)
+        // Measure the natural content height first, then fill the carousel
+        // frame so every page occupies the same area (uniform swipe surface).
+        .background(carouselHeightReader)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
@@ -233,7 +256,7 @@ struct IdentityCarouselCard: View {
     private var addPage: some View {
         VStack(spacing: 12) {
             ZStack {
-                SettingsQRCode(value: "onym-add-identity", size: 150)
+                SettingsQRCode(value: "onym-add-identity", size: 140)
                     .padding(12)
                     .blur(radius: 9)
                     .opacity(0.4)
@@ -302,6 +325,9 @@ struct IdentityCarouselCard: View {
             }
         }
         .padding(20)
+        // Measure the natural content height first, then fill the carousel
+        // frame so every page occupies the same area (uniform swipe surface).
+        .background(carouselHeightReader)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
@@ -494,5 +520,14 @@ struct RestoreIdentitySheet: View {
         flow.pendingName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         flow.pendingMnemonic = words.joined(separator: " ")
         flow.submitAdd()
+    }
+}
+
+/// Collects the tallest carousel page's content height so the paged
+/// `TabView` (which won't self-size) can be framed to its intrinsic max.
+private struct CarouselHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }

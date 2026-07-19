@@ -804,6 +804,9 @@
         }
       }
     },
+    "BLS %@" : {
+
+    },
     "BLS %@…" : {
       "localizations" : {
         "en" : {
@@ -3037,7 +3040,6 @@
 
     },
     "Start a chat by scanning" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3052,9 +3054,6 @@
           }
         }
       }
-    },
-    "Start a chat by scanning · BLS %@…" : {
-
     },
     "Start a private chat" : {
 
