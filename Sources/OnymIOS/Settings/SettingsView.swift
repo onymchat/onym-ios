@@ -41,8 +41,6 @@ struct SettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                SettingsLargeTitle("Settings")
-
                 IdentityCarouselCard(
                     flow: identitiesFlow,
                     onBackup: { showRecoveryPhrase = true },
@@ -171,7 +169,11 @@ struct SettingsView: View {
             .padding(.bottom, 32)
         }
         .background(OnymTokens.surface.ignoresSafeArea())
-        .toolbar(.hidden, for: .navigationBar)
+        // Use the system large-title bar so the title collapses to inline
+        // and content scrolls under a translucent bar (scroll-edge effect),
+        // matching standard iOS navigation behavior.
+        .navigationTitle("Settings")
+        .navigationBarTitleDisplayMode(.large)
         .task { await identitiesFlow.start() }
         .sheet(isPresented: $showRecoveryPhrase) {
             RecoveryPhraseBackupView(flow: makeBackupFlow())
