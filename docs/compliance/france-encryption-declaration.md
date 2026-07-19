@@ -14,19 +14,51 @@ within ~1 month), not an authorization.
 
 ---
 
+## 0. App functionality & encryption use (paste into App Store Connect)
+
+App Store Connect asks for a short description of the app's functionality
+and how it uses encryption **before** it will let you upload documentation.
+Paste this:
+
+> Onym is a privacy-first group messaging app. Users create groups and
+> exchange text, images, video, and voice messages. Every message and
+> media file is end-to-end encrypted so that only the members of a group
+> can read its contents — Onym operates no server that can access message
+> contents.
+>
+> Encryption is used to protect the confidentiality and integrity of user
+> communications. The app uses only standard, publicly documented
+> algorithms: AES-256-GCM for encrypting messages, media, and local
+> at-rest data; X25519 (ECDH) key agreement with HKDF-SHA256 for
+> establishing per-recipient keys; Ed25519 and secp256k1 (Schnorr)
+> signatures and SHA-256 for message and identity authentication; and
+> BIP39/PBKDF2-HMAC-SHA512 for recovery-phrase key derivation. No
+> proprietary or non-standard encryption is implemented.
+
+Shorter variant if the field is length-limited:
+
+> Onym is an end-to-end encrypted group messenger. Users exchange text,
+> images, video, and voice messages that only group members can read.
+> Encryption protects the confidentiality of user communications using
+> standard algorithms only — AES-256-GCM, X25519 key agreement
+> (HKDF-SHA256), Ed25519/secp256k1 signatures, and SHA-256 — with no
+> proprietary cryptography.
+
+---
+
 ## 1. Declarant (déclarant)
 
 | Field | Value |
 |---|---|
-| Legal name / entity | `[Company legal name]` |
-| Legal form | `[e.g. SAS / individual developer]` |
-| Registration no. (SIREN/SIRET or equiv.) | `[…]` |
-| Registered address | `[…]` |
-| Country | `[…]` |
-| Contact name | `[…]` |
-| Email | `[…]` |
-| Phone | `[…]` |
-| Apple Team ID | `[…]` |
+| Legal name / entity | `Onym OU` |
+| Legal form | `OU` |
+| Registration no. (SIREN/SIRET or equiv.) | `17504064` |
+| Registered address | `Kuklase tn 14-74, 13423, Mustamäe linnaosa, Tallinn, Harju maakond, Eesti` |
+| Country | `Estonia` |
+| Contact name | `Rinat Enikeev` |
+| Email | `lead@onym.app` |
+| Phone | `+372 55545271` |
+| Apple Team ID | `7C7LXXWRMG` |
 
 ## 2. Product
 
@@ -34,7 +66,7 @@ within ~1 month), not an authorization.
 |---|---|
 | Product name | Onym |
 | Bundle identifier | `app.onym.ios` |
-| Version | `[e.g. 1.0]` |
+| Version | `0.0.57` |
 | Nature of operation | Fourniture (supply) via the App Store, incl. France |
 | Description | Onym is a privacy-first group messenger. Messages and media are end-to-end encrypted; identities are cryptographic keys (no phone number or email); group membership is anchored on a public ledger rather than a company-owned server. |
 | Function of the cryptology | Confidentiality (end-to-end encryption of user messages and media) and authentication/integrity of messages and identities. |
