@@ -2,17 +2,19 @@ import SwiftUI
 
 /// Settings → Anchors → ... → Use existing address. Lets the user
 /// paste a Stellar Soroban contract ID (uppercase 56-char `C…`),
-/// validate it, optionally label it, and pin it for new chats. The
-/// "verify" step is currently a synchronous format check; calling out
-/// to RPC for hash-match against the manifest lands when the deploy
-/// path goes live.
+/// check its format, optionally label it, and pin it for new chats.
+///
+/// "Check format" is a client-side address-shape check only — the app
+/// has no direct Soroban RPC path (all chain traffic goes through the
+/// relayer's allowlisted calls), so it can't inspect the contract's API
+/// surface or confirm it exists on-chain. Labeled honestly to avoid
+/// implying an on-chain verification it doesn't perform.
 struct UseExistingContractView: View {
     let key: AnchorSelectionKey
     @Environment(\.dismiss) private var dismiss
 
     @State private var addr: String = ""
     @State private var label: String = ""
-    @State private var verifying = false
     @State private var verdict: Verdict?
 
     enum Verdict: Equatable { case ok, bad }
@@ -78,13 +80,12 @@ struct UseExistingContractView: View {
                 SettingsFootnote("Shown alongside the contract address in chats and on the Anchors list.")
 
                 SettingsPrimaryButton(
-                    disabled: !looksValid || verifying,
+                    disabled: !looksValid,
                     action: {
                         if verdict == .ok { dismiss() } else { verify() }
                     }
                 ) {
-                    Text(verifying ? "Verifying on Stellar…" :
-                         verdict == .ok ? "Use this contract" : "Verify")
+                    Text(verdict == .ok ? "Use this contract" : "Check format")
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 20)
@@ -171,10 +172,10 @@ struct UseExistingContractView: View {
                     .foregroundStyle(.white))
                 .padding(.top, 1)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Contract format verified")
+                Text("Address format looks valid")
                     .font(.system(size: 13.5, weight: .semibold))
                     .foregroundStyle(Color(red: 0.09, green: 0.37, blue: 0.18))
-                Text("Tap “Use this contract” to anchor new \(key.type.displayName.lowercased()) chats here. Existing chats keep their current contract.")
+                Text("This checks the address shape only, not the on-chain contract. Tap “Use this contract” to anchor new \(key.type.displayName.lowercased()) chats here; existing chats keep their current contract.")
                     .font(.system(size: 12))
                     .foregroundStyle(Color(red: 0.19, green: 0.43, blue: 0.28))
                     .lineSpacing(2)
@@ -188,13 +189,10 @@ struct UseExistingContractView: View {
         .padding(.top, 12)
     }
 
+    /// A client-side address-format check only — no network / on-chain
+    /// inspection (the app has no direct RPC path). Instant.
     private func verify() {
-        verifying = true
-        verdict = nil
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-            verifying = false
-            verdict = looksValid ? .ok : .bad
-        }
+        verdict = looksValid ? .ok : .bad
     }
 
     private func open(_ s: String) {
