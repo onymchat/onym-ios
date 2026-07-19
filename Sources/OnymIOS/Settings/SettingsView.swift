@@ -93,6 +93,7 @@ struct SettingsView: View {
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("settings.relayer_row")
                 }
+                SettingsFootnote("Anchors and the relayer default to Onym-run instances. Replace them with your own deployments for maximum privacy.")
 
                 SettingsSectionLabel("TRANSPORT")
                 SettingsCard {
