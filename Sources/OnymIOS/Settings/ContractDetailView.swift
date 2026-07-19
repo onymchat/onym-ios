@@ -24,9 +24,10 @@ struct ContractDetailView: View {
 
     private var explorerURL: URL? {
         guard let entry else { return nil }
-        let host = key.network == .testnet ? "testnet.stellar.expert" : "stellar.expert"
-        let net  = key.network == .testnet ? "testnet" : "public"
-        return URL(string: "https://\(host)/explorer/\(net)/contract/\(entry.id)")
+        // Stellar Expert has no per-network subdomain — the network is a
+        // path segment on the single `stellar.expert` host.
+        let net = key.network == .testnet ? "testnet" : "public"
+        return URL(string: "https://stellar.expert/explorer/\(net)/contract/\(entry.id)")
     }
 
     private var isCurrentSelection: Bool {

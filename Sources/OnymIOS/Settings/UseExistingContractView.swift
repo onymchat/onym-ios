@@ -103,13 +103,12 @@ struct UseExistingContractView: View {
                 SettingsCard {
                     SettingsRow(
                         title: "Browse on Stellar Expert",
-                        subtitle: key.network == .testnet
-                            ? "testnet.stellar.expert"
-                            : "stellar.expert",
+                        subtitle: "stellar.expert",
                         hasChevron: false,
                         onTap: {
-                            let host = key.network == .testnet ? "testnet.stellar.expert" : "stellar.expert"
-                            open("https://\(host)")
+                            // Single host; network is a path segment.
+                            let net = key.network == .testnet ? "testnet" : "public"
+                            open("https://stellar.expert/explorer/\(net)")
                         }
                     ) {
                         SettingsContentTile(bg: SettingsTile.indigo) {

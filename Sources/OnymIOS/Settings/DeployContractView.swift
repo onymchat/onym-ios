@@ -243,10 +243,8 @@ struct DeployContractView: View {
                     .accessibilityIdentifier("deploy.copy_addr")
                     Rectangle().fill(OnymTokens.hairlineStrong).frame(width: 0.5)
                     Button {
-                        let path = key.network == .testnet
-                            ? "testnet.stellar.expert/explorer/testnet/contract/\(addr)"
-                            : "stellar.expert/explorer/public/contract/\(addr)"
-                        open("https://\(path)")
+                        let net = key.network == .testnet ? "testnet" : "public"
+                        open("https://stellar.expert/explorer/\(net)/contract/\(addr)")
                     } label: {
                         HStack(spacing: 6) {
                             Text("View on Stellar Expert")
