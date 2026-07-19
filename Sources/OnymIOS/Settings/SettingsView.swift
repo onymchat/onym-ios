@@ -130,6 +130,7 @@ struct SettingsView: View {
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("settings.blossom_relays_row")
                 }
+                SettingsFootnote("Nostr relays and Blossom servers carry your messages and media. Replace them with your own instances for maximum privacy.")
 
                 SettingsSectionLabel("DATA")
                 SettingsCard {
