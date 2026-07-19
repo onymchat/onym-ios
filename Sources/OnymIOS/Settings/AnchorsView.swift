@@ -276,8 +276,11 @@ struct AnchorsVersionView: View {
                             title: "Deploy from source",
                             subtitle: "Build & publish your own contract"
                         ) {
+                            // Fixed dark slate (not adaptive OnymTokens.text,
+                            // which goes near-white in dark mode and hid the
+                            // white glyph). Matches the deploy guide's hero.
                             SettingsIconTile(symbol: "chevron.left.forwardslash.chevron.right",
-                                             bg: OnymTokens.text)
+                                             bg: Color(red: 0.106, green: 0.122, blue: 0.141))
                         }
                     }
                     .buttonStyle(.plain)

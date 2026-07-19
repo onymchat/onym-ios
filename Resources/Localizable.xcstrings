@@ -243,6 +243,7 @@
       }
     },
     "%@%%" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -846,6 +847,7 @@
       }
     },
     "Build & Deploy" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -861,7 +863,11 @@
         }
       }
     },
+    "Build and deploy the Onym contracts from your computer with the Stellar CLI, then point Onym at the deployed address." : {
+
+    },
     "Build, deploy, anchor" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -993,6 +999,7 @@
       }
     },
     "Compile the %@ contract from source and deploy it to Stellar %@. Onym signs with a one-time deploy key." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1058,6 +1065,7 @@
       }
     },
     "Contract deployed" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1307,6 +1315,9 @@
           }
         }
       }
+    },
+    "Deploy your own contract" : {
+
     },
     "Deployed %@ · %@" : {
       "localizations" : {
@@ -2557,6 +2568,7 @@
       }
     },
     "Ref" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3347,6 +3359,7 @@
       }
     },
     "View on Stellar Expert" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
