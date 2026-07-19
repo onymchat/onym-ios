@@ -889,6 +889,9 @@
         }
       }
     },
+    "Built by people who think privacy is a right" : {
+
+    },
     "Built by people who think privacy is a right.\nReleased under the MIT license." : {
       "localizations" : {
         "en" : {
@@ -2228,6 +2231,7 @@
       }
     },
     "onym · open · anonymous · onchain" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {

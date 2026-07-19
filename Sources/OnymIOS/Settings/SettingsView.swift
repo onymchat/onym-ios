@@ -166,23 +166,6 @@ struct SettingsView: View {
                 }
                 SettingsFootnote("Onym keeps no copy of your messages on any server — this device is the only place they live. Cleared messages can’t be downloaded again: relays hold them only briefly and may already have dropped them.")
 
-                SettingsSectionLabel("APP")
-                SettingsCard {
-                    NavigationLink {
-                        AboutView()
-                    } label: {
-                        SettingsRow(
-                            title: "About Onym",
-                            subtitle: aboutSubtitle,
-                            last: true
-                        ) {
-                            SettingsIconTile(symbol: "info.circle.fill", bg: SettingsTile.teal)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("settings.about_row")
-                }
-
                 watermark
             }
             .padding(.bottom, 32)
@@ -250,15 +233,19 @@ struct SettingsView: View {
     }
 
     private var watermark: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 6) {
             OnymMark(size: 26, color: OnymTokens.text3)
                 .padding(.top, 28)
-            Text("onym · open · anonymous · onchain")
-                .font(.system(size: 11))
-                .tracking(0.22)
+            Text("Built by people who think privacy is a right")
+                .font(.system(size: 12))
+                .foregroundStyle(OnymTokens.text3)
+                .multilineTextAlignment(.center)
+            Text(aboutSubtitle)
+                .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(OnymTokens.text3)
         }
         .frame(maxWidth: .infinity)
+        .padding(.horizontal, 24)
     }
 
     // MARK: - Subtitles
