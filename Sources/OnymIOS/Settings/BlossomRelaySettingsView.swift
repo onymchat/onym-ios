@@ -35,6 +35,24 @@ struct BlossomRelaySettingsView: View {
                 SettingsFootnote(
                     "Changes apply on the next app launch. Uploads target the first configured server."
                 )
+
+                SettingsSectionLabel("SELF-HOST")
+                SettingsCard {
+                    NavigationLink {
+                        SelfHostGuideView.blossom
+                    } label: {
+                        SettingsRow(
+                            title: "Run your own server",
+                            subtitle: "Deploy a Blossom server with Docker",
+                            last: true
+                        ) {
+                            SettingsIconTile(symbol: "server.rack",
+                                             bg: Color(red: 0.106, green: 0.122, blue: 0.141))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("blossom.run_your_own")
+                }
             }
             .padding(.bottom, 32)
         }
