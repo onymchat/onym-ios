@@ -276,6 +276,7 @@
       }
     },
     "▲" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -292,6 +293,7 @@
       }
     },
     "✈" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -324,6 +326,7 @@
       }
     },
     "🐳" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -481,6 +484,9 @@
           }
         }
       }
+    },
+    "Address format looks valid" : {
+
     },
     "All published relayers added." : {
       "localizations" : {
@@ -1082,6 +1088,7 @@
       }
     },
     "Contract format verified" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2502,6 +2509,7 @@
 
     },
     "Read the docs" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3108,6 +3116,7 @@
       }
     },
     "Tap “Use this contract” to anchor new %@ chats here. Existing chats keep their current contract." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3206,6 +3215,9 @@
       }
     },
     "This can’t be undone." : {
+
+    },
+    "This checks the address shape only, not the on-chain contract. Tap “Use this contract” to anchor new %@ chats here; existing chats keep their current contract." : {
 
     },
     "This permanently deletes every message stored on this device. Your chats stay in the list, but the messages inside them will be gone.\n\nOnym keeps no copy on its servers, and messages can’t be re-downloaded — relay copies are best-effort and may already have expired." : {

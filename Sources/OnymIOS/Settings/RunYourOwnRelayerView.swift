@@ -7,7 +7,6 @@ struct RunYourOwnRelayerView: View {
     @State private var copied: String?
 
     private static let repoURL = URL(string: "https://github.com/onymchat/onym-relayer")!
-    private static let docsURL = URL(string: "https://onym.app/docs/relayer")!
 
     private struct Step: Identifiable {
         let id = UUID()
@@ -21,18 +20,18 @@ struct RunYourOwnRelayerView: View {
         .init(n: 1,
               title: "Clone the repo",
               body: "onym-relayer is open source. Grab it from GitHub.",
-              cmd: "git clone github.com/onymchat/onym-relayer"),
+              cmd: "git clone https://github.com/onymchat/onym-relayer\ncd onym-relayer"),
         .init(n: 2,
-              title: "Configure your domain",
-              body: "Set RELAYER_RPC_URL and RELAYER_AUTH_TOKENS in .env.",
-              cmd: "cp .env.example .env\necho \"RELAYER_RPC_URL=https://your-domain\" >> .env"),
+              title: "Configure .env",
+              body: "Copy the template, then set your Stellar signing key and bind on 0.0.0.0 so Docker can reach it.",
+              cmd: "cp .env.example .env\n# in .env, set:\n#   RELAYER_SECRET_KEY=S…\n#   RELAYER_BIND=0.0.0.0:8080"),
         .init(n: 3,
-              title: "Deploy",
-              body: "Pick a host. Fly.io and Railway have one-click deploys.",
-              cmd: "fly launch --copy-config\nfly deploy"),
+              title: "Run it with Docker",
+              body: "Build the image and start the container on port 8080.",
+              cmd: "docker build -t onym-relayer .\ndocker run --env-file .env -p 8080:8080 onym-relayer"),
         .init(n: 4,
               title: "Add it to Onym",
-              body: "Back on Relayer, paste your URL into “Add Custom URL”.",
+              body: "Back on Relayer, paste your URL (e.g. http://your-host:8080) into “Add Custom URL”.",
               cmd: nil),
     ]
 
@@ -51,50 +50,6 @@ struct RunYourOwnRelayerView: View {
                                 startPoint: .top, endPoint: .bottom))
                             .frame(width: 2, height: 24)
                             .padding(.leading, 30)
-                    }
-                }
-
-                SettingsSectionLabel("ONE-CLICK DEPLOY")
-                SettingsCard {
-                    SettingsRow(
-                        title: "Deploy to Fly.io",
-                        subtitle: "Free tier · global edge",
-                        hasChevron: false,
-                        onTap: { open("https://fly.io/launch") }
-                    ) {
-                        SettingsContentTile(bg: Color(red: 0.482, green: 0.247, blue: 0.894)) {
-                            Text("✈").font(.system(size: 14)).foregroundStyle(.white)
-                        }
-                    } right: {
-                        Image(systemName: "arrow.up.right.square")
-                            .foregroundStyle(OnymTokens.text3)
-                    }
-                    SettingsRow(
-                        title: "Deploy to Railway",
-                        subtitle: "$5/mo · simple setup",
-                        hasChevron: false,
-                        onTap: { open("https://railway.app") }
-                    ) {
-                        SettingsContentTile(bg: Color(red: 0.122, green: 0.122, blue: 0.122)) {
-                            Text("▲").font(.system(size: 14)).foregroundStyle(.white)
-                        }
-                    } right: {
-                        Image(systemName: "arrow.up.right.square")
-                            .foregroundStyle(OnymTokens.text3)
-                    }
-                    SettingsRow(
-                        title: "Run with Docker",
-                        subtitle: "Self-host anywhere",
-                        hasChevron: false,
-                        last: true,
-                        onTap: { open("https://docs.docker.com/get-docker/") }
-                    ) {
-                        SettingsContentTile(bg: Color(red: 0, green: 0.502, blue: 1.0)) {
-                            Text("🐳").font(.system(size: 14))
-                        }
-                    } right: {
-                        Image(systemName: "arrow.up.right.square")
-                            .foregroundStyle(OnymTokens.text3)
                     }
                 }
 
@@ -128,41 +83,24 @@ struct RunYourOwnRelayerView: View {
                 .foregroundStyle(.white.opacity(0.7))
                 .lineSpacing(3)
 
-            HStack(spacing: 8) {
-                Button { open(Self.repoURL.absoluteString) } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "chevron.left.forwardslash.chevron.right")
-                        Text("View on GitHub")
-                            .font(.system(size: 13.5, weight: .semibold))
-                        Image(systemName: "arrow.up.right.square")
-                            .font(.system(size: 11))
-                    }
-                    .foregroundStyle(OnymTokens.text)
-                    .padding(.horizontal, 12).padding(.vertical, 10)
-                    .frame(maxWidth: .infinity)
-                    .background(.white,
-                                in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            Button { open(Self.repoURL.absoluteString) } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.left.forwardslash.chevron.right")
+                    Text("View on GitHub")
+                        .font(.system(size: 13.5, weight: .semibold))
+                    Image(systemName: "arrow.up.right.square")
+                        .font(.system(size: 11))
                 }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("run_relayer.github_button")
-
-                Button { open(Self.docsURL.absoluteString) } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "book")
-                        Text("Read the docs")
-                            .font(.system(size: 13.5, weight: .semibold))
-                        Image(systemName: "arrow.up.right.square")
-                            .font(.system(size: 11))
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 12).padding(.vertical, 10)
-                    .frame(maxWidth: .infinity)
-                    .background(Color.white.opacity(0.12),
-                                in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("run_relayer.docs_button")
+                // Fixed dark label — button sits on solid white, so an
+                // adaptive color (near-white in dark mode) would vanish.
+                .foregroundStyle(Color(red: 0.039, green: 0.039, blue: 0.047))
+                .padding(.horizontal, 12).padding(.vertical, 10)
+                .frame(maxWidth: .infinity)
+                .background(.white,
+                            in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("run_relayer.github_button")
         }
         .padding(20)
         .background(LinearGradient(colors: [Color(red: 0.106, green: 0.122, blue: 0.141),
