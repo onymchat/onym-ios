@@ -474,9 +474,9 @@ final class ChatBubbleCell: UITableViewCell {
                 ? onAccent.withAlphaComponent(0.7)
                 : UIColor(OnymTokens.text3)
             quoteBar.backgroundColor = muted
-            quoteNameLabel.text = "Message"
+            quoteNameLabel.text = String(localized: "Message")
             quoteNameLabel.textColor = muted
-            quoteSnippetLabel.text = "Message unavailable"
+            quoteSnippetLabel.text = String(localized: "Message unavailable")
             quoteSnippetLabel.textColor = muted
         } else {
             let accent = UIColor(reply.accent.color)

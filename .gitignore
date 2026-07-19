@@ -54,7 +54,7 @@ Podfile.lock.tmp
 fastlane/report.xml
 fastlane/Preview.html
 fastlane/test_output/
-fastlane/screenshots/**/*.png
+fastlane/screenshots/
 
 # Bundler (Fastlane gem dependency tree)
 vendor/

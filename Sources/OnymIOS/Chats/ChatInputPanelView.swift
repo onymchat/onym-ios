@@ -172,7 +172,7 @@ final class ChatInputPanelView: UIView {
         // UITextView has no native placeholder. Overlay a label
         // anchored to the same insets the text container uses and
         // hide it when text is present.
-        placeholderLabel.text = "Message"
+        placeholderLabel.text = String(localized: "Message")
         placeholderLabel.font = textView.font
         placeholderLabel.adjustsFontForContentSizeCategory = true
         placeholderLabel.textColor = UIColor(OnymTokens.text3)

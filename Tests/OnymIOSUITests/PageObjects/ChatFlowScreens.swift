@@ -32,6 +32,19 @@ struct CreateGroupScreen {
         nameField.typeText(name)
     }
 
+    /// Type into the multi-line invitation-message field on step 1. The
+    /// SwiftUI vertical TextField can surface as either a text view or a
+    /// text field, so accept whichever the runtime exposes.
+    func typeInvitation(_ text: String) {
+        let id = "create_group.step1.invitation_field"
+        let tv = app.textViews[id]
+        let field = tv.waitForExistence(timeout: 3) ? tv : app.textFields[id]
+        XCTAssertTrue(field.waitForExistence(timeout: 5),
+                      "create-group invitation field never appeared")
+        field.tap()
+        field.typeText(text)
+    }
+
     func tapNext() {
         let next = app.buttons["create_group.step1.next_button"]
         XCTAssertTrue(next.waitForExistence(timeout: 5), "step-1 Next button missing")

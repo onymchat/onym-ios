@@ -69,7 +69,7 @@ struct ChatEmptyStateView: View {
     }
 
     @ViewBuilder
-    private func section(_ label: String, @ViewBuilder content: () -> some View) -> some View {
+    private func section(_ label: LocalizedStringKey, @ViewBuilder content: () -> some View) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(label)
                 .font(.system(size: 12, weight: .semibold))
@@ -78,7 +78,7 @@ struct ChatEmptyStateView: View {
         }
     }
 
-    private func benefit(icon: String, title: String, detail: String) -> some View {
+    private func benefit(icon: String, title: LocalizedStringKey, detail: LocalizedStringKey) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: icon)
                 .font(.system(size: 16, weight: .semibold))

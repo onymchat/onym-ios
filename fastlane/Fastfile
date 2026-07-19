@@ -40,6 +40,18 @@ platform :ios do
     )
   end
 
+  desc "Generate localized App Store screenshots via the UI-test harness"
+  desc ""
+  desc "Drives the app through fastlane snapshot (see fastlane/Snapfile):"
+  desc "the ScreenshotUITests flow runs on the offline --ui-loopback"
+  desc "harness, seeds a group + conversation, and captures every screen"
+  desc "in each configured language. Output → fastlane/screenshots/"
+  desc "(git-ignored). Upload separately with the deliver lane once you're"
+  desc "happy (set skip_screenshots: false there)."
+  lane :screenshots do
+    capture_ios_screenshots
+  end
+
   desc "Upload App Store metadata to App Store Connect (no binary, no screenshots)"
   desc ""
   desc "Reads an App Store Connect API key from the environment:"

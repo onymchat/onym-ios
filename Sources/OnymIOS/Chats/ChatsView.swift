@@ -226,7 +226,7 @@ struct ChatsView: View {
 
     /// One privacy-benefit line in the empty state: accent icon + a bold
     /// title over a muted one-line detail.
-    private func benefitRow(icon: String, title: String, detail: String) -> some View {
+    private func benefitRow(icon: String, title: LocalizedStringKey, detail: LocalizedStringKey) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: icon)
                 .font(.system(size: 16, weight: .semibold))
