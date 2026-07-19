@@ -28,8 +28,7 @@ struct AnchorsView: View {
                 SettingsSectionLabel("ACTIVE NETWORK")
                 SettingsCard {
                     networkRow(.testnet, last: false)
-                    networkRow(.public, last: false)
-                    customNetworkRow(last: true)
+                    networkRow(.public, last: true)
                 }
 
                 if flow.hasAnyContracts(network: activeNetwork) {
@@ -91,28 +90,6 @@ struct AnchorsView: View {
         .accessibilityIdentifier(
             "anchors.network.\(network.rawValue)" + (hasContracts ? "" : ".disabled")
         )
-    }
-
-    /// Placeholder for a future user-defined network (custom relayer +
-    /// contracts). Modeled as "Soon" — not selectable yet.
-    @ViewBuilder
-    private func customNetworkRow(last: Bool) -> some View {
-        SettingsRow(
-            title: "Custom",
-            subtitle: "Your own relayer + contracts",
-            hasChevron: false,
-            last: last
-        ) {
-            SettingsContentTile(bg: SettingsTile.gray) {
-                Text("C").font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(.white)
-            }
-        } right: {
-            Text("Soon")
-                .foregroundStyle(OnymTokens.text3)
-                .font(.system(size: 14))
-        }
-        .accessibilityIdentifier("anchors.network.custom.disabled")
     }
 
     private func networkSubtitle(_ network: ContractNetwork) -> String {
