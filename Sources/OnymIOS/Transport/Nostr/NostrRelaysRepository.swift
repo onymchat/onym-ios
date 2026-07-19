@@ -20,12 +20,18 @@ import Foundation
 ///      (V1 doesn't reactively reconnect — Settings shows a banner).
 actor NostrRelaysRepository {
     private let store: any NostrRelaysSelectionStore
+    /// Fetches the Onym-published default list from GitHub. `nil` disables
+    /// network refresh entirely (UI tests / offline builds) — the
+    /// hardcoded seed then remains the only default.
+    private let fetcher: (any KnownNostrRelaysFetcher)?
 
     private var cached: NostrRelaysConfiguration
     private var continuations: [UUID: AsyncStream<NostrRelaysConfiguration>.Continuation] = [:]
+    private var startTask: Task<Void, Never>?
 
-    init(store: any NostrRelaysSelectionStore) {
+    init(store: any NostrRelaysSelectionStore, fetcher: (any KnownNostrRelaysFetcher)? = nil) {
         self.store = store
+        self.fetcher = fetcher
         let loaded = store.load()
         // First-launch seed: empty config + no prior user interaction
         // → install the app's default relay. Sticky once the user
@@ -48,6 +54,33 @@ actor NostrRelaysRepository {
 
     func currentConfiguration() -> NostrRelaysConfiguration {
         cached
+    }
+
+    // MARK: - Network refresh
+
+    /// Fetch the published default list once, in the background. Idempotent.
+    /// Called at app boot; no-op when no fetcher is configured.
+    func start() {
+        guard startTask == nil else { return }
+        startTask = Task { [weak self] in
+            await self?.refreshFromNetwork()
+        }
+    }
+
+    /// Fetch the published list and, while the user hasn't customised
+    /// their own (`hasUserInteracted == false`), install it as the new
+    /// default (kept as default so a later launch re-refreshes). Throws on
+    /// fetch failure — the current cached config (hardcoded seed or last
+    /// good fetch) stays intact.
+    func refresh() async throws {
+        guard let fetcher else { return }
+        let list = try await fetcher.fetchLatest()
+        guard !cached.hasUserInteracted, !list.isEmpty else { return }
+        applyDefault(endpoints: list)
+    }
+
+    private func refreshFromNetwork() async {
+        try? await refresh()
     }
 
     // MARK: - Mutations
@@ -90,12 +123,33 @@ actor NostrRelaysRepository {
         ))
     }
 
-    /// Reset to the app-shipped default. Useful as a "restore
-    /// defaults" affordance in Settings; resets
-    /// `hasUserInteracted = false` so the seed sticks even if the
-    /// user later clears + relaunches.
-    func resetToDefault() {
+    /// Restore the Onym-published default. Re-fetches the latest list from
+    /// GitHub and installs it; on any failure (offline / bad response /
+    /// empty / no fetcher) falls back to the hardcoded `.seed`. Either way
+    /// `hasUserInteracted` returns to `false` so the default sticks and a
+    /// future launch re-refreshes.
+    func resetToDefault() async {
+        if let fetcher {
+            do {
+                let list = try await fetcher.fetchLatest()
+                if !list.isEmpty {
+                    applyDefault(endpoints: list)
+                    return
+                }
+            } catch {
+                // Offline / bad response — fall through to the seed.
+            }
+        }
         applyConfiguration(.seed)
+    }
+
+    /// Install `endpoints` as the current default: persists with
+    /// `hasUserInteracted = false` so it's still treated as "the default".
+    private func applyDefault(endpoints: [NostrRelayEndpoint]) {
+        applyConfiguration(NostrRelaysConfiguration(
+            endpoints: endpoints,
+            hasUserInteracted: false
+        ))
     }
 
     // MARK: - Subscriptions

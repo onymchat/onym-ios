@@ -118,4 +118,53 @@ final class BlossomServersRepositoryTests: XCTestCase {
         let s2 = await iterator.next()
         XCTAssertEqual(s2?.endpoints.count, 1)
     }
+
+    // MARK: - GitHub-published default fetch
+
+    private struct StubFetcher: KnownBlossomServersFetcher {
+        let result: Result<[BlossomServerEndpoint], Error>
+        func fetchLatest() async throws -> [BlossomServerEndpoint] { try result.get() }
+    }
+
+    private static let published = BlossomServerEndpoint(
+        name: "Published", url: URL(string: "https://published.example")!, isDefault: true
+    )
+
+    func test_refresh_installsPublishedListWhenNotUserInteracted() async throws {
+        let store = InMemoryBlossomServersSelectionStore(initial: .empty)
+        let repo = BlossomServersRepository(store: store, fetcher: StubFetcher(result: .success([Self.published])))
+        try await repo.refresh()
+        let endpoints = await repo.currentEndpoints()
+        XCTAssertEqual(endpoints, [Self.published])
+        XCTAssertFalse(store.load().hasUserInteracted)
+    }
+
+    func test_refresh_doesNotOverwriteUserCustomisedList() async throws {
+        let custom = BlossomServerEndpoint.custom(url: URL(string: "https://mine.example")!)
+        let store = InMemoryBlossomServersSelectionStore(
+            initial: BlossomServersConfiguration(endpoints: [custom], hasUserInteracted: true)
+        )
+        let repo = BlossomServersRepository(store: store, fetcher: StubFetcher(result: .success([Self.published])))
+        try await repo.refresh()
+        let endpoints = await repo.currentEndpoints()
+        XCTAssertEqual(endpoints, [custom])
+    }
+
+    func test_resetToDefault_fetchesPublishedList() async {
+        let store = InMemoryBlossomServersSelectionStore(initial: .empty)
+        let repo = BlossomServersRepository(store: store, fetcher: StubFetcher(result: .success([Self.published])))
+        await repo.resetToDefault()
+        let endpoints = await repo.currentEndpoints()
+        XCTAssertEqual(endpoints, [Self.published])
+    }
+
+    func test_resetToDefault_offline_fallsBackToSeed() async {
+        struct Boom: Error {}
+        let store = InMemoryBlossomServersSelectionStore(initial: .empty)
+        let repo = BlossomServersRepository(store: store, fetcher: StubFetcher(result: .failure(Boom())))
+        await repo.resetToDefault()
+        let endpoints = await repo.currentEndpoints()
+        XCTAssertEqual(endpoints.first?.url.absoluteString, "https://blossom.onym.app",
+                       "offline reset must fall back to the hardcoded seed")
+    }
 }

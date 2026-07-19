@@ -12,7 +12,7 @@ final class NostrRelaysRepositoryTests: XCTestCase {
         let repo = NostrRelaysRepository(store: store)
         let endpoints = await repo.currentEndpoints()
         XCTAssertEqual(endpoints.count, 1)
-        XCTAssertEqual(endpoints.first?.url.absoluteString, "wss://nostr.onym.app")
+        XCTAssertEqual(endpoints.first?.url.absoluteString, "wss://nostr.onym.chat")
         XCTAssertTrue(endpoints.first?.isDefault ?? false,
                       "seeded entry must carry isDefault = true")
     }
@@ -77,7 +77,7 @@ final class NostrRelaysRepositoryTests: XCTestCase {
     func test_removeEndpoint_dropsTheRow_andFlipsUserInteracted() async {
         let store = InMemoryNostrRelaysSelectionStore(initial: .empty)
         let repo = NostrRelaysRepository(store: store)
-        let seedURL = URL(string: "wss://nostr.onym.app")!
+        let seedURL = URL(string: "wss://nostr.onym.chat")!
         await repo.removeEndpoint(url: seedURL)
         let endpoints = await repo.currentEndpoints()
         XCTAssertTrue(endpoints.isEmpty)
@@ -122,5 +122,56 @@ final class NostrRelaysRepositoryTests: XCTestCase {
         await repo.removeEndpoint(url: URL(string: "wss://a.example")!)
         let s2 = await iterator.next()
         XCTAssertEqual(s2?.endpoints.count, 1)
+    }
+
+    // MARK: - GitHub-published default fetch
+
+    private struct StubFetcher: KnownNostrRelaysFetcher {
+        let result: Result<[NostrRelayEndpoint], Error>
+        func fetchLatest() async throws -> [NostrRelayEndpoint] { try result.get() }
+    }
+
+    private static let published = NostrRelayEndpoint(
+        name: "Published", url: URL(string: "wss://published.example")!, isDefault: true
+    )
+
+    func test_refresh_installsPublishedListWhenNotUserInteracted() async throws {
+        let store = InMemoryNostrRelaysSelectionStore(initial: .empty)
+        let repo = NostrRelaysRepository(store: store, fetcher: StubFetcher(result: .success([Self.published])))
+        // init seeded the hardcoded default; refresh replaces it.
+        try await repo.refresh()
+        let endpoints = await repo.currentEndpoints()
+        XCTAssertEqual(endpoints, [Self.published])
+        XCTAssertFalse(store.load().hasUserInteracted,
+                       "published default must stay a default (re-refreshable)")
+    }
+
+    func test_refresh_doesNotOverwriteUserCustomisedList() async throws {
+        let custom = NostrRelayEndpoint.custom(url: URL(string: "wss://mine.example")!)
+        let store = InMemoryNostrRelaysSelectionStore(
+            initial: NostrRelaysConfiguration(endpoints: [custom], hasUserInteracted: true)
+        )
+        let repo = NostrRelaysRepository(store: store, fetcher: StubFetcher(result: .success([Self.published])))
+        try await repo.refresh()
+        let endpoints = await repo.currentEndpoints()
+        XCTAssertEqual(endpoints, [custom], "user's list must survive a background refresh")
+    }
+
+    func test_resetToDefault_fetchesPublishedList() async {
+        let store = InMemoryNostrRelaysSelectionStore(initial: .empty)
+        let repo = NostrRelaysRepository(store: store, fetcher: StubFetcher(result: .success([Self.published])))
+        await repo.resetToDefault()
+        let endpoints = await repo.currentEndpoints()
+        XCTAssertEqual(endpoints, [Self.published])
+    }
+
+    func test_resetToDefault_offline_fallsBackToSeed() async {
+        struct Boom: Error {}
+        let store = InMemoryNostrRelaysSelectionStore(initial: .empty)
+        let repo = NostrRelaysRepository(store: store, fetcher: StubFetcher(result: .failure(Boom())))
+        await repo.resetToDefault()
+        let endpoints = await repo.currentEndpoints()
+        XCTAssertEqual(endpoints.first?.url.absoluteString, "wss://nostr.onym.chat",
+                       "offline reset must fall back to the hardcoded seed")
     }
 }

@@ -167,7 +167,19 @@ struct OnymIOSApp: App {
         // configured server; changes apply on the next launch (the client
         // base URL is chosen once here).
         let blossomStore = UserDefaultsBlossomServersSelectionStore()
-        let blossomServersRepository = BlossomServersRepository(store: blossomStore)
+        // No network fetch under the UI harness — the hardcoded seed
+        // stays the default so tests are deterministic + offline.
+        let blossomFetcher: (any KnownBlossomServersFetcher)?
+        #if DEBUG
+        blossomFetcher = args.contains("--ui-loopback") || args.contains("--ui-testing")
+            ? nil : GitHubReleasesKnownBlossomServersFetcher()
+        #else
+        blossomFetcher = GitHubReleasesKnownBlossomServersFetcher()
+        #endif
+        let blossomServersRepository = BlossomServersRepository(
+            store: blossomStore,
+            fetcher: blossomFetcher
+        )
         self.blossomServersRepository = blossomServersRepository
         let blossomBaseURL = blossomStore.load().endpoints.first?.url
             ?? URLSessionBlossomClient.defaultBaseURL
@@ -237,8 +249,16 @@ struct OnymIOSApp: App {
         // First-launch path inside the actor seeds with the Onym
         // Official relay; subsequent launches honor the user's
         // persisted list.
+        let nostrFetcher: (any KnownNostrRelaysFetcher)?
+        #if DEBUG
+        nostrFetcher = args.contains("--ui-loopback") || args.contains("--ui-testing")
+            ? nil : GitHubReleasesKnownNostrRelaysFetcher()
+        #else
+        nostrFetcher = GitHubReleasesKnownNostrRelaysFetcher()
+        #endif
         let nostrRelaysRepository = NostrRelaysRepository(
-            store: UserDefaultsNostrRelaysSelectionStore()
+            store: UserDefaultsNostrRelaysSelectionStore(),
+            fetcher: nostrFetcher
         )
         self.nostrRelaysRepository = nostrRelaysRepository
 
@@ -498,6 +518,11 @@ struct OnymIOSApp: App {
                     // contract from whatever was cached on the previous run.
                     await relayerRepository.start()
                     await contractsRepository.start()
+                    // Refresh the Nostr + Blossom default lists from the
+                    // published GitHub manifests (no-op offline / under the
+                    // UI harness — the hardcoded seed stays the default).
+                    await nostrRelaysRepository.start()
+                    await blossomServersRepository.start()
                     // Replay groups + invitations for the in-memory snapshot streams.
                     await groupRepository.reload()
                     await incomingInvitations.reload()

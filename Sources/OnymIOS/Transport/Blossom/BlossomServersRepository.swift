@@ -18,12 +18,18 @@ import Foundation
 ///      doesn't rebuild the client live — Settings shows a banner).
 actor BlossomServersRepository {
     private let store: any BlossomServersSelectionStore
+    /// Fetches the Onym-published default list from GitHub. `nil` disables
+    /// network refresh entirely (UI tests / offline builds) — the
+    /// hardcoded seed then remains the only default.
+    private let fetcher: (any KnownBlossomServersFetcher)?
 
     private var cached: BlossomServersConfiguration
     private var continuations: [UUID: AsyncStream<BlossomServersConfiguration>.Continuation] = [:]
+    private var startTask: Task<Void, Never>?
 
-    init(store: any BlossomServersSelectionStore) {
+    init(store: any BlossomServersSelectionStore, fetcher: (any KnownBlossomServersFetcher)? = nil) {
         self.store = store
+        self.fetcher = fetcher
         let loaded = store.load()
         // First-launch seed: empty config + no prior user interaction
         // → install the app's default server. Sticky once the user
@@ -46,6 +52,32 @@ actor BlossomServersRepository {
 
     func currentConfiguration() -> BlossomServersConfiguration {
         cached
+    }
+
+    // MARK: - Network refresh
+
+    /// Fetch the published default list once, in the background. Idempotent.
+    /// Called at app boot; no-op when no fetcher is configured.
+    func start() {
+        guard startTask == nil else { return }
+        startTask = Task { [weak self] in
+            await self?.refreshFromNetwork()
+        }
+    }
+
+    /// Fetch the published list and, while the user hasn't customised
+    /// their own (`hasUserInteracted == false`), install it as the new
+    /// default. Throws on fetch failure — the current cached config
+    /// (hardcoded seed or last good fetch) stays intact.
+    func refresh() async throws {
+        guard let fetcher else { return }
+        let list = try await fetcher.fetchLatest()
+        guard !cached.hasUserInteracted, !list.isEmpty else { return }
+        applyDefault(endpoints: list)
+    }
+
+    private func refreshFromNetwork() async {
+        try? await refresh()
     }
 
     // MARK: - Mutations
@@ -88,11 +120,33 @@ actor BlossomServersRepository {
         ))
     }
 
-    /// Reset to the app-shipped default. Resets
-    /// `hasUserInteracted = false` so the seed sticks even if the user
-    /// later clears + relaunches.
-    func resetToDefault() {
+    /// Restore the Onym-published default. Re-fetches the latest list from
+    /// GitHub and installs it; on any failure (offline / bad response /
+    /// empty / no fetcher) falls back to the hardcoded `.seed`. Either way
+    /// `hasUserInteracted` returns to `false` so the default sticks and a
+    /// future launch re-refreshes.
+    func resetToDefault() async {
+        if let fetcher {
+            do {
+                let list = try await fetcher.fetchLatest()
+                if !list.isEmpty {
+                    applyDefault(endpoints: list)
+                    return
+                }
+            } catch {
+                // Offline / bad response — fall through to the seed.
+            }
+        }
         applyConfiguration(.seed)
+    }
+
+    /// Install `endpoints` as the current default: persists with
+    /// `hasUserInteracted = false` so it's still treated as "the default".
+    private func applyDefault(endpoints: [BlossomServerEndpoint]) {
+        applyConfiguration(BlossomServersConfiguration(
+            endpoints: endpoints,
+            hasUserInteracted: false
+        ))
     }
 
     // MARK: - Subscriptions
