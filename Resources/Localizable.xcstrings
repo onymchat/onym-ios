@@ -2044,6 +2044,23 @@
         }
       }
     },
+    "MEMBERS" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MEMBERS"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "УЧАСТНИКИ"
+          }
+        }
+      }
+    },
     "Messages, group state, and keys are encrypted on this device. No one — not even Onym — can read your chats." : {
       "localizations" : {
         "en" : {
@@ -2173,6 +2190,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Пока нет участников"
+          }
+        }
+      }
+    },
+    "No messages yet. Say hi." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No messages yet. Say hi."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Пока нет сообщений. Поздоровайтесь."
           }
         }
       }
@@ -3888,38 +3921,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ваш релеер — ваши правила"
-          }
-        }
-      }
-    },
-    "No messages yet. Say hi." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No messages yet. Say hi."
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Пока нет сообщений. Поздоровайтесь."
-          }
-        }
-      }
-    },
-    "MEMBERS" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "MEMBERS"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "УЧАСТНИКИ"
           }
         }
       }
