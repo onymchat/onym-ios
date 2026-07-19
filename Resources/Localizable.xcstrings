@@ -211,7 +211,14 @@
       }
     },
     "%@ members" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ участников"
+          }
+        }
+      }
     },
     "%@. " : {
       "localizations" : {
@@ -346,10 +353,24 @@
       }
     },
     "A fresh key — separate contacts and chats from your other identities." : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Новый ключ — контакты и чаты отделены от других ваших личностей."
+          }
+        }
+      }
     },
     "A name only you see. It doesn't change your keys or your invite link." : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Имя, которое видите только вы. Оно не меняет ваши ключи и ссылку-приглашение."
+          }
+        }
+      }
     },
     "Active" : {
       "localizations" : {
@@ -368,7 +389,14 @@
       }
     },
     "ACTIVE" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "АКТИВНАЯ"
+          }
+        }
+      }
     },
     "Active identity" : {
       "localizations" : {
@@ -420,7 +448,14 @@
       }
     },
     "Add a greeting, group rules, or policy…" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Добавьте приветствие, правила или политику группы…"
+          }
+        }
+      }
     },
     "Add Custom URL" : {
       "extractionState" : "stale",
@@ -457,7 +492,14 @@
       }
     },
     "Add identity" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Добавить личность"
+          }
+        }
+      }
     },
     "Add Identity" : {
       "localizations" : {
@@ -492,7 +534,14 @@
       }
     },
     "Address format looks valid" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Формат адреса корректен"
+          }
+        }
+      }
     },
     "All published relayers added." : {
       "localizations" : {
@@ -811,7 +860,14 @@
       }
     },
     "BLS %@" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BLS %@"
+          }
+        }
+      }
     },
     "BLS %@…" : {
       "localizations" : {
@@ -879,7 +935,14 @@
       }
     },
     "Build and deploy the Onym contracts from your computer with the Stellar CLI, then point Onym at the deployed address." : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Соберите и разверните контракты Onym на своём компьютере с помощью Stellar CLI, затем укажите Onym адрес развёрнутого контракта."
+          }
+        }
+      }
     },
     "Build, deploy, anchor" : {
       "extractionState" : "stale",
@@ -899,7 +962,14 @@
       }
     },
     "Built by people who think privacy is a right" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Создано теми, кто считает приватность правом"
+          }
+        }
+      }
     },
     "Built by people who think privacy is a right.\nReleased under the MIT license." : {
       "localizations" : {
@@ -1200,7 +1270,14 @@
       }
     },
     "Create a group & share a link" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Создать группу и поделиться ссылкой"
+          }
+        }
+      }
     },
     "Create an end-to-end encrypted group anchored on Stellar." : {
       "extractionState" : "stale",
@@ -1237,7 +1314,14 @@
       }
     },
     "Create identity" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Создать личность"
+          }
+        }
+      }
     },
     "Create the group, then share the invite link — they can join later without sharing any keys." : {
       "localizations" : {
@@ -1337,7 +1421,14 @@
       }
     },
     "Deploy your own contract" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Разверните свой контракт"
+          }
+        }
+      }
     },
     "Deployed %@ · %@" : {
       "localizations" : {
@@ -1469,7 +1560,14 @@
       }
     },
     "Enter the 12 or 24-word recovery phrase to restore an identity on this device." : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Введите фразу восстановления из 12 или 24 слов, чтобы восстановить личность на этом устройстве."
+          }
+        }
+      }
     },
     "Everything is encrypted" : {
       "localizations" : {
@@ -1504,7 +1602,14 @@
       }
     },
     "Find messages across all your chats." : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Поиск сообщений по всем вашим чатам."
+          }
+        }
+      }
     },
     "Founder" : {
       "localizations" : {
@@ -1718,7 +1823,14 @@
       }
     },
     "INVITATION" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ПРИГЛАШЕНИЕ"
+          }
+        }
+      }
     },
     "Invitations" : {
       "extractionState" : "stale",
@@ -2114,7 +2226,14 @@
       }
     },
     "No servers configured. Media can't be sent or received." : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Серверы не настроены. Медиа нельзя отправлять и получать."
+          }
+        }
+      }
     },
     "Nostr (npub)" : {
       "localizations" : {
@@ -2528,7 +2647,14 @@
       }
     },
     "Re-install Onym Official as the only server." : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Восстановить Onym Official как единственный сервер."
+          }
+        }
+      }
     },
     "Read the docs" : {
       "extractionState" : "stale",
@@ -2714,7 +2840,14 @@
       }
     },
     "Restore" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Восстановить"
+          }
+        }
+      }
     },
     "Restore default" : {
       "localizations" : {
@@ -2733,7 +2866,14 @@
       }
     },
     "Restore from recovery phrase" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Восстановить из фразы восстановления"
+          }
+        }
+      }
     },
     "Retry" : {
       "localizations" : {
@@ -2784,7 +2924,14 @@
       }
     },
     "Save" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сохранить"
+          }
+        }
+      }
     },
     "Scan a QR to join" : {
       "extractionState" : "stale",
@@ -3033,7 +3180,14 @@
       }
     },
     "Shown to people before they accept your invite. Optional." : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Показывается людям до принятия приглашения. Необязательно."
+          }
+        }
+      }
     },
     "Soon" : {
       "localizations" : {
@@ -3052,7 +3206,14 @@
       }
     },
     "Spin up an encrypted group and share one link — that's it." : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Создайте зашифрованную группу и поделитесь одной ссылкой — вот и всё."
+          }
+        }
+      }
     },
     "Start a chat by scanning" : {
       "localizations" : {
@@ -3071,7 +3232,14 @@
       }
     },
     "Start a private chat" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Начните приватный чат"
+          }
+        }
+      }
     },
     "Stellar Soroban contract ID" : {
       "localizations" : {
@@ -3124,7 +3292,14 @@
       }
     },
     "Swipe here to switch" : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Проведите, чтобы переключить"
+          }
+        }
+      }
     },
     "SX" : {
       "localizations" : {
@@ -3242,16 +3417,44 @@
       }
     },
     "This can’t be undone." : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Это действие нельзя отменить."
+          }
+        }
+      }
     },
     "This checks the address shape only, not the on-chain contract. Tap “Use this contract” to anchor new %@ chats here; existing chats keep their current contract." : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Проверяется только формат адреса, а не контракт в сети. Нажмите «Использовать этот контракт», чтобы новые чаты %@ привязывались сюда; существующие чаты сохранят свой контракт."
+          }
+        }
+      }
     },
     "This permanently deletes every message stored on this device. Your chats stay in the list, but the messages inside them will be gone.\n\nOnym keeps no copy on its servers, and messages can’t be re-downloaded — relay copies are best-effort and may already have expired." : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Это навсегда удалит все сообщения, хранящиеся на этом устройстве. Ваши чаты останутся в списке, но сообщения внутри них будут удалены.\n\nOnym не хранит копий на своих серверах, и сообщения нельзя загрузить заново — копии на релеях в лучшем случае временны и, возможно, уже удалены."
+          }
+        }
+      }
     },
     "This removes %@ and every message in it from this device. It can't be undone." : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Это удалит %@ и все сообщения в нём с этого устройства. Отменить будет нельзя."
+          }
+        }
+      }
     },
     "This request is for a group that isn’t on this device. Decline to clear it." : {
       "localizations" : {
@@ -3600,7 +3803,14 @@
       }
     },
     "You're the founder — you decide who joins and manage the group's settings. Everyone can chat and share; only you control membership." : {
-
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Вы основатель — вы решаете, кто вступает, и управляете настройками группы. Все могут общаться и делиться; только вы управляете участием."
+          }
+        }
+      }
     },
     "Your group is ready" : {
       "localizations" : {
