@@ -12,7 +12,7 @@ final class NostrRelaysRepositoryTests: XCTestCase {
         let repo = NostrRelaysRepository(store: store)
         let endpoints = await repo.currentEndpoints()
         XCTAssertEqual(endpoints.count, 1)
-        XCTAssertEqual(endpoints.first?.url.absoluteString, "wss://nostr.onym.chat")
+        XCTAssertEqual(endpoints.first?.url.absoluteString, "wss://nostr.onym.app")
         XCTAssertTrue(endpoints.first?.isDefault ?? false,
                       "seeded entry must carry isDefault = true")
     }
@@ -77,7 +77,7 @@ final class NostrRelaysRepositoryTests: XCTestCase {
     func test_removeEndpoint_dropsTheRow_andFlipsUserInteracted() async {
         let store = InMemoryNostrRelaysSelectionStore(initial: .empty)
         let repo = NostrRelaysRepository(store: store)
-        let seedURL = URL(string: "wss://nostr.onym.chat")!
+        let seedURL = URL(string: "wss://nostr.onym.app")!
         await repo.removeEndpoint(url: seedURL)
         let endpoints = await repo.currentEndpoints()
         XCTAssertTrue(endpoints.isEmpty)
@@ -171,7 +171,7 @@ final class NostrRelaysRepositoryTests: XCTestCase {
         let repo = NostrRelaysRepository(store: store, fetcher: StubFetcher(result: .failure(Boom())))
         await repo.resetToDefault()
         let endpoints = await repo.currentEndpoints()
-        XCTAssertEqual(endpoints.first?.url.absoluteString, "wss://nostr.onym.chat",
+        XCTAssertEqual(endpoints.first?.url.absoluteString, "wss://nostr.onym.app",
                        "offline reset must fall back to the hardcoded seed")
     }
 }

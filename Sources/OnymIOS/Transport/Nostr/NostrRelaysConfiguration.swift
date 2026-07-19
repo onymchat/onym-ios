@@ -29,7 +29,7 @@ struct NostrRelaysConfiguration: Codable, Equatable, Sendable {
         endpoints: [
             NostrRelayEndpoint(
                 name: "Onym Official",
-                url: URL(string: "wss://nostr.onym.chat")!,
+                url: URL(string: "wss://nostr.onym.app")!,
                 isDefault: true
             )
         ],
