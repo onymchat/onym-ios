@@ -111,7 +111,10 @@ struct DeployContractView: View {
                     Image(systemName: "arrow.up.right.square")
                         .font(.system(size: 11))
                 }
-                .foregroundStyle(OnymTokens.text)
+                // Fixed dark label — the button sits on a solid white
+                // background, so an adaptive color (near-white in dark
+                // mode) would be unreadable.
+                .foregroundStyle(Color(red: 0.039, green: 0.039, blue: 0.047))
                 .padding(.horizontal, 12).padding(.vertical, 10)
                 .frame(maxWidth: .infinity)
                 .background(.white,
