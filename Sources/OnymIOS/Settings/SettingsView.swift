@@ -59,22 +59,8 @@ struct SettingsView: View {
                 // lives on each identity's carousel page (its Backup
                 // action), and the informational Privacy screen is gone.
 
-                SettingsSectionLabel("NETWORK")
+                SettingsSectionLabel("ANCHORS")
                 SettingsCard {
-                    NavigationLink {
-                        RelayerSettingsView(flow: makeRelayerSettingsFlow())
-                    } label: {
-                        SettingsRow(
-                            title: "Relayer",
-                            subtitle: "Stellar Soroban · onymchat"
-                        ) {
-                            SettingsIconTile(symbol: "antenna.radiowaves.left.and.right",
-                                             bg: SettingsTile.indigo)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("settings.relayer_row")
-
                     NavigationLink {
                         AnchorsView(flow: makeAnchorsPickerFlow())
                     } label: {
@@ -91,8 +77,7 @@ struct SettingsView: View {
                     SettingsRow(
                         title: "Use Mainnet",
                         subtitle: "Testnet by default while contracts are staged",
-                        hasChevron: false,
-                        last: true
+                        hasChevron: false
                     ) {
                         SettingsIconTile(
                             symbol: useMainnet ? "globe.americas.fill" : "hammer.fill",
@@ -104,6 +89,21 @@ struct SettingsView: View {
                             .tint(OnymTokens.green)
                             .accessibilityIdentifier("settings.use_mainnet_toggle")
                     }
+
+                    NavigationLink {
+                        RelayerSettingsView(flow: makeRelayerSettingsFlow())
+                    } label: {
+                        SettingsRow(
+                            title: "Relayer",
+                            subtitle: "Stellar Soroban",
+                            last: true
+                        ) {
+                            SettingsIconTile(symbol: "antenna.radiowaves.left.and.right",
+                                             bg: SettingsTile.indigo)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("settings.relayer_row")
                 }
 
                 SettingsSectionLabel("TRANSPORT")
