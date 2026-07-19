@@ -7,22 +7,38 @@ import SwiftUI
 /// only swaps the visual layer and adds the custom-contract surfaces.
 struct AnchorsView: View {
     @State private var flow: AnchorsPickerFlow
+    /// The active network for new chats — same UserDefaults key the chain
+    /// consumers read via `UserDefaultsNetworkPreference`. Replaces the old
+    /// Settings "Use Mainnet" toggle; here it's a network selector.
+    @AppStorage(UserDefaultsNetworkPreference.storageKey) private var useMainnet = false
 
     init(flow: AnchorsPickerFlow) {
         _flow = State(initialValue: flow)
     }
 
+    /// The `ContractNetwork` matching the persisted preference.
+    private var activeNetwork: ContractNetwork { useMainnet ? .public : .testnet }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 SettingsLargeTitle("Anchors")
-                SettingsFootnote("Choose the contract version used to anchor on-chain group state. Selection per (network, governance type) pins to new chats; existing chats keep the contract they were created with.")
+                SettingsFootnote("Pick the active network and the contract version used to anchor on-chain group state. The active network applies to new chats; existing chats keep the contract they were created with.")
 
-                SettingsSectionLabel("NETWORK")
+                SettingsSectionLabel("ACTIVE NETWORK")
                 SettingsCard {
-                    let nets = ContractNetwork.allCases
-                    ForEach(Array(nets.enumerated()), id: \.element.self) { idx, net in
-                        networkRow(net, last: idx == nets.count - 1)
+                    networkRow(.testnet, last: false)
+                    networkRow(.public, last: false)
+                    customNetworkRow(last: true)
+                }
+
+                if flow.hasAnyContracts(network: activeNetwork) {
+                    SettingsSectionLabel("CONTRACT VERSIONS · \(activeNetwork.displayName.uppercased())")
+                    SettingsCard {
+                        let types = GovernanceType.allCases
+                        ForEach(Array(types.enumerated()), id: \.element.self) { idx, type in
+                            govRow(type, last: idx == types.count - 1)
+                        }
                     }
                 }
             }
@@ -34,35 +50,21 @@ struct AnchorsView: View {
         .task { flow.start() }
     }
 
+    // MARK: - Active-network selector
+
     @ViewBuilder
     private func networkRow(_ network: ContractNetwork, last: Bool) -> some View {
         let hasContracts = flow.hasAnyContracts(network: network)
+        let isActive = network == activeNetwork
         let letter = network == .testnet ? "T" : "M"
-        let bg = network == .testnet
-            ? (hasContracts ? SettingsTile.green : SettingsTile.gray)
-            : SettingsTile.gray
+        let bg = hasContracts ? SettingsTile.green : SettingsTile.gray
 
-        if hasContracts {
-            NavigationLink {
-                AnchorsNetworkView(flow: flow, network: network)
-            } label: {
-                SettingsRow(
-                    title: LocalizedStringKey(network.displayName),
-                    subtitle: networkSubtitle(network),
-                    last: last
-                ) {
-                    SettingsContentTile(bg: bg) {
-                        Text(letter).font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(.white)
-                    }
-                }
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("anchors.network.\(network.rawValue)")
-        } else {
+        Button {
+            useMainnet = (network == .public)
+        } label: {
             SettingsRow(
                 title: LocalizedStringKey(network.displayName),
-                subtitle: "No contracts yet",
+                subtitle: hasContracts ? networkSubtitle(network) : "No contracts yet",
                 hasChevron: false,
                 last: last
             ) {
@@ -71,17 +73,92 @@ struct AnchorsView: View {
                         .foregroundStyle(.white)
                 }
             } right: {
-                Text("Soon")
-                    .foregroundStyle(OnymTokens.text3)
-                    .font(.system(size: 14))
+                if isActive {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(OnymAccent.blue.color)
+                } else if !hasContracts {
+                    Text("Soon")
+                        .foregroundStyle(OnymTokens.text3)
+                        .font(.system(size: 14))
+                }
             }
-            .accessibilityIdentifier("anchors.network.\(network.rawValue).disabled")
         }
+        .buttonStyle(.plain)
+        .disabled(!hasContracts)
+        // Keep the ".disabled" suffix for no-contract rows so tests (and
+        // a11y) can distinguish an inactive-because-unavailable network.
+        .accessibilityIdentifier(
+            "anchors.network.\(network.rawValue)" + (hasContracts ? "" : ".disabled")
+        )
+    }
+
+    /// Placeholder for a future user-defined network (custom relayer +
+    /// contracts). Modeled as "Soon" — not selectable yet.
+    @ViewBuilder
+    private func customNetworkRow(last: Bool) -> some View {
+        SettingsRow(
+            title: "Custom",
+            subtitle: "Your own relayer + contracts",
+            hasChevron: false,
+            last: last
+        ) {
+            SettingsContentTile(bg: SettingsTile.gray) {
+                Text("C").font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.white)
+            }
+        } right: {
+            Text("Soon")
+                .foregroundStyle(OnymTokens.text3)
+                .font(.system(size: 14))
+        }
+        .accessibilityIdentifier("anchors.network.custom.disabled")
     }
 
     private func networkSubtitle(_ network: ContractNetwork) -> String {
         let releases = flow.state.manifest.releases.count
         return "\(GovernanceType.allCases.count) governance types · \(releases) release\(releases == 1 ? "" : "s")"
+    }
+
+    // MARK: - Contract-version list for the active network
+
+    @ViewBuilder
+    private func govRow(_ type: GovernanceType, last: Bool) -> some View {
+        let key = AnchorSelectionKey(network: activeNetwork, type: type)
+        let binding = flow.binding(for: key)
+        let isExplicit = flow.hasExplicitSelection(for: key)
+
+        if let binding {
+            NavigationLink {
+                AnchorsVersionView(flow: flow, key: key)
+            } label: {
+                SettingsRow(
+                    title: LocalizedStringKey(type.displayName),
+                    subtitle: "\(binding.release) " + (isExplicit ? "(selected)" : "(latest)"),
+                    inset: 56,
+                    last: last
+                ) {
+                    GovernanceTypeTile(type: type)
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("anchors.type.\(type.rawValue)")
+        } else {
+            SettingsRow(
+                title: LocalizedStringKey(type.displayName),
+                subtitle: "No contract",
+                hasChevron: false,
+                inset: 56,
+                last: last
+            ) {
+                GovernanceTypeTile(type: type, dimmed: true)
+            } right: {
+                Text("—")
+                    .foregroundStyle(OnymTokens.text3)
+                    .font(.system(size: 14))
+            }
+            .accessibilityIdentifier("anchors.type.\(type.rawValue).disabled")
+        }
     }
 }
 

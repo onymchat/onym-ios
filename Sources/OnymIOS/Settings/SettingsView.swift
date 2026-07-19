@@ -74,21 +74,9 @@ struct SettingsView: View {
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("settings.anchors_row")
 
-                    SettingsRow(
-                        title: "Use Mainnet",
-                        subtitle: "Testnet by default while contracts are staged",
-                        hasChevron: false
-                    ) {
-                        SettingsIconTile(
-                            symbol: useMainnet ? "globe.americas.fill" : "hammer.fill",
-                            bg: useMainnet ? SettingsTile.green : SettingsTile.gray
-                        )
-                    } right: {
-                        Toggle("", isOn: $useMainnet)
-                            .labelsHidden()
-                            .tint(OnymTokens.green)
-                            .accessibilityIdentifier("settings.use_mainnet_toggle")
-                    }
+                    // The network choice (was a "Use Mainnet" toggle) now
+                    // lives inside the Anchors screen as the active-network
+                    // selector — the subtitle above reflects it.
 
                     NavigationLink {
                         RelayerSettingsView(flow: makeRelayerSettingsFlow())
