@@ -101,7 +101,7 @@ on Apple platform cryptography.
 - Channel: Apple App Store.
 - Availability: worldwide, **including France**.
 - Audience: general public (mass-market).
-- Source availability: `[public repo URL, if applicable]`.
+- Source availability: `https://github.com/onymchat/onym-ios`.
 
 ## 5. Supporting material
 
@@ -114,4 +114,4 @@ on Apple platform cryptography.
 accurate and that Onym supplies a means of cryptology as described, using
 standard algorithms, in accordance with the applicable French regulations.
 
-Name: `[…]`   Title: `[…]`   Date: `[…]`   Signature: `[…]`
+Name: `Rinat Enikeev`   Title: `Founder`   Date: `19.07.2026`   Signature: `Rinat Enikeev`

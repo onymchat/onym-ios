@@ -32,7 +32,7 @@ one row per product.
 | Product name / model | Onym (iOS) |
 | ECCN | 5D992.c |
 | Authorization type | Self-classification (740.17(b)(1)) |
-| Manufacturer | `[Company legal name]` |
+| Manufacturer | `Onym OU` |
 | Item type | Application software — end-to-end encrypted messenger |
 | Encryption used | AES-256-GCM; X25519 ECDH; HKDF-SHA256; Ed25519; secp256k1 Schnorr; SHA-256; PBKDF2-HMAC-SHA512 |
 | Symmetric key length | 256 bits |
