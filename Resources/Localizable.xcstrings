@@ -1458,6 +1458,9 @@
         }
       }
     },
+    "Enter the 12 or 24-word recovery phrase to restore an identity on this device." : {
+
+    },
     "Everything is encrypted" : {
       "localizations" : {
         "en" : {
@@ -2695,6 +2698,9 @@
         }
       }
     },
+    "Restore" : {
+
+    },
     "Restore default" : {
       "localizations" : {
         "en" : {
@@ -2710,6 +2716,9 @@
           }
         }
       }
+    },
+    "Restore from recovery phrase" : {
+
     },
     "Retry" : {
       "localizations" : {

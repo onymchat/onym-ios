@@ -161,6 +161,34 @@ final class IdentityManagementUITests: XCTestCase {
             "old 'Work' alias never disappeared after rename"
         )
     }
+
+    /// 6) Restore from the carousel add page — the "Restore from recovery
+    /// phrase" link opens the restore sheet; a valid phrase adds an
+    /// identity and dismisses the sheet.
+    func test_restoreIdentity_viaCarousel_addsIdentity() throws {
+        let app = AppLauncher.launchFresh()
+        defer { app.terminate() }
+
+        let settings = SettingsScreen(app: app)
+        settings.swipeCarouselToAddPage()
+
+        let restore = app.buttons["identity.add.restore_button"]
+        XCTAssertTrue(restore.waitForExistence(timeout: 5),
+                      "Restore link never appeared on the add page")
+        restore.tap()
+
+        let phrase = app.textFields["restore_identity.phrase_field"]
+        XCTAssertTrue(phrase.waitForExistence(timeout: 5),
+                      "restore phrase field never appeared")
+        phrase.tap()
+        phrase.typeText("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about")
+
+        app.buttons["restore_identity.restore_button"].tap()
+
+        // A valid phrase restores the identity and dismisses the sheet.
+        XCTAssertTrue(phrase.waitForNonExistence(timeout: 6),
+                      "restore sheet never dismissed — restore may have failed")
+    }
 }
 
 private extension XCUIElement {

@@ -25,6 +25,7 @@ struct IdentityCarouselCard: View {
     @State private var selection: String = ""
     @State private var selectTask: Task<Void, Never>?
     @State private var renameTarget: IdentitySummary?
+    @State private var showRestore = false
     @FocusState private var addNameFocused: Bool
 
     var body: some View {
@@ -41,7 +42,7 @@ struct IdentityCarouselCard: View {
             // frame, overlapping the shorter add-page content (the Create
             // button). Hide them and draw our own row below the carousel.
             .tabViewStyle(.page(indexDisplayMode: .never))
-            .frame(height: 420)
+            .frame(height: 460)
             .accessibilityIdentifier("identity.carousel")
             .onChange(of: selection) { _, newValue in settle(on: newValue) }
             .onChange(of: flow.identities.count) { old, new in
@@ -70,6 +71,9 @@ struct IdentityCarouselCard: View {
         }
         .sheet(item: $renameTarget) { summary in
             RenameIdentitySheet(flow: flow, summary: summary)
+        }
+        .sheet(isPresented: $showRestore) {
+            RestoreIdentitySheet(flow: flow)
         }
     }
 
@@ -229,7 +233,7 @@ struct IdentityCarouselCard: View {
     private var addPage: some View {
         VStack(spacing: 12) {
             ZStack {
-                SettingsQRCode(value: "onym-add-identity", size: 190)
+                SettingsQRCode(value: "onym-add-identity", size: 150)
                     .padding(12)
                     .blur(radius: 9)
                     .opacity(0.4)
@@ -277,6 +281,18 @@ struct IdentityCarouselCard: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("identity.add.create_button")
+
+            Button {
+                addNameFocused = false
+                showRestore = true
+            } label: {
+                Text("Restore from recovery phrase")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(OnymAccent.blue.color)
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 2)
+            .accessibilityIdentifier("identity.add.restore_button")
 
             if let error = flow.addError {
                 Text(error)
@@ -375,5 +391,108 @@ struct RenameIdentitySheet: View {
         guard canSave else { return }
         flow.rename(summary.id, newName: trimmed)
         dismiss()
+    }
+}
+
+/// Restore an existing identity from its 12/24-word recovery phrase.
+/// Reached from the carousel's add page. The backing add pipeline
+/// (`IdentitiesFlow.submitAdd` → `repository.add(mnemonic:)`) already
+/// supports restore + invalid-phrase errors; this is its UI surface.
+struct RestoreIdentitySheet: View {
+    @Bindable var flow: IdentitiesFlow
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var phrase = ""
+    @State private var name = ""
+    /// Identity count when the sheet opened — used to detect a
+    /// successful restore (the list grows) and dismiss.
+    @State private var baselineCount = 0
+
+    private var words: [String] {
+        phrase.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+    }
+    private var canRestore: Bool { words.count == 12 || words.count == 24 }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Enter the 12 or 24-word recovery phrase to restore an identity on this device.")
+                        .font(.callout)
+                        .foregroundStyle(OnymTokens.text2)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 16)
+
+                    SettingsCard {
+                        TextField("word word word …", text: $phrase, axis: .vertical)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .font(.system(size: 16, design: .monospaced))
+                            .lineLimit(3...6)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            .accessibilityIdentifier("restore_identity.phrase_field")
+                    }
+
+                    SettingsCard {
+                        TextField("Name (optional)", text: $name)
+                            .textInputAutocapitalization(.words)
+                            .autocorrectionDisabled()
+                            .font(.system(size: 16.5))
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            .accessibilityIdentifier("restore_identity.name_field")
+                    }
+
+                    if let error = flow.addError {
+                        Text(error)
+                            .font(.system(size: 13))
+                            .foregroundStyle(OnymTokens.red)
+                            .padding(.horizontal, 20)
+                            .accessibilityIdentifier("restore_identity.error")
+                    }
+
+                    Button(action: restore) {
+                        Text("Restore")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity, minHeight: 50)
+                            .background(OnymAccent.blue.color,
+                                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canRestore)
+                    .opacity(canRestore ? 1 : 0.5)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 4)
+                    .accessibilityIdentifier("restore_identity.restore_button")
+                }
+                .padding(.bottom, 24)
+            }
+            .background(OnymTokens.surface.ignoresSafeArea())
+            .navigationTitle("Restore Identity")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+            .onAppear {
+                baselineCount = flow.identities.count
+                flow.addError = nil
+            }
+            .onChange(of: flow.identities.count) { _, newValue in
+                // A successful restore appends the identity — dismiss.
+                if newValue > baselineCount { dismiss() }
+            }
+        }
+    }
+
+    private func restore() {
+        guard canRestore else { return }
+        flow.addError = nil
+        flow.pendingName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        flow.pendingMnemonic = words.joined(separator: " ")
+        flow.submitAdd()
     }
 }
