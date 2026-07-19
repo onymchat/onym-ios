@@ -138,6 +138,14 @@ jobs:
       - name: Generate Xcode project
         run: ./generate-xcodeproj.sh
 
+      - name: Reclaim runner memory (shut down stale simulators)
+        # Persistent self-hosted Mac Mini: simulators booted by earlier
+        # or cancelled runs survive and hold RAM, which OOM-kills the
+        # memory-heavy Poseidon proof tests (they crash with SIGKILL).
+        # Shut every booted simulator down to reclaim memory before we
+        # boot the single one this job needs.
+        run: xcrun simctl shutdown all 2>/dev/null || true
+
       - name: Pick + pre-boot iOS Simulator destination
         id: sim
         run: |
@@ -232,6 +240,14 @@ jobs:
 
       - name: Generate Xcode project
         run: ./generate-xcodeproj.sh
+
+      - name: Reclaim runner memory (shut down stale simulators)
+        # Persistent self-hosted Mac Mini: simulators booted by earlier
+        # or cancelled runs survive and hold RAM, which OOM-kills the
+        # memory-heavy Poseidon proof tests (they crash with SIGKILL).
+        # Shut every booted simulator down to reclaim memory before we
+        # boot the single one this job needs.
+        run: xcrun simctl shutdown all 2>/dev/null || true
 
       - name: Pick + pre-boot iOS Simulator destination
         id: sim
