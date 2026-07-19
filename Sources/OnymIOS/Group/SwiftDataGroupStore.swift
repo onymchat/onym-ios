@@ -97,6 +97,7 @@ actor SwiftDataGroupStore: GroupStore {
             existing.encryptedMemberProfilesJSON = encoded.encryptedMemberProfilesJSON
             existing.encryptedAdminEd25519PubkeyHex = encoded.encryptedAdminEd25519PubkeyHex
             existing.encryptedAvatar = encoded.encryptedAvatar
+            existing.encryptedInvitationMessage = encoded.encryptedInvitationMessage
             try? context.save()
             return false
         }
@@ -181,7 +182,8 @@ actor SwiftDataGroupStore: GroupStore {
             encryptedAdminPubkeyHex: try group.adminPubkeyHex.map(StorageEncryption.encrypt),
             encryptedMemberProfilesJSON: encryptedProfilesJSON,
             encryptedAdminEd25519PubkeyHex: try group.adminEd25519PubkeyHex.map(StorageEncryption.encrypt),
-            encryptedAvatar: try group.avatarJPEG.map(StorageEncryption.encrypt)
+            encryptedAvatar: try group.avatarJPEG.map(StorageEncryption.encrypt),
+            encryptedInvitationMessage: try group.invitationMessage.map(StorageEncryption.encrypt)
         )
     }
 
@@ -215,6 +217,9 @@ actor SwiftDataGroupStore: GroupStore {
         // Advisory like the profiles map: a decode miss just costs the
         // brand-mark fallback until the next avatar message arrives.
         let avatarJPEG = row.encryptedAvatar.flatMap { try? StorageEncryption.decrypt($0) }
+        let invitationMessage = row.encryptedInvitationMessage.flatMap {
+            try? StorageEncryption.decryptString($0)
+        }
         return ChatGroup(
             id: row.id,
             ownerIdentityID: owner,
@@ -232,7 +237,8 @@ actor SwiftDataGroupStore: GroupStore {
             adminEd25519PubkeyHex: adminEd25519PubkeyHex,
             isPublishedOnChain: row.isPublishedOnChain,
             avatarJPEG: avatarJPEG,
-            lastReadAt: row.lastReadAt
+            lastReadAt: row.lastReadAt,
+            invitationMessage: invitationMessage
         )
     }
 }

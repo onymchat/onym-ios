@@ -47,6 +47,12 @@ struct GroupInviteOfferPayload: Codable, Equatable, Sendable {
     /// Admin's self-asserted display name, surfaced in the invitee's
     /// "X invited you" prompt. Untrusted text — render, don't trust.
     let inviterAlias: String
+    /// Optional free-text invitation the creator wrote (greeting / group
+    /// policy / articles of association). Shown on the invitee's invite
+    /// card *before* they accept. Sealed here, so any length is fine.
+    /// Untrusted text — render, don't trust. `decodeIfPresent` for
+    /// forward-compat with pre-feature senders.
+    let invitationMessage: String?
 
     enum CodingKeys: String, CodingKey {
         case version = "offer_version"
@@ -54,6 +60,7 @@ struct GroupInviteOfferPayload: Codable, Equatable, Sendable {
         case groupID = "group_id"
         case groupName = "group_name"
         case inviterAlias = "inviter_alias"
+        case invitationMessage = "invitation_message"
     }
 
     init(
@@ -61,7 +68,8 @@ struct GroupInviteOfferPayload: Codable, Equatable, Sendable {
         introPublicKey: Data,
         groupID: Data,
         groupName: String?,
-        inviterAlias: String
+        inviterAlias: String,
+        invitationMessage: String? = nil
     ) throws {
         guard introPublicKey.count == 32 else {
             throw GroupInviteOfferPayloadError.shape(
@@ -78,6 +86,7 @@ struct GroupInviteOfferPayload: Codable, Equatable, Sendable {
         self.groupID = groupID
         self.groupName = groupName
         self.inviterAlias = inviterAlias
+        self.invitationMessage = invitationMessage
     }
 
     init(from decoder: Decoder) throws {
@@ -87,8 +96,22 @@ struct GroupInviteOfferPayload: Codable, Equatable, Sendable {
             introPublicKey: c.decode(Data.self, forKey: .introPublicKey),
             groupID: c.decode(Data.self, forKey: .groupID),
             groupName: c.decodeIfPresent(String.self, forKey: .groupName),
-            inviterAlias: c.decode(String.self, forKey: .inviterAlias)
+            inviterAlias: c.decode(String.self, forKey: .inviterAlias),
+            invitationMessage: c.decodeIfPresent(String.self, forKey: .invitationMessage)
         )
+    }
+
+    /// Explicit encoder so the optional invitation message is *omitted*
+    /// (not encoded as null) when absent — matching Android's
+    /// `encodeDefaults = false` and keeping the sealed payload compact.
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(version, forKey: .version)
+        try c.encode(introPublicKey, forKey: .introPublicKey)
+        try c.encode(groupID, forKey: .groupID)
+        try c.encodeIfPresent(groupName, forKey: .groupName)
+        try c.encode(inviterAlias, forKey: .inviterAlias)
+        try c.encodeIfPresent(invitationMessage, forKey: .invitationMessage)
     }
 
     /// Rebuild the `IntroCapability` the invitee feeds to

@@ -235,6 +235,7 @@ struct IncomingMessageDispatcher: Sendable {
             groupID: offer.groupID,
             groupName: offer.groupName,
             inviterAlias: offer.inviterAlias,
+            invitationMessage: offer.invitationMessage,
             receivedAt: receivedAt
         ))
     }
@@ -352,7 +353,9 @@ struct IncomingMessageDispatcher: Sendable {
             // Group photo as the sender knew it. `nil` for avatar-less
             // groups or pre-avatar senders; a later GroupAvatarPayload
             // can still fill it in.
-            avatarJPEG: invitation.avatar
+            avatarJPEG: invitation.avatar,
+            // The group's invitation/intro, as the sender wrote it.
+            invitationMessage: invitation.invitationMessage
         )
         await groupRepository.insert(group)
     }

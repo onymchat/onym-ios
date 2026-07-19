@@ -92,17 +92,18 @@ struct CreateGroupInteractor: Sendable {
     func create(
         governanceType: SEPGroupType = .tyranny,
         name: String,
+        invitationMessage: String? = nil,
         invitees: [Data],
         avatar: Data? = nil,
         onProgress: @Sendable (CreateGroupProgress) -> Void = { _ in }
     ) async throws -> ChatGroup {
         switch governanceType {
         case .tyranny:
-            return try await createTyranny(name: name, invitees: invitees, avatar: avatar, onProgress: onProgress)
+            return try await createTyranny(name: name, invitationMessage: invitationMessage, invitees: invitees, avatar: avatar, onProgress: onProgress)
         case .oneOnOne:
-            return try await createOneOnOne(name: name, invitees: invitees, avatar: avatar, onProgress: onProgress)
+            return try await createOneOnOne(name: name, invitationMessage: invitationMessage, invitees: invitees, avatar: avatar, onProgress: onProgress)
         case .anarchy:
-            return try await createAnarchy(name: name, invitees: invitees, avatar: avatar, onProgress: onProgress)
+            return try await createAnarchy(name: name, invitationMessage: invitationMessage, invitees: invitees, avatar: avatar, onProgress: onProgress)
         case .democracy, .oligarchy:
             throw CreateGroupError.unsupportedGovernanceType(governanceType)
         }
@@ -112,6 +113,7 @@ struct CreateGroupInteractor: Sendable {
 
     private func createTyranny(
         name: String,
+        invitationMessage: String?,
         invitees: [Data],
         avatar: Data?,
         onProgress: @Sendable (CreateGroupProgress) -> Void
@@ -254,7 +256,8 @@ struct CreateGroupInteractor: Sendable {
             adminPubkeyHex: adminPubkeyHex,
             adminEd25519PubkeyHex: adminEd25519PubkeyHex,
             isPublishedOnChain: false,
-            avatarJPEG: avatar
+            avatarJPEG: avatar,
+            invitationMessage: invitationMessage
         )
         _ = await groups.insert(group)
         await groups.markPublished(id: group.id, ownerID: group.ownerIdentityID, commitment: proof.commitment)
@@ -276,6 +279,7 @@ struct CreateGroupInteractor: Sendable {
                 ownerIdentityID: ownerID,
                 groupID: groupID,
                 groupName: trimmedName,
+                invitationMessage: invitationMessage,
                 inviterAlias: inviterAlias
             )
         }
@@ -287,6 +291,7 @@ struct CreateGroupInteractor: Sendable {
 
     private func createOneOnOne(
         name: String,
+        invitationMessage: String?,
         invitees: [Data],
         avatar: Data?,
         onProgress: @Sendable (CreateGroupProgress) -> Void
@@ -444,7 +449,8 @@ struct CreateGroupInteractor: Sendable {
             adminPubkeyHex: nil,
             adminEd25519PubkeyHex: nil,
             isPublishedOnChain: false,
-            avatarJPEG: avatar
+            avatarJPEG: avatar,
+            invitationMessage: invitationMessage
         )
         _ = await groups.insert(group)
         await groups.markPublished(id: group.id, ownerID: group.ownerIdentityID, commitment: proof.commitment)
@@ -465,7 +471,8 @@ struct CreateGroupInteractor: Sendable {
             adminPubkeyHex: nil,
             peerBlsSecret: peerBlsSecret,
             memberProfiles: creatorProfiles,
-            avatar: avatar
+            avatar: avatar,
+            invitationMessage: invitationMessage
         )
         try await sendInvitations(invitePayload, to: [peerInboxKey])
 
@@ -488,6 +495,7 @@ struct CreateGroupInteractor: Sendable {
     /// adminPubkeyHex: nil`.
     private func createAnarchy(
         name: String,
+        invitationMessage: String?,
         invitees: [Data],
         avatar: Data?,
         onProgress: @Sendable (CreateGroupProgress) -> Void
@@ -627,7 +635,8 @@ struct CreateGroupInteractor: Sendable {
             adminPubkeyHex: nil,
             adminEd25519PubkeyHex: nil,
             isPublishedOnChain: false,
-            avatarJPEG: avatar
+            avatarJPEG: avatar,
+            invitationMessage: invitationMessage
         )
         _ = await groups.insert(group)
         await groups.markPublished(id: group.id, ownerID: group.ownerIdentityID, commitment: proof.commitment)
@@ -651,7 +660,8 @@ struct CreateGroupInteractor: Sendable {
                 groupTypeRaw: SEPGroupType.anarchy.rawValue,
                 adminPubkeyHex: nil,
                 memberProfiles: creatorProfiles,
-                avatar: avatar
+                avatar: avatar,
+                invitationMessage: invitationMessage
             )
             try await sendInvitations(invitePayload, to: invitees)
         }
@@ -719,6 +729,7 @@ struct CreateGroupInteractor: Sendable {
         ownerIdentityID: IdentityID,
         groupID: Data,
         groupName: String,
+        invitationMessage: String?,
         inviterAlias: String
     ) async throws {
         for (index, inboxKey) in invitees.enumerated() {
@@ -744,7 +755,8 @@ struct CreateGroupInteractor: Sendable {
                     introPublicKey: capability.introPublicKey,
                     groupID: groupID,
                     groupName: groupName,
-                    inviterAlias: inviterAlias
+                    inviterAlias: inviterAlias,
+                    invitationMessage: invitationMessage
                 )
             } catch {
                 throw CreateGroupError.invitationSendFailed(

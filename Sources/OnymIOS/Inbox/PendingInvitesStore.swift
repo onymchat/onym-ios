@@ -18,6 +18,9 @@ struct PendingInvite: Identifiable, Equatable, Sendable {
     let groupID: Data
     let groupName: String?
     let inviterAlias: String
+    /// Optional free-text invitation the creator wrote — shown on the
+    /// invite card so the user reads it before accepting. `nil` = none.
+    let invitationMessage: String?
     let receivedAt: Date
 }
 

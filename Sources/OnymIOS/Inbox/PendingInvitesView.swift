@@ -148,6 +148,18 @@ struct PendingInvitesView: View {
                     .font(.system(size: 13))
                     .foregroundStyle(OnymTokens.text2)
             }
+            if let message = invite.invitationMessage,
+               !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(message)
+                    .font(.system(size: 14))
+                    .foregroundStyle(OnymTokens.text)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(OnymTokens.surface2)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .textSelection(.enabled)
+                    .accessibilityIdentifier("pending_invites.message.\(invite.id)")
+            }
             HStack(spacing: 8) {
                 Button {
                     flow.dismiss(invite.id)

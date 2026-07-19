@@ -69,6 +69,10 @@ final class PersistedGroup {
     /// lightweight migration lands the column on existing rows without a
     /// wipe; `nil` decodes to "no avatar" (brand-mark fallback).
     var encryptedAvatar: Data?
+    /// Optional encrypted invitation message (the group's intro / policy).
+    /// Optional so SwiftData's lightweight migration lands the column on
+    /// existing rows without a wipe; `nil` decodes to "no invitation".
+    var encryptedInvitationMessage: Data?
 
     init(
         id: String,
@@ -87,7 +91,8 @@ final class PersistedGroup {
         encryptedAdminPubkeyHex: Data?,
         encryptedMemberProfilesJSON: Data?,
         encryptedAdminEd25519PubkeyHex: Data?,
-        encryptedAvatar: Data? = nil
+        encryptedAvatar: Data? = nil,
+        encryptedInvitationMessage: Data? = nil
     ) {
         self.id = id
         self.ownerIdentityIDString = ownerIdentityIDString
@@ -106,5 +111,6 @@ final class PersistedGroup {
         self.encryptedMemberProfilesJSON = encryptedMemberProfilesJSON
         self.encryptedAdminEd25519PubkeyHex = encryptedAdminEd25519PubkeyHex
         self.encryptedAvatar = encryptedAvatar
+        self.encryptedInvitationMessage = encryptedInvitationMessage
     }
 }

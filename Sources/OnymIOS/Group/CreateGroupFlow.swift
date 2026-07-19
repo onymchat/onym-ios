@@ -5,7 +5,7 @@ import Observation
 /// renders based on `flow.route`; transitions are driven by
 /// view-side intents (next, back, addInvitee, submit, etc).
 enum CreateGroupRoute: Equatable, Sendable {
-    case step1            // name + accent + governance
+    case step1            // name + invitation message + governance
     case step2            // review invitees + create
     case inviteByKey      // paste 64-char inbox key
     case creating         // progress steps
@@ -33,7 +33,12 @@ final class CreateGroupFlow {
     // MARK: - Form state
 
     var name: String
-    var accent: OnymAccent = .blue
+    /// Optional free-text invitation the creator writes — a greeting,
+    /// group policy, or articles of association. Travels in the sealed
+    /// invite payloads (never the QR/link, never on-chain) so invitees
+    /// read it before accepting and it persists as the group's intro.
+    /// Any length; empty means "no invitation".
+    var invitationMessage: String = ""
     /// Always `.tyranny` in PR-C — the picker disables the others.
     var governance: OnymUIGovernance = .tyranny
     var invitees: [OnymInvitee] = []
@@ -290,6 +295,7 @@ final class CreateGroupFlow {
             let group = try await interactor.create(
                 governanceType: governance.sepGroupType,
                 name: effectiveName,
+                invitationMessage: trimmedInvitationMessage,
                 invitees: invitees,
                 avatar: avatarImageData,
                 onProgress: { [weak self] p in
@@ -346,7 +352,7 @@ final class CreateGroupFlow {
         generatedName = generated
         name = generated
         nameFieldHasBeenFocused = false
-        accent = .blue
+        invitationMessage = ""
         governance = .tyranny
         invitees = []
         avatarImageData = nil
@@ -383,6 +389,13 @@ final class CreateGroupFlow {
 
     private var trimmedName: String {
         name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// The invitation to send: trimmed, or nil when the creator left it
+    /// blank (so we don't ship an empty string across the wire).
+    private var trimmedInvitationMessage: String? {
+        let trimmed = invitationMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
 

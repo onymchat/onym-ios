@@ -295,7 +295,10 @@ actor JoinRequestApprover: JoinRequestApproving {
             // Tyranny invitees only get the full snapshot here (the
             // create-time offer carries nothing), so this is where the
             // group photo reaches them.
-            avatar: anchored.avatarJPEG
+            avatar: anchored.avatarJPEG,
+            // Carry the group's invitation/intro so it persists for the
+            // joiner once they materialize the group.
+            invitationMessage: anchored.invitationMessage
         )
         let payloadBytes: Data
         do {

@@ -77,6 +77,46 @@ final class GroupInviteOfferPayloadTests: XCTestCase {
         )
     }
 
+    func test_invitationMessage_roundTrips() throws {
+        let long = String(repeating: "Articles of association. ", count: 200)
+        let offer = try GroupInviteOfferPayload(
+            introPublicKey: Data(repeating: 0x11, count: 32),
+            groupID: Data(repeating: 0x22, count: 32),
+            groupName: "Maple Garden",
+            inviterAlias: "Alice",
+            invitationMessage: long
+        )
+        let decoded = try JSONDecoder().decode(
+            GroupInviteOfferPayload.self,
+            from: JSONEncoder().encode(offer)
+        )
+        XCTAssertEqual(decoded.invitationMessage, long)
+        XCTAssertEqual(decoded, offer)
+    }
+
+    /// A pre-feature sender's offer (no `invitation_message` key) still
+    /// decodes — forward/backward compatibility via `decodeIfPresent`.
+    func test_missingInvitationMessage_decodesToNil() throws {
+        let json = """
+        {"offer_version":1,"intro_pub":"\(Data(repeating: 0x11, count: 32).base64EncodedString())",\
+        "group_id":"\(Data(repeating: 0x22, count: 32).base64EncodedString())",\
+        "group_name":"G","inviter_alias":"A"}
+        """
+        let decoded = try JSONDecoder().decode(
+            GroupInviteOfferPayload.self,
+            from: Data(json.utf8)
+        )
+        XCTAssertNil(decoded.invitationMessage)
+    }
+
+    /// The optional message must be *omitted* (not null) when absent, so
+    /// the wire shape matches Android's `encodeDefaults = false`.
+    func test_nilInvitationMessage_isOmittedFromJSON() throws {
+        let offer = try makeValid()
+        let json = String(data: try JSONEncoder().encode(offer), encoding: .utf8) ?? ""
+        XCTAssertFalse(json.contains("invitation_message"))
+    }
+
     func test_introCapability_rebuildsFromOffer() throws {
         let offer = try makeValid()
         let cap = try offer.introCapability()

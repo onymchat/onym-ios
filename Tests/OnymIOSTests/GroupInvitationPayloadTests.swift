@@ -116,7 +116,8 @@ final class GroupInvitationPayloadTests: XCTestCase {
 
     private func makePayload(
         memberProfiles: [String: MemberProfile]?,
-        avatar: Data? = nil
+        avatar: Data? = nil,
+        invitationMessage: String? = nil
     ) -> GroupInvitationPayload {
         GroupInvitationPayload(
             version: 1,
@@ -132,8 +133,35 @@ final class GroupInvitationPayloadTests: XCTestCase {
             adminPubkeyHex: nil,
             peerBlsSecret: nil,
             memberProfiles: memberProfiles,
-            avatar: avatar
+            avatar: avatar,
+            invitationMessage: invitationMessage
         )
+    }
+
+    // MARK: - Invitation message
+
+    func test_roundtrip_withInvitationMessage_preservesText() throws {
+        let long = String(repeating: "Group policy: be kind. ", count: 300)
+        let original = makePayload(memberProfiles: nil, invitationMessage: long)
+        let decoded = try JSONDecoder().decode(
+            GroupInvitationPayload.self,
+            from: JSONEncoder().encode(original)
+        )
+        XCTAssertEqual(decoded.invitationMessage, long)
+    }
+
+    func test_legacyPayload_withoutInvitationMessage_decodesAsNil() throws {
+        let gid = Data(repeating: 0, count: 32).base64EncodedString()
+        let secret = Data(repeating: 0, count: 32).base64EncodedString()
+        let salt = Data(repeating: 0, count: 32).base64EncodedString()
+        let legacy = #"""
+        {"version":1,"group_id":"\#(gid)","group_secret":"\#(secret)","name":"Family","members":[],"epoch":0,"salt":"\#(salt)","tier_raw":1,"group_type_raw":"tyranny"}
+        """#
+        let decoded = try JSONDecoder().decode(
+            GroupInvitationPayload.self,
+            from: legacy.data(using: .utf8)!
+        )
+        XCTAssertNil(decoded.invitationMessage)
     }
 }
 

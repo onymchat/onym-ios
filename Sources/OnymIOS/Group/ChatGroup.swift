@@ -80,6 +80,13 @@ struct ChatGroup: Identifiable, Equatable, Sendable {
     /// Defaulted so existing construction sites need no change.
     var lastReadAt: Date? = nil
 
+    /// Optional free-text invitation the creator wrote — a greeting,
+    /// group policy, or articles of association. Set at create time,
+    /// sealed into the invite payloads so joiners read it before
+    /// accepting, and persisted here as the group's intro. `nil` = none.
+    /// Defaulted so existing construction sites need no change.
+    var invitationMessage: String? = nil
+
     /// Group ID as the raw 32-byte payload (parsed back from `id`).
     /// Used directly when building chain payloads + invitations.
     var groupIDData: Data {

@@ -64,6 +64,11 @@ struct GroupInvitationPayload: Codable, Equatable, Sendable {
     /// so avatar-less groups and pre-avatar senders round-trip cleanly;
     /// a later avatar message can still set or replace it.
     let avatar: Data?
+    /// Optional free-text invitation the creator wrote (greeting / group
+    /// policy / articles of association). Persists into the materialized
+    /// `ChatGroup` as the group's intro. `decodeIfPresent` for
+    /// forward-compat with pre-feature senders.
+    let invitationMessage: String?
 
     enum CodingKeys: String, CodingKey {
         case version
@@ -80,6 +85,7 @@ struct GroupInvitationPayload: Codable, Equatable, Sendable {
         case peerBlsSecret = "peer_bls_secret"
         case memberProfiles = "member_profiles"
         case avatar
+        case invitationMessage = "invitation_message"
     }
 
     init(
@@ -96,7 +102,8 @@ struct GroupInvitationPayload: Codable, Equatable, Sendable {
         adminPubkeyHex: String?,
         peerBlsSecret: Data? = nil,
         memberProfiles: [String: MemberProfile]? = nil,
-        avatar: Data? = nil
+        avatar: Data? = nil,
+        invitationMessage: String? = nil
     ) {
         self.version = version
         self.groupID = groupID
@@ -112,6 +119,7 @@ struct GroupInvitationPayload: Codable, Equatable, Sendable {
         self.peerBlsSecret = peerBlsSecret
         self.memberProfiles = memberProfiles
         self.avatar = avatar
+        self.invitationMessage = invitationMessage
     }
 
     init(from decoder: Decoder) throws {
@@ -133,5 +141,6 @@ struct GroupInvitationPayload: Codable, Equatable, Sendable {
             forKey: .memberProfiles
         )
         avatar = try c.decodeIfPresent(Data.self, forKey: .avatar)
+        invitationMessage = try c.decodeIfPresent(String.self, forKey: .invitationMessage)
     }
 }

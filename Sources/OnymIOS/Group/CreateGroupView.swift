@@ -160,7 +160,7 @@ private struct OnymQuietButton: View {
     }
 }
 
-// MARK: - Step 1: name + accent + governance
+// MARK: - Step 1: name + invitation message + governance
 
 private struct CreateGroupStep1View: View {
     @Bindable var flow: CreateGroupFlow
@@ -174,8 +174,9 @@ private struct CreateGroupStep1View: View {
                     avatar
                     nameField
                     nameFootnote
-                    OnymSectionLabel(text: "Accent color")
-                    accentRow
+                    OnymSectionLabel(text: "Invitation message")
+                    invitationField
+                    invitationFootnote
                     OnymSectionLabel(text: "Group type")
                     founderExplanation
                 }
@@ -186,7 +187,8 @@ private struct CreateGroupStep1View: View {
         }
     }
 
-    private var accentColor: Color { flow.accent.color }
+    // Accent picker removed (never persisted/sent) — screens use brand blue.
+    private var accentColor: Color { OnymAccent.blue.color }
 
     private var avatar: some View {
         GroupAvatarPickerButton(
@@ -245,38 +247,36 @@ private struct CreateGroupStep1View: View {
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var accentRow: some View {
-        HStack(spacing: 12) {
-            ForEach(OnymAccent.allCases) { a in
-                Button {
-                    flow.accent = a
-                } label: {
-                    ZStack {
-                        Circle().fill(a.color)
-                        if flow.accent == a {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(.white)
-                        }
-                    }
-                    .frame(width: 34, height: 34)
-                    .scaleEffect(flow.accent == a ? 1.05 : 1)
-                    .overlay(
-                        Circle()
-                            .stroke(a.color, lineWidth: flow.accent == a ? 2 : 0)
-                            .padding(-3)
-                    )
-                    .overlay(
-                        Circle()
-                            .stroke(OnymTokens.bg, lineWidth: flow.accent == a ? 2 : 0)
-                            .padding(-1)
-                    )
-                }
-                .buttonStyle(.plain)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 4)
+    private var invitationField: some View {
+        TextField(
+            "",
+            text: $flow.invitationMessage,
+            prompt: Text("Add a greeting, group rules, or policy…")
+                .foregroundColor(OnymTokens.text3),
+            axis: .vertical
+        )
+        .font(.system(size: 15))
+        .foregroundStyle(OnymTokens.text)
+        .tint(accentColor)
+        .lineLimit(3...12)
+        .textInputAutocapitalization(.sentences)
+        .accessibilityIdentifier("create_group.step1.invitation_field")
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(OnymTokens.surface2)
+        .overlay(
+            RoundedRectangle(cornerRadius: 14).stroke(OnymTokens.hairline, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    private var invitationFootnote: some View {
+        Text("Shown to people before they accept your invite. Optional.")
+            .font(.system(size: 11.5))
+            .foregroundStyle(OnymTokens.text3)
+            .padding(.horizontal, 4)
+            .padding(.top, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// Founder is the only group type today, so the picker is replaced by
@@ -357,7 +357,8 @@ private struct CreateGroupStep2View: View {
         }
     }
 
-    private var accentColor: Color { flow.accent.color }
+    // Accent picker removed (never persisted/sent) — screens use brand blue.
+    private var accentColor: Color { OnymAccent.blue.color }
 
     private var typeBanner: some View {
         HStack(spacing: 10) {
@@ -586,7 +587,8 @@ private struct CreateGroupInviteByKeyView: View {
         }
     }
 
-    private var accentColor: Color { flow.accent.color }
+    // Accent picker removed (never persisted/sent) — screens use brand blue.
+    private var accentColor: Color { OnymAccent.blue.color }
 
     private var explanation: some View {
         (
@@ -791,7 +793,7 @@ private struct CreateGroupCreatingView: View {
 
             OnymGroupAvatar(
                 size: 92,
-                accent: flow.accent.color,
+                accent: OnymAccent.blue.color,
                 ringPulse: true,
                 spinning: true,
                 brand: true
@@ -846,11 +848,11 @@ private struct CreateGroupCreatingView: View {
                         .foregroundStyle(OnymTokens.onAccent)
                 case .active:
                     Circle()
-                        .stroke(flow.accent.color, lineWidth: 2)
+                        .stroke(OnymAccent.blue.color, lineWidth: 2)
                         .opacity(0.25)
                     Circle()
                         .trim(from: 0, to: 0.3)
-                        .stroke(flow.accent.color, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                        .stroke(OnymAccent.blue.color, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                         .rotationEffect(.degrees(activeRotation))
                         .onAppear {
                             withAnimation(.linear(duration: 0.9).repeatForever(autoreverses: false)) {
@@ -920,7 +922,7 @@ private struct CreateGroupCreatingView: View {
                 } label: {
                     Text("Try again")
                         .font(.system(size: 14.5, weight: .semibold))
-                        .foregroundStyle(flow.accent.color)
+                        .foregroundStyle(OnymAccent.blue.color)
                         .padding(.horizontal, 18)
                         .padding(.vertical, 8)
                         .background(OnymTokens.surface2)
@@ -1012,7 +1014,8 @@ private struct CreateGroupSuccessView: View {
         }
     }
 
-    private var accentColor: Color { flow.accent.color }
+    // Accent picker removed (never persisted/sent) — screens use brand blue.
+    private var accentColor: Color { OnymAccent.blue.color }
     private var groupName: String {
         flow.createdGroup?.name ?? (flow.name.isEmpty ? "Group" : flow.name)
     }

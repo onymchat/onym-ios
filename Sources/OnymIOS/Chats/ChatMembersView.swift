@@ -165,6 +165,10 @@ struct ChatMembersView: View {
 
     private func list(for group: ChatGroup) -> some View {
         ScrollView {
+            if let message = group.invitationMessage,
+               !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                invitationSection(message)
+            }
             VStack(spacing: 0) {
                 ForEach(rows(for: group)) { row in
                     memberRow(row)
@@ -190,6 +194,31 @@ struct ChatMembersView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 24)
         }
+    }
+
+    /// The group's invitation message (greeting / policy / articles),
+    /// shown as the group's intro at the top of the info screen.
+    private func invitationSection(_ message: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("INVITATION")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(OnymTokens.text3)
+                .padding(.leading, 4)
+            Text(message)
+                .font(.system(size: 15))
+                .foregroundStyle(OnymTokens.text)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
+                .padding(14)
+                .background(OnymTokens.surface2)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12).stroke(OnymTokens.hairline, lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .accessibilityIdentifier("members.invitation")
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
     }
 
     private func memberRow(_ row: MemberRow) -> some View {
