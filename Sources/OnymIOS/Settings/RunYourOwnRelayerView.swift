@@ -53,7 +53,7 @@ struct RunYourOwnRelayerView: View {
                     }
                 }
 
-                SettingsFootnote("Need help? Open an issue on GitHub.")
+                SettingsFootnote("Need help? Open an issue on [GitHub](https://github.com/onymchat/onym-ios/issues).")
             }
             .padding(.bottom, 24)
         }
