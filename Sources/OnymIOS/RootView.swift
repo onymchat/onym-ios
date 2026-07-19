@@ -51,6 +51,7 @@ struct RootView: View {
                         makeBackupFlow: dependencies.makeRecoveryPhraseBackupFlow,
                         makeRelayerSettingsFlow: dependencies.makeRelayerSettingsFlow,
                         makeNostrRelaySettingsFlow: dependencies.makeNostrRelaySettingsFlow,
+                        makeBlossomRelaySettingsFlow: dependencies.makeBlossomRelaySettingsFlow,
                         makeAnchorsPickerFlow: dependencies.makeAnchorsPickerFlow,
                         identitiesFlow: dependencies.identitiesFlow,
                         onClearAllMessages: { await dependencies.messageRepository.removeAll() }

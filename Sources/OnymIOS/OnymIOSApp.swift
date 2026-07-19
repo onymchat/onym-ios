@@ -13,6 +13,7 @@ struct OnymIOSApp: App {
     private let voiceLoader: ChatVoiceLoader
     private let inboxTransport: any InboxTransport
     private let nostrRelaysRepository: NostrRelaysRepository
+    private let blossomServersRepository: BlossomServersRepository
     private let incomingInvitations: IncomingInvitationsRepository
     private let pendingInvitesStore: PendingInvitesStore
     private let pendingVerificationStore: PendingVerificationStore
@@ -159,6 +160,18 @@ struct OnymIOSApp: App {
         self.initialDeeplinkURL = nil
         #endif
 
+        // User-configurable Blossom servers (Settings → Transport →
+        // Blossom Relays). Constructing the repository seeds the store on
+        // first launch, so reading it back synchronously here yields the
+        // effective server list. Uploads/downloads target the first
+        // configured server; changes apply on the next launch (the client
+        // base URL is chosen once here).
+        let blossomStore = UserDefaultsBlossomServersSelectionStore()
+        let blossomServersRepository = BlossomServersRepository(store: blossomStore)
+        self.blossomServersRepository = blossomServersRepository
+        let blossomBaseURL = blossomStore.load().endpoints.first?.url
+            ?? URLSessionBlossomClient.defaultBaseURL
+
         // Blossom client + image loader for image messages. Swapped for
         // an in-memory store under `--ui-loopback` so image send/receive
         // round-trips with no network; one shared instance so the loader
@@ -169,13 +182,13 @@ struct OnymIOSApp: App {
             blossomClient = UITestBlossomClient()
         } else {
             blossomClient = URLSessionBlossomClient(
-                baseURL: URLSessionBlossomClient.defaultBaseURL,
+                baseURL: blossomBaseURL,
                 signerProvider: OnymNostrSignerProvider()
             )
         }
         #else
         blossomClient = URLSessionBlossomClient(
-            baseURL: URLSessionBlossomClient.defaultBaseURL,
+            baseURL: blossomBaseURL,
             signerProvider: OnymNostrSignerProvider()
         )
         #endif
@@ -332,6 +345,9 @@ struct OnymIOSApp: App {
             makeNostrRelaySettingsFlow: { @MainActor in
                 NostrRelaySettingsFlow(repository: nostrRelaysRepository)
             },
+            makeBlossomRelaySettingsFlow: { @MainActor in
+                BlossomRelaySettingsFlow(repository: blossomServersRepository)
+            },
             makeAnchorsPickerFlow: { @MainActor in
                 AnchorsPickerFlow(repository: contractsRepository)
             },
@@ -395,7 +411,7 @@ struct OnymIOSApp: App {
                 messageRepository: messageRepository,
                 groupRepository: groupRepository,
                 blossomClient: blossomClient,
-                blossomServerURL: URLSessionBlossomClient.defaultBaseURL.absoluteString,
+                blossomServerURL: blossomBaseURL.absoluteString,
                 videoEncoder: videoEncoder,
                 voiceEncoder: voiceEncoder,
                 outbox: chatOutbox,

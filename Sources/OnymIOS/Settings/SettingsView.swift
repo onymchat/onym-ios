@@ -13,6 +13,7 @@ struct SettingsView: View {
     let makeBackupFlow: @MainActor () -> RecoveryPhraseBackupFlow
     let makeRelayerSettingsFlow: @MainActor () -> RelayerSettingsFlow
     let makeNostrRelaySettingsFlow: @MainActor () -> NostrRelaySettingsFlow
+    let makeBlossomRelaySettingsFlow: @MainActor () -> BlossomRelaySettingsFlow
     let makeAnchorsPickerFlow: @MainActor () -> AnchorsPickerFlow
     let identitiesFlow: IdentitiesFlow
     /// Wipes every local message (keeps chats). Wired to
@@ -112,8 +113,7 @@ struct SettingsView: View {
                     } label: {
                         SettingsRow(
                             title: "Nostr Relays",
-                            subtitle: "Inbox + invitation transport",
-                            last: true
+                            subtitle: "Inbox + invitation transport"
                         ) {
                             SettingsIconTile(
                                 symbol: "antenna.radiowaves.left.and.right.circle.fill",
@@ -123,6 +123,23 @@ struct SettingsView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("settings.nostr_relays_row")
+
+                    NavigationLink {
+                        BlossomRelaySettingsView(flow: makeBlossomRelaySettingsFlow())
+                    } label: {
+                        SettingsRow(
+                            title: "Blossom Relays",
+                            subtitle: "Media storage servers",
+                            last: true
+                        ) {
+                            SettingsIconTile(
+                                symbol: "photo.on.rectangle.angled",
+                                bg: SettingsTile.indigo
+                            )
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("settings.blossom_relays_row")
                 }
 
                 SettingsSectionLabel("DATA")

@@ -2074,6 +2074,9 @@
         }
       }
     },
+    "No servers configured. Media can't be sent or received." : {
+
+    },
     "Nostr (npub)" : {
       "localizations" : {
         "en" : {
@@ -2483,6 +2486,9 @@
           }
         }
       }
+    },
+    "Re-install Onym Official as the only server." : {
+
     },
     "Read the docs" : {
       "localizations" : {
