@@ -87,7 +87,12 @@ jobs:
         run: echo "DEVELOPER_DIR=/Applications/Xcode_26.app/Contents/Developer" >> "$GITHUB_ENV"
 
       - name: Install xcodegen
-        run: brew install xcodegen
+        # xcodegen is preinstalled on the self-hosted runner. A bare
+        # `brew install` tries to *upgrade* it, which fails when the
+        # runner shell is under Rosetta but Homebrew lives in the ARM
+        # prefix ("Cannot install under Rosetta 2 in ARM default
+        # prefix"). Skip when already present; install natively if not.
+        run: command -v xcodegen >/dev/null 2>&1 || arch -arm64 brew install xcodegen
 
       - name: Compute version
         id: ver
