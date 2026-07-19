@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Onym — US Encryption Self-Classification Report</title>
+<style>
+  @page { size: A4; margin: 20mm 18mm; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 10.5pt; line-height: 1.5; color: #111; margin: 0;
+  }
+  header { border-bottom: 2px solid #111; padding-bottom: 10px; margin-bottom: 18px; }
+  h1 { font-size: 17pt; margin: 0 0 2px; }
+  .sub { font-style: italic; color: #444; font-size: 10pt; }
+  h2 {
+    font-family: -apple-system, Helvetica, Arial, sans-serif;
+    font-size: 11pt; text-transform: uppercase; letter-spacing: .04em;
+    border-bottom: 1px solid #bbb; padding-bottom: 3px; margin: 20px 0 8px;
+  }
+  p { margin: 6px 0; }
+  table { width: 100%; border-collapse: collapse; margin: 6px 0; }
+  td { border: 1px solid #ccc; padding: 5px 8px; vertical-align: top; }
+  td.k { width: 34%; background: #f5f5f5; font-weight: bold; font-family: -apple-system, Helvetica, Arial, sans-serif; font-size: 9.5pt; }
+  .filing { background:#f5f5f5; border:1px solid #ccc; padding:8px 12px; margin:6px 0; font-family:-apple-system,Helvetica,Arial,sans-serif; font-size:9.5pt; }
+  footer { margin-top: 22px; font-size: 8.5pt; color: #777; border-top: 1px solid #ddd; padding-top: 6px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Encryption Self-Classification Report</h1>
+  <div class="sub">U.S. EAR §740.17(b)(1) · License Exception ENC · Onym (iOS)</div>
+</header>
+
+<p>This report classifies the mobile application <strong>Onym</strong> as
+mass-market encryption software, <strong>ECCN 5D992.c</strong>, exported under
+License Exception <strong>ENC</strong> pursuant to 15 CFR §740.17(b)(1). The
+application implements only standard, publicly available cryptographic algorithms;
+no CCATS classification request is required.</p>
+
+<div class="filing">
+  <strong>Filing:</strong> submit to <strong>crypt@bis.doc.gov</strong> and
+  <strong>enc@nsa.gov</strong>, at first distribution and annually by February&nbsp;1.
+</div>
+
+<h2>Point of contact</h2>
+<table>
+  <tr><td class="k">Manufacturer</td><td>Onym OÜ</td></tr>
+  <tr><td class="k">Address</td><td>Kuklase tn 14-74, 13423, Mustamäe linnaosa, Tallinn, Harju maakond, Estonia</td></tr>
+  <tr><td class="k">Contact</td><td>Rinat Enikeev — lead@onym.app — +372 55545271</td></tr>
+</table>
+
+<h2>Product classification (EAR Supp. No. 8 to Part 742)</h2>
+<table>
+  <tr><td class="k">Product name / model</td><td>Onym (iOS) — app.onym.ios, v0.0.57</td></tr>
+  <tr><td class="k">ECCN</td><td>5D992.c</td></tr>
+  <tr><td class="k">Authorization type</td><td>Self-classification, §740.17(b)(1)</td></tr>
+  <tr><td class="k">Item type</td><td>Application software — end-to-end encrypted messenger</td></tr>
+  <tr><td class="k">Encryption algorithms</td><td>AES-256-GCM; X25519 ECDH; HKDF-SHA256; Ed25519; secp256k1 (BIP340 Schnorr); SHA-256; PBKDF2-HMAC-SHA512</td></tr>
+  <tr><td class="k">Symmetric key length</td><td>256 bits</td></tr>
+  <tr><td class="k">Asymmetric key length</td><td>Curve25519 / Ed25519 / secp256k1 (256-bit class)</td></tr>
+  <tr><td class="k">Non-standard cryptography</td><td>None</td></tr>
+  <tr><td class="k">Open cryptographic interface</td><td>No</td></tr>
+  <tr><td class="k">Description</td><td>Group messenger providing end-to-end confidentiality of user messages and media using standard algorithms.</td></tr>
+</table>
+
+<h2>Certification</h2>
+<p>The undersigned certifies that the above classification is accurate to the best
+of their knowledge and that the item is eligible for License Exception ENC.</p>
+<p style="margin-top:14px">
+  Name: <strong style="font-style:italic">Rinat Enikeev</strong> &nbsp;·&nbsp;
+  Title: Founder &nbsp;·&nbsp; Date: 19 July 2026
+</p>
+
+<footer>Onym OÜ · app.onym.ios · U.S. encryption self-classification report (ECCN 5D992.c).</footer>
+</body>
+</html>
