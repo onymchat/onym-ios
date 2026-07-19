@@ -53,37 +53,10 @@ struct SettingsView: View {
                     notBackedUpBanner(count: count)
                 }
 
-                SettingsSectionLabel("SECURITY")
-                SettingsCard {
-                    NavigationLink {
-                        PrivacyEncryptionView(identitiesFlow: identitiesFlow)
-                    } label: {
-                        SettingsRow(
-                            title: "Privacy & Encryption",
-                            subtitle: "End-to-end · BIP-39"
-                        ) {
-                            SettingsIconTile(symbol: "lock.shield.fill", bg: SettingsTile.blue)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("settings.privacy_row")
-
-                    // Permanent backup entry. The `notBackedUpBanner` below
-                    // is a soft nudge that only appears when at least one
-                    // identity is unbacked; this row is the always-visible
-                    // way to reach the recovery-phrase flow.
-                    Button { showRecoveryPhrase = true } label: {
-                        SettingsRow(
-                            title: "Backup Recovery Phrase",
-                            subtitle: "12-word BIP-39 phrase",
-                            last: true
-                        ) {
-                            SettingsIconTile(symbol: "key.fill", bg: SettingsTile.amber)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("settings.backup_recovery_phrase_row")
-                }
+                // The SECURITY section (Privacy & Encryption + Backup
+                // Recovery Phrase) was removed: recovery-phrase backup now
+                // lives on each identity's carousel page (its Backup
+                // action), and the informational Privacy screen is gone.
 
                 SettingsSectionLabel("NETWORK")
                 SettingsCard {

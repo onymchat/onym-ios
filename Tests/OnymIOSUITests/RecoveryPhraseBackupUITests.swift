@@ -95,8 +95,8 @@ final class RecoveryPhraseBackupUITests: XCTestCase {
     // MARK: - Russian locale
 
     /// Launching with `language: "ru"` renders Russian copy on Settings
-    /// (nav title + Backup row) and on the recovery-phrase Intro screen —
-    /// confirms the localized catalog wires through end to end.
+    /// (nav title) and on the recovery-phrase Intro screen — confirms the
+    /// localized catalog wires through end to end.
     func test_russianLocale_rendersRussianStrings() {
         let app = AppLauncher.launchFresh(language: "ru")
         defer { app.terminate() }
@@ -109,12 +109,9 @@ final class RecoveryPhraseBackupUITests: XCTestCase {
             app.staticTexts["Настройки"].waitForExistence(timeout: 6),
             "Russian Settings nav title never appeared"
         )
-        XCTAssertTrue(
-            app.staticTexts["Резервная копия фразы восстановления"]
-                .waitForExistence(timeout: 3),
-            "Russian Backup row title never appeared"
-        )
 
+        // The standalone Backup row was removed; recovery-phrase backup is
+        // now the carousel's per-identity Backup action.
         SettingsScreen(app: app).tapBackupRecoveryPhrase()
 
         XCTAssertTrue(

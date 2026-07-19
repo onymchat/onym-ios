@@ -37,8 +37,13 @@ struct SettingsScreen {
         return app.buttons["Settings"]
     }
 
+    /// Recovery-phrase backup is reached from the identity carousel's
+    /// per-page Backup action (the standalone Settings SECURITY row was
+    /// removed). Matches the visible identity page's `identity.backup.<id>`.
     var backupRow: XCUIElement {
-        app.buttons["settings.backup_recovery_phrase_row"]
+        app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH 'identity.backup.'")
+        ).firstMatch
     }
 
     /// Swipe the carousel left once. A paged `TabView` doesn't expose its
@@ -108,7 +113,7 @@ struct SettingsScreen {
     func tapBackupRecoveryPhrase() {
         tapSettingsTab()
         XCTAssertTrue(backupRow.waitForExistence(timeout: 5),
-                      "settings backup row never appeared")
+                      "carousel Backup action never appeared")
         backupRow.tap()
     }
 
