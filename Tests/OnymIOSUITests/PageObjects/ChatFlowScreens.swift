@@ -181,7 +181,9 @@ struct ChatThreadScreen {
 
     var input: XCUIElement { app.textViews["chat.input.textview"] }
     var sendButton: XCUIElement { app.buttons["chat.input.send"] }
-    var backButton: XCUIElement { app.buttons["chat.back"] }
+    /// The chat now uses the standard SwiftUI navigation bar, so "back"
+    /// is the system nav-bar back button (leading item).
+    var backButton: XCUIElement { app.navigationBars.buttons.element(boundBy: 0) }
 
     @discardableResult
     func waitReady(timeout: TimeInterval = 20) -> Bool {

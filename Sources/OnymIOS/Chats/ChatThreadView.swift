@@ -66,12 +66,8 @@ struct ChatThreadView: View {
 
     var body: some View {
         ChatThreadControllerBridge(
-            groupName: currentGroupName,
-            memberCount: currentMemberCount,
             memberProfiles: currentMemberProfiles,
             messages: messages,
-            onBack: { dismiss() },
-            onShowMembers: { showMembers = true },
             onSendTapped: { body, replyToMessageID in
                 // Fire-and-forget. `SendMessageInteractor` does the
                 // optimistic insert as `.pending` synchronously
@@ -203,8 +199,38 @@ struct ChatThreadView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
-        .toolbar(.hidden, for: .navigationBar)
+        // The chat screen uses the standard SwiftUI navigation bar (its
+        // system back button is the only "back" affordance — the UIKit
+        // controller no longer paints its own). Title + member count sit
+        // in a centered principal item; the info button opens members.
         .toolbar(.hidden, for: .tabBar)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                VStack(spacing: 1) {
+                    Text(currentGroupName)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(OnymTokens.text)
+                        .lineLimit(1)
+                    if currentMemberCount > 1 {
+                        Text("\(currentMemberCount) members")
+                            .font(.system(size: 11))
+                            .foregroundStyle(OnymTokens.text3)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("chat.title")
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showMembers = true
+                } label: {
+                    Image(systemName: "info.circle")
+                }
+                .accessibilityLabel("Group info")
+                .accessibilityIdentifier("chat.info")
+            }
+        }
         .navigationDestination(isPresented: $showMembers) {
             ChatMembersView(
                 groupID: groupID,
@@ -349,12 +375,8 @@ struct ChatThreadView: View {
 }
 
 private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
-    let groupName: String
-    let memberCount: Int
     let memberProfiles: [String: MemberProfile]
     let messages: [ChatMessage]
-    let onBack: () -> Void
-    let onShowMembers: () -> Void
     let onSendTapped: (String, UUID?) -> Void
     let onRetryRequested: (UUID) -> Void
     let imageLoader: ChatImageLoader
@@ -377,8 +399,6 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         // `updateUIViewController`) so a later SwiftUI re-render doesn't
         // re-arm the jump after the user has scrolled away.
         vc.openAtMessageID = scrollToMessageID
-        vc.onBack = onBack
-        vc.onShowMembers = onShowMembers
         vc.onSendTapped = onSendTapped
         vc.onRetryRequested = onRetryRequested
         vc.imageLoader = imageLoader
@@ -392,7 +412,6 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         vc.onSendMedia = onSendMedia
         vc.onRemovePendingMedia = onRemovePendingMedia
         vc.loadViewIfNeeded()
-        vc.update(groupName: groupName, memberCount: memberCount)
         // Profiles before messages — the first sender-display build
         // reads the profiles to resolve names.
         vc.update(memberProfiles: memberProfiles)
@@ -403,11 +422,9 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
 
     func updateUIViewController(_ vc: ChatThreadViewController, context: Context) {
         // Closures are refreshed every render — SwiftUI captures the
-        // *current* `dismiss` + `showMembers` setters + send-tap
-        // dispatcher + retry dispatcher, so the version the
-        // controller invokes always reflects the live binding.
-        vc.onBack = onBack
-        vc.onShowMembers = onShowMembers
+        // *current* send-tap + retry dispatchers, so the version the
+        // controller invokes always reflects the live binding. (Back and
+        // group-info now live in the SwiftUI nav bar, not the controller.)
         vc.onSendTapped = onSendTapped
         vc.onRetryRequested = onRetryRequested
         vc.imageLoader = imageLoader
@@ -420,7 +437,6 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         vc.voiceLoader = voiceLoader
         vc.onSendMedia = onSendMedia
         vc.onRemovePendingMedia = onRemovePendingMedia
-        vc.update(groupName: groupName, memberCount: memberCount)
         vc.update(memberProfiles: memberProfiles)
         vc.update(messages: messages)
         vc.setPendingMedia(pendingMedia)

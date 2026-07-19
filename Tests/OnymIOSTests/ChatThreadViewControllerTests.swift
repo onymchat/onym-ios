@@ -1,18 +1,10 @@
 import XCTest
 @testable import OnymIOS
 
-/// Smoke tests for `ChatThreadViewController`. PR 5 ships an empty
-/// shell — these tests pin the wiring contract the SwiftUI bridge
-/// depends on:
-///
-///   - `viewDidLoad` doesn't crash.
-///   - `update(groupName:)` writes through to a label the bridge
-///     calls every render.
-///   - The back / info buttons invoke their closures when tapped.
-///
-/// Message rendering, input, keyboard behavior arrive in later PRs;
-/// the assertions here are intentionally narrow so they don't
-/// constrain the layout work yet to come.
+/// Smoke tests for `ChatThreadViewController` — the message list +
+/// input panel. The title / member count / back / info now live in the
+/// surrounding SwiftUI navigation bar (`ChatThreadView`), so this
+/// covers `viewDidLoad`, the empty state, and message rendering.
 @MainActor
 final class ChatThreadViewControllerTests: XCTestCase {
 
@@ -22,46 +14,10 @@ final class ChatThreadViewControllerTests: XCTestCase {
         XCTAssertNotNil(vc.view)
     }
 
-    func test_updateGroupName_writesThroughToTitleLabel() {
-        let vc = ChatThreadViewController()
-        vc.loadViewIfNeeded()
-        vc.update(groupName: "Family", memberCount: 0)
-        XCTAssertEqual(titleLabel(in: vc)?.text, "Family")
-    }
-
-    func test_updateGroupName_emptyFallsBackToChat() {
-        let vc = ChatThreadViewController()
-        vc.loadViewIfNeeded()
-        vc.update(groupName: "", memberCount: 0)
-        XCTAssertEqual(titleLabel(in: vc)?.text, "Chat",
-                       "empty group names fall back to the generic title so the bar isn't blank")
-    }
-
-    func test_memberCount_zeroOrOne_hidesSubtitle() {
-        // Singleton groups (just the user) don't need a member
-        // count; nothing-known groups would show "0 members"
-        // awkwardly. Both hide the subtitle.
-        let vc = ChatThreadViewController()
-        vc.loadViewIfNeeded()
-
-        vc.update(groupName: "Group", memberCount: 0)
-        XCTAssertTrue(memberCountLabel(in: vc)?.isHidden ?? false)
-
-        vc.update(groupName: "Group", memberCount: 1)
-        XCTAssertTrue(memberCountLabel(in: vc)?.isHidden ?? false)
-    }
-
-    func test_memberCount_twoOrMore_showsSubtitleWithPluralization() {
-        let vc = ChatThreadViewController()
-        vc.loadViewIfNeeded()
-
-        vc.update(groupName: "Group", memberCount: 2)
-        XCTAssertFalse(memberCountLabel(in: vc)?.isHidden ?? true)
-        XCTAssertEqual(memberCountLabel(in: vc)?.text, "2 members")
-
-        vc.update(groupName: "Group", memberCount: 5)
-        XCTAssertEqual(memberCountLabel(in: vc)?.text, "5 members")
-    }
+    // The title, member count, back button, and group-info button moved
+    // to the surrounding SwiftUI navigation bar (`ChatThreadView`), so
+    // they're no longer part of this UIKit controller — their unit tests
+    // were removed with the top bar.
 
     // MARK: - Empty state (PR 10)
 
@@ -91,24 +47,6 @@ final class ChatThreadViewControllerTests: XCTestCase {
         vc.update(messages: [makeMessage(body: "hi", direction: .incoming)])
         vc.update(messages: [])
         XCTAssertFalse(emptyStateLabel(in: vc)?.isHidden ?? true)
-    }
-
-    func test_backButtonTap_invokesOnBackClosure() {
-        let vc = ChatThreadViewController()
-        vc.loadViewIfNeeded()
-        var backCount = 0
-        vc.onBack = { backCount += 1 }
-        backButton(in: vc)?.sendActions(for: .touchUpInside)
-        XCTAssertEqual(backCount, 1)
-    }
-
-    func test_infoButtonTap_invokesOnShowMembersClosure() {
-        let vc = ChatThreadViewController()
-        vc.loadViewIfNeeded()
-        var showCount = 0
-        vc.onShowMembers = { showCount += 1 }
-        infoButton(in: vc)?.sendActions(for: .touchUpInside)
-        XCTAssertEqual(showCount, 1)
     }
 
     // MARK: - Message list rendering (PR 6)
@@ -830,24 +768,8 @@ final class ChatThreadViewControllerTests: XCTestCase {
     // accessibility identifiers — same approach the create-group
     // UI tests use. Keeps the production code free of test seams.
 
-    private func titleLabel(in vc: UIViewController) -> UILabel? {
-        find(in: vc.view, identifier: "chat.title") as? UILabel
-    }
-
-    private func memberCountLabel(in vc: UIViewController) -> UILabel? {
-        find(in: vc.view, identifier: "chat.title.member_count") as? UILabel
-    }
-
     private func emptyStateLabel(in vc: UIViewController) -> UILabel? {
         find(in: vc.view, identifier: "chat.empty_state") as? UILabel
-    }
-
-    private func backButton(in vc: UIViewController) -> UIButton? {
-        find(in: vc.view, identifier: "chat.back") as? UIButton
-    }
-
-    private func infoButton(in vc: UIViewController) -> UIButton? {
-        find(in: vc.view, identifier: "chat.info") as? UIButton
     }
 
     private func find(in view: UIView, identifier: String) -> UIView? {

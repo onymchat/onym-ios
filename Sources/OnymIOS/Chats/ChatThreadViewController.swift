@@ -2,32 +2,15 @@ import SwiftUI
 import UIKit
 
 /// Top-level chat-screen controller. UIKit-first per the design call
-/// (#150 plan): nav bar, message list, and input panel are all
-/// UIKit. SwiftUI hosts this controller via `ChatThreadView`.
+/// (#150 plan): the message list and input panel are UIKit. SwiftUI
+/// hosts this controller via `ChatThreadView`.
 ///
-/// PR 5 scope — skeleton only:
-/// - Custom title bar at the top (back chevron, group name, info
-///   button). SwiftUI's nav bar is hidden by the wrapper.
-/// - Empty `UITableView` placeholder where messages will render in
-///   PR 6.
-/// - Empty `UIView` placeholder where the input panel + send button
-///   will land in PR 6 / PR 7.
-///
-/// No keyboard handling, no message rendering, no send — those
-/// arrive in later PRs. Tapping the info button forwards to the
-/// SwiftUI parent, which pushes `ChatMembersView` via
-/// `navigationDestination(isPresented:)`.
+/// The navigation bar (title, member count, back button, group-info
+/// button) lives in the surrounding SwiftUI `NavigationStack` — the
+/// controller no longer paints its own top bar, so the app shows a
+/// single, consistent (Liquid Glass) system back button whether the
+/// thread is opened from the Chats list or from Search.
 final class ChatThreadViewController: UIViewController {
-    /// Invoked when the user taps the back chevron. The SwiftUI
-    /// wrapper points this at `Environment(\.dismiss)` so the
-    /// existing `NavigationStack` pops correctly.
-    var onBack: (() -> Void)?
-
-    /// Invoked when the user taps the info button. The SwiftUI
-    /// wrapper toggles a `@State` flag that triggers the members-
-    /// view push.
-    var onShowMembers: (() -> Void)?
-
     /// Invoked when the user taps the input panel's Send button
     /// with non-whitespace content. The SwiftUI wrapper points
     /// this at `SendMessageInteractor.send(groupID:body:replyToMessageID:)`
@@ -77,13 +60,6 @@ final class ChatThreadViewController: UIViewController {
     /// Fired when the ✕ on a staged item is tapped (host drops it).
     var onRemovePendingMedia: ((UUID) -> Void)?
 
-    private let titleLabel = UILabel()
-    private let memberCountLabel = UILabel()
-    private let titleStack = UIStackView()
-    private let backButton = UIButton(type: .system)
-    private let infoButton = UIButton(type: .system)
-    private let topBar = UIView()
-    private let topBarSeparator = UIView()
     private let tableView = UITableView()
     private let emptyStateLabel = UILabel()
     private let inputPanel = ChatInputPanelView()
@@ -134,7 +110,6 @@ final class ChatThreadViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = UIColor(OnymTokens.bg)
-        buildTopBar()
         buildTableView()
         buildInputPanel()
         layout()
@@ -156,11 +131,10 @@ final class ChatThreadViewController: UIViewController {
         )
     }
 
-    // The SwiftUI wrapper hides the nav bar (the controller paints its
-    // own), which makes UIKit disable the edge-swipe interactive pop
-    // gesture. Rather than just re-arm the narrow edge gesture, install
-    // a full-width pan that drives the *same* interactive pop transition
-    // — so a swipe anywhere on the chat screen goes back to the list.
+    // Widen the back-swipe target: alongside the system edge gesture,
+    // install a full-width pan that drives the *same* interactive pop
+    // transition — so a swipe anywhere on the chat screen goes back to
+    // the list, not just from the screen edge.
     //
     // The trick: lift the hidden target/action off the system
     // `interactivePopGestureRecognizer` (it points at UIKit's private
@@ -197,25 +171,6 @@ final class ChatThreadViewController: UIViewController {
         // the standard edge swipe still works alongside the full-width
         // one.
         popGesture.delegate = self
-    }
-
-    /// Push a new group-name + member-count into the title bar.
-    /// Called by the SwiftUI wrapper on every render — keeps the
-    /// bar in sync as the group renames or new joiners land without
-    /// re-creating the controller.
-    ///
-    /// `memberCount` of zero or one hides the subtitle (singleton
-    /// groups don't need a member count; nothing-known groups
-    /// would just show "0 members" awkwardly).
-    func update(groupName: String, memberCount: Int) {
-        titleLabel.text = groupName.isEmpty ? "Chat" : groupName
-        if memberCount > 1 {
-            memberCountLabel.text = "\(memberCount) members"
-            memberCountLabel.isHidden = false
-        } else {
-            memberCountLabel.text = nil
-            memberCountLabel.isHidden = true
-        }
     }
 
     /// Push a new message list into the table. Called by the SwiftUI
@@ -522,64 +477,6 @@ final class ChatThreadViewController: UIViewController {
         tableView.scrollToRow(at: lastIndex, at: .bottom, animated: animated)
     }
 
-    // MARK: - Top bar
-
-    private func buildTopBar() {
-        topBar.backgroundColor = UIColor(OnymTokens.bg)
-        topBar.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(topBar)
-
-        // Back chevron. SF Symbol chevron.left at semantic accent so
-        // it reads as a tap target in both light and dark.
-        var backConfig = UIButton.Configuration.plain()
-        backConfig.image = UIImage(systemName: "chevron.left",
-                                   withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold))
-        backConfig.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8)
-        backButton.configuration = backConfig
-        backButton.tintColor = UIColor(OnymTokens.text2)
-        backButton.translatesAutoresizingMaskIntoConstraints = false
-        backButton.addTarget(self, action: #selector(tappedBack), for: .touchUpInside)
-        backButton.accessibilityLabel = "Back"
-        backButton.accessibilityIdentifier = "chat.back"
-        topBar.addSubview(backButton)
-
-        titleLabel.font = .systemFont(ofSize: 16, weight: .semibold)
-        titleLabel.textColor = UIColor(OnymTokens.text)
-        titleLabel.textAlignment = .center
-        titleLabel.text = "Chat"
-        titleLabel.accessibilityIdentifier = "chat.title"
-
-        memberCountLabel.font = .systemFont(ofSize: 11, weight: .regular)
-        memberCountLabel.textColor = UIColor(OnymTokens.text3)
-        memberCountLabel.textAlignment = .center
-        memberCountLabel.isHidden = true
-        memberCountLabel.accessibilityIdentifier = "chat.title.member_count"
-
-        titleStack.axis = .vertical
-        titleStack.alignment = .center
-        titleStack.spacing = 1
-        titleStack.addArrangedSubview(titleLabel)
-        titleStack.addArrangedSubview(memberCountLabel)
-        titleStack.translatesAutoresizingMaskIntoConstraints = false
-        topBar.addSubview(titleStack)
-
-        var infoConfig = UIButton.Configuration.plain()
-        infoConfig.image = UIImage(systemName: "info.circle",
-                                   withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .regular))
-        infoConfig.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8)
-        infoButton.configuration = infoConfig
-        infoButton.tintColor = UIColor(OnymTokens.text2)
-        infoButton.translatesAutoresizingMaskIntoConstraints = false
-        infoButton.addTarget(self, action: #selector(tappedInfo), for: .touchUpInside)
-        infoButton.accessibilityLabel = "Group info"
-        infoButton.accessibilityIdentifier = "chat.info"
-        topBar.addSubview(infoButton)
-
-        topBarSeparator.backgroundColor = UIColor(OnymTokens.hairline)
-        topBarSeparator.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(topBarSeparator)
-    }
-
     // MARK: - Table view (message list)
 
     private func buildTableView() {
@@ -768,36 +665,10 @@ final class ChatThreadViewController: UIViewController {
     private func layout() {
         let safeArea = view.safeAreaLayoutGuide
         NSLayoutConstraint.activate([
-            // Top bar — pinned to the safe area, fixed 44pt height
-            // (matches iOS nav bar default).
-            topBar.topAnchor.constraint(equalTo: safeArea.topAnchor),
-            topBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            topBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            topBar.heightAnchor.constraint(equalToConstant: 44),
-
-            backButton.leadingAnchor.constraint(equalTo: topBar.leadingAnchor, constant: 8),
-            backButton.centerYAnchor.constraint(equalTo: topBar.centerYAnchor),
-            backButton.widthAnchor.constraint(equalToConstant: 36),
-            backButton.heightAnchor.constraint(equalToConstant: 36),
-
-            infoButton.trailingAnchor.constraint(equalTo: topBar.trailingAnchor, constant: -8),
-            infoButton.centerYAnchor.constraint(equalTo: topBar.centerYAnchor),
-            infoButton.widthAnchor.constraint(equalToConstant: 36),
-            infoButton.heightAnchor.constraint(equalToConstant: 36),
-
-            titleStack.centerXAnchor.constraint(equalTo: topBar.centerXAnchor),
-            titleStack.centerYAnchor.constraint(equalTo: topBar.centerYAnchor),
-            titleStack.leadingAnchor.constraint(greaterThanOrEqualTo: backButton.trailingAnchor, constant: 8),
-            titleStack.trailingAnchor.constraint(lessThanOrEqualTo: infoButton.leadingAnchor, constant: -8),
-
-            topBarSeparator.topAnchor.constraint(equalTo: topBar.bottomAnchor),
-            topBarSeparator.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            topBarSeparator.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            topBarSeparator.heightAnchor.constraint(equalToConstant: 1.0 / UIScreen.main.scale),
-
-            // Table view — fills the space between the top bar and
-            // the input panel.
-            tableView.topAnchor.constraint(equalTo: topBarSeparator.bottomAnchor),
+            // Table view — fills the space between the SwiftUI navigation
+            // bar (safe-area top) and the input panel. The title bar +
+            // back button now live in the surrounding SwiftUI nav bar.
+            tableView.topAnchor.constraint(equalTo: safeArea.topAnchor),
             tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             tableView.bottomAnchor.constraint(equalTo: inputPanel.topAnchor),
@@ -831,9 +702,6 @@ final class ChatThreadViewController: UIViewController {
     }
 
     // MARK: - Actions
-
-    @objc private func tappedBack() { onBack?() }
-    @objc private func tappedInfo() { onShowMembers?() }
 
     #if DEBUG
     /// Test seam — drives the same send path the input panel's Send
