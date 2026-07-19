@@ -112,7 +112,8 @@ struct SettingsView: View {
                     } label: {
                         SettingsRow(
                             title: "Nostr Relays",
-                            subtitle: "Inbox + invitation transport"
+                            subtitle: "Inbox + invitation transport",
+                            last: true
                         ) {
                             SettingsIconTile(
                                 symbol: "antenna.radiowaves.left.and.right.circle.fill",
@@ -122,38 +123,14 @@ struct SettingsView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("settings.nostr_relays_row")
-
-                    SettingsRow(
-                        title: "Tor (Hidden Service)",
-                        subtitle: "Coming soon",
-                        hasChevron: false,
-                        last: true
-                    ) {
-                        SettingsIconTile(
-                            symbol: "shield.lefthalf.filled",
-                            bg: SettingsTile.gray
-                        )
-                    } right: {
-                        Text("TBA")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(OnymTokens.text3)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(
-                                OnymTokens.surface3,
-                                in: RoundedRectangle(cornerRadius: 4)
-                            )
-                    }
-                    .accessibilityIdentifier("settings.tor_row")
                 }
 
-                SettingsSectionLabel("CHAT")
+                SettingsSectionLabel("DATA")
                 SettingsCard {
                     SettingsRow(
                         title: "Send read receipts",
                         subtitle: "You'll only see others' read status if this is on",
-                        hasChevron: false,
-                        last: true
+                        hasChevron: false
                     ) {
                         SettingsIconTile(
                             symbol: sendReadReceipts ? "checkmark.message.fill" : "message",
@@ -165,10 +142,7 @@ struct SettingsView: View {
                             .tint(OnymTokens.green)
                             .accessibilityIdentifier("settings.read_receipts_toggle")
                     }
-                }
 
-                SettingsSectionLabel("DATA")
-                SettingsCard {
                     Button { showClearConfirm1 = true } label: {
                         SettingsRow(
                             title: "Clear Local Message Cache",
