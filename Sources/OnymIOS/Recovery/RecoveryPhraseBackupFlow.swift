@@ -1,5 +1,6 @@
 import Foundation
 import UIKit
+import UniformTypeIdentifiers
 
 /// Single source of truth for the "Back up keys" flow.
 ///
@@ -116,9 +117,14 @@ final class RecoveryPhraseBackupFlow {
     func tappedCopyPhrase() {
         guard case let .reveal(phrase, true) = step else { return }
         // onym:allow-secret-read: copy is the explicit user intent on the
-        // reveal screen; auto-clears after `clipboardClearDelay` so the
-        // value doesn't sit on the system pasteboard indefinitely.
-        pasteboard.write(phrase)
+        // reveal screen. The write is `localOnly` so the seed never crosses
+        // Universal Clipboard to the user's other Apple devices, and carries
+        // an OS-enforced expiry so the system clears it even if the app is
+        // backgrounded or killed before the in-app timer below fires.
+        let expiresAt = Date().addingTimeInterval(clipboardClearDelay.seconds)
+        pasteboard.write(phrase, localOnly: true, expiresAt: expiresAt)
+        // The in-app timer stays only as UX/messaging (clears sooner while the
+        // app is foregrounded); the OS expiry above is the real guarantee.
         clipboardClearTask?.cancel()
         clipboardClearTask = Task { [pasteboard, clipboardClearDelay] in
             try? await Task.sleep(for: clipboardClearDelay)
@@ -220,17 +226,38 @@ final class RecoveryPhraseBackupFlow {
 /// Minimal seam over `UIPasteboard` so the flow's clipboard side effect can
 /// be observed in tests without writing to the actual system pasteboard.
 protocol PasteboardWriter: Sendable {
-    func write(_ value: String)
+    /// Write `value` to the pasteboard.
+    /// - Parameters:
+    ///   - localOnly: when `true`, the item stays on this device and never
+    ///     syncs via Universal Clipboard to the user's other Apple devices.
+    ///   - expiresAt: instant at which the OS drops the item, even if the
+    ///     app is backgrounded or killed before then.
+    func write(_ value: String, localOnly: Bool, expiresAt: Date)
     func clearIfStill(_ value: String)
 }
 
 struct UIPasteboardWriter: PasteboardWriter {
-    func write(_ value: String) {
-        UIPasteboard.general.string = value
+    func write(_ value: String, localOnly: Bool, expiresAt: Date) {
+        UIPasteboard.general.setItems(
+            [[UTType.utf8PlainText.identifier: value]],
+            options: [
+                .localOnly: localOnly,
+                .expirationDate: expiresAt
+            ]
+        )
     }
     func clearIfStill(_ value: String) {
         if UIPasteboard.general.string == value {
             UIPasteboard.general.string = ""
         }
+    }
+}
+
+private extension Duration {
+    /// Whole + fractional seconds as a `TimeInterval`, for bridging to the
+    /// `Date`-based pasteboard expiry API.
+    var seconds: TimeInterval {
+        let (secs, attos) = components
+        return TimeInterval(secs) + TimeInterval(attos) / 1e18
     }
 }
