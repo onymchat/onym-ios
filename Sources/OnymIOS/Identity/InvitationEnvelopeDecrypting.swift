@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// Narrow seam the inbox-side interactor depends on instead of the
@@ -47,10 +48,30 @@ extension InvitationEnvelopeDecrypting {
             SealedEnvelope.self,
             from: envelopeBytes
         )
+        // C-1: fail-closed provenance. Only surface the sender pubkey
+        // when a signature is present AND verifies against it over the
+        // ephemeral pubkey — a raw `senderEd25519PublicKey` with no
+        // valid signature is attacker-choosable and must read as nil.
         return DecryptedEnvelope(
             plaintext: plaintext,
-            senderEd25519PublicKey: envelope?.senderEd25519PublicKey
+            senderEd25519PublicKey: envelope.flatMap(Self.verifiedSender)
         )
+    }
+
+    /// Returns the envelope's Ed25519 sender pubkey iff it shipped a
+    /// signature that verifies over the ephemeral pubkey; nil otherwise.
+    private static func verifiedSender(in envelope: SealedEnvelope) -> Data? {
+        guard let sigData = envelope.ephemeralKeySignature,
+              let senderPubData = envelope.senderEd25519PublicKey,
+              let ephPubData = envelope.ephemeralPublicKey,
+              let verifyingKey = try? Curve25519.Signing.PublicKey(
+                  rawRepresentation: senderPubData
+              ),
+              verifyingKey.isValidSignature(sigData, for: ephPubData)
+        else {
+            return nil
+        }
+        return senderPubData
     }
 }
 

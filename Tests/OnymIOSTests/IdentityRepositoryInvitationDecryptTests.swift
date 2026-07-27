@@ -67,6 +67,60 @@ final class IdentityRepositoryInvitationDecryptTests: XCTestCase {
         XCTAssertEqual(decrypted, Data("signed".utf8))
     }
 
+    // MARK: - C-1: verified-sender provenance
+
+    func test_decryptWithSender_surfacesSenderOnlyWhenSignatureVerifies() async throws {
+        let identity = try await XCTUnwrapAsync(await repository.currentIdentity())
+        let senderSigningKey = Curve25519.Signing.PrivateKey()
+
+        let envelope = try TestInvitationEncryptor.envelopeBytes(
+            plaintext: Data("signed".utf8),
+            recipientX25519PublicKey: identity.inboxPublicKey,
+            senderSigningKey: senderSigningKey
+        )
+
+        let result = try await decryptWithSenderUsingCurrent(envelope)
+        XCTAssertEqual(result.plaintext, Data("signed".utf8))
+        XCTAssertEqual(
+            result.senderEd25519PublicKey,
+            Data(senderSigningKey.publicKey.rawRepresentation),
+            "a signed envelope must surface the verified sender pubkey"
+        )
+    }
+
+    func test_decryptWithSender_dropsSenderWhenSignatureOmitted() async throws {
+        // C-1 attack: envelope carries a `senderEd25519PublicKey` but
+        // NO `ephemeralKeySignature`. It must still decrypt, but the
+        // unverified (attacker-choosable) key must NOT be surfaced —
+        // `senderEd25519PublicKey` reads nil.
+        let identity = try await XCTUnwrapAsync(await repository.currentIdentity())
+
+        // Real ciphertext, no signing.
+        let base = try TestInvitationEncryptor.sealedEnvelope(
+            plaintext: Data("unsigned".utf8),
+            recipientX25519PublicKey: identity.inboxPublicKey
+        )
+        // Attacker stamps an arbitrary sender pubkey, leaves signature nil.
+        let attackerKey = Data(Curve25519.Signing.PrivateKey().publicKey.rawRepresentation)
+        let forged = SealedEnvelope(
+            version: base.version,
+            scheme: base.scheme,
+            ephemeralPublicKey: base.ephemeralPublicKey,
+            ephemeralKeySignature: nil,
+            senderEd25519PublicKey: attackerKey,
+            nonce: base.nonce,
+            ciphertext: base.ciphertext,
+            authenticationTag: base.authenticationTag
+        )
+        let bytes = try JSONEncoder().encode(forged)
+
+        let result = try await decryptWithSenderUsingCurrent(bytes)
+        XCTAssertEqual(result.plaintext, Data("unsigned".utf8),
+                       "envelope still decrypts")
+        XCTAssertNil(result.senderEd25519PublicKey,
+                     "C-1: an unsigned sender pubkey must NOT be surfaced as verified")
+    }
+
     // MARK: - Error paths
 
     func test_decryptInvitation_rejectsMalformedJSON() async {
@@ -250,5 +304,12 @@ final class IdentityRepositoryInvitationDecryptTests: XCTestCase {
     private func decryptUsingCurrent(_ envelope: Data) async throws -> Data {
         let id = try await XCTUnwrapAsync(await repository.currentSelectedID())
         return try await repository.decryptInvitation(envelopeBytes: envelope, asIdentity: id)
+    }
+
+    /// Same as `decryptUsingCurrent` but returns the verified-sender
+    /// bundle, for the C-1 provenance tests.
+    private func decryptWithSenderUsingCurrent(_ envelope: Data) async throws -> DecryptedEnvelope {
+        let id = try await XCTUnwrapAsync(await repository.currentSelectedID())
+        return try await repository.decryptInvitationWithSender(envelopeBytes: envelope, asIdentity: id)
     }
 }

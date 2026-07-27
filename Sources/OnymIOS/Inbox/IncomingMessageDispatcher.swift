@@ -566,16 +566,51 @@ struct IncomingMessageDispatcher: Sendable {
         return (key, profile)
     }
 
+    /// H-2: authorize a group-mutating control message (announcement /
+    /// avatar / rename) by its *verified* envelope signer.
+    ///
+    ///   - A missing signer is ALWAYS rejected — these mutations are
+    ///     never anonymous. (`senderEd25519PublicKey` is nil either
+    ///     because the envelope carried no signature block or, post
+    ///     C-1, because a claimed sender key failed verification.)
+    ///   - When the group stores an admin Ed25519 (Tyranny), the signer
+    ///     must equal it — the existing PR 9 trust check.
+    ///   - When the group has NO stored admin (anarchy / oneOnOne, or a
+    ///     pre-PR-9 row), the signer must be a CURRENT member, i.e.
+    ///     match some `memberProfiles[*].sendingPubkey`. This replaces
+    ///     the old "skip the check entirely when there's no admin"
+    ///     branch that let any party who knew the recipient's inbox
+    ///     pubkey mutate the group unconditionally.
+    private func isAuthorizedGroupMutation(
+        group: ChatGroup,
+        senderEd25519PublicKey: Data?
+    ) -> Bool {
+        guard let senderEd25519PublicKey else { return false }
+        if let storedAdmin = group.adminEd25519PubkeyHex {
+            let senderHex = senderEd25519PublicKey
+                .map { String(format: "%02x", $0) }.joined()
+                .lowercased()
+            return senderHex == storedAdmin.lowercased()
+        }
+        // Admin-less governance: the verified signer must belong to a
+        // current member (`memberProfiles` is keyed by BLS hex, but
+        // `sendingPubkey` is the Ed25519 that signs every envelope).
+        return group.memberProfiles.values.contains {
+            $0.sendingPubkey == senderEd25519PublicKey
+        }
+    }
+
     /// Idempotent merge of one announced member into the matching
     /// local group's `memberProfiles`. No-op when:
     ///
     ///   - The group isn't on this device (joiner whose local
     ///     materialization hasn't shipped, or stale announcement
     ///     for an unrelated group).
-    ///   - The sender's Ed25519 pubkey doesn't match the group's
-    ///     stored `adminEd25519PubkeyHex` (forged announcement, or
-    ///     announcement for a Tyranny group from a non-admin
-    ///     member). PR 9 trust check.
+    ///   - The verified sender fails `isAuthorizedGroupMutation`: for
+    ///     a group with a stored `adminEd25519PubkeyHex` the signer
+    ///     must be that admin; for an admin-less group it must be a
+    ///     current member. Missing/unverified signer is rejected
+    ///     (PR 9 + H-2).
     ///   - The member is already known under the same BLS pubkey
     ///     hex key (re-delivery, or the admin's own approve loop
     ///     re-broadcasting).
@@ -602,18 +637,13 @@ struct IncomingMessageDispatcher: Sendable {
             .map { String(format: "%02x", $0) }.joined()
         if group.memberProfiles[key] != nil { return }
 
-        // PR 9 trust check: announcement must be signed by the
-        // group's known admin. Skipped (best-effort) when the group
-        // has no stored admin Ed25519 — happens for governance
-        // models without an admin (anarchy / oneOnOne) or pre-PR-9
-        // rows that materialized before the field existed.
-        if let storedAdmin = group.adminEd25519PubkeyHex {
-            guard let senderEd25519PublicKey else { return }
-            let senderHex = senderEd25519PublicKey
-                .map { String(format: "%02x", $0) }.joined()
-                .lowercased()
-            guard senderHex == storedAdmin.lowercased() else { return }
-        }
+        // PR 9 + H-2 trust check: the verified envelope signer must be
+        // the group's known admin, or — for admin-less groups — a
+        // current member. A missing/unverified signer is rejected.
+        guard isAuthorizedGroupMutation(
+            group: group,
+            senderEd25519PublicKey: senderEd25519PublicKey
+        ) else { return }
 
         // PR 13b on-chain check: announcement's claimed commitment +
         // epoch must match what's actually anchored. Closes the
@@ -634,10 +664,11 @@ struct IncomingMessageDispatcher: Sendable {
     }
 
     /// Apply an inbound group-photo update to the matching local group.
-    /// Same admin-trust gate as `applyAnnouncement`: the envelope's
-    /// Ed25519 signer must match the group's stored
-    /// `adminEd25519PubkeyHex` (skipped best-effort for admin-less
-    /// governance models / pre-PR-9 rows). No on-chain cross-check —
+    /// Same trust gate as `applyAnnouncement` (`isAuthorizedGroupMutation`):
+    /// the verified Ed25519 signer must match the group's stored
+    /// `adminEd25519PubkeyHex`, or — for admin-less groups — be a
+    /// current member. An unsigned/unverified update is rejected
+    /// (H-2). No on-chain cross-check —
     /// the avatar isn't part of the group commitment. No-op when the
     /// group is unknown or the photo already matches (re-delivery).
     private func applyAvatar(
@@ -648,23 +679,23 @@ struct IncomingMessageDispatcher: Sendable {
         guard let group = groups.first(where: { $0.groupIDData == payload.groupID }) else {
             return
         }
-        if let storedAdmin = group.adminEd25519PubkeyHex {
-            guard let senderEd25519PublicKey else { return }
-            let senderHex = senderEd25519PublicKey
-                .map { String(format: "%02x", $0) }.joined()
-                .lowercased()
-            guard senderHex == storedAdmin.lowercased() else { return }
-        }
+        // PR 9 + H-2: admin (or, for admin-less groups, a current
+        // member) must be the verified signer; unsigned is rejected.
+        guard isAuthorizedGroupMutation(
+            group: group,
+            senderEd25519PublicKey: senderEd25519PublicKey
+        ) else { return }
         guard group.avatarJPEG != payload.avatar else { return }
         var updated = group
         updated.avatarJPEG = payload.avatar
         await groupRepository.insert(updated)
     }
 
-    /// Apply an admin group-rename (`GroupNamePayload`). Same admin gate
-    /// as `applyAvatar`: when the group has a stored admin Ed25519 key,
-    /// the envelope's verified signer must match it or the rename is
-    /// dropped. Idempotent + ignores a blank name.
+    /// Apply an admin group-rename (`GroupNamePayload`). Same gate as
+    /// `applyAvatar` (`isAuthorizedGroupMutation`): the verified signer
+    /// must be the stored admin, or — for admin-less groups — a current
+    /// member; an unsigned/unverified rename is dropped (H-2).
+    /// Idempotent + ignores a blank name.
     private func applyName(
         _ payload: GroupNamePayload,
         senderEd25519PublicKey: Data?
@@ -675,13 +706,12 @@ struct IncomingMessageDispatcher: Sendable {
         guard let group = groups.first(where: { $0.groupIDData == payload.groupID }) else {
             return
         }
-        if let storedAdmin = group.adminEd25519PubkeyHex {
-            guard let senderEd25519PublicKey else { return }
-            let senderHex = senderEd25519PublicKey
-                .map { String(format: "%02x", $0) }.joined()
-                .lowercased()
-            guard senderHex == storedAdmin.lowercased() else { return }
-        }
+        // PR 9 + H-2: admin (or, for admin-less groups, a current
+        // member) must be the verified signer; unsigned is rejected.
+        guard isAuthorizedGroupMutation(
+            group: group,
+            senderEd25519PublicKey: senderEd25519PublicKey
+        ) else { return }
         guard group.name != trimmed else { return }
         var updated = group
         updated.name = trimmed
