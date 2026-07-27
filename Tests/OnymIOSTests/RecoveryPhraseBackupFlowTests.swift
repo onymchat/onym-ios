@@ -103,6 +103,90 @@ final class RecoveryPhraseBackupFlowTests: XCTestCase {
         XCTAssertEqual(flow.step, .intro)
     }
 
+    // MARK: - Biometric fail-closed (recovery-phrase gate)
+
+    // Drives the *real* `LAContextAuthenticator` decision (not a fake) with
+    // `canEvaluate` forced false to simulate a device with no passcode /
+    // biometric enrolled. `failClosed: true` is the Release posture.
+    func test_unevaluablePolicy_failClosed_blocksReveal() async {
+        let authenticator = LAContextAuthenticator(
+            failClosed: true,
+            canEvaluate: { _ in false }
+        )
+        let gatedFlow = RecoveryPhraseBackupFlow(
+            repository: repository,
+            authenticator: authenticator,
+            pasteboard: pasteboard
+        )
+        defer { gatedFlow.stop() }
+
+        await gatedFlow.authenticate()
+
+        guard case let .authFailed(reason) = gatedFlow.step else {
+            return XCTFail("expected .authFailed, got \(gatedFlow.step)")
+        }
+        XCTAssertEqual(reason, "Set a device passcode to view your recovery phrase.")
+        if case .reveal = gatedFlow.step {
+            XCTFail("reveal must be blocked when the policy is unevaluable and failClosed")
+        }
+    }
+
+    // DEBUG posture: the same unevaluable policy fails OPEN so the dev flow
+    // proceeds to the reveal step.
+    func test_unevaluablePolicy_failOpen_reachesReveal() async {
+        let authenticator = LAContextAuthenticator(
+            failClosed: false,
+            canEvaluate: { _ in false }
+        )
+        let openFlow = RecoveryPhraseBackupFlow(
+            repository: repository,
+            authenticator: authenticator,
+            pasteboard: pasteboard
+        )
+        defer { openFlow.stop() }
+        openFlow.start()
+        await waitForReady(openFlow)
+
+        await openFlow.authenticate()
+
+        guard case .reveal = openFlow.step else {
+            return XCTFail("fail-open should reach .reveal, got \(openFlow.step)")
+        }
+    }
+
+    // Direct unit tests of the authenticator's decision, independent of the flow.
+    func test_laContextAuthenticator_failClosed_throwsOnUnevaluablePolicy() async {
+        let auth = LAContextAuthenticator(failClosed: true, canEvaluate: { _ in false })
+        do {
+            try await auth.authenticate(reason: "x")
+            XCTFail("expected a throw when failClosed and policy is unevaluable")
+        } catch {
+            XCTAssertEqual(
+                (error as? LocalizedError)?.errorDescription,
+                "Set a device passcode to view your recovery phrase."
+            )
+        }
+    }
+
+    func test_laContextAuthenticator_failOpen_returnsOnUnevaluablePolicy() async throws {
+        let auth = LAContextAuthenticator(failClosed: false, canEvaluate: { _ in false })
+        try await auth.authenticate(reason: "x")  // must not throw
+    }
+
+    func test_laContextAuthenticator_defaultPosture_matchesBuildConfiguration() {
+        #if DEBUG
+        XCTAssertFalse(
+            LAContextAuthenticator.failClosedByDefault,
+            "DEBUG builds fail open so simulator/dev flows work"
+        )
+        #else
+        XCTAssertTrue(
+            LAContextAuthenticator.failClosedByDefault,
+            "Release builds must fail closed"
+        )
+        #endif
+    }
+
     // MARK: - Reveal
 
     func test_tappedReveal_flipsRevealedTrue() async {
@@ -217,11 +301,12 @@ final class RecoveryPhraseBackupFlowTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func waitForReady() async {
+    private func waitForReady(_ target: RecoveryPhraseBackupFlow? = nil) async {
         // setUp triggers `flow.start()` which kicks off bootstrap + snapshot
         // drain. Spin briefly for the first snapshot to land.
+        let target = target ?? flow!
         for _ in 0..<50 {
-            if flow.isReady { return }
+            if target.isReady { return }
             try? await Task.sleep(for: .milliseconds(10))
         }
         XCTFail("flow.isReady never flipped true within 500ms")
