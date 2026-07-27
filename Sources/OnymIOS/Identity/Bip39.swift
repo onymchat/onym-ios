@@ -2058,10 +2058,10 @@ enum Bip39 {
     ]
 
     /// Generate a new 12-word BIP39 mnemonic from 128 bits of secure random entropy.
-    static func generateMnemonic() -> String {
-        var entropy = [UInt8](repeating: 0, count: 16) // 128 bits
-        _ = SecRandomCopyBytes(kSecRandomDefault, entropy.count, &entropy)
-        return mnemonicFromEntropy(Data(entropy))
+    /// Throws if the CSPRNG fails rather than emitting an all-zero mnemonic.
+    static func generateMnemonic() throws -> String {
+        let entropy = try SecureRandom.data(16) // 128 bits
+        return mnemonicFromEntropy(entropy)
     }
 
     /// Convert raw entropy bytes to a BIP39 mnemonic string.

@@ -1,6 +1,5 @@
 import CryptoKit
 import Foundation
-import Security
 
 /// Stateless orchestration for the create-group flow. Holds dependencies
 /// only — every call to `create` is independent. The view-model
@@ -147,8 +146,8 @@ struct CreateGroupInteractor: Sendable {
         // exists to close a same-`group_id_fr` collision via
         // `group_id + p (mod 2^256)` — see the contract comment at
         // sep-tyranny/src/lib.rs:290–298.
-        let groupID = Self.randomCanonicalFr()
-        let groupSecret = Self.randomBytes(32)
+        let groupID = try Self.randomCanonicalFr()
+        let groupSecret = try Self.randomBytes(32)
         let salt = GroupCommitmentBuilder.generateSalt()
         let tier: SEPTier = .small
 
@@ -326,8 +325,8 @@ struct CreateGroupInteractor: Sendable {
         // proof binding), but we use the canonical sampler anyway for
         // consistency with Tyranny + to keep all on-chain group IDs
         // valid Fr scalars in case a future contract rev adds the check.
-        let groupID = Self.randomCanonicalFr()
-        let groupSecret = Self.randomBytes(32)
+        let groupID = try Self.randomCanonicalFr()
+        let groupSecret = try Self.randomBytes(32)
         let salt = GroupCommitmentBuilder.generateSalt()
 
         // 4. Both BLS secrets must be present at create time — the SDK's
@@ -355,12 +354,12 @@ struct CreateGroupInteractor: Sendable {
         // BLS secret keys are canonical Fr by convention. The SDK reduces
         // silently if not, but any future strictness check would silently
         // break us — so generate canonical at the source.
-        var peerBlsSecret = Self.randomCanonicalFr()
+        var peerBlsSecret = try Self.randomCanonicalFr()
         // The OneOnOne SDK rejects equal secrets. Vanishingly unlikely
         // with 256 bits of entropy, but cheap to defend against —
         // resample on the off chance of a collision.
         while peerBlsSecret == creatorBlsSecret {
-            peerBlsSecret = Self.randomCanonicalFr()
+            peerBlsSecret = try Self.randomCanonicalFr()
         }
 
         let creatorMember: GovernanceMember
@@ -525,8 +524,8 @@ struct CreateGroupInteractor: Sendable {
         // 3. Group params. sep-anarchy doesn't gate `group_id`
         // canonicality today (no proof binding), but use the canonical
         // sampler anyway for consistency with Tyranny / OneOnOne.
-        let groupID = Self.randomCanonicalFr()
-        let groupSecret = Self.randomBytes(32)
+        let groupID = try Self.randomCanonicalFr()
+        let groupSecret = try Self.randomBytes(32)
         let salt = GroupCommitmentBuilder.generateSalt()
         let tier: SEPTier = .small
 
@@ -854,10 +853,8 @@ struct CreateGroupInteractor: Sendable {
         return hash.prefix(8).map { String(format: "%02x", $0) }.joined()
     }
 
-    private static func randomBytes(_ count: Int) -> Data {
-        var bytes = [UInt8](repeating: 0, count: count)
-        _ = SecRandomCopyBytes(kSecRandomDefault, count, &bytes)
-        return Data(bytes)
+    private static func randomBytes(_ count: Int) throws -> Data {
+        try SecureRandom.data(count)
     }
 
     /// Uniformly-random 32-byte BE value strictly less than the
@@ -871,10 +868,9 @@ struct CreateGroupInteractor: Sendable {
     /// reduction would diverge from the contract's check on ~25% of
     /// inputs. Generating canonically at the source removes the
     /// reduction question entirely.
-    static func randomCanonicalFr() -> Data {
+    static func randomCanonicalFr() throws -> Data {
         while true {
-            var bytes = [UInt8](repeating: 0, count: 32)
-            _ = SecRandomCopyBytes(kSecRandomDefault, 32, &bytes)
+            let bytes = try SecureRandom.bytes(32)
             if isCanonicalFr(bytes) {
                 return Data(bytes)
             }

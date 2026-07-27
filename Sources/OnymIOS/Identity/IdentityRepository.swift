@@ -529,7 +529,7 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
             }
             entropy = parsed
         } else {
-            let fresh = Bip39.generateMnemonic()
+            let fresh = try Bip39.generateMnemonic()
             guard let parsed = Bip39.entropyFromMnemonic(fresh) else {
                 throw IdentityError.invalidMnemonic
             }
