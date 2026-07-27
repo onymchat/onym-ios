@@ -45,6 +45,15 @@ struct GitHubReleasesKnownBlossomServersFetcher: KnownBlossomServersFetcher {
         guard (200..<300).contains(status) else {
             throw KnownBlossomServersFetchError.badStatus(status)
         }
+        // H-3: verify the detached Ed25519 signature at `<url>.sig`.
+        // Soft mode by default (see `ContractsTrust`); throws only
+        // under enforcement.
+        try await SignedAsset.verify(
+            assetData: data,
+            assetURL: url,
+            session: session,
+            label: "blossom-servers.json"
+        )
         do {
             return try decoder.decode(KnownBlossomServersDocument.self, from: data).servers
         } catch {

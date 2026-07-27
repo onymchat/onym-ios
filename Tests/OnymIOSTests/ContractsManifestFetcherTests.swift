@@ -23,6 +23,13 @@ final class ContractsManifestFetcherTests: XCTestCase {
 
     func test_fetchLatest_parsesValidDocument() async throws {
         StubURLProtocol.set { request in
+            // H-3: the fetcher also requests the detached signature at
+            // `<asset>.sig`. Answer that with a 404 so the fetcher runs
+            // in soft mode (no signed assets published yet) and still
+            // returns the decoded manifest.
+            if request.url?.absoluteString.hasSuffix(".sig") == true {
+                return (Data(), HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!)
+            }
             XCTAssertEqual(request.url, self.fixtureURL)
             let body = """
             {

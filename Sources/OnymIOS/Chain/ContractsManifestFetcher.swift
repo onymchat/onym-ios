@@ -35,6 +35,16 @@ struct GitHubReleasesContractsManifestFetcher: ContractsManifestFetcher {
         guard (200..<300).contains(statusCode) else {
             throw ContractsManifestFetchError.badStatus(statusCode)
         }
+        // H-3: verify the detached Ed25519 signature at `<url>.sig`
+        // before trusting the manifest (its `id` becomes the Soroban
+        // governance authority). Soft mode by default — see
+        // `ContractsTrust`. Throws only under enforcement.
+        try await SignedAsset.verify(
+            assetData: data,
+            assetURL: url,
+            session: session,
+            label: "contracts-manifest.json"
+        )
         return try Self.decodeFiltering(data)
     }
 
