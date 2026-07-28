@@ -55,7 +55,12 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             joinerAlias: "Bob",
             adminAlias: "Alice"
         ))
-        let decrypter = FakeInvitationEnvelopeDecrypter(mode: .fixed(plaintext))
+        // H-2: admin-less group — the announcement must be signed by a
+        // current member (the creator, sendingPubkey 0xEE).
+        let decrypter = FakeInvitationEnvelopeDecrypter(
+            mode: .fixed(plaintext),
+            senderEd25519PublicKey: Data(repeating: 0xEE, count: 32)
+        )
         let dispatcher = IncomingMessageDispatcher(
             envelopeDecrypter: decrypter,
             identities: StubIdentities(summaries: []),
@@ -288,13 +293,22 @@ final class IncomingMessageDispatcherTests: XCTestCase {
                      "unsigned announcement is dropped when the group has a stored admin")
     }
 
-    func test_announcement_acceptedForGroupWithoutStoredAdmin_legacyFallback() async throws {
-        // Legacy / pre-PR-9 group materialized without a stored
-        // adminEd25519PubkeyHex. Best-effort acceptance: any
-        // announcement that decrypts cleanly + names the group is
-        // accepted, matching pre-PR-9 behavior.
+    func test_announcement_adminLessGroup_acceptedWhenSignerIsCurrentMember() async throws {
+        // H-2: an admin-less group (anarchy / oneOnOne / pre-PR-9) no
+        // longer skips the sender check. The announcement is accepted
+        // only when the verified signer is a CURRENT member — here the
+        // existing member Alice (sendingPubkey == the envelope signer).
         let groupID = Data(repeating: 0xAB, count: 32)
-        await seedGroup(groupID: groupID, memberProfiles: [:], adminEd25519PubkeyHex: nil)
+        let memberEd25519 = Data(repeating: 0xAA, count: 32)
+        await seedGroup(
+            groupID: groupID,
+            memberProfiles: ["aa".repeated(48): MemberProfile(
+                alias: "Alice",
+                inboxPublicKey: Data(repeating: 0x10, count: 32),
+                sendingPubkey: memberEd25519
+            )],
+            adminEd25519PubkeyHex: nil
+        )
         let plaintext = try Self.encode(announcement: try Self.makeAnnouncement(
             groupID: groupID,
             joinerBlsHex: "bb".repeated(48),
@@ -304,7 +318,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
         ))
         let decrypter = FakeInvitationEnvelopeDecrypter(
             mode: .fixed(plaintext),
-            senderEd25519PublicKey: Data(repeating: 0xAA, count: 32)
+            senderEd25519PublicKey: memberEd25519
         )
         let dispatcher = IncomingMessageDispatcher(
             envelopeDecrypter: decrypter,
@@ -315,14 +329,212 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
         await dispatcher.dispatch(
-            messageID: "msg-legacy-fallback",
+            messageID: "msg-adminless-member",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
             receivedAt: Date()
         )
         let after = await groups.currentGroups()
         XCTAssertEqual(after.first?.memberProfiles["bb".repeated(48)]?.alias, "Bob",
-                       "legacy group accepts announcements (best-effort)")
+                       "admin-less group accepts an announcement signed by a current member")
+    }
+
+    func test_announcement_adminLessGroup_rejectedWhenSignerNotMember() async throws {
+        // H-2: the pre-fix bug — an admin-less group applied any
+        // announcement unconditionally. Now a signer who is NOT a
+        // current member is rejected.
+        let groupID = Data(repeating: 0xAB, count: 32)
+        await seedGroup(
+            groupID: groupID,
+            memberProfiles: ["aa".repeated(48): MemberProfile(
+                alias: "Alice",
+                inboxPublicKey: Data(repeating: 0x10, count: 32),
+                sendingPubkey: Data(repeating: 0xAA, count: 32)
+            )],
+            adminEd25519PubkeyHex: nil
+        )
+        let plaintext = try Self.encode(announcement: try Self.makeAnnouncement(
+            groupID: groupID,
+            joinerBlsHex: "bb".repeated(48),
+            joinerInboxByte: 0x33,
+            joinerAlias: "Bob",
+            adminAlias: "Alice"
+        ))
+        let decrypter = FakeInvitationEnvelopeDecrypter(
+            mode: .fixed(plaintext),
+            senderEd25519PublicKey: Data(repeating: 0xBE, count: 32)  // not a member
+        )
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
+        )
+        await dispatcher.dispatch(
+            messageID: "msg-adminless-nonmember",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+        let after = await groups.currentGroups()
+        XCTAssertNil(after.first?.memberProfiles["bb".repeated(48)],
+                     "admin-less group must reject an announcement from a non-member")
+    }
+
+    func test_announcement_adminLessGroup_rejectedWhenUnsigned() async throws {
+        // H-2: a missing signer is never treated as authorized, even
+        // for admin-less groups.
+        let groupID = Data(repeating: 0xAB, count: 32)
+        await seedGroup(
+            groupID: groupID,
+            memberProfiles: ["aa".repeated(48): MemberProfile(
+                alias: "Alice",
+                inboxPublicKey: Data(repeating: 0x10, count: 32),
+                sendingPubkey: Data(repeating: 0xAA, count: 32)
+            )],
+            adminEd25519PubkeyHex: nil
+        )
+        let plaintext = try Self.encode(announcement: try Self.makeAnnouncement(
+            groupID: groupID,
+            joinerBlsHex: "bb".repeated(48),
+            joinerInboxByte: 0x33,
+            joinerAlias: "Bob",
+            adminAlias: "Alice"
+        ))
+        let decrypter = FakeInvitationEnvelopeDecrypter(
+            mode: .fixed(plaintext),
+            senderEd25519PublicKey: nil
+        )
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
+        )
+        await dispatcher.dispatch(
+            messageID: "msg-adminless-unsigned",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+        let after = await groups.currentGroups()
+        XCTAssertNil(after.first?.memberProfiles["bb".repeated(48)],
+                     "admin-less group must reject an unsigned announcement")
+    }
+
+    // MARK: - H-2: admin-less name / avatar
+
+    func test_name_adminLessGroup_rejectedWhenSignerNotMember() async throws {
+        let groupID = Data(repeating: 0xAB, count: 32)
+        await seedGroup(
+            groupID: groupID,
+            memberProfiles: ["aa".repeated(48): MemberProfile(
+                alias: "Alice",
+                inboxPublicKey: Data(repeating: 0x10, count: 32),
+                sendingPubkey: Data(repeating: 0xAA, count: 32)
+            )],
+            adminEd25519PubkeyHex: nil
+        )
+        let plaintext = try Self.encode(name: Self.makeName(groupID: groupID, name: "Hacked"))
+        let decrypter = FakeInvitationEnvelopeDecrypter(
+            mode: .fixed(plaintext),
+            senderEd25519PublicKey: Data(repeating: 0xBE, count: 32)  // not a member
+        )
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
+        )
+        await dispatcher.dispatch(
+            messageID: "name-adminless-nonmember",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+        let after = await groups.currentGroups()
+        XCTAssertEqual(after.first { $0.groupIDData == groupID }?.name, "Family",
+                       "admin-less group must reject a rename from a non-member")
+    }
+
+    func test_avatar_adminLessGroup_rejectedWhenSignerNotMember() async throws {
+        let groupID = Data(repeating: 0xAB, count: 32)
+        await seedGroup(
+            groupID: groupID,
+            memberProfiles: ["aa".repeated(48): MemberProfile(
+                alias: "Alice",
+                inboxPublicKey: Data(repeating: 0x10, count: 32),
+                sendingPubkey: Data(repeating: 0xAA, count: 32)
+            )],
+            adminEd25519PubkeyHex: nil
+        )
+        let plaintext = try Self.encode(avatar: Self.makeAvatar(
+            groupID: groupID,
+            jpeg: Data(repeating: 0x01, count: 64)
+        ))
+        let decrypter = FakeInvitationEnvelopeDecrypter(
+            mode: .fixed(plaintext),
+            senderEd25519PublicKey: Data(repeating: 0xBE, count: 32)  // not a member
+        )
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
+        )
+        await dispatcher.dispatch(
+            messageID: "avatar-adminless-nonmember",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+        let after = await groups.currentGroups()
+        XCTAssertNil(after.first { $0.groupIDData == groupID }?.avatarJPEG,
+                     "admin-less group must reject an avatar update from a non-member")
+    }
+
+    func test_name_adminLessGroup_acceptedWhenSignerIsMember() async throws {
+        let groupID = Data(repeating: 0xAB, count: 32)
+        let memberEd25519 = Data(repeating: 0xAA, count: 32)
+        await seedGroup(
+            groupID: groupID,
+            memberProfiles: ["aa".repeated(48): MemberProfile(
+                alias: "Alice",
+                inboxPublicKey: Data(repeating: 0x10, count: 32),
+                sendingPubkey: memberEd25519
+            )],
+            adminEd25519PubkeyHex: nil
+        )
+        let plaintext = try Self.encode(name: Self.makeName(groupID: groupID, name: "Renamed"))
+        let decrypter = FakeInvitationEnvelopeDecrypter(
+            mode: .fixed(plaintext),
+            senderEd25519PublicKey: memberEd25519
+        )
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
+        )
+        await dispatcher.dispatch(
+            messageID: "name-adminless-member",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+        let after = await groups.currentGroups()
+        XCTAssertEqual(after.first { $0.groupIDData == groupID }?.name, "Renamed",
+                       "admin-less group accepts a rename signed by a current member")
     }
 
     // MARK: - Avatar path (GroupAvatarPayload)

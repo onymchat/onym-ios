@@ -323,13 +323,18 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
         } catch {
             throw InvitationDecryptError.malformedEnvelope
         }
-        let plaintext = try Self.decryptSealedEnvelope(
+        let result = try Self.decryptSealedEnvelopeWithSender(
             envelope: envelope,
             recipientX25519PrivateKey: privateKey
         )
+        // C-1: surface the sender pubkey ONLY when the envelope's
+        // Ed25519 signature was present AND verified. A key carried
+        // without a valid signature is attacker-choosable, so it must
+        // reach provenance-sensitive callers as `nil` ("no proof of
+        // sender"), never as the raw wire value.
         return DecryptedEnvelope(
-            plaintext: plaintext,
-            senderEd25519PublicKey: envelope.senderEd25519PublicKey
+            plaintext: result.plaintext,
+            senderEd25519PublicKey: result.verifiedSenderEd25519PublicKey
         )
     }
 
@@ -362,10 +367,35 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
     /// on a pre-decoded envelope. Lets the caller fish out fields like
     /// `senderEd25519PublicKey` without paying for a second JSON
     /// decode of the same bytes.
+    ///
+    /// Plaintext-only: use `decryptSealedEnvelopeWithSender` where the
+    /// caller needs authenticated provenance of the sender.
     static func decryptSealedEnvelope(
         envelope: SealedEnvelope,
         recipientX25519PrivateKey: Curve25519.KeyAgreement.PrivateKey
     ) throws -> Data {
+        try decryptSealedEnvelopeWithSender(
+            envelope: envelope,
+            recipientX25519PrivateKey: recipientX25519PrivateKey
+        ).plaintext
+    }
+
+    /// Pre-decoded decrypt that additionally reports the sender's
+    /// Ed25519 pubkey — but ONLY when it is cryptographically proven.
+    ///
+    /// C-1: `verifiedSenderEd25519PublicKey` is non-nil iff the
+    /// envelope carried BOTH an `ephemeralKeySignature` and a
+    /// `senderEd25519PublicKey` AND that signature verified against
+    /// that key over the ephemeral pubkey. An envelope that ships a
+    /// `senderEd25519PublicKey` with no (or an invalid) signature must
+    /// NOT have that key surfaced — otherwise an attacker could name
+    /// any sender it likes. A present-but-invalid signature still
+    /// throws (unchanged behavior); a wholly absent signature block
+    /// decrypts with a nil verified sender.
+    static func decryptSealedEnvelopeWithSender(
+        envelope: SealedEnvelope,
+        recipientX25519PrivateKey: Curve25519.KeyAgreement.PrivateKey
+    ) throws -> (plaintext: Data, verifiedSenderEd25519PublicKey: Data?) {
         guard envelope.scheme == "x25519-aes-256-gcm-v1" else {
             throw InvitationDecryptError.unsupportedScheme(envelope.scheme)
         }
@@ -377,7 +407,10 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
         }
 
         // M-5 / N-1: verify Ed25519 signature on the ephemeral pubkey
-        // when present.
+        // when present. The sender is considered *verified* only after
+        // this check passes — that verified key (and nothing else) is
+        // handed back to the caller (C-1).
+        var verifiedSender: Data?
         if let sigData = envelope.ephemeralKeySignature,
            let senderPubData = envelope.senderEd25519PublicKey {
             do {
@@ -385,6 +418,7 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
                 guard verifyingKey.isValidSignature(sigData, for: ephPubData) else {
                     throw InvitationDecryptError.signatureVerificationFailed
                 }
+                verifiedSender = senderPubData
             } catch let error as InvitationDecryptError {
                 throw error
             } catch {
@@ -403,7 +437,8 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
             )
             let nonce = try AES.GCM.Nonce(data: nonceData)
             let box = try AES.GCM.SealedBox(nonce: nonce, ciphertext: envelope.ciphertext, tag: tag)
-            return try AES.GCM.open(box, using: key)
+            let plaintext = try AES.GCM.open(box, using: key)
+            return (plaintext, verifiedSender)
         } catch {
             throw InvitationDecryptError.decryptionFailed
         }
