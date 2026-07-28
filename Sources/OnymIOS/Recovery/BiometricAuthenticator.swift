@@ -7,20 +7,62 @@ import LocalAuthentication
 protocol BiometricAuthenticator: Sendable {
     /// Prompts the user. Returns on success; throws on cancel / failure.
     /// On devices/simulators where `canEvaluatePolicy` is false (no enrolled
-    /// biometric and no passcode), the call returns successfully without
-    /// prompting — matches the reference impl's "fail open in dev" behaviour.
+    /// biometric and no passcode), behaviour depends on the build: DEBUG
+    /// returns successfully ("fail open") so dev/simulator flows work, while
+    /// Release throws ("fail closed") so the recovery phrase is never revealed
+    /// without authentication.
     func authenticate(reason: String) async throws
 }
 
+/// Raised by `LAContextAuthenticator` when the device cannot evaluate the
+/// auth policy (no passcode / no enrolled biometric) and the build is
+/// configured to fail closed. The message never reveals the phrase.
+enum BiometricAuthError: LocalizedError {
+    case deviceSecurityUnavailable
+
+    var errorDescription: String? {
+        switch self {
+        case .deviceSecurityUnavailable:
+            return String(localized: "Set a device passcode to view your recovery phrase.")
+        }
+    }
+}
+
 struct LAContextAuthenticator: BiometricAuthenticator {
+    /// Whether an unevaluable auth policy fails CLOSED (throws) or OPEN
+    /// (returns). Defaults to the compile-time posture: Release fails closed
+    /// so production never bypasses auth; DEBUG fails open so a fresh
+    /// simulator dev flow still works. Injectable so both branches stay
+    /// unit-testable under the DEBUG test build.
+    #if DEBUG
+    static let failClosedByDefault = false
+    #else
+    static let failClosedByDefault = true
+    #endif
+
+    let failClosed: Bool
+    private let canEvaluate: @Sendable (LAContext) -> Bool
+
+    init(
+        failClosed: Bool = LAContextAuthenticator.failClosedByDefault,
+        canEvaluate: @escaping @Sendable (LAContext) -> Bool = { context in
+            var error: NSError?
+            return context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error)
+        }
+    ) {
+        self.failClosed = failClosed
+        self.canEvaluate = canEvaluate
+    }
+
     func authenticate(reason: String) async throws {
         let context = LAContext()
-        var error: NSError?
-        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
-            // No biometric / no passcode set up — proceed so the dev flow
-            // still works on a fresh simulator. Production devices in this
-            // state are extremely rare and the user has explicitly opted
-            // out of device security.
+        guard canEvaluate(context) else {
+            // No biometric / no passcode set up. Fail CLOSED in Release so the
+            // phrase is never revealed without authentication; fail OPEN in
+            // DEBUG so the dev flow still works on a fresh simulator.
+            if failClosed {
+                throw BiometricAuthError.deviceSecurityUnavailable
+            }
             return
         }
         try await context.evaluatePolicyAsync(
