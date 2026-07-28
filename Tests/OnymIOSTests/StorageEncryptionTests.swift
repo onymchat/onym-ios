@@ -63,12 +63,12 @@ final class StorageEncryptionTests: XCTestCase {
 
     // MARK: - Key stability
 
-    func test_storageKey_isStableAcrossCalls() {
+    func test_storageKey_isStableAcrossCalls() throws {
         // The cached root secret should produce the same derived key
         // every time within a single install — otherwise persisted
         // ciphertext becomes unreadable across method calls.
-        let keyA = StorageEncryption.storageKey
-        let keyB = StorageEncryption.storageKey
+        let keyA = try StorageEncryption.storageKey
+        let keyB = try StorageEncryption.storageKey
         let dataA = keyA.withUnsafeBytes { Data($0) }
         let dataB = keyB.withUnsafeBytes { Data($0) }
         XCTAssertEqual(dataA, dataB)

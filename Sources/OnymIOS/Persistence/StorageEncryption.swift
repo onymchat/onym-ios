@@ -19,18 +19,27 @@ enum StorageEncryption {
     /// Memoised so repeated `encrypt` / `decrypt` calls don't round-trip
     /// to the Keychain. The seed itself never changes for the lifetime
     /// of the install (changing it would orphan every encrypted column).
-    private static let cachedRootSecret: Data = loadOrCreateRootSecret()
+    ///
+    /// Stored as a `Result` so the once-only, thread-safe `static let`
+    /// initialisation is preserved while still letting a CSPRNG or
+    /// Keychain failure propagate to callers instead of yielding a
+    /// silent all-zero root key.
+    private static let cachedRootSecret: Result<Data, Error> = Result {
+        try loadOrCreateRootSecret()
+    }
 
     /// AES-256 key derived from the root secret. HKDF salt + info pin
     /// the derivation to this specific use ("storage at-rest, v1") so a
     /// future second consumer of the same root secret won't collide.
     static var storageKey: SymmetricKey {
-        HKDF<SHA256>.deriveKey(
-            inputKeyMaterial: SymmetricKey(data: cachedRootSecret),
-            salt: Data("app.onym.ios.storage".utf8),
-            info: Data("local-storage-v1".utf8),
-            outputByteCount: 32
-        )
+        get throws {
+            HKDF<SHA256>.deriveKey(
+                inputKeyMaterial: SymmetricKey(data: try cachedRootSecret.get()),
+                salt: Data("app.onym.ios.storage".utf8),
+                info: Data("local-storage-v1".utf8),
+                outputByteCount: 32
+            )
+        }
     }
 
     // MARK: - Encrypt / Decrypt
@@ -39,7 +48,7 @@ enum StorageEncryption {
     /// `nonce (12B) || ciphertext || tag (16B)`. Decryption is the
     /// inverse — `decrypt` accepts that exact byte shape.
     static func encrypt(_ plaintext: Data) throws -> Data {
-        let sealed = try AES.GCM.seal(plaintext, using: storageKey)
+        let sealed = try AES.GCM.seal(plaintext, using: try storageKey)
         guard let combined = sealed.combined else {
             throw StorageEncryptionError.encryptionFailed
         }
@@ -55,7 +64,7 @@ enum StorageEncryption {
     /// truncated input (AES-GCM tag verification fails).
     static func decrypt(_ combined: Data) throws -> Data {
         let box = try AES.GCM.SealedBox(combined: combined)
-        return try AES.GCM.open(box, using: storageKey)
+        return try AES.GCM.open(box, using: try storageKey)
     }
 
     /// Decrypt to a UTF-8 string.
@@ -69,14 +78,12 @@ enum StorageEncryption {
 
     // MARK: - Keychain
 
-    private static func loadOrCreateRootSecret() -> Data {
+    private static func loadOrCreateRootSecret() throws -> Data {
         if let existing = loadFromKeychain() {
             return existing
         }
-        var bytes = [UInt8](repeating: 0, count: 32)
-        _ = SecRandomCopyBytes(kSecRandomDefault, 32, &bytes)
-        let secret = Data(bytes)
-        saveToKeychain(secret)
+        let secret = try SecureRandom.data(32)
+        try saveToKeychain(secret)
         return secret
     }
 
@@ -94,7 +101,7 @@ enum StorageEncryption {
         return nil
     }
 
-    private static func saveToKeychain(_ data: Data) {
+    private static func saveToKeychain(_ data: Data) throws {
         let deleteQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: keychainAccount,
@@ -107,18 +114,24 @@ enum StorageEncryption {
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
         ]
-        SecItemAdd(query as CFDictionary, nil)
+        let status = SecItemAdd(query as CFDictionary, nil)
+        guard status == errSecSuccess else {
+            throw StorageEncryptionError.keychainWriteFailed(status: Int(status))
+        }
     }
 }
 
 enum StorageEncryptionError: LocalizedError {
     case encryptionFailed
     case decodingFailed
+    case keychainWriteFailed(status: Int)
 
     var errorDescription: String? {
         switch self {
         case .encryptionFailed: return "Failed to encrypt data for storage"
         case .decodingFailed: return "Failed to decode decrypted data"
+        case let .keychainWriteFailed(status):
+            return "Failed to persist storage root key to Keychain (OSStatus \(status))"
         }
     }
 }

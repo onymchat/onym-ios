@@ -88,12 +88,12 @@ final class CanonicalFrTests: XCTestCase {
 
     // MARK: - randomCanonicalFr sampling
 
-    func test_randomCanonicalFr_alwaysCanonical_over10kSamples() {
+    func test_randomCanonicalFr_alwaysCanonical_over10kSamples() throws {
         // Statistically, the sampler's accept rate is `r / 2^256 ≈ 0.453`.
         // 10k samples give a generous floor on rejected-path coverage
         // (~5.5k rejections), and the assertion is unconditional.
         for _ in 0..<10_000 {
-            let bytes = CreateGroupInteractor.randomCanonicalFr()
+            let bytes = try CreateGroupInteractor.randomCanonicalFr()
             XCTAssertEqual(bytes.count, 32)
             XCTAssertTrue(
                 CreateGroupInteractor.isCanonicalFr(Array(bytes)),
@@ -102,12 +102,12 @@ final class CanonicalFrTests: XCTestCase {
         }
     }
 
-    func test_randomCanonicalFr_isNonZeroAndDistinct() {
+    func test_randomCanonicalFr_isNonZeroAndDistinct() throws {
         // Sanity: the sampler isn't returning a constant. 100 draws
         // should yield 100 distinct values with overwhelming probability.
         var seen = Set<Data>()
         for _ in 0..<100 {
-            seen.insert(CreateGroupInteractor.randomCanonicalFr())
+            seen.insert(try CreateGroupInteractor.randomCanonicalFr())
         }
         XCTAssertEqual(seen.count, 100, "sampler should not collide over 100 draws")
         XCTAssertFalse(seen.contains(Data(repeating: 0, count: 32)),
