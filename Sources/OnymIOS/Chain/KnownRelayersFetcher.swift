@@ -42,6 +42,15 @@ struct GitHubReleasesKnownRelayersFetcher: KnownRelayersFetcher {
         guard (200..<300).contains(statusCode) else {
             throw KnownRelayersFetchError.badStatus(statusCode)
         }
+        // H-3: verify the detached Ed25519 signature at `<url>.sig`.
+        // Soft mode by default (see `ContractsTrust`); throws only
+        // under enforcement.
+        try await SignedAsset.verify(
+            assetData: data,
+            assetURL: url,
+            session: session,
+            label: "relayers.json"
+        )
         let document: KnownRelayersDocument
         do {
             document = try decoder.decode(KnownRelayersDocument.self, from: data)

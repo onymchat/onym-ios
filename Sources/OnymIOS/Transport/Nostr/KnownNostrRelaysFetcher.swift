@@ -48,6 +48,15 @@ struct GitHubReleasesKnownNostrRelaysFetcher: KnownNostrRelaysFetcher {
         guard (200..<300).contains(status) else {
             throw KnownNostrRelaysFetchError.badStatus(status)
         }
+        // H-3: verify the detached Ed25519 signature at `<url>.sig`.
+        // Soft mode by default (see `ContractsTrust`); throws only
+        // under enforcement.
+        try await SignedAsset.verify(
+            assetData: data,
+            assetURL: url,
+            session: session,
+            label: "nostr-relays.json"
+        )
         do {
             return try decoder.decode(KnownNostrRelaysDocument.self, from: data).relays
         } catch {

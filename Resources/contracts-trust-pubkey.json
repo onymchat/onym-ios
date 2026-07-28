@@ -1,0 +1,5 @@
+{
+  "_comment": "PLACEHOLDER — DO NOT ship enforcement with this file unchanged. Replace `publicKeyBase64` with the REAL offline release-signing Ed25519 public key (32 raw bytes, base64-encoded) before flipping ContractsTrust.enforceSignatures to true. While `publicKeyBase64` is empty the app runs in H-3 soft mode: signatures are checked and logged but never enforced. See the release-signing pipeline follow-up (issue #183).",
+  "algorithm": "ed25519",
+  "publicKeyBase64": ""
+}
