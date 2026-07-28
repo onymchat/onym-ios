@@ -126,6 +126,43 @@ final class RecoveryPhraseBackupFlowTests: XCTestCase {
         XCTAssertTrue(pasteboard.didClear, "clipboard auto-clear didn't run")
     }
 
+    func test_tappedCopyPhrase_writesLocalOnly_withExpiryMatchingDelay() async throws {
+        // Build a flow with the production 60s clipboard delay (setUp's flow
+        // uses a 50ms delay so the auto-clear test runs fast). The OS-enforced
+        // expiry — not the in-app timer — is the real guarantee that the seed
+        // can't linger on the system pasteboard after a background/kill, so we
+        // assert it lands ~60s out and is marked local-only (no Universal
+        // Clipboard sync to the user's other Apple devices).
+        let flow60 = RecoveryPhraseBackupFlow(
+            repository: repository,
+            authenticator: authenticator,
+            pasteboard: pasteboard,
+            clipboardClearDelay: .seconds(60),
+            verifyAdvanceDelay: .milliseconds(20)
+        )
+        flow60.start()
+        defer { flow60.stop() }
+        for _ in 0..<50 where !flow60.isReady {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(flow60.isReady, "flow60 never became ready")
+
+        authenticator.outcome = .success
+        await flow60.authenticate()
+        flow60.tappedReveal()
+
+        let before = Date()
+        flow60.tappedCopyPhrase()
+        let after = Date()
+
+        XCTAssertEqual(pasteboard.lastWritten, testMnemonic)
+        XCTAssertEqual(pasteboard.lastLocalOnly, true, "seed must be pinned local-only")
+
+        let expiry = try XCTUnwrap(pasteboard.lastExpiresAt, "expiry must be set")
+        XCTAssertGreaterThanOrEqual(expiry.timeIntervalSince(after), 60 - 2)
+        XCTAssertLessThanOrEqual(expiry.timeIntervalSince(before), 60 + 2)
+    }
+
     func test_tappedCopyPhrase_isNoop_beforeReveal() async throws {
         try await advanceToReveal()
         // Don't tap reveal — phrase still hidden
@@ -274,9 +311,15 @@ private final class FakeAuthenticator: BiometricAuthenticator, @unchecked Sendab
 
 private final class FakePasteboard: PasteboardWriter, @unchecked Sendable {
     var lastWritten: String?
+    var lastLocalOnly: Bool?
+    var lastExpiresAt: Date?
     var didClear: Bool = false
 
-    func write(_ value: String) { lastWritten = value }
+    func write(_ value: String, localOnly: Bool, expiresAt: Date) {
+        lastWritten = value
+        lastLocalOnly = localOnly
+        lastExpiresAt = expiresAt
+    }
     func clearIfStill(_ value: String) {
         if lastWritten == value { didClear = true }
     }
