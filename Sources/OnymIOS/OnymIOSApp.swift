@@ -660,12 +660,14 @@ struct OnymIOSApp: App {
                     currentTask?.cancel()
                 }
                 .task {
-                    // Rebuild relay sockets the moment connectivity is
-                    // regained or the active network interface changes.
-                    // Without this, a Wi-Fi↔cellular hand-off (or any
-                    // drop-and-restore) silently half-opens the WebSocket
-                    // and inbound messages stall until the app is
-                    // relaunched. Reconnect is idempotent.
+                    // Refresh relay sockets when connectivity is regained
+                    // (edge-triggered + debounced in NetworkPathMonitor).
+                    // Without this, a drop-and-restore silently half-opens
+                    // the WebSocket and inbound messages stall until
+                    // relaunch. `reconnect()` is probe-first: a healthy
+                    // socket is left untouched, so this does NOT trigger a
+                    // full-inbox REQ replay unless the socket is actually
+                    // dead (see the replay-storm note at :598).
                     for await _ in NetworkPathMonitor.connectivityRegainedStream() {
                         await inboxTransport.reconnect()
                     }
@@ -674,9 +676,11 @@ struct OnymIOSApp: App {
                     // A backgrounded app has its relay WebSocket torn down
                     // by the OS; nothing in URLSession re-establishes it on
                     // resume, so new messages never arrive until relaunch.
-                    // Force a reconnect on the background→foreground edge
+                    // Probe-and-refresh on the background→foreground edge
                     // (tracked via `didLeaveActive` so trivial inactive
-                    // blips don't churn the connection).
+                    // blips don't churn the connection). Probe-first, so a
+                    // socket that survived the background isn't needlessly
+                    // rebuilt + re-replayed.
                     switch phase {
                     case .active:
                         if didLeaveActive {

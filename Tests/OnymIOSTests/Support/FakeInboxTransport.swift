@@ -26,7 +26,6 @@ actor FakeInboxTransport: InboxTransport {
 
     private(set) var connectedEndpoints: [TransportEndpoint] = []
     private(set) var disconnectCallCount = 0
-    private(set) var reconnectCallCount = 0
     private(set) var unsubscribedInboxes: [TransportInboxID] = []
     private(set) var subscribeCallCount = 0
 
@@ -43,10 +42,8 @@ actor FakeInboxTransport: InboxTransport {
     }
 
     func reconnect() async {
-        // No-op for the fake: live subscriptions are driven directly via
-        // `emit`, so there's nothing to rebuild. Counted so tests can
-        // assert the app fired a reconnect on foreground / connectivity.
-        reconnectCallCount += 1
+        // No-op: the fake drives live subscriptions directly via `emit`,
+        // so there is nothing to rebuild.
     }
 
     func send(_ payload: Data, to inbox: TransportInboxID) async throws -> PublishReceipt {

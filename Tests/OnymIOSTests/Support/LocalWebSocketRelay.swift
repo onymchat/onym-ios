@@ -13,6 +13,10 @@ final class LocalWebSocketRelay: @unchecked Sendable {
     private let lock = NSLock()
     private var current: NWConnection?
     private var acceptedCount = 0
+    /// Every `REQ` subscription id the server has seen, in order. Lets a
+    /// test assert that a reconnect actually replayed the client's REQs
+    /// (the PR's central claim) rather than just re-opening the socket.
+    private var reqSubIDs: [String] = []
 
     init() throws {
         let params = NWParameters.tcp
@@ -35,13 +39,11 @@ final class LocalWebSocketRelay: @unchecked Sendable {
 
     /// The OS-assigned loopback port. Available once the listener is
     /// ready; poll briefly since `start` completes asynchronously.
-    func port() throws -> UInt16 {
-        let deadline = Date().addingTimeInterval(2)
-        while Date() < deadline {
-            if let p = listener.port?.rawValue, p != 0 { return p }
-            Thread.sleep(forTimeInterval: 0.02)
+    func port() async throws -> UInt16 {
+        try await poll(timeout: 2) {
+            guard let p = listener.port?.rawValue, p != 0 else { return nil }
+            return p
         }
-        throw RelayError.noPort
     }
 
     /// Number of connections accepted so far. A reconnect shows up as an
@@ -51,12 +53,31 @@ final class LocalWebSocketRelay: @unchecked Sendable {
         return acceptedCount
     }
 
-    /// Block until `acceptedCount` reaches `count` or the timeout fires.
-    func waitForConnections(_ count: Int, timeout: TimeInterval = 3) throws {
+    /// REQ subscription ids seen so far (excluding the liveness probe).
+    func reqCount() -> Int {
+        lock.lock(); defer { lock.unlock() }
+        return reqSubIDs.count
+    }
+
+    /// Suspend until `acceptedCount` reaches `count` or the timeout fires.
+    @discardableResult
+    func waitForConnections(_ count: Int, timeout: TimeInterval = 3) async throws -> Int {
+        try await poll(timeout: timeout) { connectionCount() >= count ? connectionCount() : nil }
+    }
+
+    /// Suspend until at least `count` REQ frames have been seen.
+    @discardableResult
+    func waitForREQs(_ count: Int, timeout: TimeInterval = 3) async throws -> Int {
+        try await poll(timeout: timeout) { reqCount() >= count ? reqCount() : nil }
+    }
+
+    /// Async poll — never blocks the cooperative pool the way `Thread.sleep`
+    /// would; yields the thread between checks.
+    private func poll<T>(timeout: TimeInterval, _ probe: () -> T?) async throws -> T {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            if connectionCount() >= count { return }
-            Thread.sleep(forTimeInterval: 0.02)
+            if let value = probe() { return value }
+            try await Task.sleep(for: .milliseconds(20))
         }
         throw RelayError.timeout
     }
@@ -91,15 +112,29 @@ final class LocalWebSocketRelay: @unchecked Sendable {
     // MARK: - Private
 
     private func receive(on connection: NWConnection) {
-        connection.receiveMessage { [weak self] _, _, isComplete, error in
+        connection.receiveMessage { [weak self] data, _, isComplete, error in
             guard let self, error == nil, isComplete else { return }
-            // Drain and ignore client frames (REQ / CLOSE / liveness
-            // probes); we only need the connection to stay open.
+            if let data { self.recordIfREQ(data) }
+            // Keep draining so the connection stays open.
             self.receive(on: connection)
         }
     }
 
-    enum RelayError: Error { case noPort, timeout }
+    /// Record the subscription id of a `["REQ", subID, ...]` frame so
+    /// tests can assert the client replayed its REQs after a reconnect.
+    /// The internal liveness probe (`__onym_hb`) is excluded.
+    private func recordIfREQ(_ data: Data) {
+        guard
+            let array = try? JSONSerialization.jsonObject(with: data) as? [Any],
+            array.count >= 2,
+            (array[0] as? String) == "REQ",
+            let subID = array[1] as? String,
+            subID != "__onym_hb"
+        else { return }
+        lock.lock(); reqSubIDs.append(subID); lock.unlock()
+    }
+
+    enum RelayError: Error { case timeout }
 
     // MARK: - Event construction
 

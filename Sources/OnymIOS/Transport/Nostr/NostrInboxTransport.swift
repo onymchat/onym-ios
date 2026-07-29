@@ -124,13 +124,18 @@ final class NostrInboxTransport: InboxTransport {
             connections.removeAll()
         }
 
-        /// Rebuild every live connection in place. The subscription Tasks
-        /// and their AsyncStreams are untouched — each `NostrRelayConnection`
-        /// keeps its `subscriptions` dict across the reconnect and replays
-        /// every `REQ`, so consumers see an uninterrupted stream.
+        /// Refresh every connection on an app-driven trigger (foreground /
+        /// regained connectivity). Probe-first: a healthy socket is left
+        /// alone — no teardown, no `REQ` replay — so we don't storm the
+        /// relayer with a full-inbox re-fetch on every foreground. Only a
+        /// socket that fails to answer the probe is rebuilt, and even then
+        /// the subscription dict is preserved so consumers' streams don't
+        /// break.
         func reconnect() async {
-            for conn in connections.values {
-                await conn.reconnect()
+            await withTaskGroup(of: Void.self) { group in
+                for conn in connections.values {
+                    group.addTask { await conn.probeAndReconnectIfStale() }
+                }
             }
         }
 
