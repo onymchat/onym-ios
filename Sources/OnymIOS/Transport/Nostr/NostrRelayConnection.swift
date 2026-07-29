@@ -17,6 +17,16 @@ actor NostrRelayConnection {
     private var pendingOKContinuations: [String: CheckedContinuation<Bool, any Error>] = [:]
     private var pingTask: Task<Void, Never>?
     private var onOKCallback: ((String, Bool) -> Void)?
+    /// Bumped on every `connect()`. The receive loop and liveness
+    /// monitor capture the generation they were started under and bail
+    /// the moment it changes, so a forced reconnect (or a reconnect from
+    /// the error path) can never leave two overlapping loops fighting
+    /// over the same connection state.
+    private var connectionGeneration: UInt64 = 0
+    /// Wall-clock time of the last frame received on the current socket.
+    /// The liveness monitor uses this to detect a half-open connection —
+    /// one the OS still believes is open but that delivers nothing.
+    private var lastActivityAt = Date()
 
     func setOnOK(_ callback: @escaping (String, Bool) -> Void) {
         onOKCallback = callback
@@ -24,9 +34,19 @@ actor NostrRelayConnection {
 
     private static let maxReconnectDelay: TimeInterval = 120
     private static let baseReconnectDelay: TimeInterval = 1
-    private static let pingInterval: TimeInterval = 30
+    /// How often the liveness monitor probes the relay and checks for
+    /// staleness.
+    private static let pingInterval: TimeInterval = 20
+    /// If no frame arrives within this window the socket is treated as
+    /// dead and force-reconnected. Must comfortably exceed
+    /// `pingInterval` so a healthy relay's probe reply keeps it alive.
+    private static let livenessTimeout: TimeInterval = 55
     private static let connectionTimeout: TimeInterval = 15
     private static let publishTimeout: TimeInterval = 5
+    /// Subscription id for the liveness probe. A `REQ` under this id with
+    /// a filter that matches nothing draws an immediate `EOSE` from any
+    /// conformant relay — our stand-in for a WebSocket pong.
+    private static let livenessSubID = "__onym_hb"
 
     init(url: URL) {
         self.url = url
@@ -40,13 +60,16 @@ actor NostrRelayConnection {
 
     func connect() {
         guard webSocketTask == nil else { return }
+        connectionGeneration &+= 1
+        let generation = connectionGeneration
         let task = session.webSocketTask(with: url)
         self.webSocketTask = task
         task.resume()
         isConnected = true
         reconnectAttempts = 0
-        Task { await receiveLoop() }
-        startHeartbeat()
+        lastActivityAt = Date()
+        Task { await receiveLoop(generation: generation) }
+        startLivenessMonitor(generation: generation)
 
         for (subID, (filter, _)) in subscriptions {
             sendREQ(subscriptionID: subID, filter: filter)
@@ -58,17 +81,37 @@ actor NostrRelayConnection {
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(1))
             guard let self else { return }
-            await self.replaySubscriptions()
+            await self.replaySubscriptions(generation: generation)
         }
     }
 
     func disconnect() {
+        // Supersede any in-flight receive loop / liveness monitor.
+        connectionGeneration &+= 1
         pingTask?.cancel()
         pingTask = nil
         webSocketTask?.cancel(with: .normalClosure, reason: nil)
         webSocketTask = nil
         isConnected = false
         reconnectAttempts = 0
+    }
+
+    /// Tear down the current socket and rebuild it immediately, re-issuing
+    /// every live subscription. Unlike the error-path reconnect this skips
+    /// the backoff sleep — it exists for the "we have a fresh reason to
+    /// believe the network is back" triggers (app foreground, connectivity
+    /// regained), where waiting is pointless. Bumping the generation via
+    /// `connect()` guarantees the previous receive loop / monitor exit
+    /// without racing the new ones.
+    func reconnect() {
+        connectionGeneration &+= 1
+        pingTask?.cancel()
+        pingTask = nil
+        webSocketTask?.cancel(with: .abnormalClosure, reason: nil)
+        webSocketTask = nil
+        isConnected = false
+        reconnectAttempts = 0
+        connect()
     }
 
     func publish(event: NostrEvent) async throws {
@@ -168,17 +211,19 @@ actor NostrRelayConnection {
         Task { try? await webSocketTask?.send(.string(string)) }
     }
 
-    private func replaySubscriptions() {
+    private func replaySubscriptions(generation: UInt64) {
+        guard generation == connectionGeneration else { return }
         for (subID, (filter, _)) in subscriptions {
             sendREQ(subscriptionID: subID, filter: filter)
         }
     }
 
-    private func receiveLoop() async {
-        while isConnected {
-            guard let task = webSocketTask else { break }
+    private func receiveLoop(generation: UInt64) async {
+        while generation == connectionGeneration {
+            guard let task = webSocketTask else { return }
             do {
                 let message = try await task.receive()
+                lastActivityAt = Date()
                 let text: String
                 switch message {
                 case .string(let s): text = s
@@ -187,39 +232,87 @@ actor NostrRelayConnection {
                 }
                 handleMessage(text)
             } catch {
-                pingTask?.cancel()
-                pingTask = nil
-                isConnected = false
-                webSocketTask?.cancel(with: .abnormalClosure, reason: nil)
-                webSocketTask = nil
-                reconnectAttempts += 1
-                let delay = min(
-                    Self.maxReconnectDelay,
-                    Self.baseReconnectDelay * pow(2.0, Double(min(reconnectAttempts - 1, 6)))
-                )
-                try? await Task.sleep(for: .seconds(delay))
-                connect()
+                await handleConnectionFailure(generation: generation, backoff: true)
                 return
             }
         }
     }
 
-    /// Heartbeat sends a no-op `["CLOSE","__hb"]` instead of using
-    /// `URLSessionWebSocketTask.sendPing`. The CFNetwork ping handler has
-    /// a known crash where the pong fires on an internal queue after the
-    /// task is cancelled and dereferences a freed `nw_connection`. A
-    /// plain `.send()` doesn't have that path — if the connection is
-    /// dead, the send throws and the receive loop reconnects.
-    private func startHeartbeat() {
+    /// Single funnel for "this socket is dead, rebuild it". Guarded by the
+    /// connection generation so a stale receive loop or liveness monitor
+    /// that fires after a newer connect() is a no-op. `backoff: true`
+    /// applies exponential backoff (error path); `false` reconnects
+    /// immediately (liveness probe declared it dead).
+    private func handleConnectionFailure(generation: UInt64, backoff: Bool) async {
+        guard generation == connectionGeneration else { return }
+        pingTask?.cancel()
+        pingTask = nil
+        isConnected = false
+        webSocketTask?.cancel(with: .abnormalClosure, reason: nil)
+        webSocketTask = nil
+        reconnectAttempts += 1
+        if backoff {
+            let delay = min(
+                Self.maxReconnectDelay,
+                Self.baseReconnectDelay * pow(2.0, Double(min(reconnectAttempts - 1, 6)))
+            )
+            try? await Task.sleep(for: .seconds(delay))
+        }
+        guard generation == connectionGeneration else { return }
+        connect()
+    }
+
+    /// Active liveness monitor. Two jobs, once per `pingInterval`:
+    ///
+    ///  1. **Detect a half-open socket.** If no frame has arrived within
+    ///     `livenessTimeout`, the connection is silently dead — the OS
+    ///     still thinks it's open, so `receive()` never throws and the
+    ///     error-path reconnect never fires. We force a reconnect.
+    ///  2. **Keep the socket provably alive.** Send a `REQ` under
+    ///     `livenessSubID` whose filter matches nothing. A conformant
+    ///     relay answers with an immediate `EOSE`, which lands in
+    ///     `handleMessage` and refreshes `lastActivityAt` — a pong in all
+    ///     but name. If the `send` itself throws, the socket is dead now,
+    ///     so we reconnect without waiting for the staleness window.
+    ///
+    /// We deliberately avoid `URLSessionWebSocketTask.sendPing`: its
+    /// CFNetwork handler has a known crash where the pong fires on an
+    /// internal queue after the task is cancelled and dereferences a
+    /// freed `nw_connection`. A plain `.send()` has no such path.
+    private func startLivenessMonitor(generation: UInt64) {
         pingTask?.cancel()
         pingTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(Self.pingInterval))
-                guard !Task.isCancelled else { break }
-                guard let task = await self?.webSocketTask,
-                      task.state == .running else { break }
-                try? await task.send(.string("[\"CLOSE\",\"__hb\"]"))
+                guard !Task.isCancelled, let self else { break }
+                let alive = await self.livenessTick(generation: generation)
+                if !alive { break }
             }
+        }
+    }
+
+    /// One liveness cycle. Returns `false` when the monitor should stop
+    /// (superseded generation, dead socket, or a triggered reconnect).
+    private func livenessTick(generation: UInt64) async -> Bool {
+        guard generation == connectionGeneration,
+              let task = webSocketTask,
+              task.state == .running
+        else { return false }
+
+        if Date().timeIntervalSince(lastActivityAt) > Self.livenessTimeout {
+            await handleConnectionFailure(generation: generation, backoff: false)
+            return false
+        }
+
+        // A `#ids` filter for an all-zero id matches nothing, so the relay
+        // replies with EOSE and never streams live events into it.
+        let probe = "[\"REQ\",\"\(Self.livenessSubID)\",{\"ids\":[\"\(String(repeating: "0", count: 64))\"],\"limit\":0}]"
+        do {
+            try await task.send(.string(probe))
+            return true
+        } catch {
+            await handleConnectionFailure(generation: generation, backoff: false)
+            return false
         }
     }
 

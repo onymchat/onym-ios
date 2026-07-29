@@ -493,6 +493,7 @@ private actor ApproverRecordingInboxTransport: InboxTransport {
 
     func connect(to endpoints: [TransportEndpoint]) async {}
     func disconnect() async {}
+    func reconnect() async {}
 
     func send(_ payload: Data, to inbox: TransportInboxID) async throws -> PublishReceipt {
         sends.append((payload, inbox))

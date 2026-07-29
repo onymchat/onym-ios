@@ -435,6 +435,7 @@ private final class CreateGroupFlowTestEnv {
 private struct FlowTestInboxTransport: InboxTransport {
     func connect(to endpoints: [TransportEndpoint]) async {}
     func disconnect() async {}
+    func reconnect() async {}
     func send(_ payload: Data, to inbox: TransportInboxID) async throws -> PublishReceipt {
         PublishReceipt(messageID: "x", acceptedBy: 1)
     }

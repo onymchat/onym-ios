@@ -28,6 +28,10 @@ final class NostrInboxTransport: InboxTransport {
         await state.disconnect()
     }
 
+    func reconnect() async {
+        await state.reconnect()
+    }
+
     @discardableResult
     func send(_ payload: Data, to inbox: TransportInboxID) async throws -> PublishReceipt {
         let signer = try signerProvider.makeEphemeralSigner()
@@ -118,6 +122,16 @@ final class NostrInboxTransport: InboxTransport {
                 await conn.disconnect()
             }
             connections.removeAll()
+        }
+
+        /// Rebuild every live connection in place. The subscription Tasks
+        /// and their AsyncStreams are untouched — each `NostrRelayConnection`
+        /// keeps its `subscriptions` dict across the reconnect and replays
+        /// every `REQ`, so consumers see an uninterrupted stream.
+        func reconnect() async {
+            for conn in connections.values {
+                await conn.reconnect()
+            }
         }
 
         /// Per-relay publish outcome — split so the thrown error can

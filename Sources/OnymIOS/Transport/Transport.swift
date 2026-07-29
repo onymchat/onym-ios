@@ -104,6 +104,14 @@ protocol InboxTransport: Sendable {
     func connect(to endpoints: [TransportEndpoint]) async
     func disconnect() async
 
+    /// Force every underlying connection to tear down and rebuild
+    /// immediately, re-issuing its live subscriptions. Idempotent and
+    /// safe to call when already connected — used by the app when there's
+    /// fresh reason to believe a stale connection should be refreshed
+    /// (returning to the foreground, regained network connectivity)
+    /// rather than waiting for the passive error-path reconnect.
+    func reconnect() async
+
     @discardableResult
     func send(_ payload: Data, to inbox: TransportInboxID) async throws -> PublishReceipt
 

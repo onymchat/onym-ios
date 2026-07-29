@@ -37,6 +37,14 @@ struct OnymIOSApp: App {
     /// real `JoinView` + `JoinFlow`.
     @State private var pendingCapability: IntroCapability?
 
+    /// Drives the transport-refresh triggers. `scenePhase` catches the
+    /// app returning to the foreground after a suspension (which silently
+    /// kills the relay socket); `didLeaveActive` gates that so a plain
+    /// inactive→active blip (Control Center, a permission alert) doesn't
+    /// force a needless reconnect — only a real background→foreground does.
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var didLeaveActive = false
+
     init() {
         let args = ProcessInfo.processInfo.arguments
         let repository: IdentityRepository
@@ -650,6 +658,41 @@ struct OnymIOSApp: App {
                         currentTask = Task { await pump.run(entries: entries) }
                     }
                     currentTask?.cancel()
+                }
+                .task {
+                    // Rebuild relay sockets the moment connectivity is
+                    // regained or the active network interface changes.
+                    // Without this, a Wi-Fi↔cellular hand-off (or any
+                    // drop-and-restore) silently half-opens the WebSocket
+                    // and inbound messages stall until the app is
+                    // relaunched. Reconnect is idempotent.
+                    for await _ in NetworkPathMonitor.connectivityRegainedStream() {
+                        await inboxTransport.reconnect()
+                    }
+                }
+                .onChange(of: scenePhase) { _, phase in
+                    // A backgrounded app has its relay WebSocket torn down
+                    // by the OS; nothing in URLSession re-establishes it on
+                    // resume, so new messages never arrive until relaunch.
+                    // Force a reconnect on the background→foreground edge
+                    // (tracked via `didLeaveActive` so trivial inactive
+                    // blips don't churn the connection).
+                    switch phase {
+                    case .active:
+                        if didLeaveActive {
+                            didLeaveActive = false
+                            Task { await inboxTransport.reconnect() }
+                        }
+                    case .background:
+                        // Only a real suspension tears down the socket;
+                        // `.inactive` (Control Center, alerts) leaves it up,
+                        // so don't arm a reconnect for those.
+                        didLeaveActive = true
+                    case .inactive:
+                        break
+                    @unknown default:
+                        break
+                    }
                 }
                 .onOpenURL { url in
                     // Custom URL scheme (`onym://join?c=…`) and
