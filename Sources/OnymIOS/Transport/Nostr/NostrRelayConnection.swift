@@ -46,11 +46,6 @@ actor NostrRelayConnection {
     /// dead and force-reconnected. Must comfortably exceed
     /// `pingInterval` so a healthy relay's probe reply keeps it alive.
     private let livenessTimeout: TimeInterval
-    /// How long `probeAndReconnectIfStale` waits for the probe's reply
-    /// before declaring the socket dead. Short — it runs on a user-facing
-    /// refresh (foreground / connectivity), so a healthy relay's EOSE
-    /// lands well inside it and no needless rebuild (or inbox replay) happens.
-    private let probeReplyWindow: TimeInterval
     private static let connectionTimeout: TimeInterval = 15
     private static let publishTimeout: TimeInterval = 5
     /// Subscription id for the liveness probe. A `REQ` under this id with
@@ -62,14 +57,12 @@ actor NostrRelayConnection {
         url: URL,
         pingInterval: TimeInterval = 20,
         livenessTimeout: TimeInterval = 55,
-        probeReplyWindow: TimeInterval = 3,
         baseReconnectDelay: TimeInterval = 1,
         maxReconnectDelay: TimeInterval = 120
     ) {
         self.url = url
         self.pingInterval = pingInterval
         self.livenessTimeout = livenessTimeout
-        self.probeReplyWindow = probeReplyWindow
         self.baseReconnectDelay = baseReconnectDelay
         self.maxReconnectDelay = maxReconnectDelay
         let config = URLSessionConfiguration.default
@@ -88,10 +81,13 @@ actor NostrRelayConnection {
         self.webSocketTask = task
         task.resume()
         isConnected = true
-        // NB: `reconnectAttempts` is *not* reset here — a connect() is only
-        // an attempt, not a confirmed-live connection. It resets on the
-        // first frame actually received (see receiveLoop), so the backoff
-        // escalates across a run of failed attempts against a dead relay.
+        // Reset the backoff on every (re)connect so recovery is always
+        // prompt — a relay that drops us shouldn't compound into
+        // minute-scale retry gaps that read as "dead until relaunch".
+        // `URLSessionConfiguration.waitsForConnectivity` already prevents
+        // a tight loop while genuinely offline (connect() just waits), so
+        // there's nothing to escalate against.
+        reconnectAttempts = 0
         lastActivityAt = Date()
         Task { await receiveLoop(generation: generation) }
         startLivenessMonitor(generation: generation)
@@ -121,42 +117,10 @@ actor NostrRelayConnection {
         reconnectAttempts = 0
     }
 
-    /// App-driven refresh for the "there's fresh reason to believe the
-    /// network changed" triggers (foreground, regained connectivity).
-    /// Probe-first: send the liveness `REQ` and wait briefly for any
-    /// inbound frame. A healthy socket answers well inside the window, so
-    /// we leave it — and its subscriptions — untouched, avoiding a
-    /// needless full-inbox `REQ` replay (which storms the relayer; see
-    /// the note in `OnymIOSApp`). Only a socket that stays silent is
-    /// torn down and rebuilt.
-    func probeAndReconnectIfStale() async {
-        guard let task = webSocketTask, task.state == .running else {
-            // No usable socket at all — rebuild unconditionally.
-            forceReconnect()
-            return
-        }
-        let before = lastActivityAt
-        do {
-            try await sendLivenessProbe(task: task)
-        } catch {
-            // Send failed outright — the socket is already dead.
-            forceReconnect()
-            return
-        }
-        try? await Task.sleep(for: .seconds(probeReplyWindow))
-        // Any frame (the probe's EOSE, or real traffic) refreshes
-        // `lastActivityAt`; if nothing moved it, the socket is dead.
-        if lastActivityAt <= before {
-            forceReconnect()
-        }
-    }
-
     /// Tear down the current socket and rebuild it immediately, re-issuing
     /// every live subscription. Bumping the generation via `connect()`
     /// guarantees the previous receive loop / monitor exit without racing
-    /// the new ones. Preserves `reconnectAttempts` so repeated forced
-    /// rebuilds against a flapping/dead link still escalate backoff on the
-    /// error path rather than hammering at the flap rate.
+    /// the new ones.
     func forceReconnect() {
         connectionGeneration &+= 1
         livenessTask?.cancel()
@@ -277,10 +241,6 @@ actor NostrRelayConnection {
             do {
                 let message = try await task.receive()
                 lastActivityAt = Date()
-                // A frame actually arrived — the connection is confirmed
-                // live, so clear the backoff counter (it's only bumped by
-                // `handleConnectionFailure` and never reset by connect()).
-                reconnectAttempts = 0
                 let text: String
                 switch message {
                 case .string(let s): text = s
@@ -289,7 +249,7 @@ actor NostrRelayConnection {
                 }
                 handleMessage(text)
             } catch {
-                await handleConnectionFailure(generation: generation, backoff: true)
+                await handleConnectionFailure(generation: generation)
                 return
             }
         }
@@ -297,10 +257,13 @@ actor NostrRelayConnection {
 
     /// Single funnel for "this socket is dead, rebuild it". Guarded by the
     /// connection generation so a stale receive loop or liveness monitor
-    /// that fires after a newer connect() is a no-op. `backoff: true`
-    /// applies exponential backoff (error path); `false` reconnects
-    /// immediately (liveness probe declared it dead).
-    private func handleConnectionFailure(generation: UInt64, backoff: Bool) async {
+    /// that fires after a newer connect() is a no-op. Waits out a short
+    /// backoff before reconnecting; `reconnectAttempts` resets on each
+    /// successful `connect()`, so in practice this stays at
+    /// `baseReconnectDelay` — the escalation cap only bites if connect()
+    /// itself keeps failing before it can reset (and `waitsForConnectivity`
+    /// already parks connect() while offline rather than spinning).
+    private func handleConnectionFailure(generation: UInt64) async {
         guard generation == connectionGeneration else { return }
         livenessTask?.cancel()
         livenessTask = nil
@@ -308,13 +271,11 @@ actor NostrRelayConnection {
         webSocketTask?.cancel(with: .abnormalClosure, reason: nil)
         webSocketTask = nil
         reconnectAttempts += 1
-        if backoff {
-            let delay = min(
-                maxReconnectDelay,
-                baseReconnectDelay * pow(2.0, Double(min(reconnectAttempts - 1, 6)))
-            )
-            try? await Task.sleep(for: .seconds(delay))
-        }
+        let delay = min(
+            maxReconnectDelay,
+            baseReconnectDelay * pow(2.0, Double(min(reconnectAttempts - 1, 6)))
+        )
+        try? await Task.sleep(for: .seconds(delay))
         guard generation == connectionGeneration else { return }
         connect()
     }
@@ -332,10 +293,9 @@ actor NostrRelayConnection {
     ///     but name. If the `send` itself throws, the socket is dead now,
     ///     so we reconnect without waiting for the staleness window.
     ///
-    /// Every reconnect this triggers goes through `handleConnectionFailure`
-    /// with `backoff: true`, so a relay that never answers the probe
-    /// (non-conformant, rejects `limit: 0`) escalates the retry delay
-    /// instead of looping forever at the ping interval.
+    /// If the relay never answers the probe, staleness fires roughly once
+    /// per `livenessTimeout` and rebuilds — churn (harmless; re-delivery is
+    /// deduped) but never a stall, since each rebuild reconnects promptly.
     ///
     /// We deliberately avoid `URLSessionWebSocketTask.sendPing`: its
     /// CFNetwork handler has a known crash where the pong fires on an
@@ -363,12 +323,12 @@ actor NostrRelayConnection {
         guard generation == connectionGeneration else { return false }
 
         guard let task = webSocketTask, task.state == .running else {
-            await handleConnectionFailure(generation: generation, backoff: true)
+            await handleConnectionFailure(generation: generation)
             return false
         }
 
         if Date().timeIntervalSince(lastActivityAt) > livenessTimeout {
-            await handleConnectionFailure(generation: generation, backoff: true)
+            await handleConnectionFailure(generation: generation)
             return false
         }
 
@@ -376,7 +336,7 @@ actor NostrRelayConnection {
             try await sendLivenessProbe(task: task)
             return true
         } catch {
-            await handleConnectionFailure(generation: generation, backoff: true)
+            await handleConnectionFailure(generation: generation)
             return false
         }
     }
@@ -388,7 +348,12 @@ actor NostrRelayConnection {
     /// socket — and can reconnect; the probe-first refresh path calls it
     /// with `try?`.
     private func sendLivenessProbe(task: URLSessionWebSocketTask) async throws {
-        let probe = "[\"REQ\",\"\(Self.livenessSubID)\",{\"ids\":[\"\(String(repeating: "0", count: 64))\"],\"limit\":0}]"
+        // A single-id filter for a valid but nonexistent (all-zero) event
+        // id: matches nothing, so the relay returns an immediate EOSE and
+        // streams no live events into `livenessSubID`. Deliberately plain
+        // (no `limit`, no exotic keys) so even strict relays accept it and
+        // don't drop the connection over an odd filter.
+        let probe = "[\"REQ\",\"\(Self.livenessSubID)\",{\"ids\":[\"\(String(repeating: "0", count: 64))\"]}]"
         try await task.send(.string(probe))
     }
 

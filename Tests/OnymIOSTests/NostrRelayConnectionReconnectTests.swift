@@ -50,6 +50,43 @@ final class NostrRelayConnectionReconnectTests: XCTestCase {
         XCTAssertEqual(contents, ["before-drop", "after-reconnect"])
     }
 
+    /// The reported bug: a message that arrived while the client was
+    /// "away" (backgrounded) must be backfilled when it re-subscribes —
+    /// the relay only replays stored events in response to a fresh REQ, so
+    /// the reconnect MUST re-issue the subscription. Models the exact
+    /// symptom: no live push happens; delivery comes purely from the
+    /// reconnect's REQ replay.
+    func testForcedReconnectBackfillsMessageStoredWhileAway() async throws {
+        let relay = try LocalWebSocketRelay()
+        defer { relay.stop() }
+        let url = URL(string: "ws://127.0.0.1:\(try await relay.port())")!
+
+        let conn = NostrRelayConnection(url: url)
+        await conn.connect()
+
+        let collector = EventCollector()
+        let stream = await conn.subscribe(subscriptionID: "sub1", filter: ["kinds": [34113]])
+        let pump = Task { for await event in stream { await collector.append(event) } }
+        defer { pump.cancel() }
+        try await relay.waitForConnections(1)
+
+        // A message lands on the relay while the client is "backgrounded":
+        // stored, never pushed live to this socket.
+        relay.store(subID: "sub1", eventJSON: LocalWebSocketRelay.eventObjectJSON(
+            kind: 34113, content: "missed-while-bg", tag: ("d", "sep-inbox:abc")
+        ))
+
+        // Foreground → unconditional rebuild + re-subscribe. The relay
+        // replays the stored event on the fresh REQ.
+        await conn.forceReconnect()
+        try await relay.waitForConnections(2)
+        try await collector.waitForCount(1)
+
+        let contents = await collector.contents()
+        XCTAssertEqual(contents, ["missed-while-bg"],
+                       "reconnect must re-subscribe so the relay backfills the message missed while away")
+    }
+
     /// Passive path: a server-initiated drop makes `receive()` throw, and
     /// the receive loop's own backoff reconnect restores delivery with no
     /// external nudge.
@@ -97,7 +134,6 @@ final class NostrRelayConnectionReconnectTests: XCTestCase {
             url: url,
             pingInterval: 0.1,
             livenessTimeout: 0.3,
-            probeReplyWindow: 0.2,
             baseReconnectDelay: 0.05,
             maxReconnectDelay: 0.2
         )

@@ -124,17 +124,19 @@ final class NostrInboxTransport: InboxTransport {
             connections.removeAll()
         }
 
-        /// Refresh every connection on an app-driven trigger (foreground /
-        /// regained connectivity). Probe-first: a healthy socket is left
-        /// alone — no teardown, no `REQ` replay — so we don't storm the
-        /// relayer with a full-inbox re-fetch on every foreground. Only a
-        /// socket that fails to answer the probe is rebuilt, and even then
-        /// the subscription dict is preserved so consumers' streams don't
-        /// break.
+        /// Rebuild every connection on an app-driven trigger (foreground /
+        /// regained connectivity). Unconditional by design: after a
+        /// background suspension iOS often leaves the socket *looking*
+        /// alive while the relay has already stopped delivering, and a
+        /// Nostr relay only replays events missed during the gap in
+        /// response to a fresh `REQ`. So we always tear down and
+        /// re-subscribe — the only thing that reliably backfills messages
+        /// that arrived while we were away. The subscription dict is
+        /// preserved across the rebuild, so consumers' streams don't break.
         func reconnect() async {
             await withTaskGroup(of: Void.self) { group in
                 for conn in connections.values {
-                    group.addTask { await conn.probeAndReconnectIfStale() }
+                    group.addTask { await conn.forceReconnect() }
                 }
             }
         }

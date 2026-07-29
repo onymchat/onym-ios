@@ -17,6 +17,11 @@ final class LocalWebSocketRelay: @unchecked Sendable {
     /// test assert that a reconnect actually replayed the client's REQs
     /// (the PR's central claim) rather than just re-opening the socket.
     private var reqSubIDs: [String] = []
+    /// Raw event JSON objects "stored" on the relay, keyed by the sub id
+    /// they should replay under. Models events that arrived while the
+    /// client was away: on each `REQ` for that sub id the relay replays
+    /// them (+ EOSE), exactly as a real relay backfills on re-subscribe.
+    private var storedBySubID: [String: [String]] = [:]
 
     init() throws {
         let params = NWParameters.tcp
@@ -96,6 +101,13 @@ final class LocalWebSocketRelay: @unchecked Sendable {
         )
     }
 
+    /// "Store" an event on the relay so it is replayed on every `REQ`
+    /// for `subID` — models a message that arrived while the client was
+    /// backgrounded and must be backfilled when it re-subscribes.
+    func store(subID: String, eventJSON: String) {
+        lock.lock(); storedBySubID[subID, default: []].append(eventJSON); lock.unlock()
+    }
+
     /// Hard-drop the current connection — the client's `receive()` errors
     /// and its reconnect path (or a forced `reconnect()`) must rebuild.
     func dropCurrentConnection() {
@@ -114,24 +126,31 @@ final class LocalWebSocketRelay: @unchecked Sendable {
     private func receive(on connection: NWConnection) {
         connection.receiveMessage { [weak self] data, _, isComplete, error in
             guard let self, error == nil, isComplete else { return }
-            if let data { self.recordIfREQ(data) }
+            if let data { self.handleREQ(data, on: connection) }
             // Keep draining so the connection stays open.
             self.receive(on: connection)
         }
     }
 
-    /// Record the subscription id of a `["REQ", subID, ...]` frame so
-    /// tests can assert the client replayed its REQs after a reconnect.
-    /// The internal liveness probe (`__onym_hb`) is excluded.
-    private func recordIfREQ(_ data: Data) {
+    /// Handle a `["REQ", subID, ...]` frame: record the sub id (so tests
+    /// can assert the client replayed its REQs after a reconnect), then
+    /// replay any events stored under that sub id — a real relay's
+    /// backfill-on-subscribe. The internal liveness probe (`__onym_hb`)
+    /// is excluded from recording.
+    private func handleREQ(_ data: Data, on connection: NWConnection) {
         guard
             let array = try? JSONSerialization.jsonObject(with: data) as? [Any],
             array.count >= 2,
             (array[0] as? String) == "REQ",
-            let subID = array[1] as? String,
-            subID != "__onym_hb"
+            let subID = array[1] as? String
         else { return }
-        lock.lock(); reqSubIDs.append(subID); lock.unlock()
+        lock.lock()
+        if subID != "__onym_hb" { reqSubIDs.append(subID) }
+        let stored = storedBySubID[subID] ?? []
+        lock.unlock()
+        for eventJSON in stored {
+            push("[\"EVENT\",\"\(subID)\",\(eventJSON)]")
+        }
     }
 
     enum RelayError: Error { case timeout }
@@ -143,7 +162,20 @@ final class LocalWebSocketRelay: @unchecked Sendable {
     /// `verifyEventID()` accepts it. Signature is a throwaway — the parser
     /// verifies the id, not the signature.
     static func eventFrame(subID: String, kind: Int, content: String, tag: (String, String)) -> String {
-        let pubkey = String(repeating: "a", count: 64)
+        let event = eventObjectJSON(kind: kind, content: content, tag: tag)
+        let frame: [Any] = ["EVENT", subID, try! JSONSerialization.jsonObject(with: Data(event.utf8))]
+        let data = try! JSONSerialization.data(withJSONObject: frame, options: [])
+        return String(data: data, encoding: .utf8)!
+    }
+
+    /// The bare event object (no `["EVENT", subID, …]` wrapper), for
+    /// `store(subID:eventJSON:)`. Content is made unique per call via
+    /// `content` so distinct stored events get distinct ids.
+    static func eventObjectJSON(kind: Int, content: String, tag: (String, String)) -> String {
+        // Vary the pubkey by content so two stored events are distinct
+        // events (distinct ids), mirroring the ephemeral-pubkey-per-send
+        // design where each message is its own replaceable event.
+        let pubkey = String(SHA256.hash(data: Data(content.utf8)).map { String(format: "%02x", $0) }.joined().prefix(64))
         let createdAt = 1_700_000_000
         let tags = [[tag.0, tag.1]]
         let canonical: [Any] = [0, pubkey, createdAt, kind, tags, content]
@@ -158,8 +190,7 @@ final class LocalWebSocketRelay: @unchecked Sendable {
             "content": content,
             "sig": String(repeating: "0", count: 128),
         ]
-        let frame: [Any] = ["EVENT", subID, event]
-        let data = try! JSONSerialization.data(withJSONObject: frame, options: [])
+        let data = try! JSONSerialization.data(withJSONObject: event, options: [])
         return String(data: data, encoding: .utf8)!
     }
 }
