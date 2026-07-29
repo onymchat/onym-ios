@@ -21,13 +21,30 @@ struct RootView: View {
     let dependencies: AppDependencies
 
     @State private var selectedTab: RootTab = .chats
+    // Held in @State so they survive RootView body re-evaluations. Built
+    // inline in `body` before, a fresh ChatsFlow was minted on every
+    // re-render; `.task { flow.start() }` keys off the view's identity and
+    // does NOT re-fire for the replacement instance, so the new (unstarted,
+    // empty) flow backed the list until a tab switch forced `.task` to run
+    // again — the "chat list empty until I visit Settings and come back"
+    // bug. Creating each flow exactly once fixes it; the live subscription
+    // is durable and picks up the identity/group snapshots whenever they land.
+    @State private var chatsFlow: ChatsFlow
+    @State private var searchChatsFlow: ChatsFlow
+
+    @MainActor
+    init(dependencies: AppDependencies) {
+        self.dependencies = dependencies
+        _chatsFlow = State(initialValue: dependencies.makeChatsFlow())
+        _searchChatsFlow = State(initialValue: dependencies.makeChatsFlow())
+    }
 
     var body: some View {
         TabView(selection: $selectedTab) {
             Tab("Chats", systemImage: "bubble.left.and.bubble.right.fill", value: .chats) {
                 NavigationStack {
                     ChatsView(
-                        flow: dependencies.makeChatsFlow(),
+                        flow: chatsFlow,
                         identitiesFlow: dependencies.identitiesFlow,
                         approveRequestsFlow: dependencies.approveRequestsFlow,
                         pendingInvitesFlow: dependencies.pendingInvitesFlow,
@@ -64,7 +81,7 @@ struct RootView: View {
                 NavigationStack {
                     SearchView(
                         messageRepository: dependencies.messageRepository,
-                        chatsFlow: dependencies.makeChatsFlow(),
+                        chatsFlow: searchChatsFlow,
                         identitiesFlow: dependencies.identitiesFlow,
                         sendMessageInteractor: dependencies.sendMessageInteractor,
                         chatReceiptSender: dependencies.chatReceiptSender,
