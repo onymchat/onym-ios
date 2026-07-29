@@ -174,28 +174,34 @@ final class NostrInboxTransport: InboxTransport {
             continuation: AsyncStream<InboundInbox>.Continuation
         ) {
             activeSubscriptions[inbox]?.cancel()
-            let subIDBase = "inbox-\(inbox.rawValue)"
+            let subID = "inbox-\(inbox.rawValue)"
             let filters = NostrInboxTransport.subscriptionFilters(inbox: inbox.rawValue)
             let conns = Array(connections.values)
 
             let task = Task {
                 await withTaskGroup(of: Void.self) { group in
                     for conn in conns {
-                        for (index, filter) in filters.enumerated() {
-                            group.addTask {
-                                let filterSubID = "\(subIDBase)-\(index)"
-                                let stream = await conn.subscribe(subscriptionID: filterSubID, filter: filter)
-                                for await event in stream {
-                                    guard !Task.isCancelled else { break }
-                                    guard let payload = Data(base64Encoded: event.content) else { continue }
-                                    let received = Date(timeIntervalSince1970: TimeInterval(event.displayMilliseconds) / 1000.0)
-                                    continuation.yield(InboundInbox(
-                                        inbox: inbox,
-                                        payload: payload,
-                                        receivedAt: received,
-                                        messageID: event.id
-                                    ))
-                                }
+                        // One REQ carrying all three filter shapes — NOT
+                        // one REQ per filter. The relay dedups events
+                        // across a subscription's filters (NIP-01), and a
+                        // single subscription per inbox keeps the
+                        // connection well under relay
+                        // `maxSubsPerConnection` caps (strfry default 20;
+                        // 3 REQs per inbox tripped it on
+                        // subscription-heavy devices and the overflow was
+                        // silently CLOSED).
+                        group.addTask {
+                            let stream = await conn.subscribe(subscriptionID: subID, filters: filters)
+                            for await event in stream {
+                                guard !Task.isCancelled else { break }
+                                guard let payload = Data(base64Encoded: event.content) else { continue }
+                                let received = Date(timeIntervalSince1970: TimeInterval(event.displayMilliseconds) / 1000.0)
+                                continuation.yield(InboundInbox(
+                                    inbox: inbox,
+                                    payload: payload,
+                                    receivedAt: received,
+                                    messageID: event.id
+                                ))
                             }
                         }
                     }
