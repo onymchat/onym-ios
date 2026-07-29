@@ -59,6 +59,16 @@ final class ChatThreadViewController: UIViewController {
     var onSendMedia: (() -> Void)?
     /// Fired when the ✕ on a staged item is tapped (host drops it).
     var onRemovePendingMedia: ((UUID) -> Void)?
+    /// Fired with incoming messages whose bubbles have actually been
+    /// rendered on screen while the app is active — the host sends
+    /// `.read` receipts and clears the unread badge from here. This is
+    /// deliberately NOT the data stream: receipting from snapshot
+    /// processing marked messages "read" that were never painted (app
+    /// backgrounded, thread below the fold), telling senders a lie.
+    /// Each message is reported at most once per controller lifetime.
+    var onMessagesSeen: (([ChatMessage]) -> Void)?
+    /// Incoming message ids already reported through `onMessagesSeen`.
+    private var reportedSeenIDs: Set<UUID> = []
 
     private let tableView = UITableView()
     /// Floating "N new messages" affordance, shown above the input panel
@@ -185,10 +195,12 @@ final class ChatThreadViewController: UIViewController {
         super.viewDidAppear(animated)
         installFullWidthPopGesture()
         flushPendingScrollToBottom()
+        reportVisibleIncomingMessages()
     }
 
     @objc private func applicationDidBecomeActive() {
         flushPendingScrollToBottom()
+        reportVisibleIncomingMessages()
     }
 
     /// Perform a deferred scroll-to-bottom (see `pendingScrollToBottom`).
@@ -199,6 +211,28 @@ final class ChatThreadViewController: UIViewController {
         pendingScrollToBottom = false
         tableView.layoutIfNeeded()
         scrollToBottom(animated: false)
+    }
+
+    /// Report incoming messages whose cells are on screen right now —
+    /// but only when they're genuinely visible to a person: view in a
+    /// window AND the app active. Called from every point where
+    /// visibility can change (apply completion, scroll, foreground,
+    /// appear); cheap and idempotent, deduped via `reportedSeenIDs`.
+    func reportVisibleIncomingMessages() {
+        guard canScrollNow() else { return }
+        guard let visiblePaths = tableView.indexPathsForVisibleRows,
+              !visiblePaths.isEmpty else { return }
+        var newlySeen: [ChatMessage] = []
+        for path in visiblePaths {
+            guard path.row < orderedMessages.count else { continue }
+            let message = orderedMessages[path.row]
+            guard message.direction == .incoming,
+                  !reportedSeenIDs.contains(message.id) else { continue }
+            reportedSeenIDs.insert(message.id)
+            newlySeen.append(message)
+        }
+        guard !newlySeen.isEmpty else { return }
+        onMessagesSeen?(newlySeen)
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -345,6 +379,9 @@ final class ChatThreadViewController: UIViewController {
                     self.pendingScrollToBottom = true
                 }
             }
+            // Whatever the scroll decision, the set of on-screen bubbles
+            // may have changed — report what a person can now see.
+            self.reportVisibleIncomingMessages()
         }
 
         // The user is scrolled up in history and new incoming messages
@@ -862,13 +899,15 @@ final class ChatThreadViewController: UIViewController {
 }
 
 extension ChatThreadViewController: UITableViewDelegate {
-    /// Clears the new-messages pill once the user reaches the bottom —
-    /// whether by scrolling there themselves, tapping the pill, or an
-    /// auto-scroll pulling them down. Cheap: bails immediately while the
-    /// pill is hidden.
+    /// Scrolling changes what's visible: clear the new-messages pill
+    /// once the user reaches the bottom (by hand, pill tap, or
+    /// auto-scroll), and report newly on-screen incoming bubbles for
+    /// read-receipting.
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        guard !newMessagesPill.isHidden else { return }
-        if isNearBottom { clearNewMessagesPill() }
+        if !newMessagesPill.isHidden, isNearBottom {
+            clearNewMessagesPill()
+        }
+        reportVisibleIncomingMessages()
     }
 }
 
