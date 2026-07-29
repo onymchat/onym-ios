@@ -2,26 +2,28 @@ import Foundation
 import Network
 
 /// Bridges `NWPathMonitor` to an `AsyncStream` of "connectivity was just
-/// (re)gained" signals. Each emission is a cue to rebuild long-lived
-/// sockets that may have gone stale while the network was down or while
-/// the active interface changed (Wi-Fi ↔ cellular hand-off) — the app
-/// forwards it to `InboxTransport.reconnect()`.
+/// regained" signals. Each emission is a cue to rebuild long-lived
+/// sockets that went dead while the network was down — the app forwards
+/// it to `InboxTransport.reconnect()`.
 ///
-/// The very first `.satisfied` callback at startup is deliberately
-/// swallowed: the launch-time connect already establishes the socket, so
-/// re-triggering there is pure churn. Every subsequent `.satisfied`
-/// update — after an unsatisfied stretch or an interface change — is
-/// emitted. Reconnect is idempotent, so erring toward an extra emission
-/// is safe.
+/// Emits **only on a genuine unsatisfied→satisfied transition.**
+/// `NWPathMonitor` invokes its handler on *any* path change, including
+/// route/interface churn while the path stays satisfied (frequent on the
+/// simulator). Emitting on every satisfied callback turned this into a
+/// reconnect storm — each reconnect makes the relay replay every retained
+/// event, so the whole inbox pipeline thrashes. Tracking the previous
+/// status and firing only on the offline→online edge fixes that. The
+/// baseline (first) callback never emits: the launch-time connect already
+/// covers a satisfied start.
 enum NetworkPathMonitor {
     static func connectivityRegainedStream() -> AsyncStream<Void> {
         AsyncStream { continuation in
             let monitor = NWPathMonitor()
-            let gate = FirstCallbackGate()
+            let tracker = SatisfiedTransitionTracker()
             monitor.pathUpdateHandler = { path in
-                guard path.status == .satisfied else { return }
-                if gate.isFirstCall() { return }
-                continuation.yield(())
+                if tracker.shouldEmit(satisfied: path.status == .satisfied) {
+                    continuation.yield(())
+                }
             }
             continuation.onTermination = { @Sendable _ in monitor.cancel() }
             monitor.start(queue: DispatchQueue(label: "app.onym.ios.netpath"))
@@ -29,18 +31,18 @@ enum NetworkPathMonitor {
     }
 }
 
-/// Thread-safe one-shot latch: `isFirstCall()` returns `true` exactly
-/// once (the first invocation), `false` thereafter. `NWPathMonitor`
-/// delivers callbacks on its own queue, so the flip must be synchronized.
-private final class FirstCallbackGate: @unchecked Sendable {
+/// Thread-safe edge detector for connectivity. `shouldEmit` returns `true`
+/// only when the path flips from not-satisfied to satisfied; the first
+/// call establishes the baseline and never emits. `NWPathMonitor`
+/// delivers callbacks on its own queue, so the state must be synchronized.
+private final class SatisfiedTransitionTracker: @unchecked Sendable {
     private let lock = NSLock()
-    private var seen = false
+    private var lastSatisfied: Bool?
 
-    func isFirstCall() -> Bool {
+    func shouldEmit(satisfied: Bool) -> Bool {
         lock.lock()
-        defer { lock.unlock() }
-        if seen { return false }
-        seen = true
-        return true
+        defer { lastSatisfied = satisfied; lock.unlock() }
+        guard let previous = lastSatisfied else { return false }
+        return satisfied && !previous
     }
 }

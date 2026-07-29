@@ -1299,6 +1299,63 @@ final class IncomingMessageDispatcherTests: XCTestCase {
         XCTAssertEqual(recorded.first?.groupName, "Maple Garden")
     }
 
+    func test_offer_forAlreadyJoinedGroup_isDropped() async throws {
+        // Regression: a Nostr relay retains the offer and re-serves it on
+        // every re-subscribe. Once the group is materialized locally (you
+        // joined), a re-delivered offer must be dropped at receive time —
+        // otherwise `record` re-adds it and the materialized-group consume
+        // removes it again, and the invite "blinks" on every reconnect.
+        let groupID = Data(repeating: 0x42, count: 32)
+        let groupIDHex = groupID.map { String(format: "%02x", $0) }.joined()
+        let existing = ChatGroup(
+            id: groupIDHex,
+            ownerIdentityID: owner,
+            name: "Maple Garden",
+            groupSecret: Data(repeating: 0x55, count: 32),
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            members: [],
+            memberProfiles: [:],
+            epoch: 0,
+            salt: Data(repeating: 0x66, count: 32),
+            commitment: nil,
+            tier: .small,
+            groupType: .tyranny,
+            adminPubkeyHex: nil,
+            adminEd25519PubkeyHex: nil,
+            isPublishedOnChain: true
+        )
+        _ = await groups.insert(existing)
+
+        let offer = try GroupInviteOfferPayload(
+            introPublicKey: Data(repeating: 0x44, count: 32),
+            groupID: groupID,
+            groupName: "Maple Garden",
+            inviterAlias: "Alice"
+        )
+        let plaintext = try JSONEncoder().encode(offer)
+        let decrypter = FakeInvitationEnvelopeDecrypter(mode: .fixed(plaintext))
+        let spy = SpyPendingInvites()
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory()),
+            pendingInvites: spy
+        )
+
+        await dispatcher.dispatch(
+            messageID: "msg-offer-redelivered",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+
+        let recorded = await spy.all()
+        XCTAssertTrue(recorded.isEmpty, "an offer for an already-joined group must be dropped")
+    }
+
     func test_invitation_tyranny_chainAhead_defersAndDoesNotMaterialize() async throws {
         // Option 2: a snapshot the chain has advanced past can't be
         // byte-verified, so it must NOT materialize — it's deferred to

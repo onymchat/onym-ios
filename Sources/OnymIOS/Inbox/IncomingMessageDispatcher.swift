@@ -242,6 +242,19 @@ struct IncomingMessageDispatcher: Sendable {
         ownerIdentityID: IdentityID,
         receivedAt: Date
     ) async {
+        // Drop re-delivered offers for a group this identity has already
+        // joined. The relay retains the offer and re-serves it on every
+        // re-subscribe (each reconnect). Without this guard, `record`
+        // re-adds it and `PendingInvitesStore.consumeForMaterializedGroups`
+        // immediately removes it again (the group exists locally), so the
+        // invite "blinks" in and out. Enforcing at receive time — before
+        // it ever reaches the in-memory store — closes that loop at the
+        // door. See PendingInvitesStore.consumeForMaterializedGroups.
+        let alreadyJoined = await groupRepository.currentGroups().contains {
+            $0.groupIDData == offer.groupID && $0.ownerIdentityID == ownerIdentityID
+        }
+        guard !alreadyJoined else { return }
+
         await pendingInvites.record(PendingInvite(
             id: messageID,
             ownerIdentityID: ownerIdentityID,
