@@ -751,9 +751,13 @@ struct IncomingMessageDispatcher: Sendable {
         ownerIdentityID: IdentityID,
         senderEd25519PublicKey: Data?
     ) async {
+        let log = NostrRelayConnection.deliveryLog
         // Envelope must have been signed — anonymous chat messages
         // are not part of the v1 trust model.
-        guard let senderEd25519PublicKey else { return }
+        guard let senderEd25519PublicKey else {
+            log.debug("chatMsg DROP: unsigned envelope")
+            return
+        }
 
         // Look up the local group. Drop if we don't know it (stale
         // delivery for a group we left, or routing mistake) or if it
@@ -764,6 +768,7 @@ struct IncomingMessageDispatcher: Sendable {
         guard let group = groups.first(where: {
             $0.id == groupIDHex && $0.ownerIdentityID == ownerIdentityID
         }) else {
+            log.debug("chatMsg DROP: group not found group=\(groupIDHex, privacy: .public) owner=\(ownerIdentityID.rawValue.uuidString, privacy: .public) known=\(groups.count)")
             return
         }
 
@@ -772,6 +777,7 @@ struct IncomingMessageDispatcher: Sendable {
         // before lookup.
         let senderKey = payload.senderBlsPubkeyHex.lowercased()
         guard let senderProfile = group.memberProfiles[senderKey] else {
+            log.debug("chatMsg DROP: sender not a member sender=\(senderKey, privacy: .public) members=\(group.memberProfiles.count)")
             return
         }
 
@@ -780,6 +786,7 @@ struct IncomingMessageDispatcher: Sendable {
         // Bob (a member) could write Alice's BLS hex into the payload
         // and the receiver would attribute it wrong.
         guard senderEd25519PublicKey == senderProfile.sendingPubkey else {
+            log.debug("chatMsg DROP: ed25519 signer mismatch for sender=\(senderKey, privacy: .public)")
             return
         }
 
@@ -792,7 +799,10 @@ struct IncomingMessageDispatcher: Sendable {
             case .tyranny: return .tyranny
             }
         }()
-        guard variantKind == group.groupType else { return }
+        guard variantKind == group.groupType else {
+            log.debug("chatMsg DROP: variant/groupType mismatch \(String(describing: variantKind), privacy: .public) vs \(String(describing: group.groupType), privacy: .public)")
+            return
+        }
 
         let sentAt = Date(timeIntervalSince1970:
             TimeInterval(payload.sentAtMillis) / 1000.0)
@@ -829,6 +839,7 @@ struct IncomingMessageDispatcher: Sendable {
             voiceAttachment: payload.voiceAttachment
         )
         await messageRepository.insert(message)
+        log.debug("chatMsg INSERT id=\(payload.messageID, privacy: .public) group=\(groupIDHex, privacy: .public) owner=\(ownerIdentityID.rawValue.uuidString, privacy: .public)")
 
         // Ack the sender: delivered now (unconditional — it only reveals
         // a device received the ciphertext). Read receipts are sent

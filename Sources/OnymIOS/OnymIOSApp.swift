@@ -662,6 +662,7 @@ struct OnymIOSApp: App {
                     // full-inbox REQ replay unless the socket is actually
                     // dead (see the replay-storm note at :598).
                     for await _ in NetworkPathMonitor.connectivityRegainedStream() {
+                        NostrRelayConnection.deliveryLog.debug("trigger: connectivity regained → reconnect")
                         await inboxTransport.reconnect()
                     }
                 }
@@ -685,6 +686,7 @@ struct OnymIOSApp: App {
                         named: UIApplication.willEnterForegroundNotification
                     )
                     for await _ in foregrounded {
+                        NostrRelayConnection.deliveryLog.debug("trigger: willEnterForeground → reconnect")
                         await inboxTransport.reconnect()
                     }
                 }
