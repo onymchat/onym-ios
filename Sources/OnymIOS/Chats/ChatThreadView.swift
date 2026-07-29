@@ -253,9 +253,9 @@ struct ChatThreadView: View {
             guard let owner = chatsFlow.groups
                 .first(where: { $0.id == groupID })?.ownerIdentityID
             else { return }
-            NostrRelayConnection.deliveryLog.debug("thread SUBSCRIBED group=\(groupID, privacy: .public) owner=\(owner.rawValue.uuidString, privacy: .public)")
+            NostrRelayConnection.deliveryLog.notice("thread SUBSCRIBED group=\(groupID, privacy: .public) owner=\(owner.rawValue.uuidString, privacy: .public)")
             for await snapshot in messageRepository.snapshots(groupID: groupID, owner: owner) {
-                NostrRelayConnection.deliveryLog.debug("thread SNAPSHOT count=\(snapshot.count) group=\(groupID, privacy: .public)")
+                NostrRelayConnection.deliveryLog.notice("thread SNAPSHOT count=\(snapshot.count) group=\(groupID, privacy: .public)")
                 messages = snapshot
                 // Read receipts: the thread is on-screen (this task is
                 // tied to its lifetime), so any incoming message here is

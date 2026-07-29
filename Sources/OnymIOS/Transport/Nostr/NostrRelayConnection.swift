@@ -92,7 +92,7 @@ actor NostrRelayConnection {
         Task { await receiveLoop(generation: generation) }
         startLivenessMonitor(generation: generation)
 
-        Self.deliveryLog.debug("connect gen=\(generation) replaying \(self.subscriptions.count) subs host=\(self.host, privacy: .public)")
+        Self.deliveryLog.notice("connect gen=\(generation) replaying \(self.subscriptions.count) subs host=\(self.host, privacy: .public)")
         for (subID, (filter, _)) in subscriptions {
             sendREQ(subscriptionID: subID, filter: filter)
         }
@@ -123,7 +123,7 @@ actor NostrRelayConnection {
     /// guarantees the previous receive loop / monitor exit without racing
     /// the new ones.
     func forceReconnect() {
-        Self.deliveryLog.debug("forceReconnect host=\(self.host, privacy: .public)")
+        Self.deliveryLog.notice("forceReconnect host=\(self.host, privacy: .public)")
         connectionGeneration &+= 1
         livenessTask?.cancel()
         livenessTask = nil
@@ -267,7 +267,7 @@ actor NostrRelayConnection {
     /// already parks connect() while offline rather than spinning).
     private func handleConnectionFailure(generation: UInt64) async {
         guard generation == connectionGeneration else { return }
-        Self.deliveryLog.debug("connectionFailure gen=\(generation) attempts=\(self.reconnectAttempts) host=\(self.host, privacy: .public)")
+        Self.deliveryLog.notice("connectionFailure gen=\(generation) attempts=\(self.reconnectAttempts) host=\(self.host, privacy: .public)")
         livenessTask?.cancel()
         livenessTask = nil
         isConnected = false
@@ -386,7 +386,7 @@ actor NostrRelayConnection {
                   let eventObj = array[2] as? [String: Any]
             else { return }
             let matched = subscriptions[subID] != nil
-            Self.deliveryLog.debug("EVENT sub=\(subID, privacy: .public) matched=\(matched) host=\(self.host, privacy: .public)")
+            Self.deliveryLog.notice("EVENT sub=\(subID, privacy: .public) matched=\(matched) host=\(self.host, privacy: .public)")
             if let event = parseEvent(eventObj),
                let (_, callback) = subscriptions[subID]
             {

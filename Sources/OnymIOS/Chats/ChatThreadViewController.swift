@@ -232,7 +232,7 @@ final class ChatThreadViewController: UIViewController {
     }
 
     func update(messages: [ChatMessage]) {
-        NostrRelayConnection.deliveryLog.debug("vc.update(messages:) count=\(messages.count) loaded=\(self.isViewLoaded) window=\(self.viewIfLoaded?.window != nil)")
+        NostrRelayConnection.deliveryLog.notice("vc.update(messages:) count=\(messages.count) loaded=\(self.isViewLoaded) window=\(self.viewIfLoaded?.window != nil)")
         let isFirstApply = !hasAppliedFirstSnapshot
         let wasNearBottom = isNearBottom
         // Only a genuinely *new* row pulls the scroll along. A same-count
