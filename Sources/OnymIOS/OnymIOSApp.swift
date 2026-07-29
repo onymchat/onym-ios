@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @main
 struct OnymIOSApp: App {
@@ -36,14 +37,6 @@ struct OnymIOSApp: App {
     /// PR-6 surfaces a placeholder; PR-7 will replace it with the
     /// real `JoinView` + `JoinFlow`.
     @State private var pendingCapability: IntroCapability?
-
-    /// Drives the transport-refresh triggers. `scenePhase` catches the
-    /// app returning to the foreground after a suspension (which silently
-    /// kills the relay socket); `didLeaveActive` gates that so a plain
-    /// inactive→active blip (Control Center, a permission alert) doesn't
-    /// force a needless reconnect — only a real background→foreground does.
-    @Environment(\.scenePhase) private var scenePhase
-    @State private var didLeaveActive = false
 
     init() {
         let args = ProcessInfo.processInfo.arguments
@@ -672,30 +665,27 @@ struct OnymIOSApp: App {
                         await inboxTransport.reconnect()
                     }
                 }
-                .onChange(of: scenePhase) { _, phase in
+                .task {
                     // A backgrounded app has its relay WebSocket torn down
                     // by the OS; nothing in URLSession re-establishes it on
                     // resume, so new messages never arrive until relaunch.
-                    // Probe-and-refresh on the background→foreground edge
-                    // (tracked via `didLeaveActive` so trivial inactive
-                    // blips don't churn the connection). Probe-first, so a
-                    // socket that survived the background isn't needlessly
-                    // rebuilt + re-replayed.
-                    switch phase {
-                    case .active:
-                        if didLeaveActive {
-                            didLeaveActive = false
-                            Task { await inboxTransport.reconnect() }
-                        }
-                    case .background:
-                        // Only a real suspension tears down the socket;
-                        // `.inactive` (Control Center, alerts) leaves it up,
-                        // so don't arm a reconnect for those.
-                        didLeaveActive = true
-                    case .inactive:
-                        break
-                    @unknown default:
-                        break
+                    // Probe-and-refresh on return-to-foreground.
+                    //
+                    // We listen to `willEnterForeground` rather than reading
+                    // `@Environment(\.scenePhase)` on the App: scenePhase in
+                    // the App body re-evaluates the whole view tree on every
+                    // phase change, which is both wasteful and re-mints
+                    // view-owned state. This notification fires only on a
+                    // real background→foreground transition (never on an
+                    // inactive blip like Control Center), and drives the
+                    // side effect without touching the render path.
+                    // `reconnect()` is probe-first — a socket that survived
+                    // the background isn't needlessly rebuilt + re-replayed.
+                    let foregrounded = NotificationCenter.default.notifications(
+                        named: UIApplication.willEnterForegroundNotification
+                    )
+                    for await _ in foregrounded {
+                        await inboxTransport.reconnect()
                     }
                 }
                 .onOpenURL { url in
