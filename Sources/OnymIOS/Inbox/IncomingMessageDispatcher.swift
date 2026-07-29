@@ -85,6 +85,14 @@ struct IncomingMessageDispatcher: Sendable {
     /// (actor reference), preserving FIFO across the app's single
     /// dispatcher.
     var slowLane = SerialDispatchLane()
+    /// Durable per-(owner, group) invite dispositions. Consulted before
+    /// queueing a `GroupInviteOfferPayload`: a relay retains the offer
+    /// and re-serves it on every re-subscribe, so once the user has
+    /// requested / declined / joined, re-deliveries must be dropped at
+    /// the door — otherwise the offer "blinks" back into the inbox
+    /// forever. Defaulted to a no-op for the same reason as
+    /// `pendingInvites`.
+    var inviteDispositions: any InviteDispositionStoring = NoopInviteDispositionStore()
 
     func dispatch(
         messageID: String,
@@ -280,6 +288,39 @@ struct IncomingMessageDispatcher: Sendable {
         ownerIdentityID: IdentityID,
         receivedAt: Date
     ) async {
+        // Disposition gate: once this (owner, group) invite has been
+        // requested / declined / joined, a re-delivered offer (the relay
+        // re-serves retained events on every re-subscribe, possibly
+        // under a fresh event id) is dropped at the door. Without this
+        // the offer re-enters the pending list and the materialized-
+        // group consumer removes it again — the "blinking invite" loop.
+        switch await inviteDispositions.disposition(
+            owner: ownerIdentityID, groupID: offer.groupID
+        ) {
+        case .requested, .declined, .joined:
+            return
+        case .offered, nil:
+            break
+        }
+
+        // Belt for the joined case the ledger may not have seen (e.g. a
+        // group materialized before this ledger existed): a local group
+        // for this (owner, group) means the invite is spent.
+        let alreadyJoined = await groupRepository.currentGroups().contains {
+            $0.groupIDData == offer.groupID && $0.ownerIdentityID == ownerIdentityID
+        }
+        if alreadyJoined {
+            await inviteDispositions.record(
+                .joined, owner: ownerIdentityID, groupID: offer.groupID,
+                groupName: offer.groupName, inviterAlias: offer.inviterAlias
+            )
+            return
+        }
+
+        await inviteDispositions.record(
+            .offered, owner: ownerIdentityID, groupID: offer.groupID,
+            groupName: offer.groupName, inviterAlias: offer.inviterAlias
+        )
         await pendingInvites.record(PendingInvite(
             id: messageID,
             ownerIdentityID: ownerIdentityID,

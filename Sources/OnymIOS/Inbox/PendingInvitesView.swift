@@ -15,7 +15,8 @@ struct PendingInvitesView: View {
                 if let error = flow.lastError {
                     errorBanner(error)
                 }
-                if flow.pending.isEmpty && flow.verifying.isEmpty {
+                if flow.pending.isEmpty && flow.verifying.isEmpty
+                    && flow.awaitingApproval.isEmpty {
                     emptyState
                 } else {
                     inviteList
@@ -86,6 +87,9 @@ struct PendingInvitesView: View {
                 ForEach(flow.verifying) { entry in
                     verifyingCard(entry)
                 }
+                ForEach(flow.awaitingApproval) { entry in
+                    awaitingApprovalCard(entry)
+                }
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 24)
@@ -130,6 +134,36 @@ struct PendingInvitesView: View {
         .background(OnymTokens.surface)
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .accessibilityIdentifier("pending_invites.verifying.\(entry.groupIDHex)")
+    }
+
+    /// An accepted invite whose join request is with the admin. Durable
+    /// (ledger-backed): survives relaunch, can't be re-accepted, clears
+    /// on its own the moment the admin approves and the group
+    /// materializes.
+    private func awaitingApprovalCard(_ entry: InviteDispositionEntry) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(entry.groupName?.isEmpty == false ? entry.groupName! : String(localized: "Group"))
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(OnymTokens.text)
+            HStack(spacing: 8) {
+                Image(systemName: "paperplane.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(OnymTokens.text3)
+                Text("Request sent \u{2014} awaiting approval")
+                    .font(.system(size: 13))
+                    .foregroundStyle(OnymTokens.text2)
+            }
+            if let inviter = entry.inviterAlias, !inviter.isEmpty {
+                Text("Invited by \(inviter)")
+                    .font(.system(size: 12))
+                    .foregroundStyle(OnymTokens.text3)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(OnymTokens.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .accessibilityIdentifier("pending_invites.awaiting.\(entry.groupIDHex)")
     }
 
     private func inviteCard(_ invite: PendingInvite) -> some View {

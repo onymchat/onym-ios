@@ -18,6 +18,12 @@ import Observation
 final class PendingInvitesFlow {
     /// Pending invites for the current identity, newest first.
     var pending: [PendingInvite] = []
+    /// Accepted-but-unapproved invites for the current identity — the
+    /// durable "Request sent · awaiting approval" rows. Sourced from the
+    /// disposition ledger, so they survive relaunch instead of vanishing
+    /// (and can't be accepted twice); each clears when its group
+    /// materializes (→ `.joined`).
+    var awaitingApproval: [InviteDispositionEntry] = []
     /// Groups that were accepted but couldn't be verified at an exact
     /// epoch yet — awaiting (or unable to get) the current state from
     /// the admin. Surfaced so the user knows a join is in flight or
@@ -38,6 +44,11 @@ final class PendingInvitesFlow {
     private let store: PendingInvitesStore
     private let verificationStore: PendingVerificationStore
     private let groupRepository: GroupRepository
+    /// Durable (owner, group) dispositions — written on accept / dismiss
+    /// / group-materialize; read by the dispatcher to drop re-delivered
+    /// offers and by this flow for the awaiting-approval rows. nil keeps
+    /// the pre-ledger behavior (existing tests).
+    private let dispositions: InviteDispositionLedger?
     /// Mirrors `JoinFlow`'s injected `submitRequest` — seals + sends a
     /// `JoinRequestPayload` for the given capability. Returns the
     /// sender outcome so the flow can surface errors.
@@ -52,6 +63,7 @@ final class PendingInvitesFlow {
     private var streamingTask: Task<Void, Never>?
     private var verifyingTask: Task<Void, Never>?
     private var groupWatchTask: Task<Void, Never>?
+    private var ledgerTask: Task<Void, Never>?
 
     init(
         store: PendingInvitesStore,
@@ -59,7 +71,8 @@ final class PendingInvitesFlow {
         groupRepository: GroupRepository,
         submitJoin: @escaping @Sendable (IntroCapability, String) async -> JoinRequestSender.Outcome,
         displayLabel: @escaping @MainActor () -> String,
-        retryVerification: @escaping @Sendable (String) async -> Void
+        retryVerification: @escaping @Sendable (String) async -> Void,
+        dispositions: InviteDispositionLedger? = nil
     ) {
         self.store = store
         self.verificationStore = verificationStore
@@ -67,6 +80,7 @@ final class PendingInvitesFlow {
         self.submitJoin = submitJoin
         self.displayLabel = displayLabel
         self.retryVerification = retryVerification
+        self.dispositions = dispositions
     }
 
     func isInFlight(_ id: String) -> Bool { inFlightIDs.contains(id) }
@@ -95,13 +109,38 @@ final class PendingInvitesFlow {
                 self.verifying = snapshot
             }
         }
+        // Awaiting-approval rows: mirror the ledger's requested entries.
+        if let dispositions {
+            let dstream = dispositions.snapshots
+            ledgerTask = Task { @MainActor [weak self] in
+                for await entries in dstream {
+                    guard let self else { break }
+                    self.awaitingApproval = entries.filter { $0.state == .requested }
+                }
+            }
+        }
         let groups = groupRepository.snapshots
         let store = self.store
+        let dispositions = self.dispositions
         groupWatchTask = Task {
             for await groups in groups {
                 await store.consumeForMaterializedGroups(
                     Set(groups.map(\.groupIDData))
                 )
+                // A materialized group spends its invite: record .joined
+                // so re-delivered offers stay dropped and the awaiting-
+                // approval row clears.
+                if let dispositions {
+                    for group in groups {
+                        await dispositions.record(
+                            .joined,
+                            owner: group.ownerIdentityID,
+                            groupID: group.groupIDData,
+                            groupName: group.name,
+                            inviterAlias: nil
+                        )
+                    }
+                }
             }
         }
     }
@@ -113,6 +152,8 @@ final class PendingInvitesFlow {
         verifyingTask = nil
         groupWatchTask?.cancel()
         groupWatchTask = nil
+        ledgerTask?.cancel()
+        ledgerTask = nil
     }
 
     /// Retry a verification that got stuck because the admin was
@@ -142,6 +183,7 @@ final class PendingInvitesFlow {
         lastError = nil
         let label = displayLabel()
         let submitJoin = self.submitJoin
+        let dispositions = self.dispositions
         Task { @MainActor [weak self] in
             let outcome = await submitJoin(capability, label)
             guard let self else { return }
@@ -149,6 +191,23 @@ final class PendingInvitesFlow {
             switch outcome {
             case .sent:
                 self.requestedIDs.insert(id)
+                // Durable: the accept survives relaunch as an
+                // "awaiting approval" row, and the dispatcher drops
+                // re-delivered offers for this (owner, group) from now
+                // on — the invite can never blink back or be accepted
+                // twice.
+                if let dispositions {
+                    await dispositions.record(
+                        .requested,
+                        owner: invite.ownerIdentityID,
+                        groupID: invite.groupID,
+                        groupName: invite.groupName,
+                        inviterAlias: invite.inviterAlias
+                    )
+                    // The offer card is superseded by the durable
+                    // awaiting-approval row.
+                    await self.store.consume(id: id)
+                }
             case .noIdentityLoaded:
                 self.lastError = "Sign in first."
             case .transportFailed(let reason):
@@ -158,10 +217,25 @@ final class PendingInvitesFlow {
     }
 
     /// Drop an invite the user doesn't want. Local-only — no NACK to
-    /// the admin (their outstanding intro key just goes unused).
+    /// the admin (their outstanding intro key just goes unused). The
+    /// declined disposition is durable, so the relay re-serving the
+    /// offer can't resurrect it.
     func dismiss(_ id: String) {
         let store = self.store
-        Task { await store.consume(id: id) }
+        let dispositions = self.dispositions
+        let invite = pending.first(where: { $0.id == id })
+        Task {
+            if let dispositions, let invite {
+                await dispositions.record(
+                    .declined,
+                    owner: invite.ownerIdentityID,
+                    groupID: invite.groupID,
+                    groupName: invite.groupName,
+                    inviterAlias: invite.inviterAlias
+                )
+            }
+            await store.consume(id: id)
+        }
     }
 
     func dismissError() { lastError = nil }
