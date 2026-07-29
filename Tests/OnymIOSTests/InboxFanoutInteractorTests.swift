@@ -216,6 +216,7 @@ private actor RecordingInboxTransport: InboxTransport {
 
     func connect(to endpoints: [TransportEndpoint]) async {}
     func disconnect() async {}
+    func reconnect() async {}
 
     func send(_ payload: Data, to inbox: TransportInboxID) async throws -> PublishReceipt {
         PublishReceipt(messageID: UUID().uuidString, acceptedBy: 1)

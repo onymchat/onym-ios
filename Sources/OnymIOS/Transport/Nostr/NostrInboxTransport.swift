@@ -37,6 +37,10 @@ final class NostrInboxTransport: InboxTransport {
         await state.disconnect()
     }
 
+    func reconnect() async {
+        await state.reconnect()
+    }
+
     @discardableResult
     func send(_ payload: Data, to inbox: TransportInboxID) async throws -> PublishReceipt {
         let signer = try signerProvider.makeEphemeralSigner()
@@ -134,6 +138,18 @@ final class NostrInboxTransport: InboxTransport {
                 await conn.disconnect()
             }
             connections.removeAll()
+        }
+
+        /// Rebuild every connection in place. The per-connection
+        /// subscription dicts survive the rebuild and their REQs replay
+        /// (`since`-bounded), so consumers' AsyncStreams never break and
+        /// the relay backfills exactly the gap missed while away.
+        func reconnect() async {
+            await withTaskGroup(of: Void.self) { group in
+                for conn in connections.values {
+                    group.addTask { await conn.forceReconnect() }
+                }
+            }
         }
 
         /// Per-relay publish outcome — split so the thrown error can

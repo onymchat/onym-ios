@@ -42,6 +42,11 @@ actor FakeInboxTransport: InboxTransport {
         continuations.removeAll()
     }
 
+    func reconnect() async {
+        // No-op: the fake drives live subscriptions directly via `emit`,
+        // so there is nothing to rebuild.
+    }
+
     func send(_ payload: Data, to inbox: TransportInboxID) async throws -> PublishReceipt {
         // Not exercised by the pump; tests asserting on send paths use a different fake.
         PublishReceipt(messageID: "fake-\(UUID().uuidString)", acceptedBy: 1)

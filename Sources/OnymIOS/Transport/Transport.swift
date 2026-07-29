@@ -104,6 +104,17 @@ protocol InboxTransport: Sendable {
     func connect(to endpoints: [TransportEndpoint]) async
     func disconnect() async
 
+    /// Tear down and rebuild every underlying connection, re-issuing all
+    /// live subscriptions. Unconditional by design: it exists for the
+    /// app-driven refresh triggers (return to foreground, regained
+    /// connectivity), where a fresh REQ is the only mechanism that
+    /// backfills events missed while the socket was dead or suspended —
+    /// probing first and skipping the rebuild on a healthy-*looking*
+    /// socket provably loses messages (design doc F3). Cheap by
+    /// construction: replays are `since`-bounded to the gap. Consumers'
+    /// subscription streams survive the rebuild.
+    func reconnect() async
+
     @discardableResult
     func send(_ payload: Data, to inbox: TransportInboxID) async throws -> PublishReceipt
 

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @main
 struct OnymIOSApp: App {
@@ -654,6 +655,36 @@ struct OnymIOSApp: App {
                         currentTask = Task { await pump.run(entries: entries) }
                     }
                     currentTask?.cancel()
+                }
+                .task {
+                    // Refresh relay sockets when connectivity is regained.
+                    // NetworkPathMonitor is edge-triggered (only a genuine
+                    // unsatisfied→satisfied transition) and debounced, so
+                    // interface churn can't storm reconnects; the rebuild
+                    // itself is cheap (since-bounded replay + dedup).
+                    for await _ in NetworkPathMonitor.connectivityRegainedStream() {
+                        await inboxTransport.reconnect()
+                    }
+                }
+                .task {
+                    // A backgrounded app has its relay WebSocket torn down
+                    // (or half-opened) by the OS; nothing in URLSession
+                    // re-establishes it on resume, and only a fresh REQ
+                    // backfills what was missed while suspended. Rebuild
+                    // unconditionally on return to foreground.
+                    //
+                    // `willEnterForeground` (not `scenePhase` on the App):
+                    // observing scenePhase re-evaluates the entire view
+                    // tree on every phase change; the notification fires
+                    // only on a real background→foreground transition and
+                    // drives the side effect without touching the render
+                    // path.
+                    let foregrounded = NotificationCenter.default.notifications(
+                        named: UIApplication.willEnterForegroundNotification
+                    )
+                    for await _ in foregrounded {
+                        await inboxTransport.reconnect()
+                    }
                 }
                 .onOpenURL { url in
                     // Custom URL scheme (`onym://join?c=…`) and
