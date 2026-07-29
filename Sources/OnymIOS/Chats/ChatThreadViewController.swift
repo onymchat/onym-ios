@@ -61,6 +61,31 @@ final class ChatThreadViewController: UIViewController {
     var onRemovePendingMedia: ((UUID) -> Void)?
 
     private let tableView = UITableView()
+    /// Floating "N new messages" affordance, shown above the input panel
+    /// when incoming messages land while the user is scrolled up in
+    /// history — auto-scrolling would yank them away from what they're
+    /// reading, but the arrival must still be user-visible. Tapping
+    /// scrolls to the bottom; reaching the bottom by hand clears it too.
+    private let newMessagesPill = UIButton(type: .system)
+    /// Incoming messages that arrived while the user was away from the
+    /// bottom — the pill's count. Reset whenever the bottom is reached.
+    private var unseenIncomingCount = 0
+    /// Deferred auto-scroll: set when a fresh message wants the scroll
+    /// pulled to the bottom but the view can't scroll reliably right now
+    /// (app backgrounded / mid-foreground-transition / view not in a
+    /// window — exactly where the reconnect backfill lands). Flushed on
+    /// `viewDidAppear` and `didBecomeActiveNotification`, so a message
+    /// received while backgrounded is on screen the moment the user is.
+    private(set) var pendingScrollToBottom = false
+    /// Whether a scroll performed right now will actually stick. UIKit
+    /// quietly drops scroll-to-row work applied while the app isn't
+    /// active or the view isn't in a window. Injectable so tests can
+    /// drive the deferred path without a real app lifecycle.
+    lazy var canScrollNow: () -> Bool = { [weak self] in
+        guard let self, let view = self.viewIfLoaded else { return false }
+        return view.window != nil
+            && UIApplication.shared.applicationState == .active
+    }
     /// The group's invitation message, surfaced in the empty state.
     private var invitationMessage: String?
     /// Rich empty state (invitation + members + privacy points), hosted
@@ -118,7 +143,18 @@ final class ChatThreadViewController: UIViewController {
         buildTableView()
         buildInputPanel()
         layout()
+        buildNewMessagesPill()
         configureDataSource()
+
+        // A backfilled message can land while the app is backgrounded or
+        // mid-foreground-transition, where a scroll won't stick — flush
+        // the deferred scroll the moment the app is actually active.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applicationDidBecomeActive),
+            name: UIApplication.didBecomeActiveNotification,
+            object: nil
+        )
 
         // The input panel rides the keyboard up via the
         // `keyboardLayoutGuide` constraint, which shrinks the message
@@ -148,6 +184,21 @@ final class ChatThreadViewController: UIViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         installFullWidthPopGesture()
+        flushPendingScrollToBottom()
+    }
+
+    @objc private func applicationDidBecomeActive() {
+        flushPendingScrollToBottom()
+    }
+
+    /// Perform a deferred scroll-to-bottom (see `pendingScrollToBottom`).
+    /// Non-animated: the user is just arriving; the latest message should
+    /// simply already be there, like it is after a relaunch.
+    private func flushPendingScrollToBottom() {
+        guard pendingScrollToBottom else { return }
+        pendingScrollToBottom = false
+        tableView.layoutIfNeeded()
+        scrollToBottom(animated: false)
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -249,6 +300,12 @@ final class ChatThreadViewController: UIViewController {
             guard let prior = messagesByID[msg.id], prior != msg else { return nil }
             return msg.id
         }
+        // Incoming rows this update introduces (computed against the
+        // *previous* messagesByID) — drives the "N new messages" pill
+        // when the user is scrolled up and auto-scroll would be rude.
+        let newIncomingCount = sorted.count(where: { msg in
+            msg.direction == .incoming && messagesByID[msg.id] == nil
+        })
         messagesByID = Dictionary(uniqueKeysWithValues: sorted.map { ($0.id, $0) })
         orderedMessages = sorted
         rebuildSenderDisplays()
@@ -277,8 +334,26 @@ final class ChatThreadViewController: UIViewController {
                 self.jumpToBottomForColdOpen()
                 self.hasAppliedFirstSnapshot = true
             } else if wasNearBottom && sorted.count > previousCount {
-                self.scrollToBottom(animated: true)
+                if self.canScrollNow() {
+                    self.scrollToBottom(animated: true)
+                } else {
+                    // Backgrounded / mid-foreground-transition / not in a
+                    // window: a scroll now would be silently dropped and
+                    // the fresh message would sit below the fold —
+                    // delivered but invisible. Defer; `viewDidAppear` /
+                    // `didBecomeActive` flushes it.
+                    self.pendingScrollToBottom = true
+                }
             }
+        }
+
+        // The user is scrolled up in history and new incoming messages
+        // just landed: don't yank the scroll — surface the arrival with
+        // the pill instead. (Own outgoing sends keep today's behavior:
+        // no pill, no scroll unless near bottom.)
+        if !isFirstApply, !wasNearBottom, newIncomingCount > 0 {
+            unseenIncomingCount += newIncomingCount
+            showNewMessagesPill(count: unseenIncomingCount)
         }
     }
 
@@ -483,12 +558,66 @@ final class ChatThreadViewController: UIViewController {
         tableView.scrollToRow(at: lastIndex, at: .bottom, animated: animated)
     }
 
+    // MARK: - New-messages pill
+
+    private func buildNewMessagesPill() {
+        var config = UIButton.Configuration.filled()
+        config.baseBackgroundColor = UIColor(OnymTokens.surface3)
+        config.baseForegroundColor = UIColor(OnymTokens.text)
+        config.cornerStyle = .capsule
+        config.image = UIImage(systemName: "chevron.down")
+        config.preferredSymbolConfigurationForImage =
+            UIImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
+        config.imagePadding = 6
+        config.contentInsets = NSDirectionalEdgeInsets(
+            top: 8, leading: 14, bottom: 8, trailing: 14
+        )
+        newMessagesPill.configuration = config
+        newMessagesPill.layer.shadowColor = UIColor.black.cgColor
+        newMessagesPill.layer.shadowOpacity = 0.18
+        newMessagesPill.layer.shadowRadius = 10
+        newMessagesPill.layer.shadowOffset = CGSize(width: 0, height: 4)
+        newMessagesPill.accessibilityIdentifier = "chat.newMessagesPill"
+        newMessagesPill.isHidden = true
+        newMessagesPill.addTarget(self, action: #selector(newMessagesPillTapped), for: .touchUpInside)
+
+        newMessagesPill.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(newMessagesPill)
+        NSLayoutConstraint.activate([
+            newMessagesPill.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            newMessagesPill.bottomAnchor.constraint(equalTo: inputPanel.topAnchor, constant: -12),
+        ])
+    }
+
+    private func showNewMessagesPill(count: Int) {
+        var config = newMessagesPill.configuration
+        config?.title = String(localized: "\(count) new messages")
+        newMessagesPill.configuration = config
+        newMessagesPill.isHidden = false
+    }
+
+    /// Hide the pill and forget the unseen count — the user has reached
+    /// (or jumped to) the bottom, so everything is seen.
+    private func clearNewMessagesPill() {
+        unseenIncomingCount = 0
+        newMessagesPill.isHidden = true
+    }
+
+    @objc private func newMessagesPillTapped() {
+        clearNewMessagesPill()
+        tableView.layoutIfNeeded()
+        scrollToBottom(animated: true)
+    }
+
     // MARK: - Table view (message list)
 
     private func buildTableView() {
         tableView.translatesAutoresizingMaskIntoConstraints = false
         tableView.backgroundColor = UIColor(OnymTokens.bg)
         tableView.separatorStyle = .none
+        // Scroll tracking for the new-messages pill: reaching the bottom
+        // (by hand or via the pill) clears the unseen count.
+        tableView.delegate = self
         // Hidden until the cold open is positioned at the bottom, so the
         // user never sees the initial top→bottom scroll. Revealed by
         // `jumpToBottomForColdOpen` once the latest message is in place.
@@ -730,6 +859,17 @@ final class ChatThreadViewController: UIViewController {
         handleSend(body)
     }
     #endif
+}
+
+extension ChatThreadViewController: UITableViewDelegate {
+    /// Clears the new-messages pill once the user reaches the bottom —
+    /// whether by scrolling there themselves, tapping the pill, or an
+    /// auto-scroll pulling them down. Cheap: bails immediately while the
+    /// pill is hidden.
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        guard !newMessagesPill.isHidden else { return }
+        if isNearBottom { clearNewMessagesPill() }
+    }
 }
 
 extension ChatThreadViewController: UIGestureRecognizerDelegate {

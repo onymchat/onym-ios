@@ -437,6 +437,138 @@ final class ChatThreadViewControllerTests: XCTestCase {
         RunLoop.current.run(until: Date(timeIntervalSinceNow: seconds))
     }
 
+    // MARK: - New-message awareness (pill + deferred scroll)
+
+    /// Mount a controller with a long thread, cold-opened at the bottom,
+    /// then scrolled up to the top — the "user is reading history" state
+    /// the pill exists for.
+    private func scrolledUpController(messageCount: Int = 40) -> (ChatThreadViewController, UITableView, [ChatMessage]) {
+        let vc = mountedController()
+        let msgs = (0..<messageCount).map {
+            incoming(sender: "aa".repeated(48), body: "message \($0)", at: TimeInterval($0))
+        }
+        vc.update(messages: msgs)
+        let table = layoutTable(in: vc)
+        pumpMainRunLoop()  // cold open completes; hasAppliedFirstSnapshot set
+        table.contentOffset = .zero
+        table.layoutIfNeeded()
+        XCTAssertFalse(vc.isNearBottom, "precondition: the user is scrolled up")
+        return (vc, table, msgs)
+    }
+
+    private func newMessagesPill(in vc: UIViewController) -> UIButton? {
+        find(in: vc.view) { $0.accessibilityIdentifier == "chat.newMessagesPill" } as? UIButton
+    }
+
+    func test_newMessagesPill_hiddenInitially() {
+        let vc = mountedController()
+        vc.update(messages: [makeMessage(body: "hi", direction: .incoming)])
+        _ = layoutTable(in: vc)
+        pumpMainRunLoop()
+        XCTAssertTrue(newMessagesPill(in: vc)?.isHidden ?? false)
+    }
+
+    func test_incomingWhileScrolledUp_showsPillWithCount() {
+        let (vc, _, msgs) = scrolledUpController()
+        vc.update(messages: msgs + [
+            incoming(sender: "bb".repeated(48), body: "new 1", at: 100),
+            incoming(sender: "bb".repeated(48), body: "new 2", at: 101),
+        ])
+        pumpMainRunLoop()
+        let pill = newMessagesPill(in: vc)
+        XCTAssertEqual(pill?.isHidden, false,
+                       "incoming messages while scrolled up must surface the pill")
+        XCTAssertTrue(pill?.configuration?.title?.contains("2") ?? false,
+                      "the pill must carry the unseen count")
+        XCTAssertFalse(vc.isNearBottom,
+                       "the scroll position must NOT be yanked while reading history")
+    }
+
+    func test_pillCount_accumulatesAcrossUpdates() {
+        let (vc, _, msgs) = scrolledUpController()
+        let first = msgs + [incoming(sender: "bb".repeated(48), body: "new 1", at: 100)]
+        vc.update(messages: first)
+        pumpMainRunLoop(0.05)
+        vc.update(messages: first + [incoming(sender: "bb".repeated(48), body: "new 2", at: 101)])
+        pumpMainRunLoop(0.05)
+        XCTAssertTrue(newMessagesPill(in: vc)?.configuration?.title?.contains("2") ?? false,
+                      "unseen count must accumulate until the bottom is reached")
+    }
+
+    func test_reachingBottom_clearsPill() {
+        let (vc, table, msgs) = scrolledUpController()
+        vc.update(messages: msgs + [incoming(sender: "bb".repeated(48), body: "new", at: 100)])
+        pumpMainRunLoop(0.05)
+        XCTAssertEqual(newMessagesPill(in: vc)?.isHidden, false)
+
+        vc.scrollToBottom(animated: false)
+        table.layoutIfNeeded()
+        vc.scrollViewDidScroll(table)
+        XCTAssertEqual(newMessagesPill(in: vc)?.isHidden, true,
+                       "reaching the bottom must clear the pill")
+    }
+
+    func test_pillTap_scrollsToBottomAndHides() {
+        let (vc, table, msgs) = scrolledUpController()
+        vc.update(messages: msgs + [incoming(sender: "bb".repeated(48), body: "new", at: 100)])
+        pumpMainRunLoop(0.05)
+        let pill = newMessagesPill(in: vc)!
+        XCTAssertFalse(pill.isHidden)
+
+        pill.sendActions(for: .touchUpInside)
+        // The tap scrolls animated from ~40 rows up — give the scroll
+        // animation time to settle before asserting the landing spot.
+        pumpMainRunLoop(0.6)
+        table.layoutIfNeeded()
+        XCTAssertTrue(pill.isHidden)
+        XCTAssertTrue(vc.isNearBottom, "tapping the pill must land on the latest message")
+    }
+
+    func test_incomingNearBottom_autoScrolls_noPill() {
+        let vc = mountedController()
+        let msgs = (0..<40).map {
+            incoming(sender: "aa".repeated(48), body: "message \($0)", at: TimeInterval($0))
+        }
+        vc.update(messages: msgs)
+        _ = layoutTable(in: vc)
+        pumpMainRunLoop()  // cold open → at bottom
+
+        vc.update(messages: msgs + [incoming(sender: "bb".repeated(48), body: "new", at: 100)])
+        pumpMainRunLoop()
+        XCTAssertTrue(newMessagesPill(in: vc)?.isHidden ?? false,
+                      "near-bottom arrivals auto-scroll; the pill must not appear")
+        XCTAssertTrue(vc.isNearBottom, "the fresh message must be pulled into view")
+    }
+
+    /// The reported field bug: a message lands while the app can't
+    /// scroll (backgrounded / mid-foreground-transition). The scroll must
+    /// be deferred — and flushed the moment the app becomes active, so
+    /// the message is on screen when the user is.
+    func test_arrivalWhileNotScrollable_deferredAndFlushedOnBecomeActive() {
+        let vc = mountedController()
+        let msgs = (0..<40).map {
+            incoming(sender: "aa".repeated(48), body: "message \($0)", at: TimeInterval($0))
+        }
+        vc.update(messages: msgs)
+        let table = layoutTable(in: vc)
+        pumpMainRunLoop()  // cold open → at bottom
+        XCTAssertTrue(vc.isNearBottom)
+
+        vc.canScrollNow = { false }  // "backgrounded"
+        vc.update(messages: msgs + [incoming(sender: "bb".repeated(48), body: "bg message", at: 100)])
+        pumpMainRunLoop()
+        XCTAssertTrue(vc.pendingScrollToBottom,
+                      "an arrival that can't scroll now must arm the deferred scroll")
+
+        vc.canScrollNow = { true }  // "foregrounded"
+        NotificationCenter.default.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        pumpMainRunLoop()
+        table.layoutIfNeeded()
+        XCTAssertFalse(vc.pendingScrollToBottom, "didBecomeActive must flush the deferred scroll")
+        XCTAssertTrue(vc.isNearBottom,
+                      "the message received while away must be on screen after foregrounding")
+    }
+
     // MARK: - Sender differentiation (run grouping + name headers)
 
     func test_runGrouping_headerOnlyAtStartOfSameSenderRun() {
