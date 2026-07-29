@@ -617,7 +617,11 @@ struct OnymIOSApp: App {
                     let fanout = InboxFanoutInteractor(
                         inboxTransport: inboxTransport,
                         identityRepository: identityRepository,
-                        dispatcher: dispatcher
+                        dispatcher: dispatcher,
+                        // Durable event-id dedup: replay overlap and
+                        // multi-relay duplicates are dropped before
+                        // decrypt (marked seen only post-dispatch).
+                        seenEventIDs: SeenEventIDStore()
                     )
                     await fanout.run()
                 }

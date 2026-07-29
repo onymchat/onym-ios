@@ -14,9 +14,18 @@ final class NostrInboxTransport: InboxTransport {
 
     private let state: State
     private let signerProvider: any NostrEphemeralSignerProvider
+    /// Tolerance subtracted from the high-water mark when bounding a
+    /// REQ's `since`, absorbing relay clock skew and out-of-order
+    /// delivery. The small re-fetched overlap is deduped downstream
+    /// (`SeenEventIDStore`); the point is excluding the *ancient*
+    /// backlog, not being exact.
+    static let replaySinceSlack: Int64 = 300
 
-    init(signerProvider: any NostrEphemeralSignerProvider) {
-        self.state = State()
+    init(
+        signerProvider: any NostrEphemeralSignerProvider,
+        highWaterMarks: any InboxHighWaterMarkStoring = UserDefaultsInboxHighWaterMarkStore()
+    ) {
+        self.state = State(highWaterMarks: highWaterMarks)
         self.signerProvider = signerProvider
     }
 
@@ -98,6 +107,13 @@ final class NostrInboxTransport: InboxTransport {
     fileprivate actor State {
         private var connections: [URL: NostrRelayConnection] = [:]
         private var activeSubscriptions: [TransportInboxID: Task<Void, Never>] = [:]
+        /// Per-inbox high-water marks (persisted). Read at every REQ send
+        /// via the connection's `sinceProvider`, raised as events arrive.
+        private let highWaterMarks: any InboxHighWaterMarkStoring
+
+        init(highWaterMarks: any InboxHighWaterMarkStoring) {
+            self.highWaterMarks = highWaterMarks
+        }
 
         func connect(to endpoints: [TransportEndpoint]) async {
             for endpoint in endpoints {
@@ -177,6 +193,18 @@ final class NostrInboxTransport: InboxTransport {
             let subID = "inbox-\(inbox.rawValue)"
             let filters = NostrInboxTransport.subscriptionFilters(inbox: inbox.rawValue)
             let conns = Array(connections.values)
+            // Bound every REQ (initial + reconnect replay) to the gap
+            // since the last event already seen for this inbox. nil on
+            // the first-ever run ⇒ one unbounded cold-start fetch, then
+            // bounded forever. Evaluated at send time, so a reconnect
+            // after hours away fetches hours — not the full history.
+            let inboxTag = inbox.rawValue
+            let hwm = highWaterMarks
+            let sinceProvider: @Sendable () -> Int64? = {
+                hwm.highWaterMark(inbox: inboxTag).map {
+                    max(0, $0 - NostrInboxTransport.replaySinceSlack)
+                }
+            }
 
             let task = Task {
                 await withTaskGroup(of: Void.self) { group in
@@ -191,9 +219,14 @@ final class NostrInboxTransport: InboxTransport {
                         // subscription-heavy devices and the overflow was
                         // silently CLOSED).
                         group.addTask {
-                            let stream = await conn.subscribe(subscriptionID: subID, filters: filters)
+                            let stream = await conn.subscribe(
+                                subscriptionID: subID,
+                                filters: filters,
+                                sinceProvider: sinceProvider
+                            )
                             for await event in stream {
                                 guard !Task.isCancelled else { break }
+                                hwm.raise(inbox: inboxTag, to: event.createdAt)
                                 guard let payload = Data(base64Encoded: event.content) else { continue }
                                 let received = Date(timeIntervalSince1970: TimeInterval(event.displayMilliseconds) / 1000.0)
                                 continuation.yield(InboundInbox(

@@ -27,6 +27,7 @@ actor FakeInboxTransport: InboxTransport {
     private(set) var connectedEndpoints: [TransportEndpoint] = []
     private(set) var disconnectCallCount = 0
     private(set) var unsubscribedInboxes: [TransportInboxID] = []
+    private(set) var subscribedInboxes: [TransportInboxID] = []
     private(set) var subscribeCallCount = 0
 
     // MARK: - InboxTransport
@@ -93,6 +94,7 @@ actor FakeInboxTransport: InboxTransport {
         continuation: AsyncStream<InboundInbox>.Continuation
     ) {
         subscribeCallCount += 1
+        subscribedInboxes.append(inbox)
         continuations[inbox] = continuation
     }
 }

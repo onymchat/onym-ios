@@ -44,9 +44,16 @@ actor NostrRelayConnection {
     let url: URL
     private var webSocketTask: URLSessionWebSocketTask?
     private let session: URLSession
-    /// Live subscriptions: subID → (filters, per-event callback). All of
-    /// a subscription's filters ship in one REQ frame.
-    private var subscriptions: [String: (filters: [[String: Any]], callback: (NostrEvent) -> Void)] = [:]
+    /// Live subscriptions: subID → (filters, since-provider, per-event
+    /// callback). All of a subscription's filters ship in one REQ frame.
+    /// `sinceProvider` is consulted at every REQ *send* (initial and
+    /// replay), so the `since` bound reflects the caller's current
+    /// high-water mark rather than a value frozen at subscribe time.
+    private var subscriptions: [String: (
+        filters: [[String: Any]],
+        sinceProvider: (@Sendable () -> Int64?)?,
+        callback: (NostrEvent) -> Void
+    )] = [:]
     private(set) var isConnected = false
     private var reconnectAttempts = 0
     private var pendingOKContinuations: [String: CheckedContinuation<Bool, any Error>] = [:]
@@ -103,11 +110,13 @@ actor NostrRelayConnection {
         let config = URLSessionConfiguration.default
         config.waitsForConnectivity = true
         config.timeoutIntervalForRequest = Self.connectionTimeout
-        // Long-lived WebSocket: no wall-clock resource bound. Death is
-        // detected by the liveness monitor, not the URL loader. (A finite
-        // bound would force periodic full-history replays until the
-        // since-bounded replay of the next PR lands; revisit there.)
-        config.timeoutIntervalForResource = 0
+        // OS-level safety net: after this wall-clock bound the task dies,
+        // `receive()` throws, and the normal failure funnel rebuilds. The
+        // liveness monitor is the real death detector; this only catches
+        // pathological hangs it can't see. Affordable now that reconnect
+        // replays are `since`-bounded (a forced hourly rebuild refetches
+        // the gap, not the full retained history).
+        config.timeoutIntervalForResource = 3600
         self.session = URLSession(configuration: config)
     }
 
@@ -129,7 +138,7 @@ actor NostrRelayConnection {
         startLivenessMonitor(generation: generation)
 
         for (subID, entry) in subscriptions {
-            sendREQ(subscriptionID: subID, filters: entry.filters)
+            sendREQ(subscriptionID: subID, filters: entry.filters, sinceProvider: entry.sinceProvider)
         }
 
         // URLSessionWebSocketTask exposes no reliable onOpen callback.
@@ -233,12 +242,19 @@ actor NostrRelayConnection {
     /// Open one relay subscription carrying every filter in `filters`
     /// (single REQ frame — the relay dedups events across the filters
     /// within one subscription, NIP-01).
+    ///
+    /// `sinceProvider`, when given, bounds every REQ this subscription
+    /// sends — initial and reconnect replay alike — with
+    /// `since = max(filter's own since, provider value)`. Returning nil
+    /// leaves the filters untouched (first-ever run: unbounded cold-start
+    /// fetch).
     func subscribe(
         subscriptionID: String,
-        filters: [[String: Any]]
+        filters: [[String: Any]],
+        sinceProvider: (@Sendable () -> Int64?)? = nil
     ) -> AsyncStream<NostrEvent> {
         let stream = AsyncStream<NostrEvent> { continuation in
-            subscriptions[subscriptionID] = (filters, { event in
+            subscriptions[subscriptionID] = (filters, sinceProvider, { event in
                 continuation.yield(event)
             })
             continuation.onTermination = { @Sendable _ in
@@ -247,7 +263,7 @@ actor NostrRelayConnection {
                 }
             }
         }
-        sendREQ(subscriptionID: subscriptionID, filters: filters)
+        sendREQ(subscriptionID: subscriptionID, filters: filters, sinceProvider: sinceProvider)
         return stream
     }
 
@@ -263,7 +279,24 @@ actor NostrRelayConnection {
 
     // MARK: - Private
 
-    private func sendREQ(subscriptionID: String, filters: [[String: Any]]) {
+    private func sendREQ(
+        subscriptionID: String,
+        filters: [[String: Any]],
+        sinceProvider: (@Sendable () -> Int64?)?
+    ) {
+        var filters = filters
+        // Bound the fetch to the caller's current high-water mark: only
+        // the gap since the last event already seen is replayed, not the
+        // relay's full retained history. Never lowers a since a filter
+        // already carries.
+        if let since = sinceProvider?() {
+            filters = filters.map { filter in
+                var filter = filter
+                let existing = (filter["since"] as? Int64) ?? .min
+                filter["since"] = max(existing, since)
+                return filter
+            }
+        }
         var frame: [Any] = ["REQ", subscriptionID]
         frame.append(contentsOf: filters)
         guard let data = try? JSONSerialization.data(withJSONObject: frame),
@@ -275,7 +308,7 @@ actor NostrRelayConnection {
     private func replaySubscriptions(generation: UInt64) {
         guard generation == connectionGeneration else { return }
         for (subID, entry) in subscriptions {
-            sendREQ(subscriptionID: subID, filters: entry.filters)
+            sendREQ(subscriptionID: subID, filters: entry.filters, sinceProvider: entry.sinceProvider)
         }
     }
 
@@ -433,7 +466,7 @@ actor NostrRelayConnection {
                 Task { await handleConnectionFailure(generation: generation) }
             } else {
                 closedRetriedSubIDs.insert(subID)
-                sendREQ(subscriptionID: subID, filters: entry.filters)
+                sendREQ(subscriptionID: subID, filters: entry.filters, sinceProvider: entry.sinceProvider)
             }
         case "NOTICE":
             break
