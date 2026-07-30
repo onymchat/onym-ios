@@ -56,6 +56,19 @@ targets:
         # About screen ships a stale value forever.
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # Export compliance. Onym uses non-exempt encryption (end-to-end
+        # message/media encryption with AES-256-GCM + X25519, beyond
+        # HTTPS), so this is `true`. The app ships only industry-standard,
+        # publicly documented algorithms — it qualifies for US License
+        # Exception ENC (ECCN 5D992.c, mass market) via a
+        # self-classification report, and needs a French encryption
+        # declaration to be sold in France. See docs/compliance/.
+        # Without this key App Store Connect re-prompts the compliance
+        # questionnaire on every upload. It MUST live here, not in
+        # Info.plist directly — the plist is xcodegen output and a
+        # hand-edit is silently dropped on the next regenerate (that's
+        # how 71fbb75's key got lost once already).
+        ITSAppUsesNonExemptEncryption: true
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: true
           UISceneConfigurations: {}
