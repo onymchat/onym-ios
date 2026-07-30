@@ -1,6 +1,20 @@
 import Foundation
 import os.log
 
+/// TEMPORARY transport diagnostics for the device live-delivery bug.
+/// Emits nothing in release builds. Remove once resolved.
+enum TransportLog {
+    #if DEBUG
+    private static let logger = Logger(subsystem: "app.onym.ios", category: "TransportDebug")
+    #endif
+    static func log(_ message: @autoclosure () -> String) {
+        #if DEBUG
+        let text = message()
+        logger.debug("🔌 \(text, privacy: .public)")
+        #endif
+    }
+}
+
 /// Persistent WebSocket connection to a single Nostr relay. Owns the
 /// REQ/EVENT/EOSE/OK/CLOSE framing and is the only place in the
 /// transport layer that touches `URLSessionWebSocketTask`. Reconnect with
@@ -48,7 +62,11 @@ actor NostrRelayConnection {
 
     func connect() {
         desiredConnected = true
-        guard webSocketTask == nil else { return }
+        guard webSocketTask == nil else {
+            TransportLog.log("connect \(url.absoluteString): skipped, socket already exists")
+            return
+        }
+        TransportLog.log("connect \(url.absoluteString): opening socket, will replay \(subscriptions.count) subs")
         let task = session.webSocketTask(with: url)
         self.webSocketTask = task
         task.resume()
@@ -71,6 +89,7 @@ actor NostrRelayConnection {
     }
 
     func disconnect() {
+        TransportLog.log("disconnect \(url.absoluteString)")
         desiredConnected = false
         pingTask?.cancel()
         pingTask = nil
@@ -106,6 +125,7 @@ actor NostrRelayConnection {
     /// before the send so a fast OK can never be missed.
     func publishAndAwaitOK(event: NostrEvent) async throws -> Bool {
         let eventID = event.id
+        TransportLog.log("publish \(eventID.prefix(8)) → \(url.absoluteString): awaiting OK")
 
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Bool, any Error>) in
             self.pendingOKContinuations[eventID] = continuation
@@ -129,12 +149,14 @@ actor NostrRelayConnection {
 
     private func timeoutPendingOK(eventID: String) {
         if let continuation = pendingOKContinuations.removeValue(forKey: eventID) {
+            TransportLog.log("publish \(eventID.prefix(8)) → \(url.absoluteString): no OK in 5s, assuming accepted")
             continuation.resume(returning: true)
         }
     }
 
     private func failPendingOK(eventID: String, error: any Error) {
         if let continuation = pendingOKContinuations.removeValue(forKey: eventID) {
+            TransportLog.log("publish \(eventID.prefix(8)) → \(url.absoluteString): send failed: \(error)")
             continuation.resume(throwing: error)
         }
     }
@@ -158,6 +180,7 @@ actor NostrRelayConnection {
     }
 
     func unsubscribe(subscriptionID: String) {
+        TransportLog.log("CLOSE \(subscriptionID) → \(url.absoluteString)")
         subscriptions.removeValue(forKey: subscriptionID)
         let frame: [Any] = ["CLOSE", subscriptionID]
         if let data = try? JSONSerialization.data(withJSONObject: frame),
@@ -174,7 +197,18 @@ actor NostrRelayConnection {
         guard let data = try? JSONSerialization.data(withJSONObject: frame),
               let string = String(data: data, encoding: .utf8)
         else { return }
-        Task { try? await webSocketTask?.send(.string(string)) }
+        Task {
+            guard let task = webSocketTask else {
+                TransportLog.log("REQ \(subscriptionID) → \(url.absoluteString): DROPPED, no socket")
+                return
+            }
+            do {
+                try await task.send(.string(string))
+                TransportLog.log("REQ \(subscriptionID) → \(url.absoluteString): sent \(string)")
+            } catch {
+                TransportLog.log("REQ \(subscriptionID) → \(url.absoluteString): send FAILED: \(error)")
+            }
+        }
     }
 
     private func replaySubscriptions() {
@@ -190,6 +224,8 @@ actor NostrRelayConnection {
     /// the same CFNetwork use-after-free family as the `sendPing` crash
     /// documented above `startHeartbeat()`.
     private func receiveLoop(task: URLSessionWebSocketTask) async {
+        TransportLog.log("receiveLoop \(url.absoluteString): started")
+        defer { TransportLog.log("receiveLoop \(url.absoluteString): exited") }
         while isConnected, webSocketTask === task {
             do {
                 let message = try await task.receive()
@@ -207,7 +243,10 @@ actor NostrRelayConnection {
                 }
                 handleMessage(text)
             } catch {
-                guard webSocketTask === task else { return }
+                guard webSocketTask === task else {
+                    TransportLog.log("receiveLoop \(url.absoluteString): stale loop erred (\(error)), yielding to successor")
+                    return
+                }
                 pingTask?.cancel()
                 pingTask = nil
                 isConnected = false
@@ -218,10 +257,14 @@ actor NostrRelayConnection {
                     Self.maxReconnectDelay,
                     Self.baseReconnectDelay * pow(2.0, Double(min(reconnectAttempts - 1, 6)))
                 )
+                TransportLog.log("receiveLoop \(url.absoluteString): receive failed (\(error)), attempt \(reconnectAttempts), reconnecting in \(delay)s")
                 try? await Task.sleep(for: .seconds(delay))
                 // disconnect() may have run during the backoff sleep —
                 // a dropped connection must stay dropped.
-                guard desiredConnected, webSocketTask == nil else { return }
+                guard desiredConnected, webSocketTask == nil else {
+                    TransportLog.log("receiveLoop \(url.absoluteString): reconnect abandoned (desired=\(desiredConnected), socketExists=\(webSocketTask != nil))")
+                    return
+                }
                 connect()
                 return
             }
@@ -260,14 +303,19 @@ actor NostrRelayConnection {
     /// waiting — the EOSE it provokes, or ordinary traffic, both prove
     /// the receive path is alive.
     private func probeLiveness() async -> Bool {
-        guard let task = webSocketTask, task.state == .running else { return false }
+        guard let task = webSocketTask, task.state == .running else {
+            TransportLog.log("probe \(url.absoluteString): no running socket (state=\(webSocketTask?.state.rawValue ?? -1))")
+            return false
+        }
         let sentAt = ContinuousClock.now
         try? await task.send(.string(Self.probeREQ))
         try? await Task.sleep(for: .seconds(Self.probeTimeout))
         // Socket was replaced while waiting — the reconnect that did it
         // started a fresh heartbeat, which owns liveness now.
         guard webSocketTask === task else { return true }
-        return lastFrameAt > sentAt
+        let alive = lastFrameAt > sentAt
+        TransportLog.log("probe \(url.absoluteString): \(alive ? "alive" : "DEAD — no frame within \(Self.probeTimeout)s")")
+        return alive
     }
 
     /// Cancelling the socket makes the pending `receive()` throw, so the
@@ -291,34 +339,46 @@ actor NostrRelayConnection {
         guard let data = text.data(using: .utf8),
               let array = try? JSONSerialization.jsonObject(with: data) as? [Any],
               let kind = array.first as? String
-        else { return }
+        else {
+            TransportLog.log("frame ← \(url.absoluteString): unparseable (\(text.utf8.count) bytes)")
+            return
+        }
 
         switch kind {
         case "EVENT":
             guard array.count >= 3,
                   let subID = array[1] as? String,
                   let eventObj = array[2] as? [String: Any]
-            else { return }
-            if let event = parseEvent(eventObj),
+            else {
+                TransportLog.log("EVENT ← \(url.absoluteString): malformed frame")
+                return
+            }
+            let event = parseEvent(eventObj)
+            let matched = subscriptions[subID] != nil
+            TransportLog.log("EVENT ← \(url.absoluteString): sub=\(subID) id=\((eventObj["id"] as? String)?.prefix(8) ?? "?") parsed=\(event != nil) subKnown=\(matched)")
+            if let event,
                let (_, callback) = subscriptions[subID]
             {
                 callback(event)
             }
         case "EOSE":
-            break
+            TransportLog.log("EOSE ← \(url.absoluteString): sub=\(array.count >= 2 ? "\(array[1])" : "?")")
         case "OK":
             if array.count >= 3,
                let eventID = array[1] as? String,
                let accepted = array[2] as? Bool {
                 if let continuation = pendingOKContinuations.removeValue(forKey: eventID) {
+                    TransportLog.log("OK ← \(url.absoluteString): id=\(eventID.prefix(8)) accepted=\(accepted)")
                     continuation.resume(returning: accepted)
+                } else {
+                    TransportLog.log("OK ← \(url.absoluteString): id=\(eventID.prefix(8)) accepted=\(accepted), nothing pending")
                 }
                 onOKCallback?(eventID, accepted)
             }
         case "NOTICE":
-            break
+            TransportLog.log("NOTICE ← \(url.absoluteString): \(array.count >= 2 ? "\(array[1])" : text)")
         default:
-            break
+            TransportLog.log("frame ← \(url.absoluteString): unhandled kind=\(kind)")
         }
     }
 

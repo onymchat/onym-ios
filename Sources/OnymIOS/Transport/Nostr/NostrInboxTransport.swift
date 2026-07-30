@@ -100,6 +100,7 @@ final class NostrInboxTransport: InboxTransport {
         private var activeSubscriptions: [TransportInboxID: Task<Void, Never>] = [:]
 
         func connect(to endpoints: [TransportEndpoint]) async {
+            TransportLog.log("inbox transport: connect to \(endpoints.count) endpoints (\(connections.count) already connected)")
             for endpoint in endpoints {
                 if connections[endpoint.url] == nil {
                     let conn = NostrRelayConnection(url: endpoint.url)
@@ -154,6 +155,7 @@ final class NostrInboxTransport: InboxTransport {
             let accepted = outcomes.filter {
                 if case .accepted = $0 { return true } else { return false }
             }.count
+            TransportLog.log("inbox send id=\(event.id.prefix(8)): accepted by \(accepted)/\(conns.count) relays")
             if accepted > 0 { return accepted }
 
             let anyRejected = outcomes.contains {
@@ -177,6 +179,7 @@ final class NostrInboxTransport: InboxTransport {
             let subIDBase = "inbox-\(inbox.rawValue)"
             let filters = NostrInboxTransport.subscriptionFilters(inbox: inbox.rawValue)
             let conns = Array(connections.values)
+            TransportLog.log("inbox subscribe \(inbox.rawValue.prefix(12)): \(filters.count) filters × \(conns.count) relays")
 
             let task = Task {
                 await withTaskGroup(of: Void.self) { group in
@@ -187,7 +190,11 @@ final class NostrInboxTransport: InboxTransport {
                                 let stream = await conn.subscribe(subscriptionID: filterSubID, filter: filter)
                                 for await event in stream {
                                     guard !Task.isCancelled else { break }
-                                    guard let payload = Data(base64Encoded: event.content) else { continue }
+                                    guard let payload = Data(base64Encoded: event.content) else {
+                                        TransportLog.log("inbox \(inbox.rawValue.prefix(12)): event \(event.id.prefix(8)) DROPPED, content not base64")
+                                        continue
+                                    }
+                                    TransportLog.log("inbox \(inbox.rawValue.prefix(12)): yielding event \(event.id.prefix(8)) (\(payload.count)B) from sub \(filterSubID)")
                                     let received = Date(timeIntervalSince1970: TimeInterval(event.displayMilliseconds) / 1000.0)
                                     continuation.yield(InboundInbox(
                                         inbox: inbox,
@@ -205,6 +212,7 @@ final class NostrInboxTransport: InboxTransport {
         }
 
         func unsubscribe(inbox: TransportInboxID) {
+            TransportLog.log("inbox unsubscribe \(inbox.rawValue.prefix(12))")
             activeSubscriptions[inbox]?.cancel()
             activeSubscriptions.removeValue(forKey: inbox)
         }
