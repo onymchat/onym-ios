@@ -34,6 +34,40 @@
         }
       }
     },
+    "Group": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Group"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Группа"
+          }
+        }
+      }
+    },
+    "Invited by %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Invited by %@"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Пригласил(а) %@"
+          }
+        }
+      }
+    },
     "Not connected to a relay": {
       "extractionState": "manual",
       "localizations": {
@@ -64,6 +98,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Не в сети"
+          }
+        }
+      }
+    },
+    "Request sent — awaiting approval": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Request sent — awaiting approval"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Запрос отправлен — ожидает одобрения"
           }
         }
       }

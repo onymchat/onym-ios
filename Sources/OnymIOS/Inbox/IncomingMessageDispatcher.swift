@@ -78,6 +78,21 @@ struct IncomingMessageDispatcher: Sendable {
     /// raises a message to `.read` when this device also sends read
     /// receipts. Defaulted to `true` (the shipping default).
     var readReceiptsEnabled: @Sendable () -> Bool = { true }
+    /// The slow lane: FIFO, serial, non-blocking-to-enqueue. Every
+    /// invitation / group-state payload runs here so a backlog of
+    /// chain-verifying handlers can never starve live chat (F6). One
+    /// lane per dispatcher instance; the struct's copies share it
+    /// (actor reference), preserving FIFO across the app's single
+    /// dispatcher.
+    var slowLane = SerialDispatchLane()
+    /// Durable per-(owner, group) invite dispositions. Consulted before
+    /// queueing a `GroupInviteOfferPayload`: a relay retains the offer
+    /// and re-serves it on every re-subscribe, so once the user has
+    /// requested / declined / joined, re-deliveries must be dropped at
+    /// the door — otherwise the offer "blinks" back into the inbox
+    /// forever. Defaulted to a no-op for the same reason as
+    /// `pendingInvites`.
+    var inviteDispositions: any InviteDispositionStoring = NoopInviteDispositionStore()
 
     func dispatch(
         messageID: String,
@@ -94,111 +109,132 @@ struct IncomingMessageDispatcher: Sendable {
             envelopeBytes: payload,
             asIdentity: ownerIdentityID
         ) else {
-            await fallThrough(
-                messageID: messageID,
-                ownerIdentityID: ownerIdentityID,
-                payload: payload,
-                receivedAt: receivedAt
-            )
+            // Undecryptable ciphertext lands in the opaque invitations
+            // queue — invitation domain, so it rides the slow lane.
+            await slowLane.enqueue { [self] in
+                await fallThrough(
+                    messageID: messageID,
+                    ownerIdentityID: ownerIdentityID,
+                    payload: payload,
+                    receivedAt: receivedAt
+                )
+            }
             return
         }
 
-        // Fast path 0: GroupInviteOfferPayload — a push invitation.
-        // Decoded + queued for the user's explicit Accept; it carries
-        // no epoch / commitment / roster, so it never materializes a
-        // group or touches the on-chain commitment. Tried first
-        // because its required `inviter_alias` + `intro_pub` keys are
-        // unique to this type — no other inbox payload decodes as one.
+        // ── Lane routing ────────────────────────────────────────────
+        // Chat messages + receipts are handled INLINE (fast lane): pure
+        // local work, milliseconds. Everything invitation / group-state
+        // shaped goes through `slowLane` (FIFO, serial): those handlers
+        // may hit the relayer for a chain read, and processing them
+        // inline meant a backlog of replayed invitations stalled live
+        // chat for minutes (F6). The fan-out's serial loop returns
+        // immediately for slow payloads; relative order WITHIN the slow
+        // family is preserved by the lane's FIFO guarantee.
+
+        // Slow: GroupInviteOfferPayload — a push invitation. Decoded +
+        // queued for the user's explicit Accept; carries no epoch /
+        // commitment / roster, so it never materializes a group. Tried
+        // first because its required `inviter_alias` + `intro_pub` keys
+        // are unique to this type.
         if let offer = try? JSONDecoder().decode(
             GroupInviteOfferPayload.self,
             from: envelope.plaintext
         ) {
-            await recordOffer(
-                offer,
-                messageID: messageID,
-                ownerIdentityID: ownerIdentityID,
-                receivedAt: receivedAt
-            )
+            await slowLane.enqueue { [self] in
+                await recordOffer(
+                    offer,
+                    messageID: messageID,
+                    ownerIdentityID: ownerIdentityID,
+                    receivedAt: receivedAt
+                )
+            }
             return
         }
 
-        // Fast path 0.5: GroupStateRefreshRequest — a member asking the
-        // admin for the current group state (Option 2 verify-at-current).
+        // Slow: GroupStateRefreshRequest — a member asking the admin for
+        // the current group state (Option 2 verify-at-current).
         // Admin-side; delegated to the verifier, which gates on the
         // requester being a current member before disclosing the salt.
         if let refresh = try? JSONDecoder().decode(
             GroupStateRefreshRequest.self,
             from: envelope.plaintext
         ) {
-            await groupStateRefresher.handleRefreshRequest(
-                refresh,
-                ownerIdentityID: ownerIdentityID,
-                requesterEd25519: envelope.senderEd25519PublicKey
-            )
+            let senderKey = envelope.senderEd25519PublicKey
+            await slowLane.enqueue { [self] in
+                await groupStateRefresher.handleRefreshRequest(
+                    refresh,
+                    ownerIdentityID: ownerIdentityID,
+                    requesterEd25519: senderKey
+                )
+            }
             return
         }
 
-        // Fast path 1: MemberAnnouncementPayload — incremental roster
-        // delta for an existing local group.
+        // Slow: MemberAnnouncementPayload — incremental roster delta for
+        // an existing local group (may verify against the chain).
         if let announcement = try? JSONDecoder().decode(
             MemberAnnouncementPayload.self,
             from: envelope.plaintext
         ) {
-            await applyAnnouncement(
-                announcement,
-                senderEd25519PublicKey: envelope.senderEd25519PublicKey
-            )
+            let senderKey = envelope.senderEd25519PublicKey
+            await slowLane.enqueue { [self] in
+                await applyAnnouncement(
+                    announcement,
+                    senderEd25519PublicKey: senderKey
+                )
+            }
             return
         }
 
-        // Fast path 1.5: GroupAvatarPayload — admin updated the group
-        // photo. Group-state delta like the announcement above; its
-        // unique `avatar_*` keys keep it from decoding as a chat
-        // message (which shares version / group_id / sender).
+        // Slow: GroupAvatarPayload — admin updated the group photo.
+        // Group-state delta; its unique `avatar_*` keys keep it from
+        // decoding as a chat message. Local-only work, but it rides the
+        // slow lane so group-state mutations stay mutually ordered.
         if let avatarMsg = try? JSONDecoder().decode(
             GroupAvatarPayload.self,
             from: envelope.plaintext
         ) {
-            await applyAvatar(
-                avatarMsg,
-                senderEd25519PublicKey: envelope.senderEd25519PublicKey
-            )
+            let senderKey = envelope.senderEd25519PublicKey
+            await slowLane.enqueue { [self] in
+                await applyAvatar(avatarMsg, senderEd25519PublicKey: senderKey)
+            }
             return
         }
 
-        // Fast path 1.6: GroupNamePayload — admin renamed the group.
-        // Group-state delta like the avatar above; its unique `name_*`
-        // keys keep it from decoding as any other payload.
+        // Slow: GroupNamePayload — admin renamed the group. Same
+        // ordering rationale as the avatar above.
         if let nameMsg = try? JSONDecoder().decode(
             GroupNamePayload.self,
             from: envelope.plaintext
         ) {
-            await applyName(
-                nameMsg,
-                senderEd25519PublicKey: envelope.senderEd25519PublicKey
-            )
+            let senderKey = envelope.senderEd25519PublicKey
+            await slowLane.enqueue { [self] in
+                await applyName(nameMsg, senderEd25519PublicKey: senderKey)
+            }
             return
         }
 
-        // Fast path 2: GroupInvitationPayload — materialize a local
-        // group under `ownerIdentityID`. Skips the invitations queue
-        // because the group is now visible in the chat list.
+        // Slow: GroupInvitationPayload — materialize a local group under
+        // `ownerIdentityID` (chain-verifies the snapshot commitment).
         if let invitation = try? JSONDecoder().decode(
             GroupInvitationPayload.self,
             from: envelope.plaintext
         ) {
-            await materializeGroup(
-                invitation,
-                ownerIdentityID: ownerIdentityID,
-                senderEd25519PublicKey: envelope.senderEd25519PublicKey
-            )
+            let senderKey = envelope.senderEd25519PublicKey
+            await slowLane.enqueue { [self] in
+                await materializeGroup(
+                    invitation,
+                    ownerIdentityID: ownerIdentityID,
+                    senderEd25519PublicKey: senderKey
+                )
+            }
             return
         }
 
-        // Fast path: chat receipt — a peer acking one of OUR messages
-        // as delivered / read. Wire-shape-disjoint from every other
-        // payload (unique `kind` + `message_ids` keys), so this `try?`
-        // decode can't steal a different payload.
+        // Fast: chat receipt — a peer acking one of OUR messages as
+        // delivered / read. Wire-shape-disjoint from every other payload
+        // (unique `kind` + `message_ids` keys). Pure local status flip.
         if let receipt = try? JSONDecoder().decode(
             ChatReceiptPayload.self,
             from: envelope.plaintext
@@ -207,10 +243,11 @@ struct IncomingMessageDispatcher: Sendable {
             return
         }
 
-        // Fast path 3: ChatMessagePayload — body of the chat thread.
-        // Verifies the envelope's Ed25519 signer matches the claimed
-        // sender's `MemberProfile.sendingPubkey` (insider-spoof
-        // defense, PR 3), then persists via `messageRepository`.
+        // Fast: ChatMessagePayload — body of the chat thread. Verifies
+        // the envelope's Ed25519 signer matches the claimed sender's
+        // `MemberProfile.sendingPubkey` (insider-spoof defense), then
+        // persists via `messageRepository`. Never waits behind the slow
+        // lane — this is the latency-critical path.
         if let chatMessage = try? JSONDecoder().decode(
             ChatMessagePayload.self,
             from: envelope.plaintext
@@ -223,13 +260,22 @@ struct IncomingMessageDispatcher: Sendable {
             return
         }
 
-        // Plaintext didn't match any known payload — fall through.
-        await fallThrough(
-            messageID: messageID,
-            ownerIdentityID: ownerIdentityID,
-            payload: payload,
-            receivedAt: receivedAt
-        )
+        // Plaintext didn't match any known payload — fall through to the
+        // opaque invitations queue (invitation domain → slow lane).
+        await slowLane.enqueue { [self] in
+            await fallThrough(
+                messageID: messageID,
+                ownerIdentityID: ownerIdentityID,
+                payload: payload,
+                receivedAt: receivedAt
+            )
+        }
+    }
+
+    /// Test seam: wait for every slow-lane job enqueued so far (plus any
+    /// they chain, e.g. the chat retry) to finish.
+    func drainSlowLane() async {
+        await slowLane.drain()
     }
 
     /// Queue a decoded push offer for the user's explicit Accept.
@@ -242,6 +288,39 @@ struct IncomingMessageDispatcher: Sendable {
         ownerIdentityID: IdentityID,
         receivedAt: Date
     ) async {
+        // Disposition gate: once this (owner, group) invite has been
+        // requested / declined / joined, a re-delivered offer (the relay
+        // re-serves retained events on every re-subscribe, possibly
+        // under a fresh event id) is dropped at the door. Without this
+        // the offer re-enters the pending list and the materialized-
+        // group consumer removes it again — the "blinking invite" loop.
+        switch await inviteDispositions.disposition(
+            owner: ownerIdentityID, groupID: offer.groupID
+        ) {
+        case .requested, .declined, .joined:
+            return
+        case .offered, nil:
+            break
+        }
+
+        // Belt for the joined case the ledger may not have seen (e.g. a
+        // group materialized before this ledger existed): a local group
+        // for this (owner, group) means the invite is spent.
+        let alreadyJoined = await groupRepository.currentGroups().contains {
+            $0.groupIDData == offer.groupID && $0.ownerIdentityID == ownerIdentityID
+        }
+        if alreadyJoined {
+            await inviteDispositions.record(
+                .joined, owner: ownerIdentityID, groupID: offer.groupID,
+                groupName: offer.groupName, inviterAlias: offer.inviterAlias
+            )
+            return
+        }
+
+        await inviteDispositions.record(
+            .offered, owner: ownerIdentityID, groupID: offer.groupID,
+            groupName: offer.groupName, inviterAlias: offer.inviterAlias
+        )
         await pendingInvites.record(PendingInvite(
             id: messageID,
             ownerIdentityID: ownerIdentityID,
@@ -736,7 +815,8 @@ struct IncomingMessageDispatcher: Sendable {
     private func persistChatMessage(
         _ payload: ChatMessagePayload,
         ownerIdentityID: IdentityID,
-        senderEd25519PublicKey: Data?
+        senderEd25519PublicKey: Data?,
+        allowRetry: Bool = true
     ) async {
         // Envelope must have been signed — anonymous chat messages
         // are not part of the v1 trust model.
@@ -751,6 +831,23 @@ struct IncomingMessageDispatcher: Sendable {
         guard let group = groups.first(where: {
             $0.id == groupIDHex && $0.ownerIdentityID == ownerIdentityID
         }) else {
+            // The group may be *about to* exist: with the lane split, a
+            // chat message can race ahead of the invitation that
+            // materializes its group (the invitation rides the slow
+            // lane). Retry once BEHIND the slow lane's current queue —
+            // if a materializing invitation is in flight, the retry runs
+            // after it and the message lands; otherwise it's a genuine
+            // stale delivery and the retry drops it like before.
+            if allowRetry {
+                await slowLane.enqueue { [self] in
+                    await persistChatMessage(
+                        payload,
+                        ownerIdentityID: ownerIdentityID,
+                        senderEd25519PublicKey: senderEd25519PublicKey,
+                        allowRetry: false
+                    )
+                }
+            }
             return
         }
 

@@ -78,7 +78,7 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
             envelopeSigner: senderEd25519
         )
 
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "msg-1",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -103,7 +103,7 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
             envelopeSigner: senderEd25519
         )
 
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "msg-reply",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -128,7 +128,7 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
             envelopeSigner: senderEd25519
         )
 
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "msg-1",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -151,7 +151,7 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
             envelopeSigner: senderEd25519
         )
 
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "msg-1",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -173,7 +173,7 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
             envelopeSigner: Data(repeating: 0xBB, count: 32)  // not Alice
         )
 
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "msg-1",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -195,7 +195,7 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
             envelopeSigner: nil
         )
 
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "msg-1",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -219,7 +219,7 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
             envelopeSigner: senderEd25519
         )
 
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "msg-1",
             ownerIdentityID: otherIdentity,
             payload: Data("envelope".utf8),
@@ -285,7 +285,7 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
             plaintext: try JSONEncoder().encode(payload),
             envelopeSigner: secondSenderEd25519
         )
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "msg-multi",
             ownerIdentityID: secondIdentity,
             payload: Data("envelope".utf8),
@@ -313,13 +313,13 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
         )
 
         // Same message delivered twice (Nostr re-delivery, etc.).
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "msg-1",
             ownerIdentityID: owner,
             payload: envelopeBytes,
             receivedAt: Date()
         )
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "msg-1-retry",
             ownerIdentityID: owner,
             payload: envelopeBytes,
@@ -383,7 +383,7 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
             envelopeSigner: senderEd25519,
             receiptSender: spy
         )
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "msg-1",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -408,7 +408,7 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
             plaintext: try JSONEncoder().encode(receipt),
             envelopeSigner: senderEd25519
         )
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "rcpt-1", ownerIdentityID: owner,
             payload: Data("envelope".utf8), receivedAt: Date()
         )
@@ -429,7 +429,7 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
             envelopeSigner: senderEd25519,
             readReceiptsEnabled: { false }
         )
-        await off.dispatch(messageID: "r", ownerIdentityID: owner,
+        await off.dispatchAndDrain(messageID: "r", ownerIdentityID: owner,
                            payload: Data("e".utf8), receivedAt: Date())
         var stored = await messages.currentMessages(groupID: groupIDHex, owner: owner)
         XCTAssertEqual(stored.first { $0.id == idOff }?.status, .delivered,
@@ -441,7 +441,7 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
             envelopeSigner: senderEd25519,
             readReceiptsEnabled: { true }
         )
-        await on.dispatch(messageID: "r2", ownerIdentityID: owner,
+        await on.dispatchAndDrain(messageID: "r2", ownerIdentityID: owner,
                           payload: Data("e".utf8), receivedAt: Date())
         stored = await messages.currentMessages(groupID: groupIDHex, owner: owner)
         XCTAssertEqual(stored.first { $0.id == idOff }?.status, .read)

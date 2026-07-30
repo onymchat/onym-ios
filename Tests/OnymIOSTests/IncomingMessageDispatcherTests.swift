@@ -70,7 +70,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
 
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "msg-1",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -106,7 +106,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
 
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "msg-2",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -152,7 +152,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
 
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "msg-3",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -196,7 +196,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             chainState: chainState,
             messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "msg-trust-ok",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -238,7 +238,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             chainState: chainState,
             messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "msg-trust-bad",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -282,7 +282,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             chainState: chainState,
             messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "msg-unsigned",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -328,7 +328,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             chainState: chainState,
             messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "msg-adminless-member",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -372,7 +372,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             chainState: chainState,
             messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "msg-adminless-nonmember",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -415,7 +415,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             chainState: chainState,
             messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "msg-adminless-unsigned",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -452,7 +452,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             chainState: chainState,
             messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "name-adminless-nonmember",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -490,7 +490,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             chainState: chainState,
             messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "avatar-adminless-nonmember",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -526,7 +526,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             chainState: chainState,
             messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "name-adminless-member",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -561,7 +561,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             chainState: chainState,
             messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "avatar-ok",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -595,7 +595,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             chainState: chainState,
             messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "name-ok",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -626,7 +626,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             chainState: chainState,
             messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "name-imposter",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -660,7 +660,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             chainState: chainState,
             messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "avatar-imposter",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -693,7 +693,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             chainState: chainState,
             messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "avatar-clear",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -745,7 +745,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             chainState: chainState,
             messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "msg-cap",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -780,7 +780,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             chainState: chainState,
             messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "msg-no-commitment",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -825,7 +825,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             chainState: chainState,
             messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "msg-onchain-mismatch",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -862,7 +862,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             chainState: chainState,
             messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "msg-internal-mismatch",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -917,7 +917,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             chainState: chainState,
             messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "msg-announce-mismatch",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -967,7 +967,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
 
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "msg-mat",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -1016,7 +1016,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
 
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "msg-legacy",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -1055,7 +1055,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
 
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "msg-race",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -1082,7 +1082,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
 
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "msg-4",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -1111,7 +1111,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
 
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "msg-5",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -1280,7 +1280,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             pendingInvites: spy
         )
 
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "msg-offer",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -1333,7 +1333,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             groupStateRefresher: refresher
         )
 
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "msg-stale",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),
@@ -1380,9 +1380,9 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
 
-        await dispatcher.dispatch(messageID: "mat-1", ownerIdentityID: owner,
+        await dispatcher.dispatchAndDrain(messageID: "mat-1", ownerIdentityID: owner,
                                   payload: Data("envelope".utf8), receivedAt: Date())
-        await dispatcher.dispatch(messageID: "mat-1-replay", ownerIdentityID: owner,
+        await dispatcher.dispatchAndDrain(messageID: "mat-1-replay", ownerIdentityID: owner,
                                   payload: Data("envelope".utf8), receivedAt: Date())
 
         let after = await groups.currentGroups()
@@ -1426,7 +1426,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             groupStateRefresher: refresher
         )
 
-        await dispatcher.dispatch(messageID: "mat-throw", ownerIdentityID: owner,
+        await dispatcher.dispatchAndDrain(messageID: "mat-throw", ownerIdentityID: owner,
                                   payload: Data("envelope".utf8), receivedAt: Date())
 
         let after = await groups.currentGroups()
@@ -1477,7 +1477,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             groupStateRefresher: refresher
         )
 
-        await dispatcher.dispatch(messageID: "mat-behind", ownerIdentityID: owner,
+        await dispatcher.dispatchAndDrain(messageID: "mat-behind", ownerIdentityID: owner,
                                   payload: Data("envelope".utf8), receivedAt: Date())
 
         let after = await groups.currentGroups()
@@ -1523,7 +1523,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
         )
 
-        await dispatcher.dispatch(messageID: "ann-known", ownerIdentityID: owner,
+        await dispatcher.dispatchAndDrain(messageID: "ann-known", ownerIdentityID: owner,
                                   payload: Data("envelope".utf8), receivedAt: Date())
 
         XCTAssertEqual(chainState.calls.count, 0,
@@ -1555,7 +1555,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             groupStateRefresher: refresher
         )
 
-        await dispatcher.dispatch(
+        await dispatcher.dispatchAndDrain(
             messageID: "msg-refresh",
             ownerIdentityID: owner,
             payload: Data("envelope".utf8),

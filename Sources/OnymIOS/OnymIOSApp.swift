@@ -19,6 +19,7 @@ struct OnymIOSApp: App {
     private let incomingInvitations: IncomingInvitationsRepository
     private let pendingInvitesStore: PendingInvitesStore
     private let pendingVerificationStore: PendingVerificationStore
+    private let inviteDispositionLedger: InviteDispositionLedger
     private let groupStateVerifier: GroupStateVerifier
     private let introKeyStore: any IntroKeyStore
     private let introRequestStore: any IntroRequestStore
@@ -325,6 +326,13 @@ struct OnymIOSApp: App {
         // identical to the deeplink join path.
         let pendingInvitesStore = PendingInvitesStore()
         self.pendingInvitesStore = pendingInvitesStore
+        // Durable (owner, group) invite dispositions — the "I already
+        // handled this" record a relay can't provide (it re-serves
+        // retained offers on every re-subscribe). Written by the invites
+        // flow (accept/dismiss/joined), read by the dispatcher to drop
+        // re-delivered offers at the door.
+        let inviteDispositionLedger = InviteDispositionLedger()
+        self.inviteDispositionLedger = inviteDispositionLedger
         // Verify-at-current (Option 2): stale snapshots defer here; the
         // verifier asks the admin for current state and surfaces a
         // "couldn't verify" state if the admin is offline.
@@ -366,7 +374,8 @@ struct OnymIOSApp: App {
             },
             retryVerification: { [groupStateVerifier] groupIDHex in
                 await groupStateVerifier.retry(groupIDHex: groupIDHex)
-            }
+            },
+            dispositions: inviteDispositionLedger
         )
 
         self.dependencies = AppDependencies(
@@ -573,6 +582,7 @@ struct OnymIOSApp: App {
                         await incomingInvitations.setCurrentIdentity(initialID)
                         await pendingInvitesStore.setCurrentIdentity(initialID)
                         await pendingVerificationStore.setCurrentIdentity(initialID)
+                        await inviteDispositionLedger.setCurrentIdentity(initialID)
                     }
                 }
                 .task {
@@ -583,6 +593,7 @@ struct OnymIOSApp: App {
                         await incomingInvitations.setCurrentIdentity(id)
                         await pendingInvitesStore.setCurrentIdentity(id)
                         await pendingVerificationStore.setCurrentIdentity(id)
+                        await inviteDispositionLedger.setCurrentIdentity(id)
                     }
                 }
                 .task {
@@ -596,6 +607,7 @@ struct OnymIOSApp: App {
                         await incomingInvitations.removeForOwner(removed)
                         await pendingInvitesStore.removeForOwner(removed)
                         await pendingVerificationStore.removeForOwner(removed)
+                        await inviteDispositionLedger.removeForOwner(removed)
                         // Cascade-wipe the removed identity's intro
                         // privkeys so an attacker who restores a
                         // backup post-removal can't decrypt
@@ -649,12 +661,17 @@ struct OnymIOSApp: App {
                             identity: identityRepository,
                             inboxTransport: inboxTransport
                         ),
-                        readReceiptsEnabled: { ReadReceiptsPreference.isEnabled }
+                        readReceiptsEnabled: { ReadReceiptsPreference.isEnabled },
+                        inviteDispositions: inviteDispositionLedger
                     )
                     let fanout = InboxFanoutInteractor(
                         inboxTransport: inboxTransport,
                         identityRepository: identityRepository,
-                        dispatcher: dispatcher
+                        dispatcher: dispatcher,
+                        // Durable event-id dedup: replay overlap and
+                        // multi-relay duplicates are dropped before
+                        // decrypt (marked seen only post-dispatch).
+                        seenEventIDs: SeenEventIDStore()
                     )
                     await fanout.run()
                 }

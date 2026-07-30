@@ -20,17 +20,26 @@ struct InboxFanoutInteractor: Sendable {
     /// Coalescing window — multiple identity changes within this many
     /// milliseconds collapse into one re-subscribe.
     let debounceMilliseconds: UInt64
+    /// Durable dedup by Nostr event id, consulted BEFORE the dispatcher
+    /// decrypts. Re-delivered events (HWM slack overlap, multi-relay,
+    /// reconnect replay) cost a set lookup instead of a decrypt + chain
+    /// read. Marked seen only after a dispatch completes, so a crash
+    /// midway re-delivers rather than loses. nil disables dedup (tests
+    /// that assert re-delivery behavior).
+    let seenEventIDs: SeenEventIDStore?
 
     init(
         inboxTransport: any InboxTransport,
         identityRepository: IdentityRepository,
         dispatcher: IncomingMessageDispatcher,
-        debounceMilliseconds: UInt64 = 250
+        debounceMilliseconds: UInt64 = 250,
+        seenEventIDs: SeenEventIDStore? = nil
     ) {
         self.inboxTransport = inboxTransport
         self.identityRepository = identityRepository
         self.dispatcher = dispatcher
         self.debounceMilliseconds = debounceMilliseconds
+        self.seenEventIDs = seenEventIDs
     }
 
     /// Run until cancelled. Subscribes to every identity's inbox tag
@@ -38,7 +47,8 @@ struct InboxFanoutInteractor: Sendable {
     func run() async {
         let subscriptions = ActiveSubscriptions(
             inboxTransport: inboxTransport,
-            dispatcher: dispatcher
+            dispatcher: dispatcher,
+            seenEventIDs: seenEventIDs
         )
 
         // Apply the current identity set immediately on launch (the
@@ -107,11 +117,17 @@ struct InboxFanoutInteractor: Sendable {
 private actor ActiveSubscriptions {
     private let inboxTransport: any InboxTransport
     private let dispatcher: IncomingMessageDispatcher
+    private let seenEventIDs: SeenEventIDStore?
     private var live: [IdentityID: (tag: TransportInboxID, task: Task<Void, Never>)] = [:]
 
-    init(inboxTransport: any InboxTransport, dispatcher: IncomingMessageDispatcher) {
+    init(
+        inboxTransport: any InboxTransport,
+        dispatcher: IncomingMessageDispatcher,
+        seenEventIDs: SeenEventIDStore?
+    ) {
         self.inboxTransport = inboxTransport
         self.dispatcher = dispatcher
+        self.seenEventIDs = seenEventIDs
     }
 
     func apply(_ wanted: Set<IdentityID>, tagsByID: [IdentityID: TransportInboxID]) async {
@@ -130,15 +146,25 @@ private actor ActiveSubscriptions {
             // `InvitationEnvelopeDecrypting` so cross-identity envelopes
             // decrypt under the right per-identity X25519 key, even if
             // the user has switched to a different identity.
-            let task = Task { [dispatcher, id] in
+            let task = Task { [dispatcher, seenEventIDs, id] in
                 for await message in stream {
                     if Task.isCancelled { break }
+                    // Dedup BEFORE decrypt: a re-delivered event (slack
+                    // overlap, second relay, reconnect replay) is a set
+                    // lookup, not a decrypt + possible chain read.
+                    if let seenEventIDs,
+                       await seenEventIDs.contains(message.messageID) {
+                        continue
+                    }
                     await dispatcher.dispatch(
                         messageID: message.messageID,
                         ownerIdentityID: id,
                         payload: message.payload,
                         receivedAt: message.receivedAt
                     )
+                    // Mark AFTER dispatch: a crash mid-processing means
+                    // re-delivery (idempotent), never loss.
+                    await seenEventIDs?.markSeen(message.messageID)
                 }
             }
             live[id] = (tag, task)
