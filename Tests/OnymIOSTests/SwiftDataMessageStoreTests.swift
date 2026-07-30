@@ -36,8 +36,8 @@ final class SwiftDataMessageStoreTests: XCTestCase {
             status: .pending
         )
 
-        let inserted = await store.insertOrUpdate(msg)
-        XCTAssertTrue(inserted)
+        let outcome = await store.insertOrUpdate(msg)
+        XCTAssertEqual(outcome, .inserted)
 
         let listed = await store.list(groupID: groupID, ownerIDString: owner.rawValue.uuidString)
         XCTAssertEqual(listed.count, 1)
@@ -173,8 +173,9 @@ final class SwiftDataMessageStoreTests: XCTestCase {
             replyToMessageID: nil,
             groupType: .tyranny
         )
-        let inserted = await store.insertOrUpdate(updated)
-        XCTAssertFalse(inserted, "second insert on same id+owner must report update, not insert")
+        let outcome = await store.insertOrUpdate(updated)
+        XCTAssertEqual(outcome, .updated,
+                       "second insert on same id+owner must report update, not insert")
 
         let listed = await store.list(groupID: msg.groupID, ownerIDString: kOwner.rawValue.uuidString)
         XCTAssertEqual(listed.count, 1)
@@ -198,11 +199,11 @@ final class SwiftDataMessageStoreTests: XCTestCase {
             body: "mine", direction: .incoming
         )
 
-        let insertedA = await store.insertOrUpdate(outgoing)
-        let insertedB = await store.insertOrUpdate(incoming)
-        XCTAssertTrue(insertedA)
-        XCTAssertTrue(insertedB,
-                      "second owner is a fresh insert, not an in-place overwrite")
+        let outcomeA = await store.insertOrUpdate(outgoing)
+        let outcomeB = await store.insertOrUpdate(incoming)
+        XCTAssertEqual(outcomeA, .inserted)
+        XCTAssertEqual(outcomeB, .inserted,
+                       "second owner is a fresh insert, not an in-place overwrite")
 
         let aRows = await store.list(groupID: groupID, ownerIDString: ownerA.rawValue.uuidString)
         let bRows = await store.list(groupID: groupID, ownerIDString: ownerB.rawValue.uuidString)

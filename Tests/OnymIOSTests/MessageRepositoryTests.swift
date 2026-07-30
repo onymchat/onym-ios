@@ -41,8 +41,8 @@ final class MessageRepositoryTests: XCTestCase {
         _ = await iterator.next()  // initial empty
 
         let msg = makeMessage(groupID: groupA, body: "hello")
-        let inserted = await repo.insert(msg)
-        XCTAssertTrue(inserted)
+        let outcome = await repo.insert(msg)
+        XCTAssertEqual(outcome, .inserted)
 
         let next = await iterator.next()
         XCTAssertEqual(next?.count, 1)
@@ -437,11 +437,24 @@ private actor InMemoryMessageStore: MessageStore {
     }
 
     @discardableResult
-    func insertOrUpdate(_ message: ChatMessage) -> Bool {
+    func insertOrUpdate(_ message: ChatMessage) -> MessageInsertOutcome {
         let key = Key(id: message.id, owner: message.ownerIdentityID)
         let isNew = rows[key] == nil
         rows[key] = message
-        return isNew
+        return isNew ? .inserted : .updated
+    }
+
+    private var ackedKeys: Set<Key> = []
+
+    func needsDeliveredAck(id: UUID, ownerIDString: String) -> Bool {
+        guard let owner = IdentityID(ownerIDString) else { return false }
+        let key = Key(id: id, owner: owner)
+        return rows[key] != nil && !ackedKeys.contains(key)
+    }
+
+    func markDeliveredAckSent(id: UUID, ownerIDString: String) {
+        guard let owner = IdentityID(ownerIDString) else { return }
+        ackedKeys.insert(Key(id: id, owner: owner))
     }
 
     func updateStatus(id: UUID, ownerIDString: String, status: MessageStatus, failureReason: SendFailureReason?) {

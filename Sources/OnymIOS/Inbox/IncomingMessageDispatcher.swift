@@ -552,7 +552,7 @@ struct IncomingMessageDispatcher: Sendable {
     private func selfMemberProfileEntry(
         for identityID: IdentityID
     ) async -> (key: String, value: MemberProfile)? {
-        let summaries = await identities.currentIdentities()
+        let summaries = (try? await identities.currentIdentities()) ?? []
         guard let me = summaries.first(where: { $0.id == identityID }) else {
             return nil
         }
@@ -815,17 +815,48 @@ struct IncomingMessageDispatcher: Sendable {
             // (`ChatVoiceLoader`).
             voiceAttachment: payload.voiceAttachment
         )
-        await messageRepository.insert(message)
+        let outcome = await messageRepository.insert(message)
 
-        // Ack the sender: delivered now (unconditional — it only reveals
-        // a device received the ciphertext). Read receipts are sent
-        // later, when the user opens the thread.
-        await receiptSender.send(
+        // Ack the sender: delivered now (it only reveals a device
+        // received the ciphertext). Read receipts are sent later, when
+        // the user opens the thread. The receipt send is fire-and-
+        // forget with no outbox, so inbox replays are its only retry —
+        // gate on the persisted `deliveredAckSent` latch, not on
+        // "newly inserted":
+        // - `.inserted` → first sight, ack.
+        // - `.updated` → replay; ack ONLY if no earlier attempt
+        //   succeeded (re-acking every replay published a receipt per
+        //   historical message on every launch, each becoming a new
+        //   stored event in the sender's inbox — snowballing replays
+        //   for both sides).
+        // - `.failed` → nothing stored; acking would tell the sender
+        //   "delivered" about a message this device lost. Stay silent
+        //   so the relay copy retries on the next replay.
+        let needsAck: Bool
+        switch outcome {
+        case .inserted:
+            needsAck = true
+        case .updated:
+            needsAck = await messageRepository.needsDeliveredAck(
+                id: message.id,
+                owner: message.ownerIdentityID
+            )
+        case .failed:
+            needsAck = false
+        }
+        guard needsAck else { return }
+        let accepted = await receiptSender.send(
             kind: .delivered,
             messageIDs: [payload.messageID],
             groupID: payload.groupID,
             to: senderProfile.inboxPublicKey
         )
+        if accepted {
+            await messageRepository.markDeliveredAckSent(
+                id: message.id,
+                owner: message.ownerIdentityID
+            )
+        }
     }
 
     /// Apply an inbound receipt: raise the acked outgoing messages to

@@ -21,11 +21,25 @@ actor KeychainIntroKeyStore: IntroKeyStore {
     static let serviceDefault = "app.onym.ios.intro_keys"
     static let account = "blob"
 
+    /// How long an invite link is honored after minting. 24 hours per
+    /// issue onymchat/onym-ios#111 (shrink the leak window of a
+    /// forwarded or screenshotted link) — matches onym-android's
+    /// `IntroKeyEntry.LIFETIME_MILLIS`. Expired entries are invisible
+    /// to `find`/`listForOwner`/streams (so the intro pump stops
+    /// subscribing their inboxes, which each cost a relay REQ slot)
+    /// and are compacted out of the blob by the load that first sees
+    /// them expired.
+    static let entryTTL: TimeInterval = 24 * 60 * 60
+
     private let service: String
     /// Per-owner subscriber continuations. Mutations re-emit the
     /// filtered+sorted snapshot to every subscriber whose owner
     /// matches.
     private var continuations: [IdentityID: [UUID: AsyncStream<[IntroKeyEntry]>.Continuation]] = [:]
+    /// Reentrancy latch: `loadAll()` publishes when it compacts, and
+    /// `publish` itself calls `loadAll()` — the latch stops that inner
+    /// load from re-entering the compaction path.
+    private var compacting = false
 
     init(testNamespace: String? = nil) {
         if let testNamespace, !testNamespace.isEmpty {
@@ -81,6 +95,20 @@ actor KeychainIntroKeyStore: IntroKeyStore {
             publish(forOwner: ownerIdentityID)
         }
         return removed
+    }
+
+    @discardableResult
+    func pruneOwners(keeping owners: Set<IdentityID>) async -> Int {
+        let keep = Set(owners.map { $0.rawValue.uuidString })
+        var current = loadAll()
+        let orphaned = current.filter { !keep.contains($0.ownerIdentityID) }
+        guard !orphaned.isEmpty else { return 0 }
+        current.removeAll { !keep.contains($0.ownerIdentityID) }
+        writeAll(current)
+        for owner in Set(orphaned.compactMap { IdentityID($0.ownerIdentityID) }) {
+            publish(forOwner: owner)
+        }
+        return orphaned.count
     }
 
     nonisolated func entriesStream(forOwner ownerIdentityID: IdentityID) -> AsyncStream<[IntroKeyEntry]> {
@@ -146,7 +174,30 @@ actor KeychainIntroKeyStore: IntroKeyStore {
         // because this store holds ephemeral per-invite keys; if we
         // lose them, the worst that happens is in-flight invites
         // fail to deliver and the inviter re-shares.
-        return (try? JSONDecoder().decode(StoredIntroKeysBlob.self, from: data))?.entries ?? []
+        let entries = (try? JSONDecoder().decode(StoredIntroKeysBlob.self, from: data))?.entries ?? []
+        // TTL filter at the single load point so expired entries are
+        // invisible to every reader.
+        let cutoff = Int64((Date().timeIntervalSince1970 - Self.entryTTL) * 1000)
+        let live = entries.filter { $0.createdAtMillis > cutoff }
+        // Compact immediately: expired rows carry intro PRIVATE keys,
+        // and a read-only workload would otherwise leave them at rest
+        // indefinitely waiting for a mutation to rewrite the blob.
+        // Publish for the expired entries' owners so a live session's
+        // intro pump drops their relay REQ slots too — but note this
+        // still only runs when *something* touches the store; a fully
+        // quiet session keeps its slots until the next access or
+        // launch.
+        if live.count != entries.count, !compacting {
+            compacting = true
+            writeAll(live)
+            let expiredOwners = Set(
+                entries.filter { $0.createdAtMillis <= cutoff }
+                    .compactMap { IdentityID($0.ownerIdentityID) }
+            )
+            for owner in expiredOwners { publish(forOwner: owner) }
+            compacting = false
+        }
+        return live
     }
 
     private func writeAll(_ entries: [StoredIntroKey]) {

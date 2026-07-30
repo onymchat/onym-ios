@@ -7,5 +7,5 @@ import Foundation
 /// `InvitationEnvelopeDecrypting` pattern: tests substitute a canned
 /// list, production conforms `IdentityRepository` directly.
 protocol IdentitiesProviding: Sendable {
-    func currentIdentities() async -> [IdentitySummary]
+    func currentIdentities() async throws -> [IdentitySummary]
 }

@@ -633,6 +633,26 @@ struct OnymIOSApp: App {
                     // the outer task restarts via .task { } onChange
                     // semantics in a follow-up. For V1, single-active-
                     // identity pump is sufficient.
+                    // GC intro keys whose owner identity no longer
+                    // exists (identity removed without the cascade
+                    // firing, or orphaned by an app delete/reinstall —
+                    // the keychain blob outlives the app container).
+                    // Each stale entry costs a relay subscription slot
+                    // through this pump, forever.
+                    // Skip the prune when the identity load fails —
+                    // an orphaned key surviving until next launch is
+                    // recoverable; pruning against a partial identity
+                    // list would wipe live invite-link inboxes. Also
+                    // skip on a successful-but-EMPTY load (fresh
+                    // install post-quarantine, or bootstrap losing the
+                    // race): with zero identities the pump subscribes
+                    // nothing anyway, and pruning would permanently
+                    // destroy intro keys whose quarantined owners a
+                    // recovery flow could still bring back.
+                    if let identities = try? await identityRepository.currentIdentities(),
+                       !identities.isEmpty {
+                        await introKeyStore.pruneOwners(keeping: Set(identities.map(\.id)))
+                    }
                     let pump = IntroInboxPump(
                         inboxTransport: inboxTransport,
                         store: introRequestStore

@@ -11,12 +11,20 @@ actor NostrRelayConnection {
     let url: URL
     private var webSocketTask: URLSessionWebSocketTask?
     private let session: URLSession
-    private var subscriptions: [String: ([String: Any], (NostrEvent) -> Void)] = [:]
+    private var subscriptions: [String: ([[String: Any]], (NostrEvent) -> Void)] = [:]
     private(set) var isConnected = false
     private var reconnectAttempts = 0
     private var pendingOKContinuations: [String: CheckedContinuation<Bool, any Error>] = [:]
     private var pingTask: Task<Void, Never>?
     private var onOKCallback: ((String, Bool) -> Void)?
+    /// Sticky connection intent. Set by `connect()`/`disconnect()` and
+    /// checked by a receive loop waking from its backoff sleep, so an
+    /// explicitly dropped connection can never resurrect itself.
+    private var desiredConnected = false
+    /// Instant of the last frame the receive loop delivered. The
+    /// heartbeat compares this against its probe time to detect sockets
+    /// that died without erroring (NAT drop, suspended-app wake).
+    private var lastFrameAt = ContinuousClock.now
 
     func setOnOK(_ callback: @escaping (String, Bool) -> Void) {
         onOKCallback = callback
@@ -39,17 +47,17 @@ actor NostrRelayConnection {
     }
 
     func connect() {
+        desiredConnected = true
         guard webSocketTask == nil else { return }
         let task = session.webSocketTask(with: url)
         self.webSocketTask = task
         task.resume()
         isConnected = true
-        reconnectAttempts = 0
-        Task { await receiveLoop() }
+        Task { await receiveLoop(task: task) }
         startHeartbeat()
 
-        for (subID, (filter, _)) in subscriptions {
-            sendREQ(subscriptionID: subID, filter: filter)
+        for (subID, (filters, _)) in subscriptions {
+            sendREQ(subscriptionID: subID, filters: filters)
         }
 
         // URLSessionWebSocketTask exposes no reliable onOpen callback. Replay
@@ -63,6 +71,7 @@ actor NostrRelayConnection {
     }
 
     func disconnect() {
+        desiredConnected = false
         pingTask?.cancel()
         pingTask = nil
         webSocketTask?.cancel(with: .normalClosure, reason: nil)
@@ -97,7 +106,6 @@ actor NostrRelayConnection {
     /// before the send so a fast OK can never be missed.
     func publishAndAwaitOK(event: NostrEvent) async throws -> Bool {
         let eventID = event.id
-
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Bool, any Error>) in
             self.pendingOKContinuations[eventID] = continuation
 
@@ -134,8 +142,21 @@ actor NostrRelayConnection {
         subscriptionID: String,
         filter: [String: Any]
     ) -> AsyncStream<NostrEvent> {
+        subscribe(subscriptionID: subscriptionID, filters: [filter])
+    }
+
+    /// A single REQ carries every filter (NIP-01 allows it), so one
+    /// subscription slot is consumed on the relay no matter how many
+    /// filter shapes a caller needs — relays cap concurrent REQs per
+    /// connection (strfry defaults to 20) and reject the overflow.
+    /// The relay also dedups matches within one REQ, so overlapping
+    /// filters no longer deliver the same event several times.
+    func subscribe(
+        subscriptionID: String,
+        filters: [[String: Any]]
+    ) -> AsyncStream<NostrEvent> {
         let stream = AsyncStream<NostrEvent> { continuation in
-            subscriptions[subscriptionID] = (filter, { event in
+            subscriptions[subscriptionID] = (filters, { event in
                 continuation.yield(event)
             })
             continuation.onTermination = { @Sendable _ in
@@ -144,7 +165,7 @@ actor NostrRelayConnection {
                 }
             }
         }
-        sendREQ(subscriptionID: subscriptionID, filter: filter)
+        sendREQ(subscriptionID: subscriptionID, filters: filters)
         return stream
     }
 
@@ -160,25 +181,38 @@ actor NostrRelayConnection {
 
     // MARK: - Private
 
-    private func sendREQ(subscriptionID: String, filter: [String: Any]) {
-        let frame: [Any] = ["REQ", subscriptionID, filter]
+    private func sendREQ(subscriptionID: String, filters: [[String: Any]]) {
+        let frame: [Any] = ["REQ", subscriptionID] + filters
         guard let data = try? JSONSerialization.data(withJSONObject: frame),
               let string = String(data: data, encoding: .utf8)
         else { return }
-        Task { try? await webSocketTask?.send(.string(string)) }
-    }
-
-    private func replaySubscriptions() {
-        for (subID, (filter, _)) in subscriptions {
-            sendREQ(subscriptionID: subID, filter: filter)
+        Task {
+            try? await webSocketTask?.send(.string(string))
         }
     }
 
-    private func receiveLoop() async {
-        while isConnected {
-            guard let task = webSocketTask else { break }
+    private func replaySubscriptions() {
+        for (subID, (filters, _)) in subscriptions {
+            sendREQ(subscriptionID: subID, filters: filters)
+        }
+    }
+
+    /// Each loop is bound to the socket it was spawned for and exits the
+    /// moment `webSocketTask` no longer points at it. Exactly one loop
+    /// ever calls `receive()` on a given socket, and a stale loop can
+    /// never cancel a successor's socket while a receive is pending —
+    /// the same CFNetwork use-after-free family as the `sendPing` crash
+    /// documented above `startHeartbeat()`.
+    private func receiveLoop(task: URLSessionWebSocketTask) async {
+        while isConnected, webSocketTask === task {
             do {
                 let message = try await task.receive()
+                lastFrameAt = ContinuousClock.now
+                // A delivered frame proves the connection is healthy.
+                // Resetting here instead of in connect() keeps the
+                // backoff escalating for a relay that dies during the
+                // handshake, rather than retrying it every second.
+                reconnectAttempts = 0
                 let text: String
                 switch message {
                 case .string(let s): text = s
@@ -187,10 +221,13 @@ actor NostrRelayConnection {
                 }
                 handleMessage(text)
             } catch {
+                // A stale loop's socket erred after it was replaced —
+                // the successor owns reconnect now.
+                guard webSocketTask === task else { return }
                 pingTask?.cancel()
                 pingTask = nil
                 isConnected = false
-                webSocketTask?.cancel(with: .abnormalClosure, reason: nil)
+                task.cancel(with: .abnormalClosure, reason: nil)
                 webSocketTask = nil
                 reconnectAttempts += 1
                 let delay = min(
@@ -198,29 +235,98 @@ actor NostrRelayConnection {
                     Self.baseReconnectDelay * pow(2.0, Double(min(reconnectAttempts - 1, 6)))
                 )
                 try? await Task.sleep(for: .seconds(delay))
+                // disconnect() may have run during the backoff sleep —
+                // a dropped connection must stay dropped. A non-nil
+                // socket means an externally-created successor exists.
+                guard desiredConnected, webSocketTask == nil else { return }
                 connect()
                 return
             }
         }
     }
 
-    /// Heartbeat sends a no-op `["CLOSE","__hb"]` instead of using
-    /// `URLSessionWebSocketTask.sendPing`. The CFNetwork ping handler has
-    /// a known crash where the pong fires on an internal queue after the
-    /// task is cancelled and dereferences a freed `nw_connection`. A
-    /// plain `.send()` doesn't have that path — if the connection is
-    /// dead, the send throws and the receive loop reconnects.
+    /// Heartbeat probes liveness with a request/response round trip
+    /// instead of `URLSessionWebSocketTask.sendPing`. The CFNetwork ping
+    /// handler has a known crash where the pong fires on an internal
+    /// queue after the task is cancelled and dereferences a freed
+    /// `nw_connection`. A fire-and-forget `.send()` isn't enough either:
+    /// on a NAT-dropped or suspend-killed socket the send buffers
+    /// locally and "succeeds" while nothing can ever arrive, so the
+    /// receive loop hangs forever without an error. The probe is a REQ
+    /// whose filter can't match anything (impossible event id), which
+    /// NIP-01 requires the relay to answer with an immediate EOSE —
+    /// silence past the timeout means the socket is dead.
     private func startHeartbeat() {
         pingTask?.cancel()
         pingTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(Self.pingInterval))
-                guard !Task.isCancelled else { break }
-                guard let task = await self?.webSocketTask,
-                      task.state == .running else { break }
-                try? await task.send(.string("[\"CLOSE\",\"__hb\"]"))
+                guard !Task.isCancelled, let self else { break }
+                guard let socket = await self.currentSocket() else { break }
+                guard await self.probeLiveness(of: socket) else {
+                    await self.teardownDeadSocket(socket)
+                    break
+                }
             }
         }
+    }
+
+    private static let probeTimeout: TimeInterval = 10
+    private static let probePollSlice: TimeInterval = 0.5
+    private static let probeREQ = #"["REQ","__hb",{"ids":["0000000000000000000000000000000000000000000000000000000000000000"],"limit":1}]"#
+    private static let probeCLOSE = #"["CLOSE","__hb"]"#
+
+    /// The socket the heartbeat should probe this round, captured on
+    /// the actor so probe + teardown act on one pinned reference.
+    private func currentSocket() -> URLSessionWebSocketTask? {
+        webSocketTask
+    }
+
+    /// Send the probe REQ on `task` and report whether *any* frame
+    /// arrived while waiting — the EOSE it provokes, or ordinary
+    /// traffic, both prove the receive path is alive. Polls in short
+    /// slices so a frame that is already flowing ends the probe
+    /// immediately instead of holding the full timeout. The probe REQ
+    /// is CLOSEd on exit — relays cap concurrent REQs per connection,
+    /// and an open `__hb` would pin one of those slots for the
+    /// socket's whole lifetime. During the probe window the connection
+    /// briefly uses one extra slot; that's safe even at the relay's
+    /// cap, because an over-limit REQ is *answered* (strfry replies
+    /// CLOSED/NOTICE) and any reply frame satisfies the probe — only a
+    /// relay that silently drops over-cap REQs could produce a false
+    /// dead verdict, and keeping the subscription count below cap
+    /// (one-REQ-per-inbox + intro-key TTL/GC) is the real guard there.
+    private func probeLiveness(of task: URLSessionWebSocketTask) async -> Bool {
+        guard task.state == .running else { return false }
+        let sentAt = ContinuousClock.now
+        try? await task.send(.string(Self.probeREQ))
+        defer {
+            Task { try? await task.send(.string(Self.probeCLOSE)) }
+        }
+        let deadline = sentAt.advanced(by: .seconds(Self.probeTimeout))
+        while ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .seconds(Self.probePollSlice))
+            // Heartbeat torn down mid-probe — don't spin out the rest
+            // of the window (a cancelled sleep returns immediately).
+            if Task.isCancelled { return true }
+            // Socket was replaced while waiting — the reconnect that
+            // did it started a fresh heartbeat, which owns liveness now.
+            guard webSocketTask === task else { return true }
+            if lastFrameAt > sentAt { return true }
+        }
+        return false
+    }
+
+    /// Cancelling the socket makes the pending `receive()` throw, so the
+    /// receive loop's error path runs the shared backoff + reconnect
+    /// (which also replays subscriptions, fetching whatever the dead
+    /// socket missed). Tears down only the socket the probe actually
+    /// judged: a reconnect may have installed a successor between the
+    /// verdict and this call, and cancelling that one would be the
+    /// foreign-cancel pattern `receiveLoop(task:)` exists to prevent.
+    private func teardownDeadSocket(_ task: URLSessionWebSocketTask) {
+        guard webSocketTask === task else { return }
+        task.cancel(with: .abnormalClosure, reason: nil)
     }
 
     /// Reject incoming frames over 1 MB so a malicious relay can't
@@ -249,8 +355,6 @@ actor NostrRelayConnection {
             {
                 callback(event)
             }
-        case "EOSE":
-            break
         case "OK":
             if array.count >= 3,
                let eventID = array[1] as? String,
@@ -260,7 +364,7 @@ actor NostrRelayConnection {
                 }
                 onOKCallback?(eventID, accepted)
             }
-        case "NOTICE":
+        case "EOSE", "NOTICE":
             break
         default:
             break

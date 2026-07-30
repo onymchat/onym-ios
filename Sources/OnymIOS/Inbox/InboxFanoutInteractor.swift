@@ -44,7 +44,7 @@ struct InboxFanoutInteractor: Sendable {
         // Apply the current identity set immediately on launch (the
         // identitiesStream replays the current value on subscribe but
         // only delivers it once we await the first element).
-        let initial = await identityRepository.currentIdentities()
+        let initial = (try? await identityRepository.currentIdentities()) ?? []
         await subscriptions.apply(
             Set(initial.map(\.id)),
             tagsByID: Self.tagsByID(initial)

@@ -12,7 +12,12 @@ final class IdentityRepositoryMultiIdentityTests: XCTestCase {
     override func setUp() {
         super.setUp()
         keychain = IdentityKeychainStore(testNamespace: "multi-\(UUID().uuidString)")
-        repo = IdentityRepository(keychain: keychain, selectionStore: .inMemory())
+        repo = IdentityRepository(
+            keychain: keychain,
+            selectionStore: .inMemory(),
+            installMarker: .inMemory(initiallySet: true),
+            protectedData: .always
+        )
     }
 
     override func tearDown() {
@@ -32,7 +37,7 @@ final class IdentityRepositoryMultiIdentityTests: XCTestCase {
         // `IdentityRepositoryTests.test_bootstrap_freshInstall_…`.
         // onym:allow-secret-read
         XCTAssertNotNil(identity.recoveryPhrase)
-        let summaries = await repo.currentIdentities()
+        let summaries = try await repo.currentIdentities()
         XCTAssertEqual(summaries.count, 1)
         XCTAssertEqual(summaries[0].name, "Identity",
                        "first auto-bootstrapped identity uses the bare 'Identity' name")
@@ -42,7 +47,7 @@ final class IdentityRepositoryMultiIdentityTests: XCTestCase {
         let first = try await repo.bootstrap()
         let secondID = try await repo.add(name: "Work")
 
-        let summaries = await repo.currentIdentities()
+        let summaries = try await repo.currentIdentities()
         XCTAssertEqual(summaries.count, 2)
         XCTAssertEqual(Set(summaries.map(\.name)), ["Identity", "Work"])
 
@@ -56,7 +61,7 @@ final class IdentityRepositoryMultiIdentityTests: XCTestCase {
     func test_add_namesGetTrimmed_andEmptyFallsBackToSlotDefault() async throws {
         _ = try await repo.bootstrap()
         let id = try await repo.add(name: "   ")
-        let summary = await repo.currentIdentities().first(where: { $0.id == id })
+        let summary = try await repo.currentIdentities().first(where: { $0.id == id })
         XCTAssertEqual(summary?.name, "Identity 2",
                        "whitespace-only names must fall back to the slot default")
     }
@@ -74,7 +79,7 @@ final class IdentityRepositoryMultiIdentityTests: XCTestCase {
         XCTAssertEqual(switched, secondID)
 
         let current = try await XCTUnwrapAsync(await repo.currentIdentity())
-        let summary = await repo.currentIdentities().first(where: { $0.id == secondID })
+        let summary = try await repo.currentIdentities().first(where: { $0.id == secondID })
         XCTAssertEqual(current.blsPublicKey, summary?.blsPublicKey)
     }
 
@@ -107,7 +112,7 @@ final class IdentityRepositoryMultiIdentityTests: XCTestCase {
         let removed = await removedTask.value
         XCTAssertEqual(removed, secondID)
 
-        let summaries = await repo.currentIdentities()
+        let summaries = try await repo.currentIdentities()
         XCTAssertEqual(summaries.count, 1, "one identity remains after removal")
         let current = try await XCTUnwrapAsync(await repo.currentIdentity())
         XCTAssertEqual(current.blsPublicKey, summaries[0].blsPublicKey,
@@ -119,7 +124,7 @@ final class IdentityRepositoryMultiIdentityTests: XCTestCase {
         try await repo.remove(onlyID)
         let current = await repo.currentIdentity()
         XCTAssertNil(current, "no identities → no current")
-        let summaries = await repo.currentIdentities()
+        let summaries = try await repo.currentIdentities()
         XCTAssertEqual(summaries, [])
     }
 
@@ -154,13 +159,40 @@ final class IdentityRepositoryMultiIdentityTests: XCTestCase {
         // Create a fresh repo against the same keychain — selection
         // should be restored from the persisted store.
         let selectionStore = SelectedIdentityStore.inMemory(initial: secondID)
-        let revived = IdentityRepository(keychain: keychain, selectionStore: selectionStore)
+        let revived = IdentityRepository(
+            keychain: keychain,
+            selectionStore: selectionStore,
+            installMarker: .inMemory(initiallySet: true),
+            protectedData: .always
+        )
         _ = try await revived.bootstrap()
         let current = try await XCTUnwrapAsync(await revived.currentIdentity())
-        let summaries = await revived.currentIdentities()
+        let summaries = try await revived.currentIdentities()
         let secondSummary = summaries.first(where: { $0.id == secondID })
         XCTAssertEqual(current.blsPublicKey, secondSummary?.blsPublicKey,
                        "previously-selected ID must come back as current")
+    }
+
+    func test_currentIdentities_asFirstCall_loadsFromKeychain() async throws {
+        // Seed the keychain via a first repo instance.
+        _ = try await repo.bootstrap()
+        _ = try await repo.add(name: "Work")
+        let selected = await repo.currentSelectedID()
+
+        // A fresh repo whose FIRST call is `currentIdentities()` must
+        // load from the keychain, not return the empty pre-load
+        // snapshot. The app's intro-key prune races `bootstrap()` and
+        // treats this as the complete owner set — an empty answer
+        // there wipes every pending invite-link inbox.
+        let fresh = IdentityRepository(
+            keychain: keychain,
+            selectionStore: .inMemory(initial: selected),
+            installMarker: .inMemory(initiallySet: true),
+            protectedData: .always
+        )
+        let summaries = try await fresh.currentIdentities()
+        XCTAssertEqual(summaries.count, 2,
+                       "first-call snapshot must reflect keychain contents")
     }
 
     // MARK: - Helpers

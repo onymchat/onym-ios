@@ -55,6 +55,15 @@ final class PersistedMessage {
     /// optional, so adding it is a SwiftData lightweight migration
     /// over the existing store — same shape as `replyToMessageIDString`.
     var failureReasonRaw: String?
+    /// `true` once the delivered receipt for this incoming row was
+    /// successfully handed to the transport. The receipt send is
+    /// fire-and-forget with no outbox, so relay-reconnect replays are
+    /// the only retry — the dispatcher re-acks a replayed row until
+    /// this flips, then stays silent (re-acking every replay snowballed
+    /// receipt storms; see `persistChatMessage`). Plain (one bit) and
+    /// optional for lightweight migration; nil reads as `false`.
+    /// Meaningless for outgoing rows.
+    var deliveredAckSent: Bool?
 
     var encryptedSenderBlsPubkeyHex: Data
     var encryptedBody: Data
@@ -89,6 +98,7 @@ final class PersistedMessage {
         groupTypeRaw: String,
         replyToMessageIDString: String?,
         failureReasonRaw: String?,
+        deliveredAckSent: Bool? = nil,
         encryptedSenderBlsPubkeyHex: Data,
         encryptedBody: Data,
         encryptedAttachmentJSON: Data? = nil,
@@ -105,6 +115,7 @@ final class PersistedMessage {
         self.groupTypeRaw = groupTypeRaw
         self.replyToMessageIDString = replyToMessageIDString
         self.failureReasonRaw = failureReasonRaw
+        self.deliveredAckSent = deliveredAckSent
         self.encryptedSenderBlsPubkeyHex = encryptedSenderBlsPubkeyHex
         self.encryptedBody = encryptedBody
         self.encryptedAttachmentJSON = encryptedAttachmentJSON

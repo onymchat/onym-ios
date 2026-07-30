@@ -43,6 +43,17 @@ actor InMemoryIntroKeyStore: IntroKeyStore {
         return removed
     }
 
+    @discardableResult
+    func pruneOwners(keeping owners: Set<IdentityID>) async -> Int {
+        let orphaned = entries.filter { !owners.contains($0.ownerIdentityID) }
+        guard !orphaned.isEmpty else { return 0 }
+        entries.removeAll { !owners.contains($0.ownerIdentityID) }
+        for owner in Set(orphaned.map(\.ownerIdentityID)) {
+            publish(forOwner: owner)
+        }
+        return orphaned.count
+    }
+
     nonisolated func entriesStream(forOwner ownerIdentityID: IdentityID) -> AsyncStream<[IntroKeyEntry]> {
         AsyncStream { continuation in
             let id = UUID()

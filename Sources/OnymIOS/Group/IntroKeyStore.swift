@@ -56,4 +56,15 @@ protocol IntroKeyStore: Sendable {
     /// here so adding/revoking an invite immediately re-balances the
     /// transport subscription set.
     nonisolated func entriesStream(forOwner ownerIdentityID: IdentityID) -> AsyncStream<[IntroKeyEntry]>
+
+    /// Launch-time garbage collection: drop every entry whose owner is
+    /// not in `owners`. `deleteForOwner` only fires for identities
+    /// removed through the app — identities orphaned by an app
+    /// delete/reinstall never cascade, and their intro keys would keep
+    /// consuming a relay subscription slot each forever. Returns the
+    /// count of entries removed. No default implementation on purpose:
+    /// a real store that forgot GC would otherwise compile fine and
+    /// silently never collect.
+    @discardableResult
+    func pruneOwners(keeping owners: Set<IdentityID>) async -> Int
 }

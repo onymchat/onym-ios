@@ -53,7 +53,7 @@ final class InboxFanoutInteractorTests: XCTestCase {
         // Seed two identities BEFORE running.
         _ = try await identity.bootstrap()                      // Identity 1
         _ = try await identity.add(name: "Work")                // Identity 2
-        let summaries = await identity.currentIdentities()
+        let summaries = try await identity.currentIdentities()
         XCTAssertEqual(summaries.count, 2)
 
         let transport = RecordingInboxTransport()
@@ -103,7 +103,7 @@ final class InboxFanoutInteractorTests: XCTestCase {
     func test_removingIdentity_triggersUnsubscribe() async throws {
         _ = try await identity.bootstrap()
         let workID = try await identity.add(name: "Work")
-        let summaries = await identity.currentIdentities()
+        let summaries = try await identity.currentIdentities()
         let workSummary = try XCTUnwrap(summaries.first(where: { $0.id == workID }))
 
         let transport = RecordingInboxTransport()
@@ -132,7 +132,7 @@ final class InboxFanoutInteractorTests: XCTestCase {
 
     func test_inboundMessage_landsInRepository() async throws {
         let activeIdentity = try await identity.bootstrap()
-        let summaries = await identity.currentIdentities()
+        let summaries = try await identity.currentIdentities()
         let summary = try XCTUnwrap(
             summaries.first(where: { $0.blsPublicKey == activeIdentity.blsPublicKey })
         )

@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// Nostr-relay-backed `InboxTransport`. Each `send` builds a kind-34113
@@ -98,6 +99,13 @@ final class NostrInboxTransport: InboxTransport {
     fileprivate actor State {
         private var connections: [URL: NostrRelayConnection] = [:]
         private var activeSubscriptions: [TransportInboxID: Task<Void, Never>] = [:]
+        /// Monotonic counter baked into every subscription id. A
+        /// resubscribe for the same inbox cancels the old stream, whose
+        /// `onTermination` sends CLOSE for *its* id — with a fixed id
+        /// that CLOSE would tear down the replacement REQ and silence
+        /// the inbox until the next resubscribe. Same scheme as
+        /// `NostrMessageTransport.subscriptionGeneration`.
+        private var subscriptionGeneration: UInt64 = 0
 
         func connect(to endpoints: [TransportEndpoint]) async {
             for endpoint in endpoints {
@@ -174,28 +182,34 @@ final class NostrInboxTransport: InboxTransport {
             continuation: AsyncStream<InboundInbox>.Continuation
         ) {
             activeSubscriptions[inbox]?.cancel()
-            let subIDBase = "inbox-\(inbox.rawValue)"
+            subscriptionGeneration += 1
+            // NIP-01 caps subscription ids at 64 chars; the raw inbox
+            // pubkey is already 64, so ship a truncated digest instead.
+            let subID = "inbox-\(Self.subIDHash(inbox.rawValue))-\(subscriptionGeneration)"
             let filters = NostrInboxTransport.subscriptionFilters(inbox: inbox.rawValue)
             let conns = Array(connections.values)
 
+            // All filter shapes ride in ONE REQ per relay: relays cap
+            // concurrent REQs per connection (strfry rejects overflow with
+            // "too many concurrent REQs"), and one REQ also makes the relay
+            // dedup events that match several of the overlapping filters.
             let task = Task {
                 await withTaskGroup(of: Void.self) { group in
                     for conn in conns {
-                        for (index, filter) in filters.enumerated() {
-                            group.addTask {
-                                let filterSubID = "\(subIDBase)-\(index)"
-                                let stream = await conn.subscribe(subscriptionID: filterSubID, filter: filter)
-                                for await event in stream {
-                                    guard !Task.isCancelled else { break }
-                                    guard let payload = Data(base64Encoded: event.content) else { continue }
-                                    let received = Date(timeIntervalSince1970: TimeInterval(event.displayMilliseconds) / 1000.0)
-                                    continuation.yield(InboundInbox(
-                                        inbox: inbox,
-                                        payload: payload,
-                                        receivedAt: received,
-                                        messageID: event.id
-                                    ))
+                        group.addTask {
+                            let stream = await conn.subscribe(subscriptionID: subID, filters: filters)
+                            for await event in stream {
+                                guard !Task.isCancelled else { break }
+                                guard let payload = Data(base64Encoded: event.content) else {
+                                    continue
                                 }
+                                let received = Date(timeIntervalSince1970: TimeInterval(event.displayMilliseconds) / 1000.0)
+                                continuation.yield(InboundInbox(
+                                    inbox: inbox,
+                                    payload: payload,
+                                    receivedAt: received,
+                                    messageID: event.id
+                                ))
                             }
                         }
                     }
@@ -207,6 +221,16 @@ final class NostrInboxTransport: InboxTransport {
         func unsubscribe(inbox: TransportInboxID) {
             activeSubscriptions[inbox]?.cancel()
             activeSubscriptions.removeValue(forKey: inbox)
+        }
+
+        /// First 16 hex chars of SHA-256 — collision-safe for the
+        /// handful of inboxes one client subscribes to, and short
+        /// enough to leave room for the generation suffix.
+        private static func subIDHash(_ inbox: String) -> String {
+            SHA256.hash(data: Data(inbox.utf8))
+                .prefix(8)
+                .map { String(format: "%02x", $0) }
+                .joined()
         }
     }
 }
