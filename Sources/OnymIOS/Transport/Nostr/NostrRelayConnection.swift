@@ -3,14 +3,19 @@ import os.log
 
 /// TEMPORARY transport diagnostics for the device live-delivery bug.
 /// Emits nothing in release builds. Remove once resolved.
+/// Uses print() rather than os Logger because the scheme runs with
+/// OS_ACTIVITY_MODE=disable, which suppresses os_log in Xcode's console.
 enum TransportLog {
     #if DEBUG
-    private static let logger = Logger(subsystem: "app.onym.ios", category: "TransportDebug")
+    private static let timestamp: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss.SSS"
+        return f
+    }()
     #endif
     static func log(_ message: @autoclosure () -> String) {
         #if DEBUG
-        let text = message()
-        logger.debug("🔌 \(text, privacy: .public)")
+        print("🔌 \(timestamp.string(from: Date())) \(message())")
         #endif
     }
 }
