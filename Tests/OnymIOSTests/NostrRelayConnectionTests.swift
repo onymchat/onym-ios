@@ -179,13 +179,15 @@ final class NostrRelayConnectionTests: XCTestCase {
         await conn.disconnect()
     }
 
-    /// A second `CLOSED` for the same subscription in the same connection
-    /// generation means the rejection is persistent — escalate to a full
-    /// rebuild (visible recovery) instead of retrying forever or going
-    /// silently deaf.
+    /// A second `CLOSED` for the same subscription — with no intervening
+    /// EOSE/EVENT proving the retry stuck — means the rejection is
+    /// persistent: escalate to a full rebuild (visible recovery) instead
+    /// of retrying forever or going silently deaf. The relay is silent
+    /// (no EOSE) so the retry's acceptance-decay doesn't clear the flag.
     func testRepeatedCLOSEDRebuildsConnection() async throws {
         let relay = try LocalWebSocketRelay()
         defer { relay.stop() }
+        relay.autoRespondEOSE = false
         let conn = NostrRelayConnection(
             url: try await relay.wsURL(),
             baseReconnectDelay: 0.05,
@@ -209,6 +211,62 @@ final class NostrRelayConnectionTests: XCTestCase {
         await conn.disconnect()
     }
 
+    /// A relay that persistently rejects the subscription (every REQ →
+    /// CLOSED) must back off, not hot-loop: the relay's own CLOSED
+    /// frames must not count as "confirmed live" and reset the backoff.
+    /// With base 0.05 s / cap 0.4 s over a 1.5 s window, escalating
+    /// backoff yields a handful of rebuilds; the naive reset-on-frame
+    /// behavior yields 15+ at a steady ~20 Hz-equivalent.
+    func testPersistentlyRejectedSubscription_backsOffInsteadOfHotLooping() async throws {
+        let relay = try LocalWebSocketRelay()
+        defer { relay.stop() }
+        relay.autoCLOSESubscriptions = true
+
+        let conn = NostrRelayConnection(
+            url: try await relay.wsURL(),
+            baseReconnectDelay: 0.05,
+            maxReconnectDelay: 0.4
+        )
+        await conn.connect()
+        let stream = await conn.subscribe(subscriptionID: "sub1", filters: [["kinds": [34113]]])
+        let pump = Task { for await _ in stream {} }
+        defer { pump.cancel() }
+
+        try await Task.sleep(for: .seconds(1.5))
+        let rebuilds = relay.connectionCount()
+        XCTAssertGreaterThanOrEqual(rebuilds, 2, "rebuild attempts must continue")
+        XCTAssertLessThanOrEqual(rebuilds, 8,
+                                 "persistent CLOSED must escalate backoff, not hot-loop (~1 Hz+)")
+        await conn.disconnect()
+    }
+
+    /// Benign, isolated CLOSEDs must not accumulate into a rebuild: an
+    /// EOSE for the re-issued REQ proves it stuck and decays the sub's
+    /// retried flag, so a second CLOSED much later gets a fresh retry.
+    func testIsolatedCLOSEDs_decayAfterAcceptedREQ_noRebuild() async throws {
+        let relay = try LocalWebSocketRelay()
+        defer { relay.stop() }
+        let conn = NostrRelayConnection(url: try await relay.wsURL())
+        await conn.connect()
+        let stream = await conn.subscribe(subscriptionID: "sub1", filters: [["kinds": [34113]]])
+        let pump = Task { for await _ in stream {} }
+        defer { pump.cancel() }
+
+        try await relay.waitForConnections(1)
+        try await relay.waitForREQs(1)
+
+        relay.sendCLOSED(subID: "sub1")
+        try await relay.waitForREQs(2)  // retry — auto-answered with EOSE
+        try await Task.sleep(for: .milliseconds(200))  // EOSE decays the flag
+
+        relay.sendCLOSED(subID: "sub1")
+        try await relay.waitForREQs(3)  // a fresh retry, NOT a rebuild
+
+        XCTAssertEqual(relay.connectionCount(), 1,
+                       "isolated CLOSEDs with accepted retries in between must never rebuild")
+        await conn.disconnect()
+    }
+
     /// `CLOSED` for an unknown subscription (e.g. one we already
     /// unsubscribed) is ignored — no retry, no rebuild.
     func testCLOSEDForUnknownSubIsIgnored() async throws {
@@ -228,6 +286,67 @@ final class NostrRelayConnectionTests: XCTestCase {
         XCTAssertEqual(relay.connectionCount(), 1)
         await conn.disconnect()
     }
+}
+
+/// Transport-level: re-subscribing an inbox must not let the OLD
+/// stream's asynchronous `onTermination` CLOSE tear down the NEW
+/// subscription (the generation-token pattern `NostrMessageTransport`
+/// pioneered, now applied to the inbox transport).
+final class NostrInboxTransportResubscribeTests: XCTestCase {
+    func test_resubscribeSameInbox_usesFreshSubID_andStaysLive() async throws {
+        let relay = try LocalWebSocketRelay()
+        defer { relay.stop() }
+        let transport = NostrInboxTransport(signerProvider: OnymNostrSignerProvider())
+        let url = URL(string: "ws://127.0.0.1:\(try await relay.port())")!
+        await transport.connect(to: [TransportEndpoint(url: url)])
+
+        let inbox = TransportInboxID(rawValue: "beef0001")
+        let first = transport.subscribe(inbox: inbox)
+        let firstPump = Task { for await _ in first {} }
+        try await relay.waitForREQs(1)
+
+        // Re-subscribe (identity rebalance / pump restart shape). The
+        // old stream terminates asynchronously and sends CLOSE for ITS
+        // subID — which must not be the new one's.
+        let second = transport.subscribe(inbox: inbox)
+        let received = ResubscribeBox()
+        let secondPump = Task { for await msg in second { await received.append(msg.messageID) } }
+        defer { secondPump.cancel() }
+        firstPump.cancel()
+        try await relay.waitForREQs(2)
+        // Give the old stream's onTermination CLOSE time to land (the
+        // bug window this test exists for).
+        try await Task.sleep(for: .milliseconds(300))
+
+        // The two REQs must carry DISTINCT subIDs — that's the whole fix.
+        let subIDs = relay.recordedSubIDs()
+        XCTAssertEqual(subIDs.count, 2)
+        XCTAssertEqual(Set(subIDs).count, 2, "re-subscribe must mint a fresh subID")
+
+        // The new subscription must still be live: push an event to the
+        // SECOND recorded subID and assert delivery.
+        relay.push(LocalWebSocketRelay.eventFrame(
+            subID: relay.lastRecordedSubID()!,
+            kind: 34113,
+            content: Data("still alive".utf8).base64EncodedString(),
+            tag: ("d", "sep-inbox:beef0001")
+        ))
+        let deadline = Date().addingTimeInterval(3)
+        while Date() < deadline {
+            if await received.count() >= 1 { break }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        let count = await received.count()
+        XCTAssertEqual(count, 1,
+                       "the re-subscribed inbox must survive the old stream's CLOSE")
+        await transport.disconnect()
+    }
+}
+
+private actor ResubscribeBox {
+    private var ids: [String] = []
+    func append(_ id: String) { ids.append(id) }
+    func count() -> Int { ids.count }
 }
 
 // MARK: - Helpers

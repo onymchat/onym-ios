@@ -83,8 +83,10 @@ final class NostrInboxTransportReconnectTests: XCTestCase {
         try await relay.waitForREQs(1)
 
         // Arrives while "backgrounded": stored on the relay, never
-        // pushed live to this socket.
-        relay.store(subID: "inbox-cafe0001", eventJSON: LocalWebSocketRelay.eventObjectJSON(
+        // pushed live to this socket. Keyed to the subID the transport
+        // actually REQ'd (generation-suffixed) — a reconnect replays the
+        // same subscription id.
+        relay.store(subID: relay.lastRecordedSubID()!, eventJSON: LocalWebSocketRelay.eventObjectJSON(
             kind: 34113,
             content: Data("missed".utf8).base64EncodedString(),
             tag: ("d", "sep-inbox:cafe0001")
