@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// Nostr-relay-backed `InboxTransport`. Each `send` builds a kind-34113
@@ -98,9 +99,15 @@ final class NostrInboxTransport: InboxTransport {
     fileprivate actor State {
         private var connections: [URL: NostrRelayConnection] = [:]
         private var activeSubscriptions: [TransportInboxID: Task<Void, Never>] = [:]
+        /// Monotonic counter baked into every subscription id. A
+        /// resubscribe for the same inbox cancels the old stream, whose
+        /// `onTermination` sends CLOSE for *its* id — with a fixed id
+        /// that CLOSE would tear down the replacement REQ and silence
+        /// the inbox until the next resubscribe. Same scheme as
+        /// `NostrMessageTransport.subscriptionGeneration`.
+        private var subscriptionGeneration: UInt64 = 0
 
         func connect(to endpoints: [TransportEndpoint]) async {
-            TransportLog.log("inbox transport: connect to \(endpoints.count) endpoints (\(connections.count) already connected)")
             for endpoint in endpoints {
                 if connections[endpoint.url] == nil {
                     let conn = NostrRelayConnection(url: endpoint.url)
@@ -155,7 +162,6 @@ final class NostrInboxTransport: InboxTransport {
             let accepted = outcomes.filter {
                 if case .accepted = $0 { return true } else { return false }
             }.count
-            TransportLog.log("inbox send id=\(event.id.prefix(8)): accepted by \(accepted)/\(conns.count) relays")
             if accepted > 0 { return accepted }
 
             let anyRejected = outcomes.contains {
@@ -176,10 +182,12 @@ final class NostrInboxTransport: InboxTransport {
             continuation: AsyncStream<InboundInbox>.Continuation
         ) {
             activeSubscriptions[inbox]?.cancel()
-            let subID = "inbox-\(inbox.rawValue)"
+            subscriptionGeneration += 1
+            // NIP-01 caps subscription ids at 64 chars; the raw inbox
+            // pubkey is already 64, so ship a truncated digest instead.
+            let subID = "inbox-\(Self.subIDHash(inbox.rawValue))-\(subscriptionGeneration)"
             let filters = NostrInboxTransport.subscriptionFilters(inbox: inbox.rawValue)
             let conns = Array(connections.values)
-            TransportLog.log("inbox subscribe \(inbox.rawValue.prefix(12)): 1 REQ (\(filters.count) filters) × \(conns.count) relays")
 
             // All filter shapes ride in ONE REQ per relay: relays cap
             // concurrent REQs per connection (strfry rejects overflow with
@@ -193,10 +201,8 @@ final class NostrInboxTransport: InboxTransport {
                             for await event in stream {
                                 guard !Task.isCancelled else { break }
                                 guard let payload = Data(base64Encoded: event.content) else {
-                                    TransportLog.log("inbox \(inbox.rawValue.prefix(12)): event \(event.id.prefix(8)) DROPPED, content not base64")
                                     continue
                                 }
-                                TransportLog.log("inbox \(inbox.rawValue.prefix(12)): yielding event \(event.id.prefix(8)) (\(payload.count)B)")
                                 let received = Date(timeIntervalSince1970: TimeInterval(event.displayMilliseconds) / 1000.0)
                                 continuation.yield(InboundInbox(
                                     inbox: inbox,
@@ -213,9 +219,18 @@ final class NostrInboxTransport: InboxTransport {
         }
 
         func unsubscribe(inbox: TransportInboxID) {
-            TransportLog.log("inbox unsubscribe \(inbox.rawValue.prefix(12))")
             activeSubscriptions[inbox]?.cancel()
             activeSubscriptions.removeValue(forKey: inbox)
+        }
+
+        /// First 16 hex chars of SHA-256 — collision-safe for the
+        /// handful of inboxes one client subscribes to, and short
+        /// enough to leave room for the generation suffix.
+        private static func subIDHash(_ inbox: String) -> String {
+            SHA256.hash(data: Data(inbox.utf8))
+                .prefix(8)
+                .map { String(format: "%02x", $0) }
+                .joined()
         }
     }
 }
