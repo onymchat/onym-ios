@@ -1,5 +1,23 @@
 import Foundation
 
+/// Result of `MessageStore.insertOrUpdate`. `.updated` (the benign
+/// replay / status-flip path) and `.failed` (nothing persisted) both
+/// mean "not a new row", but callers gating side effects must tell
+/// them apart: the delivered receipt is skipped for a replayed
+/// duplicate yet must ALSO be withheld on failure so the sender's
+/// relay copy is still replayed — and re-attempted — on the next
+/// reconnect, rather than acked for a message this device never
+/// stored.
+enum MessageInsertOutcome: Sendable, Equatable {
+    /// New row persisted.
+    case inserted
+    /// A row with the same `(id, owner)` already existed and was
+    /// updated in place.
+    case updated
+    /// Nothing was persisted — encode or save failed.
+    case failed
+}
+
 /// Persistence seam for chat messages. Async surface mirrors
 /// `GroupStore` so a concrete implementation can serialise writes on
 /// its own queue without forcing callers onto a specific actor.
@@ -33,11 +51,10 @@ protocol MessageStore: Sendable {
 
     /// Idempotent on the composite `(message.id, ownerIdentityID)`.
     /// New row → insert. Same id+owner → update in place; used both
-    /// for receive-side replays (no-op result on the second insert)
+    /// for receive-side replays (`.updated` on the second insert)
     /// and outgoing status transitions (pending → sent / failed).
-    /// Returns `true` on insert, `false` on update.
     @discardableResult
-    func insertOrUpdate(_ message: ChatMessage) async -> Bool
+    func insertOrUpdate(_ message: ChatMessage) async -> MessageInsertOutcome
 
     /// Flip just the status column (and the failure-reason column that
     /// travels with it — non-nil when flipping to `.failed`, nil

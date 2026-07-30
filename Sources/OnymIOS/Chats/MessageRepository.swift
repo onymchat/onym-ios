@@ -47,10 +47,10 @@ actor MessageRepository {
     /// to `MessageStore.insertOrUpdate`). Receive-side replays and
     /// outgoing status flips both flow through here.
     @discardableResult
-    func insert(_ message: ChatMessage) async -> Bool {
-        let inserted = await store.insertOrUpdate(message)
+    func insert(_ message: ChatMessage) async -> MessageInsertOutcome {
+        let outcome = await store.insertOrUpdate(message)
         await refresh(ThreadKey(groupID: message.groupID, owner: message.ownerIdentityID))
-        return inserted
+        return outcome
     }
 
     /// Flip an outgoing message's status (pending → sent / failed).

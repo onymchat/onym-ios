@@ -129,8 +129,8 @@ actor SwiftDataMessageStore: MessageStore {
     }
 
     @discardableResult
-    func insertOrUpdate(_ message: ChatMessage) -> Bool {
-        guard let encoded = try? Self.encode(message) else { return false }
+    func insertOrUpdate(_ message: ChatMessage) -> MessageInsertOutcome {
+        guard let encoded = try? Self.encode(message) else { return .failed }
 
         let id = message.id.uuidString
         let owner = encoded.ownerIdentityIDString
@@ -157,12 +157,19 @@ actor SwiftDataMessageStore: MessageStore {
             existing.encryptedAlbumJSON = encoded.encryptedAlbumJSON
             existing.encryptedVoiceAttachmentJSON = encoded.encryptedVoiceAttachmentJSON
             try? context.save()
-            return false
+            return .updated
         }
 
         context.insert(encoded)
-        try? context.save()
-        return true
+        do {
+            try context.save()
+        } catch {
+            // Roll the orphaned in-memory insert back out so the
+            // next attempt (inbox replay) starts from a clean context.
+            context.delete(encoded)
+            return .failed
+        }
+        return .inserted
     }
 
     func updateStatus(id: UUID, ownerIDString: String, status: MessageStatus, failureReason: SendFailureReason?) {
