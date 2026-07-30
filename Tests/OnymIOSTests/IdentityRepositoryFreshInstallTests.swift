@@ -119,6 +119,38 @@ final class IdentityRepositoryFreshInstallTests: XCTestCase {
         XCTAssertTrue(marker.exists())
     }
 
+    /// Regression: the protected-data check suspends inside the first
+    /// load, and actor reentrancy let two concurrent first-callers
+    /// (the app's sibling `bootstrap()` / `currentIdentities()`
+    /// launch tasks) interleave across it — appending every identity
+    /// twice. The slow availability closure below holds the window
+    /// open; the single-flight load must keep the list exact.
+    func test_concurrentFirstLoads_doNotDuplicateIdentities() async throws {
+        _ = try await seedIdentities()
+        let selected = try keychain.list().first
+
+        let repo = IdentityRepository(
+            keychain: keychain,
+            selectionStore: .inMemory(initial: selected),
+            installMarker: .inMemory(initiallySet: false),
+            protectedData: ProtectedDataAvailability(isAvailable: {
+                try? await Task.sleep(for: .milliseconds(100))
+                return true
+            })
+        )
+
+        async let first = repo.bootstrap()
+        async let second = repo.currentIdentities()
+        _ = try await first
+        _ = try await second
+
+        let summaries = try await repo.currentIdentities()
+        XCTAssertEqual(summaries.count, 2,
+                       "concurrent first loads must not double-append identities")
+        XCTAssertEqual(Set(summaries.map(\.id)).count, 2,
+                       "every picker entry is distinct")
+    }
+
     /// Quarantining twice (fresh install verdict on two consecutive
     /// launches) must not throw on the duplicate items.
     func test_quarantineAll_idempotentAcrossRepeatedVerdicts() async throws {

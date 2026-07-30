@@ -39,6 +39,8 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
     private var orderedIDs: [IdentityID] = []
     private var currentID: IdentityID?
     private var loaded = false
+    /// Non-nil while a first load is in flight — see `ensureLoaded()`.
+    private var loadTask: Task<Void, any Error>?
 
     private var snapshotContinuations: [UUID: AsyncStream<Identity?>.Continuation] = [:]
     private var identitiesContinuations: [UUID: AsyncStream<[IdentitySummary]>.Continuation] = [:]
@@ -540,6 +542,27 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
     /// stored selection no longer exists.
     private func ensureLoaded() async throws {
         guard !loaded else { return }
+        // Single-flight: `performLoad()` suspends (the protected-data
+        // check hops to the MainActor), and actor reentrancy would let
+        // two first-callers interleave across that gap — both passing
+        // the `loaded` guard, both resetting state, both appending
+        // every identity twice. The app hits exactly that shape at
+        // launch: `bootstrap()` and the intro-prune's
+        // `currentIdentities()` are sibling `.task`s. First caller
+        // creates the load; everyone else awaits the same task.
+        if let inFlight = loadTask {
+            try await inFlight.value
+            return
+        }
+        let task = Task { try await self.performLoad() }
+        loadTask = task
+        // Creator clears the slot on success AND failure — a failed
+        // load must not wedge every future call on a dead task.
+        defer { loadTask = nil }
+        try await task.value
+    }
+
+    private func performLoad() async throws {
         // A previous attempt may have thrown mid-loop; start every
         // attempt from a clean slate so a retry can't double-append.
         cache.removeAll()
