@@ -262,8 +262,9 @@ actor NostrRelayConnection {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(Self.pingInterval))
                 guard !Task.isCancelled, let self else { break }
-                guard await self.probeLiveness() else {
-                    await self.teardownDeadSocket()
+                guard let socket = await self.currentSocket() else { break }
+                guard await self.probeLiveness(of: socket) else {
+                    await self.teardownDeadSocket(socket)
                     break
                 }
             }
@@ -275,17 +276,28 @@ actor NostrRelayConnection {
     private static let probeREQ = #"["REQ","__hb",{"ids":["0000000000000000000000000000000000000000000000000000000000000000"],"limit":1}]"#
     private static let probeCLOSE = #"["CLOSE","__hb"]"#
 
-    /// Send the probe REQ and report whether *any* frame arrived while
-    /// waiting — the EOSE it provokes, or ordinary traffic, both prove
-    /// the receive path is alive. Polls in short slices so a frame that
-    /// is already flowing ends the probe immediately instead of holding
-    /// the full timeout. The probe REQ is CLOSEd on exit — relays cap
-    /// concurrent REQs per connection, and an open `__hb` would pin one
-    /// of those slots for the socket's whole lifetime.
-    private func probeLiveness() async -> Bool {
-        guard let task = webSocketTask, task.state == .running else {
-            return false
-        }
+    /// The socket the heartbeat should probe this round, captured on
+    /// the actor so probe + teardown act on one pinned reference.
+    private func currentSocket() -> URLSessionWebSocketTask? {
+        webSocketTask
+    }
+
+    /// Send the probe REQ on `task` and report whether *any* frame
+    /// arrived while waiting — the EOSE it provokes, or ordinary
+    /// traffic, both prove the receive path is alive. Polls in short
+    /// slices so a frame that is already flowing ends the probe
+    /// immediately instead of holding the full timeout. The probe REQ
+    /// is CLOSEd on exit — relays cap concurrent REQs per connection,
+    /// and an open `__hb` would pin one of those slots for the
+    /// socket's whole lifetime. During the probe window the connection
+    /// briefly uses one extra slot; that's safe even at the relay's
+    /// cap, because an over-limit REQ is *answered* (strfry replies
+    /// CLOSED/NOTICE) and any reply frame satisfies the probe — only a
+    /// relay that silently drops over-cap REQs could produce a false
+    /// dead verdict, and keeping the subscription count below cap
+    /// (one-REQ-per-inbox + intro-key TTL/GC) is the real guard there.
+    private func probeLiveness(of task: URLSessionWebSocketTask) async -> Bool {
+        guard task.state == .running else { return false }
         let sentAt = ContinuousClock.now
         try? await task.send(.string(Self.probeREQ))
         defer {
@@ -308,9 +320,13 @@ actor NostrRelayConnection {
     /// Cancelling the socket makes the pending `receive()` throw, so the
     /// receive loop's error path runs the shared backoff + reconnect
     /// (which also replays subscriptions, fetching whatever the dead
-    /// socket missed).
-    private func teardownDeadSocket() {
-        webSocketTask?.cancel(with: .abnormalClosure, reason: nil)
+    /// socket missed). Tears down only the socket the probe actually
+    /// judged: a reconnect may have installed a successor between the
+    /// verdict and this call, and cancelling that one would be the
+    /// foreign-cancel pattern `receiveLoop(task:)` exists to prevent.
+    private func teardownDeadSocket(_ task: URLSessionWebSocketTask) {
+        guard webSocketTask === task else { return }
+        task.cancel(with: .abnormalClosure, reason: nil)
     }
 
     /// Reject incoming frames over 1 MB so a malicious relay can't
