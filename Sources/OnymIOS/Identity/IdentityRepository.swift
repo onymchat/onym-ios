@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import OnymSDK
+import UIKit
 
 /// Owns every on-device identity. All Keychain I/O and OnymSDK calls
 /// happen here; views observe `identitiesStream` + `currentIdentityID`
@@ -29,6 +30,7 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
     private let keychain: IdentityKeychainStore
     private let selectionStore: SelectedIdentityStore
     private let installMarker: InstallMarker
+    private let protectedData: ProtectedDataAvailability
 
     /// In-memory cache of every identity loaded from the keychain.
     /// Repopulated lazily on first access via `ensureLoaded()`.
@@ -46,11 +48,13 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
     init(
         keychain: IdentityKeychainStore = IdentityKeychainStore(),
         selectionStore: SelectedIdentityStore = .userDefaults,
-        installMarker: InstallMarker = .userDefaults
+        installMarker: InstallMarker = .userDefaults,
+        protectedData: ProtectedDataAvailability = .uiApplication
     ) {
         self.keychain = keychain
         self.selectionStore = selectionStore
         self.installMarker = installMarker
+        self.protectedData = protectedData
     }
 
     // MARK: - Bootstrap / lifecycle
@@ -59,8 +63,8 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
     /// generates a default-named one. Returns the currently-selected
     /// identity (post-bootstrap there's always one selected).
     @discardableResult
-    func bootstrap() throws -> Identity {
-        try ensureLoaded()
+    func bootstrap() async throws -> Identity {
+        try await ensureLoaded()
         if cache.isEmpty {
             let id = try addLocked(name: nil, mnemonic: nil)
             currentID = id
@@ -82,8 +86,8 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
     /// phrase or generates a fresh one when nil. The new identity
     /// becomes current iff there was no current identity before.
     @discardableResult
-    func add(name: String? = nil, mnemonic: String? = nil) throws -> IdentityID {
-        try ensureLoaded()
+    func add(name: String? = nil, mnemonic: String? = nil) async throws -> IdentityID {
+        try await ensureLoaded()
         let id = try addLocked(name: name, mnemonic: mnemonic)
         if currentID == nil {
             currentID = id
@@ -96,8 +100,8 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
     /// Switch the currently-selected identity. Calls with an unknown
     /// `id` are no-ops (defensive — UI should never present an ID
     /// that isn't in the picker).
-    func select(_ id: IdentityID) throws {
-        try ensureLoaded()
+    func select(_ id: IdentityID) async throws {
+        try await ensureLoaded()
         guard cache[id] != nil else { return }
         guard currentID != id else { return }
         currentID = id
@@ -109,8 +113,8 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
     /// cache, picks a new current (next in order, or nil if it was the
     /// last). Subscribers of `identityRemoved` get notified so they
     /// can wipe identity-scoped state (chats, messages — PR-3).
-    func remove(_ id: IdentityID) throws {
-        try ensureLoaded()
+    func remove(_ id: IdentityID) async throws {
+        try await ensureLoaded()
         guard cache[id] != nil else { return }
         try keychain.wipe(id)
         cache.removeValue(forKey: id)
@@ -135,8 +139,8 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
     ///
     /// - Throws: `IdentityError.identityNotLoaded` if `id` doesn't exist
     ///   on this device.
-    func rename(_ id: IdentityID, newName: String) throws {
-        try ensureLoaded()
+    func rename(_ id: IdentityID, newName: String) async throws {
+        try await ensureLoaded()
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return }
         guard var snapshot = try keychain.read(id) else {
@@ -154,11 +158,11 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
     /// first — preserves the legacy single-slot `restore` semantic so
     /// existing tests + the recovery-phrase backup flow keep working.
     @discardableResult
-    func restore(mnemonic: String) throws -> Identity {
+    func restore(mnemonic: String) async throws -> Identity {
         guard Bip39.isValidMnemonic(mnemonic) else {
             throw IdentityError.invalidMnemonic
         }
-        try ensureLoaded()
+        try await ensureLoaded()
         for id in orderedIDs { try keychain.wipe(id) }
         let removed = orderedIDs
         cache.removeAll()
@@ -177,8 +181,8 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
     }
 
     /// Wipe every identity. Subscribers receive nil.
-    func wipe() throws {
-        try ensureLoaded()
+    func wipe() async throws {
+        try await ensureLoaded()
         for id in orderedIDs { try keychain.wipe(id) }
         let removed = orderedIDs
         cache.removeAll()
@@ -225,8 +229,8 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
     /// and throws on load failure so callers can tell "no identities"
     /// apart from "not loaded yet" — destructive callers (intro-key
     /// pruning) must not treat a failed load as an empty list.
-    func currentIdentities() throws -> [IdentitySummary] {
-        try ensureLoaded()
+    func currentIdentities() async throws -> [IdentitySummary] {
+        try await ensureLoaded()
         return orderedIDs.compactMap(summary(for:))
     }
 
@@ -534,14 +538,14 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
     /// Resolves the previously-selected identity from
     /// `selectionStore`; falls back to the first identity if the
     /// stored selection no longer exists.
-    private func ensureLoaded() throws {
+    private func ensureLoaded() async throws {
         guard !loaded else { return }
         // A previous attempt may have thrown mid-loop; start every
         // attempt from a clean slate so a retry can't double-append.
         cache.removeAll()
         names.removeAll()
         orderedIDs.removeAll()
-        try reconcileFreshInstall()
+        try await reconcileFreshInstall()
         let ids = try keychain.list()
         // Stable order — UUIDs sort lexically. The picker also re-sorts
         // by name, so this is just a determinism guarantee for the
@@ -589,8 +593,15 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
     /// real keys sit in the keychain. A wrong verdict must cost a
     /// hidden identity (recoverable via mnemonic or a future
     /// quarantine-recovery flow), not destroyed key material.
-    private func reconcileFreshInstall() throws {
+    private func reconcileFreshInstall() async throws {
         guard !installMarker.exists() else { return }
+        // Both inputs live in a plist that's unreadable before the
+        // first post-boot unlock — they'd silently read as "fresh
+        // install" while real keys sit in the keychain. Defer the
+        // verdict to a launch that can actually read them; nothing is
+        // lost, the identity items can't be read or renamed while
+        // locked either.
+        guard await protectedData.isAvailable() else { return }
         if selectionStore.load() == nil {
             try keychain.quarantineAll()
         }
@@ -848,6 +859,28 @@ struct SelectedIdentityStore: Sendable {
         }
         init(value: IdentityID?) { _value = value }
     }
+}
+
+/// Seam over "has the user unlocked the device since boot". The
+/// fresh-install verdict in `reconcileFreshInstall()` reads two
+/// UserDefaults values whose plist is
+/// `NSFileProtectionCompleteUntilFirstUserAuthentication` — before the
+/// first unlock both silently read as empty, indistinguishable from a
+/// genuine fresh install. Gating the reconcile on this signal defers
+/// the verdict to a launch where the inputs are actually readable.
+/// Async because the authoritative API
+/// (`UIApplication.isProtectedDataAvailable`) is main-actor-isolated;
+/// the repository hops there once, at first load. Injected so tests
+/// (and any future extension target, where `UIApplication.shared` is
+/// unavailable) can substitute a constant.
+struct ProtectedDataAvailability: Sendable {
+    let isAvailable: @Sendable () async -> Bool
+
+    static let uiApplication = ProtectedDataAvailability {
+        await MainActor.run { UIApplication.shared.isProtectedDataAvailable }
+    }
+
+    static let always = ProtectedDataAvailability { true }
 }
 
 /// First-run marker distinguishing a fresh install from a relaunch.
