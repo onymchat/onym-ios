@@ -210,7 +210,7 @@ final class IdentityRepositoryTests: XCTestCase {
 
         try await repo.rename(firstID, newName: "Personal")
 
-        let summaries = await repo.currentIdentities()
+        let summaries = try await repo.currentIdentities()
         XCTAssertEqual(summaries.first { $0.id == firstID }?.name, "Personal")
         XCTAssertEqual(summaries.first { $0.id == secondID }?.name, "Work")
         let selected = await repo.currentSelectedID()
@@ -228,7 +228,7 @@ final class IdentityRepositoryTests: XCTestCase {
             selectionStore: .inMemory()
         )
         _ = try await freshRepo.bootstrap()
-        let reloaded = await freshRepo.currentIdentities()
+        let reloaded = try await freshRepo.currentIdentities()
         XCTAssertEqual(reloaded.first { $0.id == firstID }?.name, "Personal")
         XCTAssertEqual(reloaded.first { $0.id == secondID }?.name, "Work")
     }
@@ -236,7 +236,7 @@ final class IdentityRepositoryTests: XCTestCase {
     func test_rename_trimsWhitespace() async throws {
         let id = try await repo.add(name: "Original")
         try await repo.rename(id, newName: "  Padded   ")
-        let summaries = await repo.currentIdentities()
+        let summaries = try await repo.currentIdentities()
         XCTAssertEqual(summaries.first { $0.id == id }?.name, "Padded")
     }
 
@@ -244,7 +244,7 @@ final class IdentityRepositoryTests: XCTestCase {
         let id = try await repo.add(name: "Keep")
         try await repo.rename(id, newName: "   ")
         try await repo.rename(id, newName: "")
-        let summaries = await repo.currentIdentities()
+        let summaries = try await repo.currentIdentities()
         XCTAssertEqual(summaries.first { $0.id == id }?.name, "Keep")
     }
 

@@ -552,7 +552,7 @@ struct IncomingMessageDispatcher: Sendable {
     private func selfMemberProfileEntry(
         for identityID: IdentityID
     ) async -> (key: String, value: MemberProfile)? {
-        let summaries = await identities.currentIdentities()
+        let summaries = (try? await identities.currentIdentities()) ?? []
         guard let me = summaries.first(where: { $0.id == identityID }) else {
             return nil
         }

@@ -639,8 +639,13 @@ struct OnymIOSApp: App {
                     // the keychain blob outlives the app container).
                     // Each stale entry costs a relay subscription slot
                     // through this pump, forever.
-                    let owners = Set(await identityRepository.currentIdentities().map(\.id))
-                    await introKeyStore.pruneOwners(keeping: owners)
+                    // Skip the prune when the identity load fails —
+                    // an orphaned key surviving until next launch is
+                    // recoverable; pruning against a partial identity
+                    // list would wipe live invite-link inboxes.
+                    if let identities = try? await identityRepository.currentIdentities() {
+                        await introKeyStore.pruneOwners(keeping: Set(identities.map(\.id)))
+                    }
                     let pump = IntroInboxPump(
                         inboxTransport: inboxTransport,
                         store: introRequestStore

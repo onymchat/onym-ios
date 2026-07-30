@@ -53,7 +53,7 @@ final class IdentitiesFlow {
     /// can fire on every view appear without leaking subscribers.
     func start() async {
         guard streamingTask == nil else { return }
-        let initialIdentities = await repository.currentIdentities()
+        let initialIdentities = (try? await repository.currentIdentities()) ?? []
         identities = initialIdentities
         currentID = await repository.currentSelectedID()
 

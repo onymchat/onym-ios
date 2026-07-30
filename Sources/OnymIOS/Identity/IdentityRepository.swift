@@ -221,9 +221,13 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
     }
 
     /// Snapshot of every identity, ordered by insertion. View-safe
-    /// (no secret material).
-    func currentIdentities() -> [IdentitySummary] {
-        orderedIDs.compactMap(summary(for:))
+    /// (no secret material). Loads from the Keychain on first access
+    /// and throws on load failure so callers can tell "no identities"
+    /// apart from "not loaded yet" — destructive callers (intro-key
+    /// pruning) must not treat a failed load as an empty list.
+    func currentIdentities() throws -> [IdentitySummary] {
+        try ensureLoaded()
+        return orderedIDs.compactMap(summary(for:))
     }
 
     /// One-shot accessor for the currently-selected identity's BLS Fr
