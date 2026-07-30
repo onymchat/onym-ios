@@ -815,11 +815,16 @@ struct IncomingMessageDispatcher: Sendable {
             // (`ChatVoiceLoader`).
             voiceAttachment: payload.voiceAttachment
         )
-        await messageRepository.insert(message)
+        let inserted = await messageRepository.insert(message)
 
-        // Ack the sender: delivered now (unconditional — it only reveals
-        // a device received the ciphertext). Read receipts are sent
-        // later, when the user opens the thread.
+        // Ack the sender: delivered now (it only reveals a device
+        // received the ciphertext). Read receipts are sent later, when
+        // the user opens the thread. Only for a NEWLY stored message —
+        // relay reconnects replay the full inbox, and re-acking every
+        // replayed message published a receipt per historical message
+        // on every launch, each becoming a new stored event in the
+        // sender's inbox (snowballing replays for both sides).
+        guard inserted else { return }
         await receiptSender.send(
             kind: .delivered,
             messageIDs: [payload.messageID],
