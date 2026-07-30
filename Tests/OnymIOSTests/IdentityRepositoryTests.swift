@@ -17,7 +17,9 @@ final class IdentityRepositoryTests: XCTestCase {
         )
         repo = IdentityRepository(
             keychain: keychain,
-            selectionStore: .inMemory()
+            selectionStore: .inMemory(),
+            installMarker: .inMemory(initiallySet: true),
+            protectedData: .always
         )
     }
 
@@ -104,7 +106,11 @@ final class IdentityRepositoryTests: XCTestCase {
         let first = try await repo.bootstrap()
 
         // Fresh repo against the same Keychain — should load, not regenerate.
-        let secondRepo = IdentityRepository(keychain: keychain)
+        let secondRepo = IdentityRepository(
+            keychain: keychain,
+            installMarker: .inMemory(initiallySet: true),
+            protectedData: .always
+        )
         let loaded = try await secondRepo.bootstrap()
 
         XCTAssertEqual(first, loaded)
@@ -225,7 +231,9 @@ final class IdentityRepositoryTests: XCTestCase {
         // Survives a full reload from disk.
         let freshRepo = IdentityRepository(
             keychain: keychain,
-            selectionStore: .inMemory()
+            selectionStore: .inMemory(),
+            installMarker: .inMemory(initiallySet: true),
+            protectedData: .always
         )
         _ = try await freshRepo.bootstrap()
         let reloaded = try await freshRepo.currentIdentities()

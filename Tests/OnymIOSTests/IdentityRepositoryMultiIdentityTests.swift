@@ -12,7 +12,12 @@ final class IdentityRepositoryMultiIdentityTests: XCTestCase {
     override func setUp() {
         super.setUp()
         keychain = IdentityKeychainStore(testNamespace: "multi-\(UUID().uuidString)")
-        repo = IdentityRepository(keychain: keychain, selectionStore: .inMemory())
+        repo = IdentityRepository(
+            keychain: keychain,
+            selectionStore: .inMemory(),
+            installMarker: .inMemory(initiallySet: true),
+            protectedData: .always
+        )
     }
 
     override func tearDown() {
@@ -154,7 +159,12 @@ final class IdentityRepositoryMultiIdentityTests: XCTestCase {
         // Create a fresh repo against the same keychain — selection
         // should be restored from the persisted store.
         let selectionStore = SelectedIdentityStore.inMemory(initial: secondID)
-        let revived = IdentityRepository(keychain: keychain, selectionStore: selectionStore)
+        let revived = IdentityRepository(
+            keychain: keychain,
+            selectionStore: selectionStore,
+            installMarker: .inMemory(initiallySet: true),
+            protectedData: .always
+        )
         _ = try await revived.bootstrap()
         let current = try await XCTUnwrapAsync(await revived.currentIdentity())
         let summaries = try await revived.currentIdentities()
@@ -176,7 +186,9 @@ final class IdentityRepositoryMultiIdentityTests: XCTestCase {
         // there wipes every pending invite-link inbox.
         let fresh = IdentityRepository(
             keychain: keychain,
-            selectionStore: .inMemory(initial: selected)
+            selectionStore: .inMemory(initial: selected),
+            installMarker: .inMemory(initiallySet: true),
+            protectedData: .always
         )
         let summaries = try await fresh.currentIdentities()
         XCTAssertEqual(summaries.count, 2,
