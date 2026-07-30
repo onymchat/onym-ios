@@ -21,13 +21,14 @@ actor KeychainIntroKeyStore: IntroKeyStore {
     static let serviceDefault = "app.onym.ios.intro_keys"
     static let account = "blob"
 
-    /// Invite links are short-lived capabilities: entries older than
-    /// this are expired — invisible to `find`/`listForOwner`/streams
-    /// (so the intro pump stops subscribing their inboxes, which each
-    /// cost a relay REQ slot) and compacted out on the next write.
-    /// Without a TTL, every link ever shared kept an inbox subscribed
-    /// forever.
-    static let entryTTL: TimeInterval = 30 * 24 * 60 * 60
+    /// How long an invite link is honored after minting. 24 hours per
+    /// issue onymchat/onym-ios#111 (shrink the leak window of a
+    /// forwarded or screenshotted link) — matches onym-android's
+    /// `IntroKeyEntry.LIFETIME_MILLIS`. Expired entries are invisible
+    /// to `find`/`listForOwner`/streams (so the intro pump stops
+    /// subscribing their inboxes, which each cost a relay REQ slot)
+    /// and compact out of the blob on the next write.
+    static let entryTTL: TimeInterval = 24 * 60 * 60
 
     private let service: String
     /// Per-owner subscriber continuations. Mutations re-emit the
