@@ -5,40 +5,46 @@ import Foundation
 /// Injected into the dispatcher (delivered receipts on receive) and the
 /// chat thread (read receipts on view). Best-effort: a failed seal or
 /// send is swallowed — a missing receipt only costs a check mark, never
-/// correctness.
+/// correctness. Returns whether the transport accepted the publish so
+/// the dispatcher can latch `deliveredAckSent` only on success and
+/// retry the receipt on the next inbox replay otherwise.
 protocol ChatReceiptSending: Sendable {
+    @discardableResult
     func send(
         kind: ChatReceiptPayload.Kind,
         messageIDs: [UUID],
         groupID: Data,
         to recipientInboxKey: Data
-    ) async
+    ) async -> Bool
 }
 
 /// Default no-op so the dispatcher's many test constructions don't have
 /// to thread a receipt sender they don't exercise (same posture as
-/// `pendingInvites` / `groupStateRefresher`).
+/// `pendingInvites` / `groupStateRefresher`). Reports `false` — nothing
+/// was sent, so nothing should be latched as acked.
 struct NoopChatReceiptSender: ChatReceiptSending {
+    @discardableResult
     func send(
         kind: ChatReceiptPayload.Kind,
         messageIDs: [UUID],
         groupID: Data,
         to recipientInboxKey: Data
-    ) async {}
+    ) async -> Bool { false }
 }
 
 struct ChatReceiptSender: ChatReceiptSending {
     let identity: IdentityRepository
     let inboxTransport: any InboxTransport
 
+    @discardableResult
     func send(
         kind: ChatReceiptPayload.Kind,
         messageIDs: [UUID],
         groupID: Data,
         to recipientInboxKey: Data
-    ) async {
-        guard !messageIDs.isEmpty else { return }
-        guard let active = await identity.currentIdentity() else { return }
+    ) async -> Bool {
+        guard !messageIDs.isEmpty else { return false }
+        guard let active = await identity.currentIdentity() else { return false }
         let myBlsHex = active.blsPublicKey.map { String(format: "%02x", $0) }.joined()
         let payload = ChatReceiptPayload(
             version: 1,
@@ -49,9 +55,9 @@ struct ChatReceiptSender: ChatReceiptSending {
         )
         guard let bytes = try? JSONEncoder().encode(payload),
               let sealed = try? await identity.sealInvitation(payload: bytes, to: recipientInboxKey)
-        else { return }
+        else { return false }
         let tag = TransportInboxID(rawValue: Self.inboxTag(from: recipientInboxKey))
-        _ = try? await inboxTransport.send(sealed, to: tag)
+        return (try? await inboxTransport.send(sealed, to: tag)) != nil
     }
 
     /// Same derivation as `SendMessageInteractor` / `IntroInboxPump`.

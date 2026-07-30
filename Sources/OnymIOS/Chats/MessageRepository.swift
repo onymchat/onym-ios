@@ -53,6 +53,25 @@ actor MessageRepository {
         return outcome
     }
 
+    /// Whether the delivered receipt for one incoming row still needs
+    /// to be sent — `true` until `markDeliveredAckSent` latches it.
+    /// See `MessageStore.needsDeliveredAck`.
+    func needsDeliveredAck(id: UUID, owner: IdentityID) async -> Bool {
+        await store.needsDeliveredAck(
+            id: id,
+            ownerIDString: owner.rawValue.uuidString
+        )
+    }
+
+    /// Latch one row's delivered receipt as successfully sent. No
+    /// snapshot refresh — the flag never renders.
+    func markDeliveredAckSent(id: UUID, owner: IdentityID) async {
+        await store.markDeliveredAckSent(
+            id: id,
+            ownerIDString: owner.rawValue.uuidString
+        )
+    }
+
     /// Flip an outgoing message's status (pending → sent / failed).
     /// Hot path for the send pipeline so we don't round-trip the
     /// whole row through the encryption boundary. `failureReason`

@@ -156,7 +156,15 @@ actor SwiftDataMessageStore: MessageStore {
             existing.encryptedVideoAttachmentJSON = encoded.encryptedVideoAttachmentJSON
             existing.encryptedAlbumJSON = encoded.encryptedAlbumJSON
             existing.encryptedVoiceAttachmentJSON = encoded.encryptedVoiceAttachmentJSON
-            try? context.save()
+            do {
+                try context.save()
+            } catch {
+                // Discard the half-mutated row so the context reflects
+                // what's actually on disk; `.failed` keeps the enum's
+                // "nothing was persisted" promise on this path too.
+                context.rollback()
+                return .failed
+            }
             return .updated
         }
 
@@ -170,6 +178,29 @@ actor SwiftDataMessageStore: MessageStore {
             return .failed
         }
         return .inserted
+    }
+
+    func needsDeliveredAck(id: UUID, ownerIDString: String) -> Bool {
+        guard let row = fetchRow(id: id, ownerIDString: ownerIDString) else {
+            return false
+        }
+        return row.deliveredAckSent != true
+    }
+
+    func markDeliveredAckSent(id: UUID, ownerIDString: String) {
+        guard let row = fetchRow(id: id, ownerIDString: ownerIDString) else {
+            return
+        }
+        row.deliveredAckSent = true
+        try? context.save()
+    }
+
+    private func fetchRow(id: UUID, ownerIDString: String) -> PersistedMessage? {
+        let key = id.uuidString
+        let descriptor = FetchDescriptor<PersistedMessage>(
+            predicate: #Predicate { $0.id == key && $0.ownerIdentityIDString == ownerIDString }
+        )
+        return try? context.fetch(descriptor).first
     }
 
     func updateStatus(id: UUID, ownerIDString: String, status: MessageStatus, failureReason: SendFailureReason?) {

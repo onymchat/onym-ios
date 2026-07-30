@@ -444,6 +444,19 @@ private actor InMemoryMessageStore: MessageStore {
         return isNew ? .inserted : .updated
     }
 
+    private var ackedKeys: Set<Key> = []
+
+    func needsDeliveredAck(id: UUID, ownerIDString: String) -> Bool {
+        guard let owner = IdentityID(ownerIDString) else { return false }
+        let key = Key(id: id, owner: owner)
+        return rows[key] != nil && !ackedKeys.contains(key)
+    }
+
+    func markDeliveredAckSent(id: UUID, ownerIDString: String) {
+        guard let owner = IdentityID(ownerIDString) else { return }
+        ackedKeys.insert(Key(id: id, owner: owner))
+    }
+
     func updateStatus(id: UUID, ownerIDString: String, status: MessageStatus, failureReason: SendFailureReason?) {
         guard let owner = IdentityID(ownerIDString) else { return }
         let key = Key(id: id, owner: owner)

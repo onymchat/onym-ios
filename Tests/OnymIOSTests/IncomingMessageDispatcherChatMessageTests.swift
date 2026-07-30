@@ -397,6 +397,58 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
                        "delivered receipt must be addressed to the message sender's inbox")
     }
 
+    func test_replayedChatMessage_retriesDeliveredReceiptUntilAccepted() async throws {
+        let payload = makePayload(body: "hi")
+        let spy = SpyChatReceiptSender()
+        await spy.setAccepts(false)  // relay unreachable on first receive
+        let dispatcher = makeDispatcher(
+            plaintext: try JSONEncoder().encode(payload),
+            envelopeSigner: senderEd25519,
+            receiptSender: spy
+        )
+        await dispatcher.dispatch(
+            messageID: "msg-1",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+        await spy.setAccepts(true)  // relay back for the replay
+        await dispatcher.dispatch(
+            messageID: "msg-1-replay",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+        let sends = await spy.sends
+        XCTAssertEqual(sends.count, 2,
+                       "a replay must retry the receipt while no send has been accepted")
+    }
+
+    func test_replayedChatMessage_doesNotReackOnceReceiptAccepted() async throws {
+        let payload = makePayload(body: "hi")
+        let spy = SpyChatReceiptSender()
+        let dispatcher = makeDispatcher(
+            plaintext: try JSONEncoder().encode(payload),
+            envelopeSigner: senderEd25519,
+            receiptSender: spy
+        )
+        await dispatcher.dispatch(
+            messageID: "msg-1",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+        await dispatcher.dispatch(
+            messageID: "msg-1-replay",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+        let sends = await spy.sends
+        XCTAssertEqual(sends.count, 1,
+                       "an accepted receipt must latch — replays never re-ack (receipt-storm regression)")
+    }
+
     func test_receipt_delivered_raisesOutgoingMessageToDelivered() async throws {
         let outgoingID = UUID()
         await seedOutgoing(id: outgoingID, status: .sent)
@@ -467,13 +519,20 @@ private actor SpyChatReceiptSender: ChatReceiptSending {
         let recipientInboxKey: Data
     }
     private(set) var sends: [Sent] = []
+    /// Whether the spy reports the publish as accepted — `false`
+    /// simulates an unreachable relay so tests can drive the
+    /// replay-retries-unacked-receipt path.
+    var accepts = true
+    func setAccepts(_ value: Bool) { accepts = value }
+    @discardableResult
     func send(
         kind: ChatReceiptPayload.Kind,
         messageIDs: [UUID],
         groupID: Data,
         to recipientInboxKey: Data
-    ) async {
+    ) async -> Bool {
         sends.append(Sent(kind: kind, messageIDs: messageIDs, groupID: groupID, recipientInboxKey: recipientInboxKey))
+        return accepts
     }
 }
 
