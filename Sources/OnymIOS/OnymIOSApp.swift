@@ -633,6 +633,14 @@ struct OnymIOSApp: App {
                     // the outer task restarts via .task { } onChange
                     // semantics in a follow-up. For V1, single-active-
                     // identity pump is sufficient.
+                    // GC intro keys whose owner identity no longer
+                    // exists (identity removed without the cascade
+                    // firing, or orphaned by an app delete/reinstall —
+                    // the keychain blob outlives the app container).
+                    // Each stale entry costs a relay subscription slot
+                    // through this pump, forever.
+                    let owners = Set(await identityRepository.currentIdentities().map(\.id))
+                    await introKeyStore.pruneOwners(keeping: owners)
                     let pump = IntroInboxPump(
                         inboxTransport: inboxTransport,
                         store: introRequestStore

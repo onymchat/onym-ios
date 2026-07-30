@@ -21,6 +21,14 @@ actor KeychainIntroKeyStore: IntroKeyStore {
     static let serviceDefault = "app.onym.ios.intro_keys"
     static let account = "blob"
 
+    /// Invite links are short-lived capabilities: entries older than
+    /// this are expired — invisible to `find`/`listForOwner`/streams
+    /// (so the intro pump stops subscribing their inboxes, which each
+    /// cost a relay REQ slot) and compacted out on the next write.
+    /// Without a TTL, every link ever shared kept an inbox subscribed
+    /// forever.
+    static let entryTTL: TimeInterval = 30 * 24 * 60 * 60
+
     private let service: String
     /// Per-owner subscriber continuations. Mutations re-emit the
     /// filtered+sorted snapshot to every subscriber whose owner
@@ -81,6 +89,20 @@ actor KeychainIntroKeyStore: IntroKeyStore {
             publish(forOwner: ownerIdentityID)
         }
         return removed
+    }
+
+    @discardableResult
+    func pruneOwners(keeping owners: Set<IdentityID>) async -> Int {
+        let keep = Set(owners.map { $0.rawValue.uuidString })
+        var current = loadAll()
+        let orphaned = current.filter { !keep.contains($0.ownerIdentityID) }
+        guard !orphaned.isEmpty else { return 0 }
+        current.removeAll { !keep.contains($0.ownerIdentityID) }
+        writeAll(current)
+        for owner in Set(orphaned.compactMap { IdentityID($0.ownerIdentityID) }) {
+            publish(forOwner: owner)
+        }
+        return orphaned.count
     }
 
     nonisolated func entriesStream(forOwner ownerIdentityID: IdentityID) -> AsyncStream<[IntroKeyEntry]> {
@@ -146,7 +168,12 @@ actor KeychainIntroKeyStore: IntroKeyStore {
         // because this store holds ephemeral per-invite keys; if we
         // lose them, the worst that happens is in-flight invites
         // fail to deliver and the inviter re-shares.
-        return (try? JSONDecoder().decode(StoredIntroKeysBlob.self, from: data))?.entries ?? []
+        let entries = (try? JSONDecoder().decode(StoredIntroKeysBlob.self, from: data))?.entries ?? []
+        // TTL filter at the single load point so expired entries are
+        // invisible to every reader; the next writeAll compacts them
+        // out of the blob.
+        let cutoff = Int64((Date().timeIntervalSince1970 - Self.entryTTL) * 1000)
+        return entries.filter { $0.createdAtMillis > cutoff }
     }
 
     private func writeAll(_ entries: [StoredIntroKey]) {

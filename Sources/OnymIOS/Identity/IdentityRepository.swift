@@ -28,6 +28,7 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
 
     private let keychain: IdentityKeychainStore
     private let selectionStore: SelectedIdentityStore
+    private let installMarker: InstallMarker
 
     /// In-memory cache of every identity loaded from the keychain.
     /// Repopulated lazily on first access via `ensureLoaded()`.
@@ -44,10 +45,12 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
 
     init(
         keychain: IdentityKeychainStore = IdentityKeychainStore(),
-        selectionStore: SelectedIdentityStore = .userDefaults
+        selectionStore: SelectedIdentityStore = .userDefaults,
+        installMarker: InstallMarker = .userDefaults
     ) {
         self.keychain = keychain
         self.selectionStore = selectionStore
+        self.installMarker = installMarker
     }
 
     // MARK: - Bootstrap / lifecycle
@@ -530,6 +533,7 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
     private func ensureLoaded() throws {
         guard !loaded else { return }
         loaded = true
+        try reconcileFreshInstall()
         let ids = try keychain.list()
         // Stable order — UUIDs sort lexically. The picker also re-sorts
         // by name, so this is just a determinism guarantee for the
@@ -548,6 +552,28 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
             currentID = orderedIDs.first
             if currentID != nil { persistSelection() }
         }
+    }
+
+    /// Keychain items survive app uninstall while UserDefaults dies
+    /// with the container — so identities from every previous install
+    /// silently resurrect into the picker and the inbox fan-out.
+    /// "Install marker absent" alone can't distinguish a fresh install
+    /// from an app UPDATE that predates the marker, so the persisted
+    /// identity selection doubles as the legacy-install signal:
+    ///
+    /// - marker present            → normal launch, nothing to do
+    /// - no marker, selection set  → update of an existing install:
+    ///   stamp the marker, keep everything
+    /// - no marker, no selection   → fresh install: any identity items
+    ///   in the keychain are orphans of a deleted install — wipe them.
+    ///   The user's path back to an identity is the recovery phrase,
+    ///   not an invisible keychain remnant.
+    private func reconcileFreshInstall() throws {
+        guard !installMarker.exists() else { return }
+        if selectionStore.load() == nil {
+            try keychain.wipeAll()
+        }
+        installMarker.set()
     }
 
     /// Mints a fresh BIP39 identity (or restores from `mnemonic` when
@@ -799,7 +825,43 @@ struct SelectedIdentityStore: Sendable {
             get { lock.withLock { _value } }
             set { lock.withLock { _value = newValue } }
         }
-        init(value: IdentityID?) { self._value = value }
+        init(value: IdentityID?) { _value = value }
+    }
+}
+
+/// First-run marker distinguishing a fresh install from a relaunch.
+/// Lives in UserDefaults precisely BECAUSE UserDefaults dies with the
+/// app container on uninstall while keychain items do not — "marker
+/// absent" is the fresh-install signal `reconcileFreshInstall()` keys
+/// off.
+struct InstallMarker: Sendable {
+    let exists: @Sendable () -> Bool
+    let set: @Sendable () -> Void
+
+    static let userDefaults: InstallMarker = {
+        let key = "app.onym.ios.identity.installMarker"
+        return InstallMarker(
+            exists: { UserDefaults.standard.bool(forKey: key) },
+            set: { UserDefaults.standard.set(true, forKey: key) }
+        )
+    }()
+
+    static func inMemory(initiallySet: Bool = false) -> InstallMarker {
+        let box = BoolBox(value: initiallySet)
+        return InstallMarker(
+            exists: { box.value },
+            set: { box.value = true }
+        )
+    }
+
+    private final class BoolBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _value: Bool
+        var value: Bool {
+            get { lock.withLock { _value } }
+            set { lock.withLock { _value = newValue } }
+        }
+        init(value: Bool) { _value = value }
     }
 }
 
