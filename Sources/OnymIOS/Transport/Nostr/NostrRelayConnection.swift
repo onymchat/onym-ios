@@ -17,6 +17,10 @@ actor NostrRelayConnection {
     private var pendingOKContinuations: [String: CheckedContinuation<Bool, any Error>] = [:]
     private var pingTask: Task<Void, Never>?
     private var onOKCallback: ((String, Bool) -> Void)?
+    /// Sticky connection intent. Set by `connect()`/`disconnect()` and
+    /// checked by a receive loop waking from its backoff sleep, so an
+    /// explicitly dropped connection can never resurrect itself.
+    private var desiredConnected = false
 
     func setOnOK(_ callback: @escaping (String, Bool) -> Void) {
         onOKCallback = callback
@@ -39,13 +43,13 @@ actor NostrRelayConnection {
     }
 
     func connect() {
+        desiredConnected = true
         guard webSocketTask == nil else { return }
         let task = session.webSocketTask(with: url)
         self.webSocketTask = task
         task.resume()
         isConnected = true
-        reconnectAttempts = 0
-        Task { await receiveLoop() }
+        Task { await receiveLoop(task: task) }
         startHeartbeat()
 
         for (subID, (filter, _)) in subscriptions {
@@ -63,6 +67,7 @@ actor NostrRelayConnection {
     }
 
     func disconnect() {
+        desiredConnected = false
         pingTask?.cancel()
         pingTask = nil
         webSocketTask?.cancel(with: .normalClosure, reason: nil)
@@ -174,11 +179,21 @@ actor NostrRelayConnection {
         }
     }
 
-    private func receiveLoop() async {
-        while isConnected {
-            guard let task = webSocketTask else { break }
+    /// Each loop is bound to the socket it was spawned for and exits the
+    /// moment `webSocketTask` no longer points at it. Exactly one loop
+    /// ever calls `receive()` on a given socket, and a stale loop can
+    /// never cancel a successor's socket while a receive is pending —
+    /// the same CFNetwork use-after-free family as the `sendPing` crash
+    /// documented above `startHeartbeat()`.
+    private func receiveLoop(task: URLSessionWebSocketTask) async {
+        while isConnected, webSocketTask === task {
             do {
                 let message = try await task.receive()
+                // A delivered frame proves the connection is healthy.
+                // Resetting here instead of in connect() keeps the
+                // backoff escalating for a relay that dies during the
+                // handshake, rather than retrying it every second.
+                reconnectAttempts = 0
                 let text: String
                 switch message {
                 case .string(let s): text = s
@@ -187,10 +202,11 @@ actor NostrRelayConnection {
                 }
                 handleMessage(text)
             } catch {
+                guard webSocketTask === task else { return }
                 pingTask?.cancel()
                 pingTask = nil
                 isConnected = false
-                webSocketTask?.cancel(with: .abnormalClosure, reason: nil)
+                task.cancel(with: .abnormalClosure, reason: nil)
                 webSocketTask = nil
                 reconnectAttempts += 1
                 let delay = min(
@@ -198,6 +214,9 @@ actor NostrRelayConnection {
                     Self.baseReconnectDelay * pow(2.0, Double(min(reconnectAttempts - 1, 6)))
                 )
                 try? await Task.sleep(for: .seconds(delay))
+                // disconnect() may have run during the backoff sleep —
+                // a dropped connection must stay dropped.
+                guard desiredConnected, webSocketTask == nil else { return }
                 connect()
                 return
             }
