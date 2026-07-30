@@ -126,7 +126,8 @@ struct ChatThreadView: View {
             voiceLoader: voiceLoader,
             pendingMedia: pendingMedia.map { (id: $0.id, thumbnail: $0.thumbnail) },
             onSendMedia: { handleSendPendingMedia() },
-            onRemovePendingMedia: { id in pendingMedia.removeAll { $0.id == id } }
+            onRemovePendingMedia: { id in pendingMedia.removeAll { $0.id == id } },
+            onMessagesSeen: handleMessagesSeen
         )
         // One combined picker for photos + videos. Each pick is classified
         // in `onChange` by its content type.
@@ -255,25 +256,37 @@ struct ChatThreadView: View {
             else { return }
             for await snapshot in messageRepository.snapshots(groupID: groupID, owner: owner) {
                 messages = snapshot
-                // Read receipts: the thread is on-screen (this task is
-                // tied to its lifetime), so any incoming message here is
-                // "read". Gated by the symmetric setting, batched per
-                // sender, and de-duped via `ackedReadIDs`.
-                await sendReadReceipts(for: snapshot)
-                // Clear the chat-list unread badge: mark the group read up
-                // to the newest message the user is now looking at. No-op
-                // in the repo when it isn't newer than the stored marker.
-                if let newest = snapshot.map(\.sentAt).max() {
-                    await chatsFlow.markRead(groupID: groupID, upTo: newest)
-                }
+                // NB: read receipts + unread-badge clearing deliberately
+                // do NOT happen here. A snapshot reaching this task only
+                // proves the data arrived — not that a person saw it
+                // (app may be backgrounded, message below the fold).
+                // Both are driven by `handleMessagesSeen`, fed by the
+                // controller when bubbles are actually rendered on an
+                // active screen.
             }
         }
     }
 
-    /// Emit `.read` receipts for incoming messages the user is now
-    /// looking at. No-op when the setting is off. Groups unacked
-    /// incoming IDs by sender and ships one receipt per sender to that
-    /// sender's inbox key (resolved from the group's member profiles).
+    /// Render-acknowledged "seen" handler: the controller reports
+    /// incoming messages whose bubbles were actually painted on an
+    /// active screen. Ship `.read` receipts for them and clear the
+    /// chat-list unread badge up to the newest seen message — both now
+    /// mean what they say.
+    private func handleMessagesSeen(_ seen: [ChatMessage]) {
+        let chatsFlow = chatsFlow
+        let groupID = groupID
+        Task {
+            await sendReadReceipts(for: seen)
+            if let newest = seen.map(\.sentAt).max() {
+                await chatsFlow.markRead(groupID: groupID, upTo: newest)
+            }
+        }
+    }
+
+    /// Emit `.read` receipts for incoming messages the user has now
+    /// seen. No-op when the setting is off. Groups unacked incoming IDs
+    /// by sender and ships one receipt per sender to that sender's
+    /// inbox key (resolved from the group's member profiles).
     private func sendReadReceipts(for snapshot: [ChatMessage]) async {
         guard ReadReceiptsPreference.isEnabled else { return }
         guard let group = chatsFlow.groups.first(where: { $0.id == groupID }) else { return }
@@ -400,6 +413,7 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
     let pendingMedia: [(id: UUID, thumbnail: UIImage)]
     let onSendMedia: () -> Void
     let onRemovePendingMedia: (UUID) -> Void
+    let onMessagesSeen: ([ChatMessage]) -> Void
 
     func makeUIViewController(context: Context) -> ChatThreadViewController {
         let vc = ChatThreadViewController()
@@ -447,6 +461,7 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         vc.voiceLoader = voiceLoader
         vc.onSendMedia = onSendMedia
         vc.onRemovePendingMedia = onRemovePendingMedia
+        vc.onMessagesSeen = onMessagesSeen
         vc.update(memberProfiles: memberProfiles)
         vc.update(invitationMessage: invitationMessage)
         vc.update(messages: messages)
