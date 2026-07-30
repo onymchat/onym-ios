@@ -29,7 +29,10 @@ import os.log
 ///  - A subscription is one `REQ` carrying *all* of its filters (NIP-01
 ///    dedups within a subscription) — never one REQ per filter, which
 ///    multiplied subscription count 3× and tripped relay
-///    `maxSubsPerConnection` caps.
+///    `maxSubsPerConnection` caps. The connection's relay-side budget is
+///    `subscriptions.count + 1`: the liveness probe holds one extra sub
+///    slot for the connection's lifetime (it is never CLOSEd — its
+///    periodic re-REQ replaces itself in place).
 ///  - `CLOSED` is handled, not ignored: first CLOSED for a live
 ///    subscription re-REQs it once; a repeat within the same connection
 ///    generation treats the connection as unhealthy and rebuilds. A
@@ -58,7 +61,18 @@ actor NostrRelayConnection {
     private var lastActivityAt = Date()
     /// Subscription ids already re-REQ'd after a CLOSED in the current
     /// generation. A second CLOSED for the same id escalates to a rebuild.
+    /// An id is removed again when its subscription is confirmed accepted
+    /// (EOSE/EVENT lands for it), so benign CLOSEDs hours apart on a
+    /// long-lived socket don't accumulate into a spurious rebuild.
     private var closedRetriedSubIDs: Set<String> = []
+    /// Consecutive rebuilds caused by repeated CLOSED. Deliberately NOT
+    /// reset by frame arrival (a CLOSED-spewing relay still sends
+    /// frames — that's what made the naive backoff hot-loop at ~1 Hz);
+    /// reset only when a subscription is confirmed accepted (EOSE/EVENT
+    /// for a live subID). Feeds the failure funnel's backoff so a
+    /// persistently rejected subscription escalates to `maxReconnectDelay`
+    /// instead of hammering the relay.
+    private var closedRebuilds = 0
 
     func setOnOK(_ callback: @escaping (String, Bool) -> Void) {
         onOKCallback = callback
@@ -269,7 +283,18 @@ actor NostrRelayConnection {
         guard let data = try? JSONSerialization.data(withJSONObject: frame),
               let string = String(data: data, encoding: .utf8)
         else { return }
-        Task { try? await webSocketTask?.send(.string(string)) }
+        // A REQ lost on a wounded socket is a deaf subscription for up
+        // to `livenessTimeout` — route the send failure into the failure
+        // funnel instead of waiting for the staleness check to notice.
+        let generation = connectionGeneration
+        Task { [weak self, webSocketTask] in
+            do {
+                guard let task = webSocketTask else { return }
+                try await task.send(.string(string))
+            } catch {
+                await self?.handleConnectionFailure(generation: generation)
+            }
+        }
     }
 
     private func replaySubscriptions(generation: UInt64) {
@@ -284,9 +309,18 @@ actor NostrRelayConnection {
             guard let task = webSocketTask else { return }
             do {
                 let message = try await task.receive()
+                // The generation may have advanced while `receive()` was
+                // suspended (a forced reconnect raced an in-flight
+                // frame). A stale frame must not refresh the NEW
+                // generation's liveness clock or backoff state.
+                guard generation == connectionGeneration else { return }
                 lastActivityAt = Date()
                 // A frame arrived — the connection is confirmed live.
-                // This (and only this) resets the backoff counter.
+                // This (and only this) resets the error backoff. NB it
+                // deliberately does NOT reset `closedRebuilds`: a relay
+                // that keeps rejecting our REQs still sends frames
+                // (CLOSEDs), and treating those as health is what made
+                // the CLOSED path hot-loop.
                 reconnectAttempts = 0
                 let text: String
                 switch message {
@@ -304,23 +338,31 @@ actor NostrRelayConnection {
 
     /// Single funnel for "this socket is dead, rebuild it". Guarded by
     /// the connection generation so a stale receive loop or liveness
-    /// monitor firing after a newer connect() is a no-op. Sleeps out the
-    /// backoff (escalating only while no frame has confirmed the
-    /// connection live) before reconnecting.
+    /// monitor firing after a newer connect() is a no-op; the generation
+    /// is bumped on entry so two failure paths for the same generation
+    /// (liveness + receive-loop catch, interleaved across the backoff
+    /// sleep) can't both run — the second is guarded out. Backoff uses
+    /// the max of the error counter and the CLOSED-rebuild counter, so
+    /// a persistently rejected subscription escalates to
+    /// `maxReconnectDelay` even though its socket "successfully"
+    /// receives CLOSED frames.
     private func handleConnectionFailure(generation: UInt64) async {
         guard generation == connectionGeneration else { return }
+        connectionGeneration &+= 1
+        let rebuildGeneration = connectionGeneration
         livenessTask?.cancel()
         livenessTask = nil
         isConnected = false
         webSocketTask?.cancel(with: .abnormalClosure, reason: nil)
         webSocketTask = nil
         reconnectAttempts += 1
+        let effectiveAttempts = max(reconnectAttempts, closedRebuilds)
         let delay = min(
             maxReconnectDelay,
-            baseReconnectDelay * pow(2.0, Double(min(reconnectAttempts - 1, 6)))
+            baseReconnectDelay * pow(2.0, Double(min(effectiveAttempts - 1, 6)))
         )
         try? await Task.sleep(for: .seconds(delay))
-        guard generation == connectionGeneration else { return }
+        guard rebuildGeneration == connectionGeneration else { return }
         connect()
     }
 
@@ -403,10 +445,24 @@ actor NostrRelayConnection {
             if let event = parseEvent(eventObj),
                let entry = subscriptions[subID]
             {
+                // Same acceptance proof as EOSE: events flowing for a
+                // subscription mean its REQ stuck.
+                closedRebuilds = 0
+                closedRetriedSubIDs.remove(subID)
                 entry.callback(event)
             }
         case "EOSE":
-            break
+            // EOSE for one of OUR subscriptions proves the relay accepted
+            // its REQ: the CLOSED bookkeeping resets. `closedRebuilds`
+            // stops escalating (the condition cleared), and the sub's
+            // retried flag decays so a benign CLOSED hours from now gets
+            // a fresh retry instead of an immediate rebuild.
+            if array.count >= 2,
+               let subID = array[1] as? String,
+               subscriptions[subID] != nil {
+                closedRebuilds = 0
+                closedRetriedSubIDs.remove(subID)
+            }
         case "OK":
             if array.count >= 3,
                let eventID = array[1] as? String,
@@ -430,6 +486,13 @@ actor NostrRelayConnection {
             guard let entry = subscriptions[subID] else { return }
             if closedRetriedSubIDs.contains(subID) {
                 Self.securityLogger.warning("Relay repeatedly closed a subscription; rebuilding connection: \(self.url.absoluteString, privacy: .public)")
+                // Escalating counter that SURVIVES the rebuild and is
+                // immune to frame arrival (see `closedRebuilds`) — a
+                // persistently rejected subscription backs off to
+                // `maxReconnectDelay` instead of hot-looping at
+                // `baseReconnectDelay` (the relay's own CLOSED frames
+                // would otherwise keep resetting the error backoff).
+                closedRebuilds += 1
                 Task { await handleConnectionFailure(generation: generation) }
             } else {
                 closedRetriedSubIDs.insert(subID)

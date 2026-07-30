@@ -58,12 +58,19 @@ final class NostrInboxTransport: InboxTransport {
     }
 
     func subscribe(inbox: TransportInboxID) -> AsyncStream<InboundInbox> {
-        AsyncStream<InboundInbox> { continuation in
+        // Per-stream token: this stream's termination may fire *after* a
+        // newer subscription for the same inbox has been installed
+        // (re-subscribe on identity rebalance / pump restart). Cleanup
+        // is token-guarded so the stale termination can't tear down the
+        // fresh subscription — the same race the per-generation subIDs
+        // close at the relay-connection level.
+        let token = UUID()
+        return AsyncStream<InboundInbox> { continuation in
             Task { [state] in
-                await state.subscribe(inbox: inbox, continuation: continuation)
+                await state.subscribe(inbox: inbox, token: token, continuation: continuation)
             }
             continuation.onTermination = { @Sendable [state] _ in
-                Task { await state.unsubscribe(inbox: inbox) }
+                Task { await state.unsubscribe(inbox: inbox, ifToken: token) }
             }
         }
     }
@@ -97,7 +104,15 @@ final class NostrInboxTransport: InboxTransport {
 
     fileprivate actor State {
         private var connections: [URL: NostrRelayConnection] = [:]
-        private var activeSubscriptions: [TransportInboxID: Task<Void, Never>] = [:]
+        /// Live per-inbox subscription: the pump task plus the stream
+        /// token that owns it (see `subscribe`'s token guard).
+        private var activeSubscriptions: [TransportInboxID: (token: UUID, task: Task<Void, Never>)] = [:]
+        /// Monotonic counter for relay subscription IDs. Each subscribe
+        /// gets a unique id so an old stream's asynchronous
+        /// `onTermination` CLOSE can't tear down a freshly opened REQ
+        /// for the same inbox — the exact race `NostrMessageTransport`
+        /// already guards against with its own generation counter.
+        private var subscriptionGeneration: UInt64 = 0
 
         func connect(to endpoints: [TransportEndpoint]) async {
             for endpoint in endpoints {
@@ -110,8 +125,8 @@ final class NostrInboxTransport: InboxTransport {
         }
 
         func disconnect() async {
-            for task in activeSubscriptions.values {
-                task.cancel()
+            for entry in activeSubscriptions.values {
+                entry.task.cancel()
             }
             activeSubscriptions.removeAll()
             for conn in connections.values {
@@ -171,10 +186,12 @@ final class NostrInboxTransport: InboxTransport {
 
         func subscribe(
             inbox: TransportInboxID,
+            token: UUID,
             continuation: AsyncStream<InboundInbox>.Continuation
         ) {
-            activeSubscriptions[inbox]?.cancel()
-            let subID = "inbox-\(inbox.rawValue)"
+            activeSubscriptions[inbox]?.task.cancel()
+            subscriptionGeneration += 1
+            let subID = "inbox-\(inbox.rawValue)-\(subscriptionGeneration)"
             let filters = NostrInboxTransport.subscriptionFilters(inbox: inbox.rawValue)
             let conns = Array(connections.values)
 
@@ -207,12 +224,24 @@ final class NostrInboxTransport: InboxTransport {
                     }
                 }
             }
-            activeSubscriptions[inbox] = task
+            activeSubscriptions[inbox] = (token: token, task: task)
         }
 
+        /// Deliberate unsubscribe (protocol surface): unconditional.
         func unsubscribe(inbox: TransportInboxID) {
-            activeSubscriptions[inbox]?.cancel()
+            activeSubscriptions[inbox]?.task.cancel()
             activeSubscriptions.removeValue(forKey: inbox)
+        }
+
+        /// Stream-termination cleanup: only tears down the subscription
+        /// the terminating stream actually owns. A stale termination
+        /// (its inbox was re-subscribed and a newer stream installed)
+        /// is a no-op — without this guard the old stream's async
+        /// cleanup cancelled the fresh subscription and the inbox went
+        /// silently deaf.
+        func unsubscribe(inbox: TransportInboxID, ifToken token: UUID) {
+            guard activeSubscriptions[inbox]?.token == token else { return }
+            unsubscribe(inbox: inbox)
         }
     }
 }
