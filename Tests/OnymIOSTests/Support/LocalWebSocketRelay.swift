@@ -25,9 +25,25 @@ final class LocalWebSocketRelay: @unchecked Sendable {
     private var recordedREQs: [(subID: String, filters: [[String: Any]])] = []
     /// Events "stored" on the relay, keyed by the subID they replay under.
     private var storedBySubID: [String: [String]] = [:]
+    /// Backing storage for the response-mode flags; written by test
+    /// threads, read on the listener queue — lock-guarded.
+    private var _autoRespondEOSE = true
+    private var _autoCLOSESubscriptions = false
+
     /// When false, the relay answers nothing at all (no EOSE, no stored
     /// replay) — a healthy-looking but silent peer.
-    var autoRespondEOSE = true
+    var autoRespondEOSE: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _autoRespondEOSE }
+        set { lock.lock(); defer { lock.unlock() }; _autoRespondEOSE = newValue }
+    }
+
+    /// When true, every non-probe REQ is answered with
+    /// `["CLOSED", subID, …]` — a relay that persistently rejects the
+    /// subscription (e.g. a maxSubsPerConnection cap).
+    var autoCLOSESubscriptions: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _autoCLOSESubscriptions }
+        set { lock.lock(); defer { lock.unlock() }; _autoCLOSESubscriptions = newValue }
+    }
 
     init() throws {
         let params = NWParameters.tcp
@@ -74,6 +90,18 @@ final class LocalWebSocketRelay: @unchecked Sendable {
     func reqs(subID: String) -> [[[String: Any]]] {
         lock.lock(); defer { lock.unlock() }
         return recordedREQs.filter { $0.subID == subID }.map(\.filters)
+    }
+
+    /// All recorded (non-probe) subscription ids, in arrival order.
+    func recordedSubIDs() -> [String] {
+        lock.lock(); defer { lock.unlock() }
+        return recordedREQs.map(\.subID)
+    }
+
+    /// The most recently REQ'd (non-probe) subscription id.
+    func lastRecordedSubID() -> String? {
+        lock.lock(); defer { lock.unlock() }
+        return recordedREQs.last?.subID
     }
 
     @discardableResult
@@ -131,9 +159,12 @@ final class LocalWebSocketRelay: @unchecked Sendable {
 
     private func receive(on connection: NWConnection) {
         connection.receiveMessage { [weak self] data, _, isComplete, error in
-            guard let self, error == nil, isComplete else { return }
-            if let data { self.handleFrame(data, on: connection) }
+            guard let self, error == nil else { return }
+            // Re-arm FIRST: a non-final or unparseable frame must not
+            // silently kill the read loop mid-test.
             self.receive(on: connection)
+            guard isComplete, let data else { return }
+            self.handleFrame(data, on: connection)
         }
     }
 
@@ -152,9 +183,14 @@ final class LocalWebSocketRelay: @unchecked Sendable {
             recordedREQs.append((subID: subID, filters: filters))
         }
         let stored = storedBySubID[subID] ?? []
-        let respond = autoRespondEOSE
+        let respond = _autoRespondEOSE
+        let reject = _autoCLOSESubscriptions && subID != "__onym_hb"
         lock.unlock()
 
+        if reject {
+            push("[\"CLOSED\",\"\(subID)\",\"error: too many concurrent REQs\"]")
+            return
+        }
         guard respond else { return }
         for eventJSON in stored {
             push("[\"EVENT\",\"\(subID)\",\(eventJSON)]")
