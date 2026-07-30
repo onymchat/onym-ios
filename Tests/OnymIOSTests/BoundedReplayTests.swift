@@ -169,9 +169,10 @@ final class BoundedReplayTests: XCTestCase {
 
         try await relay.waitForREQs(1)
         // The harness event's created_at is 1_700_000_000; content must
-        // be base64 for the transport to yield it.
+        // be base64 for the transport to yield it. Push to the subID the
+        // transport actually REQ'd (generation-suffixed).
         relay.push(LocalWebSocketRelay.eventFrame(
-            subID: "inbox-abcd1234", kind: 34113,
+            subID: relay.lastRecordedSubID()!, kind: 34113,
             content: Data("hello".utf8).base64EncodedString(),
             tag: ("d", "sep-inbox:abcd1234")
         ))
