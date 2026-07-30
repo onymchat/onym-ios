@@ -62,14 +62,9 @@ protocol IntroKeyStore: Sendable {
     /// removed through the app — identities orphaned by an app
     /// delete/reinstall never cascade, and their intro keys would keep
     /// consuming a relay subscription slot each forever. Returns the
-    /// count of entries removed.
+    /// count of entries removed. No default implementation on purpose:
+    /// a real store that forgot GC would otherwise compile fine and
+    /// silently never collect.
     @discardableResult
     func pruneOwners(keeping owners: Set<IdentityID>) async -> Int
-}
-
-extension IntroKeyStore {
-    /// Default no-op so lightweight conformers (test doubles) don't
-    /// need GC behavior.
-    @discardableResult
-    func pruneOwners(keeping owners: Set<IdentityID>) async -> Int { 0 }
 }

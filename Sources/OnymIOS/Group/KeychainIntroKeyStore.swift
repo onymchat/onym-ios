@@ -27,7 +27,8 @@ actor KeychainIntroKeyStore: IntroKeyStore {
     /// `IntroKeyEntry.LIFETIME_MILLIS`. Expired entries are invisible
     /// to `find`/`listForOwner`/streams (so the intro pump stops
     /// subscribing their inboxes, which each cost a relay REQ slot)
-    /// and compact out of the blob on the next write.
+    /// and are compacted out of the blob by the load that first sees
+    /// them expired.
     static let entryTTL: TimeInterval = 24 * 60 * 60
 
     private let service: String
@@ -171,10 +172,16 @@ actor KeychainIntroKeyStore: IntroKeyStore {
         // fail to deliver and the inviter re-shares.
         let entries = (try? JSONDecoder().decode(StoredIntroKeysBlob.self, from: data))?.entries ?? []
         // TTL filter at the single load point so expired entries are
-        // invisible to every reader; the next writeAll compacts them
-        // out of the blob.
+        // invisible to every reader.
         let cutoff = Int64((Date().timeIntervalSince1970 - Self.entryTTL) * 1000)
-        return entries.filter { $0.createdAtMillis > cutoff }
+        let live = entries.filter { $0.createdAtMillis > cutoff }
+        // Compact immediately: expired rows carry intro PRIVATE keys,
+        // and a read-only workload would otherwise leave them at rest
+        // indefinitely waiting for a mutation to rewrite the blob.
+        if live.count != entries.count {
+            writeAll(live)
+        }
+        return live
     }
 
     private func writeAll(_ entries: [StoredIntroKey]) {
