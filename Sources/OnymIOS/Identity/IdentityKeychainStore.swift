@@ -48,6 +48,14 @@ struct IdentityKeychainStore: Sendable {
     /// back doesn't need to remember it.
     static let account = "current"
 
+    /// Service-name prefix for quarantined items. Deliberately NOT an
+    /// extension of `servicePrefix` so `list()`/`read()` can never see
+    /// a quarantined identity. Items land here instead of being
+    /// destroyed when `reconcileFreshInstall()` decides they're
+    /// orphans of a deleted install — that verdict rests on soft
+    /// UserDefaults signals, so the key material must survive it.
+    static let quarantineServicePrefix = "app.onym.ios.identity-quarantine."
+
     /// Optional injection seam for tests — production uses the default
     /// init which targets the real Keychain. Tests pass a `serviceSuffix`
     /// override that namespaces test runs and lets `wipeAll` clean up
@@ -149,25 +157,17 @@ struct IdentityKeychainStore: Sendable {
         }
     }
 
-    /// Drop every per-identity item — used by tests in `tearDown` and
-    /// (eventually) the user-facing "reset all identities" flow.
+    /// Drop every per-identity item, active AND quarantined — used by
+    /// tests in `tearDown` and (eventually) the user-facing "reset all
+    /// identities" flow.
     func wipeAll() throws {
-        let prefix = servicePrefix(for: testNamespace)
-        let listQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecReturnAttributes as String: true,
-            kSecMatchLimit as String: kSecMatchLimitAll,
+        let prefixes = [
+            servicePrefix(for: testNamespace),
+            quarantinePrefix(for: testNamespace),
         ]
-        var result: AnyObject?
-        let status = SecItemCopyMatching(listQuery as CFDictionary, &result)
-        if status == errSecItemNotFound { return }
-        guard status == errSecSuccess, let items = result as? [[String: Any]] else {
-            if status == errSecSuccess { return }
-            throw IdentityError.keychainRead(status)
-        }
-        for attrs in items {
+        for attrs in try listAllItems() {
             guard let service = attrs[kSecAttrService as String] as? String,
-                  service.hasPrefix(prefix)
+                  prefixes.contains(where: { service.hasPrefix($0) })
             else { continue }
             let deleteQuery: [String: Any] = [
                 kSecClass as String: kSecClassGenericPassword,
@@ -181,13 +181,89 @@ struct IdentityKeychainStore: Sendable {
         }
     }
 
+    /// Move every active per-identity item into the quarantine
+    /// namespace instead of destroying it. Quarantined items are
+    /// invisible to `list()`/`read()` (the picker, the inbox fan-out)
+    /// but the secret material stays at rest, so a wrong "fresh
+    /// install" verdict is recoverable rather than fatal.
+    func quarantineAll() throws {
+        let activePrefix = servicePrefix(for: testNamespace)
+        let targetPrefix = quarantinePrefix(for: testNamespace)
+        for attrs in try listAllItems() {
+            guard let service = attrs[kSecAttrService as String] as? String,
+                  service.hasPrefix(activePrefix)
+            else { continue }
+            let suffix = String(service.dropFirst(activePrefix.count))
+            let query: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: Self.account,
+            ]
+            let rename: [String: Any] = [
+                kSecAttrService as String: targetPrefix + suffix,
+            ]
+            let status = SecItemUpdate(query as CFDictionary, rename as CFDictionary)
+            if status == errSecDuplicateItem {
+                // A previous quarantine of this same id already holds a
+                // copy — keeping it is enough; drop the active twin.
+                let deleteStatus = SecItemDelete(query as CFDictionary)
+                guard deleteStatus == errSecSuccess || deleteStatus == errSecItemNotFound else {
+                    throw IdentityError.keychainDelete(deleteStatus)
+                }
+                continue
+            }
+            guard status == errSecSuccess || status == errSecItemNotFound else {
+                throw IdentityError.keychainWrite(status)
+            }
+        }
+    }
+
+    /// Every quarantined identity id — surfaced so a future recovery /
+    /// support flow can offer them back to the user.
+    func listQuarantined() throws -> [IdentityID] {
+        let prefix = quarantinePrefix(for: testNamespace)
+        return try listAllItems().compactMap { attrs in
+            guard let service = attrs[kSecAttrService as String] as? String,
+                  service.hasPrefix(prefix)
+            else { return nil }
+            return IdentityID(String(service.dropFirst(prefix.count)))
+        }
+    }
+
     // MARK: - Private
+
+    /// One `SecItemCopyMatching` over every generic-password item;
+    /// callers filter by service prefix. Returns `[]` when the
+    /// keychain is empty.
+    private func listAllItems() throws -> [[String: Any]] {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll,
+        ]
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound { return [] }
+        guard status == errSecSuccess else {
+            throw IdentityError.keychainRead(status)
+        }
+        return (result as? [[String: Any]]) ?? []
+    }
 
     /// Per-identity service name. Tests override the prefix via
     /// `testNamespace` so concurrent test runs don't stomp on each
     /// other's keychain entries.
     private func service(for id: IdentityID) -> String {
         servicePrefix(for: testNamespace) + id.rawValue.uuidString
+    }
+
+    /// Quarantine analogue of `servicePrefix(for:)` — same namespacing
+    /// rule so tests quarantine into their own sandbox too.
+    private func quarantinePrefix(for namespace: String?) -> String {
+        if let namespace, !namespace.isEmpty {
+            return "\(Self.quarantineServicePrefix)\(namespace)."
+        }
+        return Self.quarantineServicePrefix
     }
 
     /// Returns the prefix used to list/match per-identity items. The

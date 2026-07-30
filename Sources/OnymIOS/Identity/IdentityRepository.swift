@@ -536,7 +536,11 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
     /// stored selection no longer exists.
     private func ensureLoaded() throws {
         guard !loaded else { return }
-        loaded = true
+        // A previous attempt may have thrown mid-loop; start every
+        // attempt from a clean slate so a retry can't double-append.
+        cache.removeAll()
+        names.removeAll()
+        orderedIDs.removeAll()
         try reconcileFreshInstall()
         let ids = try keychain.list()
         // Stable order — UUIDs sort lexically. The picker also re-sorts
@@ -556,6 +560,11 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
             currentID = orderedIDs.first
             if currentID != nil { persistSelection() }
         }
+        // Only a fully-successful load marks the repo loaded. Flipping
+        // the flag up front would let a keychain error strand the repo
+        // "loaded" but empty — a retried bootstrap() then mints a
+        // duplicate identity while the real ones still sit on disk.
+        loaded = true
     }
 
     /// Keychain items survive app uninstall while UserDefaults dies
@@ -569,13 +578,21 @@ actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelopeSealin
     /// - no marker, selection set  → update of an existing install:
     ///   stamp the marker, keep everything
     /// - no marker, no selection   → fresh install: any identity items
-    ///   in the keychain are orphans of a deleted install — wipe them.
-    ///   The user's path back to an identity is the recovery phrase,
-    ///   not an invisible keychain remnant.
+    ///   in the keychain are orphans of a deleted install — quarantine
+    ///   them out of the active namespace.
+    ///
+    /// Quarantine, never wipe: both signals live in UserDefaults,
+    /// whose file protection is weaker than the identity items'
+    /// (`CompleteUntilFirstUserAuthentication` vs
+    /// `AfterFirstUnlockThisDeviceOnly`), so a pre-first-unlock launch
+    /// or a corrupted defaults DB can read as "fresh install" while
+    /// real keys sit in the keychain. A wrong verdict must cost a
+    /// hidden identity (recoverable via mnemonic or a future
+    /// quarantine-recovery flow), not destroyed key material.
     private func reconcileFreshInstall() throws {
         guard !installMarker.exists() else { return }
         if selectionStore.load() == nil {
-            try keychain.wipeAll()
+            try keychain.quarantineAll()
         }
         installMarker.set()
     }
