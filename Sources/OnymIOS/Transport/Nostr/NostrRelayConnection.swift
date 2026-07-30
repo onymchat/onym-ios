@@ -85,6 +85,26 @@ actor NostrRelayConnection {
         onOKCallback = callback
     }
 
+    /// Confirmed-live state, with transitions surfaced to the owner.
+    /// `true` only when a frame has actually arrived on the current
+    /// socket (the same "confirmed live" semantics the backoff uses);
+    /// `false` from every teardown path (failure funnel, disconnect,
+    /// forced rebuild). The transport aggregates these across relays
+    /// into the connection state the app's repository layer publishes.
+    private var confirmedLive = false
+    private var onLiveStateChange: ((Bool) -> Void)?
+
+    func setOnLiveStateChange(_ callback: @escaping (Bool) -> Void) {
+        onLiveStateChange = callback
+        callback(confirmedLive)
+    }
+
+    private func setConfirmedLive(_ live: Bool) {
+        guard live != confirmedLive else { return }
+        confirmedLive = live
+        onLiveStateChange?(live)
+    }
+
     // Timings — injectable so the (otherwise minute-scale) liveness and
     // backoff paths are exercisable in tests. Defaults are production
     // values.
@@ -175,6 +195,7 @@ actor NostrRelayConnection {
         webSocketTask = nil
         isConnected = false
         reconnectAttempts = 0
+        setConfirmedLive(false)
     }
 
     /// Tear down the current socket and rebuild it immediately,
@@ -191,6 +212,7 @@ actor NostrRelayConnection {
         webSocketTask?.cancel(with: .abnormalClosure, reason: nil)
         webSocketTask = nil
         isConnected = false
+        setConfirmedLive(false)
         connect()
     }
 
@@ -355,6 +377,7 @@ actor NostrRelayConnection {
                 // (CLOSEDs), and treating those as health is what made
                 // the CLOSED path hot-loop.
                 reconnectAttempts = 0
+                setConfirmedLive(true)
                 let text: String
                 switch message {
                 case .string(let s): text = s
@@ -386,6 +409,7 @@ actor NostrRelayConnection {
         livenessTask?.cancel()
         livenessTask = nil
         isConnected = false
+        setConfirmedLive(false)
         webSocketTask?.cancel(with: .abnormalClosure, reason: nil)
         webSocketTask = nil
         reconnectAttempts += 1

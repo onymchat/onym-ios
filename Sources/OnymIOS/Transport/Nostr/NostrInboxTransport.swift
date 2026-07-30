@@ -41,6 +41,18 @@ final class NostrInboxTransport: InboxTransport {
         await state.reconnect()
     }
 
+    nonisolated func connectionStateStream() -> AsyncStream<Bool> {
+        AsyncStream { continuation in
+            let id = UUID()
+            Task { [state] in
+                await state.subscribeConnectionState(id: id, continuation: continuation)
+            }
+            continuation.onTermination = { @Sendable [state] _ in
+                Task { await state.unsubscribeConnectionState(id: id) }
+            }
+        }
+    }
+
     @discardableResult
     func send(_ payload: Data, to inbox: TransportInboxID) async throws -> PublishReceipt {
         let signer = try signerProvider.makeEphemeralSigner()
@@ -129,6 +141,11 @@ final class NostrInboxTransport: InboxTransport {
         /// Per-inbox high-water marks (persisted). Read at every REQ send
         /// via the connection's `sinceProvider`, raised as events arrive.
         private let highWaterMarks: any InboxHighWaterMarkStoring
+        /// Per-relay confirmed-live flags + the aggregate's subscribers.
+        /// Aggregate rule: connected iff ANY relay is confirmed live —
+        /// one reachable relay delivers messages.
+        private var liveByRelay: [URL: Bool] = [:]
+        private var stateContinuations: [UUID: AsyncStream<Bool>.Continuation] = [:]
 
         init(highWaterMarks: any InboxHighWaterMarkStoring) {
             self.highWaterMarks = highWaterMarks
@@ -139,9 +156,38 @@ final class NostrInboxTransport: InboxTransport {
                 if connections[endpoint.url] == nil {
                     let conn = NostrRelayConnection(url: endpoint.url)
                     connections[endpoint.url] = conn
+                    let url = endpoint.url
+                    await conn.setOnLiveStateChange { [weak self] live in
+                        Task { await self?.relayLiveStateChanged(url: url, live: live) }
+                    }
                     await conn.connect()
                 }
             }
+        }
+
+        // MARK: - Connection state (presentation-facing signal)
+
+        private var aggregateConnected: Bool {
+            liveByRelay.values.contains(true)
+        }
+
+        private func relayLiveStateChanged(url: URL, live: Bool) {
+            let before = aggregateConnected
+            liveByRelay[url] = live
+            let after = aggregateConnected
+            guard before != after else { return }
+            for continuation in stateContinuations.values {
+                continuation.yield(after)
+            }
+        }
+
+        func subscribeConnectionState(id: UUID, continuation: AsyncStream<Bool>.Continuation) {
+            stateContinuations[id] = continuation
+            continuation.yield(aggregateConnected)
+        }
+
+        func unsubscribeConnectionState(id: UUID) {
+            stateContinuations.removeValue(forKey: id)
         }
 
         func disconnect() async {
@@ -153,6 +199,13 @@ final class NostrInboxTransport: InboxTransport {
                 await conn.disconnect()
             }
             connections.removeAll()
+            let wasConnected = aggregateConnected
+            liveByRelay.removeAll()
+            if wasConnected {
+                for continuation in stateContinuations.values {
+                    continuation.yield(false)
+                }
+            }
         }
 
         /// Rebuild every connection in place. The per-connection

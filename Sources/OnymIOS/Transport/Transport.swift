@@ -121,4 +121,22 @@ protocol InboxTransport: Sendable {
     func subscribe(inbox: TransportInboxID) -> AsyncStream<InboundInbox>
 
     func unsubscribe(inbox: TransportInboxID) async
+
+    /// Hot stream of the transport's connection state: `true` while at
+    /// least one endpoint is *confirmed live* (a frame has actually
+    /// arrived on its current socket), `false` otherwise. Emits the
+    /// current value on subscribe, then transitions. This is the ONLY
+    /// signal the presentation layer consumes from the transport — the
+    /// repository layer owns reconnecting; views only render the state.
+    nonisolated func connectionStateStream() -> AsyncStream<Bool>
+}
+
+extension InboxTransport {
+    /// Default for transports without a meaningful connection lifecycle
+    /// (in-process loopback, test fakes): permanently connected.
+    nonisolated func connectionStateStream() -> AsyncStream<Bool> {
+        AsyncStream { continuation in
+            continuation.yield(true)
+        }
+    }
 }

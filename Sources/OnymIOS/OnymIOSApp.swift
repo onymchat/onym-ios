@@ -13,6 +13,7 @@ struct OnymIOSApp: App {
     private let videoLoader: ChatVideoLoader
     private let voiceLoader: ChatVoiceLoader
     private let inboxTransport: any InboxTransport
+    private let transportLifecycle: TransportLifecycleRepository
     private let nostrRelaysRepository: NostrRelaysRepository
     private let blossomServersRepository: BlossomServersRepository
     private let incomingInvitations: IncomingInvitationsRepository
@@ -148,6 +149,21 @@ struct OnymIOSApp: App {
         #endif
         self.inboxTransport = inboxTransport
         self.contractTransportFactory = contractTransportFactory
+
+        // Transport lifecycle lives in the repository layer, not the
+        // view tree: it owns connect + every reconnect trigger, and the
+        // presentation layer's ONLY contact with the transport is the
+        // connection-state flow below. The trigger streams (UIKit
+        // foreground notification, NWPathMonitor) are built here at the
+        // shell and injected, keeping the repository itself UIKit-free
+        // and unit-testable with hand-driven streams.
+        let transportLifecycle = TransportLifecycleRepository(
+            transport: inboxTransport,
+            foregroundSignals: Self.foregroundSignalStream(),
+            connectivitySignals: NetworkPathMonitor.connectivityRegainedStream()
+        )
+        self.transportLifecycle = transportLifecycle
+        let connectionStatusFlow = ConnectionStatusFlow(repository: transportLifecycle)
 
         // DEBUG deeplink injection for UI tests (see `initialDeeplinkURL`).
         #if DEBUG
@@ -429,6 +445,7 @@ struct OnymIOSApp: App {
                 ChatsFlow(repository: groupRepository, messages: messageRepository)
             },
             identitiesFlow: identitiesFlow,
+            connectionStatusFlow: connectionStatusFlow,
             approveRequestsFlow: approveRequestsFlow,
             pendingInvitesFlow: pendingInvitesFlow,
             messageRepository: messageRepository,
@@ -492,6 +509,25 @@ struct OnymIOSApp: App {
         )
     }
     #endif
+
+    /// UIKit foreground notification adapted to a plain `AsyncStream<Void>`
+    /// so the transport-lifecycle repository stays UIKit-free. Fires only
+    /// on a real background→foreground transition. (Deliberately NOT
+    /// `scenePhase` on the App — that re-evaluates the entire view tree
+    /// per phase change.)
+    private static func foregroundSignalStream() -> AsyncStream<Void> {
+        AsyncStream { continuation in
+            let task = Task {
+                let notifications = NotificationCenter.default.notifications(
+                    named: UIApplication.willEnterForegroundNotification
+                )
+                for await _ in notifications {
+                    continuation.yield(())
+                }
+            }
+            continuation.onTermination = { @Sendable _ in task.cancel() }
+        }
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -580,16 +616,16 @@ struct OnymIOSApp: App {
                     }
                 }
                 .task {
-                    // Connect the Nostr inbox transport to every
-                    // configured relay BEFORE the fanout interactor
-                    // attempts to subscribe. Without this, both legs
-                    // of the inbox are silently dead: subscribe()
-                    // no-ops on an empty connections dict and send()
-                    // throws TransportError.notConnected.
+                    // Start the transport-lifecycle repository BEFORE the
+                    // fanout interactor subscribes. The repository owns
+                    // the initial connect AND every reconnect trigger
+                    // (foreground / connectivity) — no view code drives
+                    // the transport; the presentation layer only observes
+                    // `ConnectionStatusFlow`.
                     let endpoints = await nostrRelaysRepository
                         .currentEndpoints()
                         .map { TransportEndpoint(url: $0.url) }
-                    await inboxTransport.connect(to: endpoints)
+                    await transportLifecycle.start(endpoints: endpoints)
 
                     // PR-4: subscribe to every identity's inbox
                     // concurrently. Without this, messages addressed
@@ -668,36 +704,6 @@ struct OnymIOSApp: App {
                         currentTask = Task { await pump.run(entries: entries) }
                     }
                     currentTask?.cancel()
-                }
-                .task {
-                    // Refresh relay sockets when connectivity is regained.
-                    // NetworkPathMonitor is edge-triggered (only a genuine
-                    // unsatisfied→satisfied transition) and debounced, so
-                    // interface churn can't storm reconnects; the rebuild
-                    // itself is cheap (since-bounded replay + dedup).
-                    for await _ in NetworkPathMonitor.connectivityRegainedStream() {
-                        await inboxTransport.reconnect()
-                    }
-                }
-                .task {
-                    // A backgrounded app has its relay WebSocket torn down
-                    // (or half-opened) by the OS; nothing in URLSession
-                    // re-establishes it on resume, and only a fresh REQ
-                    // backfills what was missed while suspended. Rebuild
-                    // unconditionally on return to foreground.
-                    //
-                    // `willEnterForeground` (not `scenePhase` on the App):
-                    // observing scenePhase re-evaluates the entire view
-                    // tree on every phase change; the notification fires
-                    // only on a real background→foreground transition and
-                    // drives the side effect without touching the render
-                    // path.
-                    let foregrounded = NotificationCenter.default.notifications(
-                        named: UIApplication.willEnterForegroundNotification
-                    )
-                    for await _ in foregrounded {
-                        await inboxTransport.reconnect()
-                    }
                 }
                 .onOpenURL { url in
                     // Custom URL scheme (`onym://join?c=…`) and

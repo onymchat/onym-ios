@@ -46,6 +46,7 @@ struct RootView: View {
                     ChatsView(
                         flow: chatsFlow,
                         identitiesFlow: dependencies.identitiesFlow,
+                        connectionStatusFlow: dependencies.connectionStatusFlow,
                         approveRequestsFlow: dependencies.approveRequestsFlow,
                         pendingInvitesFlow: dependencies.pendingInvitesFlow,
                         messageRepository: dependencies.messageRepository,

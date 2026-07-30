@@ -42,9 +42,13 @@ actor FakeInboxTransport: InboxTransport {
         continuations.removeAll()
     }
 
+    private(set) var reconnectCallCount = 0
+
     func reconnect() async {
-        // No-op: the fake drives live subscriptions directly via `emit`,
-        // so there is nothing to rebuild.
+        // Nothing to rebuild (live subscriptions are driven via `emit`);
+        // counted so the lifecycle-repository tests can assert the
+        // trigger streams actually forward.
+        reconnectCallCount += 1
     }
 
     func send(_ payload: Data, to inbox: TransportInboxID) async throws -> PublishReceipt {
