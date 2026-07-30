@@ -642,8 +642,15 @@ struct OnymIOSApp: App {
                     // Skip the prune when the identity load fails —
                     // an orphaned key surviving until next launch is
                     // recoverable; pruning against a partial identity
-                    // list would wipe live invite-link inboxes.
-                    if let identities = try? await identityRepository.currentIdentities() {
+                    // list would wipe live invite-link inboxes. Also
+                    // skip on a successful-but-EMPTY load (fresh
+                    // install post-quarantine, or bootstrap losing the
+                    // race): with zero identities the pump subscribes
+                    // nothing anyway, and pruning would permanently
+                    // destroy intro keys whose quarantined owners a
+                    // recovery flow could still bring back.
+                    if let identities = try? await identityRepository.currentIdentities(),
+                       !identities.isEmpty {
                         await introKeyStore.pruneOwners(keeping: Set(identities.map(\.id)))
                     }
                     let pump = IntroInboxPump(

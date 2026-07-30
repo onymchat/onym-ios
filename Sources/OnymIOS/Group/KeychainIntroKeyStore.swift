@@ -36,6 +36,10 @@ actor KeychainIntroKeyStore: IntroKeyStore {
     /// filtered+sorted snapshot to every subscriber whose owner
     /// matches.
     private var continuations: [IdentityID: [UUID: AsyncStream<[IntroKeyEntry]>.Continuation]] = [:]
+    /// Reentrancy latch: `loadAll()` publishes when it compacts, and
+    /// `publish` itself calls `loadAll()` — the latch stops that inner
+    /// load from re-entering the compaction path.
+    private var compacting = false
 
     init(testNamespace: String? = nil) {
         if let testNamespace, !testNamespace.isEmpty {
@@ -178,8 +182,20 @@ actor KeychainIntroKeyStore: IntroKeyStore {
         // Compact immediately: expired rows carry intro PRIVATE keys,
         // and a read-only workload would otherwise leave them at rest
         // indefinitely waiting for a mutation to rewrite the blob.
-        if live.count != entries.count {
+        // Publish for the expired entries' owners so a live session's
+        // intro pump drops their relay REQ slots too — but note this
+        // still only runs when *something* touches the store; a fully
+        // quiet session keeps its slots until the next access or
+        // launch.
+        if live.count != entries.count, !compacting {
+            compacting = true
             writeAll(live)
+            let expiredOwners = Set(
+                entries.filter { $0.createdAtMillis <= cutoff }
+                    .compactMap { IdentityID($0.ownerIdentityID) }
+            )
+            for owner in expiredOwners { publish(forOwner: owner) }
+            compacting = false
         }
         return live
     }
