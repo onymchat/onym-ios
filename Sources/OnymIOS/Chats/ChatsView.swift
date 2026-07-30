@@ -8,6 +8,10 @@ import SwiftUI
 struct ChatsView: View {
     let flow: ChatsFlow
     let identitiesFlow: IdentitiesFlow
+    /// The presentation layer's entire view of the transport: a single
+    /// connected/disconnected flag. Reconnecting is the repository
+    /// layer's job; this view only renders the offline indicator.
+    let connectionStatusFlow: ConnectionStatusFlow
     let approveRequestsFlow: ApproveRequestsFlow
     let pendingInvitesFlow: PendingInvitesFlow
     let messageRepository: MessageRepository
@@ -50,6 +54,24 @@ struct ChatsView: View {
             ToolbarItem(placement: .topBarLeading) {
                 IdentityPickerMenu(flow: identitiesFlow)
             }
+            // Relay connection indicator — rendered ONLY while no relay
+            // is confirmed live. Purely observational: the repository
+            // layer keeps reconnecting on its own; this just tells the
+            // user why nothing new is arriving right now.
+            if !connectionStatusFlow.isConnected {
+                ToolbarItem(placement: .topBarLeading) {
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(OnymTokens.red)
+                            .frame(width: 7, height: 7)
+                        Text("Offline")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(OnymTokens.text2)
+                    }
+                    .accessibilityIdentifier("chats.connection_offline")
+                    .accessibilityLabel(Text("Not connected to a relay"))
+                }
+            }
             // Pending join requests — always rendered so the surface
             // is discoverable even before the first request lands;
             // the badge only appears when `pending.count > 0`.
@@ -90,6 +112,7 @@ struct ChatsView: View {
         }
         .task { flow.start() }
         .task { await identitiesFlow.start() }
+        .task { connectionStatusFlow.start() }
         .task { await approveRequestsFlow.start() }
         .task { await pendingInvitesFlow.start() }
         .fullScreenCover(isPresented: $showCreateGroup) {

@@ -130,6 +130,8 @@ final class UITestLoopbackInboxTransport: InboxTransport, @unchecked Sendable {
 
     func connect(to endpoints: [TransportEndpoint]) async {}
     func disconnect() async {}
+    // In-process loopback: subscriber continuations survive; nothing to rebuild.
+    func reconnect() async {}
 
     @discardableResult
     func send(_ payload: Data, to inbox: TransportInboxID) async throws -> PublishReceipt {

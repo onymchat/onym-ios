@@ -160,7 +160,7 @@ final class NostrMessageTransport: MessageTransport {
                                 "#t": [topic.rawValue],
                                 "since": sinceUnix,
                             ]
-                            let stream = await conn.subscribe(subscriptionID: subID, filter: filter)
+                            let stream = await conn.subscribe(subscriptionID: subID, filters: [filter])
                             for await event in stream {
                                 guard !Task.isCancelled else { break }
                                 guard let payload = Data(base64Encoded: event.content) else { continue }

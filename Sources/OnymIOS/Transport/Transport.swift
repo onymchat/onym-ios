@@ -104,10 +104,39 @@ protocol InboxTransport: Sendable {
     func connect(to endpoints: [TransportEndpoint]) async
     func disconnect() async
 
+    /// Tear down and rebuild every underlying connection, re-issuing all
+    /// live subscriptions. Unconditional by design: it exists for the
+    /// app-driven refresh triggers (return to foreground, regained
+    /// connectivity), where a fresh REQ is the only mechanism that
+    /// backfills events missed while the socket was dead or suspended —
+    /// probing first and skipping the rebuild on a healthy-*looking*
+    /// socket provably loses messages (design doc F3). Cheap by
+    /// construction: replays are `since`-bounded to the gap. Consumers'
+    /// subscription streams survive the rebuild.
+    func reconnect() async
+
     @discardableResult
     func send(_ payload: Data, to inbox: TransportInboxID) async throws -> PublishReceipt
 
     func subscribe(inbox: TransportInboxID) -> AsyncStream<InboundInbox>
 
     func unsubscribe(inbox: TransportInboxID) async
+
+    /// Hot stream of the transport's connection state: `true` while at
+    /// least one endpoint is *confirmed live* (a frame has actually
+    /// arrived on its current socket), `false` otherwise. Emits the
+    /// current value on subscribe, then transitions. This is the ONLY
+    /// signal the presentation layer consumes from the transport — the
+    /// repository layer owns reconnecting; views only render the state.
+    nonisolated func connectionStateStream() -> AsyncStream<Bool>
+}
+
+extension InboxTransport {
+    /// Default for transports without a meaningful connection lifecycle
+    /// (in-process loopback, test fakes): permanently connected.
+    nonisolated func connectionStateStream() -> AsyncStream<Bool> {
+        AsyncStream { continuation in
+            continuation.yield(true)
+        }
+    }
 }

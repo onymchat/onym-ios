@@ -14,9 +14,18 @@ final class NostrInboxTransport: InboxTransport {
 
     private let state: State
     private let signerProvider: any NostrEphemeralSignerProvider
+    /// Tolerance subtracted from the high-water mark when bounding a
+    /// REQ's `since`, absorbing relay clock skew and out-of-order
+    /// delivery. The small re-fetched overlap is deduped downstream
+    /// (`SeenEventIDStore`); the point is excluding the *ancient*
+    /// backlog, not being exact.
+    static let replaySinceSlack: Int64 = 300
 
-    init(signerProvider: any NostrEphemeralSignerProvider) {
-        self.state = State()
+    init(
+        signerProvider: any NostrEphemeralSignerProvider,
+        highWaterMarks: any InboxHighWaterMarkStoring = UserDefaultsInboxHighWaterMarkStore()
+    ) {
+        self.state = State(highWaterMarks: highWaterMarks)
         self.signerProvider = signerProvider
     }
 
@@ -26,6 +35,22 @@ final class NostrInboxTransport: InboxTransport {
 
     func disconnect() async {
         await state.disconnect()
+    }
+
+    func reconnect() async {
+        await state.reconnect()
+    }
+
+    nonisolated func connectionStateStream() -> AsyncStream<Bool> {
+        AsyncStream { continuation in
+            let id = UUID()
+            Task { [state] in
+                await state.subscribeConnectionState(id: id, continuation: continuation)
+            }
+            continuation.onTermination = { @Sendable [state] _ in
+                Task { await state.unsubscribeConnectionState(id: id) }
+            }
+        }
     }
 
     @discardableResult
@@ -58,12 +83,19 @@ final class NostrInboxTransport: InboxTransport {
     }
 
     func subscribe(inbox: TransportInboxID) -> AsyncStream<InboundInbox> {
-        AsyncStream<InboundInbox> { continuation in
+        // Per-stream token: this stream's termination may fire *after* a
+        // newer subscription for the same inbox has been installed
+        // (re-subscribe on identity rebalance / pump restart). Cleanup
+        // is token-guarded so the stale termination can't tear down the
+        // fresh subscription — the same race the per-generation subIDs
+        // close at the relay-connection level.
+        let token = UUID()
+        return AsyncStream<InboundInbox> { continuation in
             Task { [state] in
-                await state.subscribe(inbox: inbox, continuation: continuation)
+                await state.subscribe(inbox: inbox, token: token, continuation: continuation)
             }
             continuation.onTermination = { @Sendable [state] _ in
-                Task { await state.unsubscribe(inbox: inbox) }
+                Task { await state.unsubscribe(inbox: inbox, ifToken: token) }
             }
         }
     }
@@ -97,27 +129,95 @@ final class NostrInboxTransport: InboxTransport {
 
     fileprivate actor State {
         private var connections: [URL: NostrRelayConnection] = [:]
-        private var activeSubscriptions: [TransportInboxID: Task<Void, Never>] = [:]
+        /// Live per-inbox subscription: the pump task plus the stream
+        /// token that owns it (see `subscribe`'s token guard).
+        private var activeSubscriptions: [TransportInboxID: (token: UUID, task: Task<Void, Never>)] = [:]
+        /// Monotonic counter for relay subscription IDs. Each subscribe
+        /// gets a unique id so an old stream's asynchronous
+        /// `onTermination` CLOSE can't tear down a freshly opened REQ
+        /// for the same inbox — the exact race `NostrMessageTransport`
+        /// already guards against with its own generation counter.
+        private var subscriptionGeneration: UInt64 = 0
+        /// Per-inbox high-water marks (persisted). Read at every REQ send
+        /// via the connection's `sinceProvider`, raised as events arrive.
+        private let highWaterMarks: any InboxHighWaterMarkStoring
+        /// Per-relay confirmed-live flags + the aggregate's subscribers.
+        /// Aggregate rule: connected iff ANY relay is confirmed live —
+        /// one reachable relay delivers messages.
+        private var liveByRelay: [URL: Bool] = [:]
+        private var stateContinuations: [UUID: AsyncStream<Bool>.Continuation] = [:]
+
+        init(highWaterMarks: any InboxHighWaterMarkStoring) {
+            self.highWaterMarks = highWaterMarks
+        }
 
         func connect(to endpoints: [TransportEndpoint]) async {
             for endpoint in endpoints {
                 if connections[endpoint.url] == nil {
                     let conn = NostrRelayConnection(url: endpoint.url)
                     connections[endpoint.url] = conn
+                    let url = endpoint.url
+                    await conn.setOnLiveStateChange { [weak self] live in
+                        Task { await self?.relayLiveStateChanged(url: url, live: live) }
+                    }
                     await conn.connect()
                 }
             }
         }
 
+        // MARK: - Connection state (presentation-facing signal)
+
+        private var aggregateConnected: Bool {
+            liveByRelay.values.contains(true)
+        }
+
+        private func relayLiveStateChanged(url: URL, live: Bool) {
+            let before = aggregateConnected
+            liveByRelay[url] = live
+            let after = aggregateConnected
+            guard before != after else { return }
+            for continuation in stateContinuations.values {
+                continuation.yield(after)
+            }
+        }
+
+        func subscribeConnectionState(id: UUID, continuation: AsyncStream<Bool>.Continuation) {
+            stateContinuations[id] = continuation
+            continuation.yield(aggregateConnected)
+        }
+
+        func unsubscribeConnectionState(id: UUID) {
+            stateContinuations.removeValue(forKey: id)
+        }
+
         func disconnect() async {
-            for task in activeSubscriptions.values {
-                task.cancel()
+            for entry in activeSubscriptions.values {
+                entry.task.cancel()
             }
             activeSubscriptions.removeAll()
             for conn in connections.values {
                 await conn.disconnect()
             }
             connections.removeAll()
+            let wasConnected = aggregateConnected
+            liveByRelay.removeAll()
+            if wasConnected {
+                for continuation in stateContinuations.values {
+                    continuation.yield(false)
+                }
+            }
+        }
+
+        /// Rebuild every connection in place. The per-connection
+        /// subscription dicts survive the rebuild and their REQs replay
+        /// (`since`-bounded), so consumers' AsyncStreams never break and
+        /// the relay backfills exactly the gap missed while away.
+        func reconnect() async {
+            await withTaskGroup(of: Void.self) { group in
+                for conn in connections.values {
+                    group.addTask { await conn.forceReconnect() }
+                }
+            }
         }
 
         /// Per-relay publish outcome — split so the thrown error can
@@ -171,42 +271,79 @@ final class NostrInboxTransport: InboxTransport {
 
         func subscribe(
             inbox: TransportInboxID,
+            token: UUID,
             continuation: AsyncStream<InboundInbox>.Continuation
         ) {
-            activeSubscriptions[inbox]?.cancel()
-            let subIDBase = "inbox-\(inbox.rawValue)"
+            activeSubscriptions[inbox]?.task.cancel()
+            subscriptionGeneration += 1
+            let subID = "inbox-\(inbox.rawValue)-\(subscriptionGeneration)"
             let filters = NostrInboxTransport.subscriptionFilters(inbox: inbox.rawValue)
             let conns = Array(connections.values)
+            // Bound every REQ (initial + reconnect replay) to the gap
+            // since the last event already seen for this inbox. nil on
+            // the first-ever run ⇒ one unbounded cold-start fetch, then
+            // bounded forever. Evaluated at send time, so a reconnect
+            // after hours away fetches hours — not the full history.
+            let inboxTag = inbox.rawValue
+            let hwm = highWaterMarks
+            let sinceProvider: @Sendable () -> Int64? = {
+                hwm.highWaterMark(inbox: inboxTag).map {
+                    max(0, $0 - NostrInboxTransport.replaySinceSlack)
+                }
+            }
 
             let task = Task {
                 await withTaskGroup(of: Void.self) { group in
                     for conn in conns {
-                        for (index, filter) in filters.enumerated() {
-                            group.addTask {
-                                let filterSubID = "\(subIDBase)-\(index)"
-                                let stream = await conn.subscribe(subscriptionID: filterSubID, filter: filter)
-                                for await event in stream {
-                                    guard !Task.isCancelled else { break }
-                                    guard let payload = Data(base64Encoded: event.content) else { continue }
-                                    let received = Date(timeIntervalSince1970: TimeInterval(event.displayMilliseconds) / 1000.0)
-                                    continuation.yield(InboundInbox(
-                                        inbox: inbox,
-                                        payload: payload,
-                                        receivedAt: received,
-                                        messageID: event.id
-                                    ))
-                                }
+                        // One REQ carrying all three filter shapes — NOT
+                        // one REQ per filter. The relay dedups events
+                        // across a subscription's filters (NIP-01), and a
+                        // single subscription per inbox keeps the
+                        // connection well under relay
+                        // `maxSubsPerConnection` caps (strfry default 20;
+                        // 3 REQs per inbox tripped it on
+                        // subscription-heavy devices and the overflow was
+                        // silently CLOSED).
+                        group.addTask {
+                            let stream = await conn.subscribe(
+                                subscriptionID: subID,
+                                filters: filters,
+                                sinceProvider: sinceProvider
+                            )
+                            for await event in stream {
+                                guard !Task.isCancelled else { break }
+                                hwm.raise(inbox: inboxTag, to: event.createdAt)
+                                guard let payload = Data(base64Encoded: event.content) else { continue }
+                                let received = Date(timeIntervalSince1970: TimeInterval(event.displayMilliseconds) / 1000.0)
+                                continuation.yield(InboundInbox(
+                                    inbox: inbox,
+                                    payload: payload,
+                                    receivedAt: received,
+                                    messageID: event.id
+                                ))
                             }
                         }
                     }
                 }
             }
-            activeSubscriptions[inbox] = task
+            activeSubscriptions[inbox] = (token: token, task: task)
         }
 
+        /// Deliberate unsubscribe (protocol surface): unconditional.
         func unsubscribe(inbox: TransportInboxID) {
-            activeSubscriptions[inbox]?.cancel()
+            activeSubscriptions[inbox]?.task.cancel()
             activeSubscriptions.removeValue(forKey: inbox)
+        }
+
+        /// Stream-termination cleanup: only tears down the subscription
+        /// the terminating stream actually owns. A stale termination
+        /// (its inbox was re-subscribed and a newer stream installed)
+        /// is a no-op — without this guard the old stream's async
+        /// cleanup cancelled the fresh subscription and the inbox went
+        /// silently deaf.
+        func unsubscribe(inbox: TransportInboxID, ifToken token: UUID) {
+            guard activeSubscriptions[inbox]?.token == token else { return }
+            unsubscribe(inbox: inbox)
         }
     }
 }

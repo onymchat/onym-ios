@@ -361,6 +361,7 @@ private actor VerifierRecordingInboxTransport: InboxTransport {
     private(set) var sends: Int = 0
     func connect(to endpoints: [TransportEndpoint]) async {}
     func disconnect() async {}
+    func reconnect() async {}
     func send(_ payload: Data, to inbox: TransportInboxID) async throws -> PublishReceipt {
         sends += 1
         return PublishReceipt(messageID: "spy-\(sends)", acceptedBy: 1)

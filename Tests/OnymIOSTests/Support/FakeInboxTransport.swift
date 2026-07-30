@@ -27,6 +27,7 @@ actor FakeInboxTransport: InboxTransport {
     private(set) var connectedEndpoints: [TransportEndpoint] = []
     private(set) var disconnectCallCount = 0
     private(set) var unsubscribedInboxes: [TransportInboxID] = []
+    private(set) var subscribedInboxes: [TransportInboxID] = []
     private(set) var subscribeCallCount = 0
 
     // MARK: - InboxTransport
@@ -39,6 +40,15 @@ actor FakeInboxTransport: InboxTransport {
         disconnectCallCount += 1
         for cont in continuations.values { cont.finish() }
         continuations.removeAll()
+    }
+
+    private(set) var reconnectCallCount = 0
+
+    func reconnect() async {
+        // Nothing to rebuild (live subscriptions are driven via `emit`);
+        // counted so the lifecycle-repository tests can assert the
+        // trigger streams actually forward.
+        reconnectCallCount += 1
     }
 
     func send(_ payload: Data, to inbox: TransportInboxID) async throws -> PublishReceipt {
@@ -93,6 +103,7 @@ actor FakeInboxTransport: InboxTransport {
         continuation: AsyncStream<InboundInbox>.Continuation
     ) {
         subscribeCallCount += 1
+        subscribedInboxes.append(inbox)
         continuations[inbox] = continuation
     }
 }
