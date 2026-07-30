@@ -68,7 +68,19 @@ targets:
         # Info.plist directly — the plist is xcodegen output and a
         # hand-edit is silently dropped on the next regenerate (that's
         # how 71fbb75's key got lost once already).
-        ITSAppUsesNonExemptEncryption: true
+        #
+        # TODO(compliance): TEMPORARILY commented out. The France
+        # encryption declaration (uploaded Jul 19, 2026) is still
+        # "In Review" in App Store Connect, so ASC has not assigned a
+        # compliance KEY VALUE yet — and with documentation registered,
+        # any upload that sets this key is rejected with error 90592
+        # ("Invalid Export Compliance Code") until the code exists.
+        # Interim: leave the key out, answer the encryption
+        # questionnaire in the ASC UI per build. Once the declaration
+        # is approved and My Apps → App Information shows its KEY
+        # VALUE, restore the line below AND add
+        #   ITSEncryptionExportComplianceCode: <that key value>
+        # ITSAppUsesNonExemptEncryption: true
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: true
           UISceneConfigurations: {}
@@ -76,6 +88,10 @@ targets:
         UILaunchScreen:
           UIColorName: LaunchBackground
           UIImageName: LaunchLogo
+        # App Store category. Onym is an E2E messenger — Social
+        # Networking is the category Apple files messaging apps under
+        # (Messages, WhatsApp, Signal, Telegram all live there).
+        LSApplicationCategoryType: public.app-category.social-networking
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft
