@@ -176,33 +176,34 @@ final class NostrInboxTransport: InboxTransport {
             continuation: AsyncStream<InboundInbox>.Continuation
         ) {
             activeSubscriptions[inbox]?.cancel()
-            let subIDBase = "inbox-\(inbox.rawValue)"
+            let subID = "inbox-\(inbox.rawValue)"
             let filters = NostrInboxTransport.subscriptionFilters(inbox: inbox.rawValue)
             let conns = Array(connections.values)
-            TransportLog.log("inbox subscribe \(inbox.rawValue.prefix(12)): \(filters.count) filters × \(conns.count) relays")
+            TransportLog.log("inbox subscribe \(inbox.rawValue.prefix(12)): 1 REQ (\(filters.count) filters) × \(conns.count) relays")
 
+            // All filter shapes ride in ONE REQ per relay: relays cap
+            // concurrent REQs per connection (strfry rejects overflow with
+            // "too many concurrent REQs"), and one REQ also makes the relay
+            // dedup events that match several of the overlapping filters.
             let task = Task {
                 await withTaskGroup(of: Void.self) { group in
                     for conn in conns {
-                        for (index, filter) in filters.enumerated() {
-                            group.addTask {
-                                let filterSubID = "\(subIDBase)-\(index)"
-                                let stream = await conn.subscribe(subscriptionID: filterSubID, filter: filter)
-                                for await event in stream {
-                                    guard !Task.isCancelled else { break }
-                                    guard let payload = Data(base64Encoded: event.content) else {
-                                        TransportLog.log("inbox \(inbox.rawValue.prefix(12)): event \(event.id.prefix(8)) DROPPED, content not base64")
-                                        continue
-                                    }
-                                    TransportLog.log("inbox \(inbox.rawValue.prefix(12)): yielding event \(event.id.prefix(8)) (\(payload.count)B) from sub \(filterSubID)")
-                                    let received = Date(timeIntervalSince1970: TimeInterval(event.displayMilliseconds) / 1000.0)
-                                    continuation.yield(InboundInbox(
-                                        inbox: inbox,
-                                        payload: payload,
-                                        receivedAt: received,
-                                        messageID: event.id
-                                    ))
+                        group.addTask {
+                            let stream = await conn.subscribe(subscriptionID: subID, filters: filters)
+                            for await event in stream {
+                                guard !Task.isCancelled else { break }
+                                guard let payload = Data(base64Encoded: event.content) else {
+                                    TransportLog.log("inbox \(inbox.rawValue.prefix(12)): event \(event.id.prefix(8)) DROPPED, content not base64")
+                                    continue
                                 }
+                                TransportLog.log("inbox \(inbox.rawValue.prefix(12)): yielding event \(event.id.prefix(8)) (\(payload.count)B)")
+                                let received = Date(timeIntervalSince1970: TimeInterval(event.displayMilliseconds) / 1000.0)
+                                continuation.yield(InboundInbox(
+                                    inbox: inbox,
+                                    payload: payload,
+                                    receivedAt: received,
+                                    messageID: event.id
+                                ))
                             }
                         }
                     }

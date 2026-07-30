@@ -30,7 +30,7 @@ actor NostrRelayConnection {
     let url: URL
     private var webSocketTask: URLSessionWebSocketTask?
     private let session: URLSession
-    private var subscriptions: [String: ([String: Any], (NostrEvent) -> Void)] = [:]
+    private var subscriptions: [String: ([[String: Any]], (NostrEvent) -> Void)] = [:]
     private(set) var isConnected = false
     private var reconnectAttempts = 0
     private var pendingOKContinuations: [String: CheckedContinuation<Bool, any Error>] = [:]
@@ -79,8 +79,8 @@ actor NostrRelayConnection {
         Task { await receiveLoop(task: task) }
         startHeartbeat()
 
-        for (subID, (filter, _)) in subscriptions {
-            sendREQ(subscriptionID: subID, filter: filter)
+        for (subID, (filters, _)) in subscriptions {
+            sendREQ(subscriptionID: subID, filters: filters)
         }
 
         // URLSessionWebSocketTask exposes no reliable onOpen callback. Replay
@@ -170,8 +170,21 @@ actor NostrRelayConnection {
         subscriptionID: String,
         filter: [String: Any]
     ) -> AsyncStream<NostrEvent> {
+        subscribe(subscriptionID: subscriptionID, filters: [filter])
+    }
+
+    /// A single REQ carries every filter (NIP-01 allows it), so one
+    /// subscription slot is consumed on the relay no matter how many
+    /// filter shapes a caller needs — relays cap concurrent REQs per
+    /// connection (strfry defaults to 20) and reject the overflow.
+    /// The relay also dedups matches within one REQ, so overlapping
+    /// filters no longer deliver the same event several times.
+    func subscribe(
+        subscriptionID: String,
+        filters: [[String: Any]]
+    ) -> AsyncStream<NostrEvent> {
         let stream = AsyncStream<NostrEvent> { continuation in
-            subscriptions[subscriptionID] = (filter, { event in
+            subscriptions[subscriptionID] = (filters, { event in
                 continuation.yield(event)
             })
             continuation.onTermination = { @Sendable _ in
@@ -180,7 +193,7 @@ actor NostrRelayConnection {
                 }
             }
         }
-        sendREQ(subscriptionID: subscriptionID, filter: filter)
+        sendREQ(subscriptionID: subscriptionID, filters: filters)
         return stream
     }
 
@@ -197,8 +210,8 @@ actor NostrRelayConnection {
 
     // MARK: - Private
 
-    private func sendREQ(subscriptionID: String, filter: [String: Any]) {
-        let frame: [Any] = ["REQ", subscriptionID, filter]
+    private func sendREQ(subscriptionID: String, filters: [[String: Any]]) {
+        let frame: [Any] = ["REQ", subscriptionID] + filters
         guard let data = try? JSONSerialization.data(withJSONObject: frame),
               let string = String(data: data, encoding: .utf8)
         else { return }
@@ -217,8 +230,8 @@ actor NostrRelayConnection {
     }
 
     private func replaySubscriptions() {
-        for (subID, (filter, _)) in subscriptions {
-            sendREQ(subscriptionID: subID, filter: filter)
+        for (subID, (filters, _)) in subscriptions {
+            sendREQ(subscriptionID: subID, filters: filters)
         }
     }
 
