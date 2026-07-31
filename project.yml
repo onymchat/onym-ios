@@ -38,7 +38,7 @@ targets:
     info:
       path: Info.plist
       properties:
-        CFBundleDisplayName: Onym
+        CFBundleDisplayName: Onym Chat
         # `$(...)` is Xcode's build-setting substitution, NOT xcodegen
         # env interpolation — these strings end up verbatim in
         # Info.plist and Xcode resolves them per build. The
