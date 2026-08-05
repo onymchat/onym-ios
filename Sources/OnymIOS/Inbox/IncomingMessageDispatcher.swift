@@ -692,7 +692,26 @@ struct IncomingMessageDispatcher: Sendable {
         // via the fresh MemberProfile below).
         let key = payload.newMember.blsPub
             .map { String(format: "%02x", $0) }.joined()
-        if let existing = group.memberProfiles[key], !existing.revoked { return }
+        let existing = group.memberProfiles[key]
+        if let existing, !existing.revoked { return }
+
+        // Re-admission guard. A tombstoned profile is resurrected ONLY
+        // by an announcement provably newer than the removal that
+        // tombstoned it (`MemberProfile.statusEpoch`). Every relay
+        // reconnect replays the member's ORIGINAL admission event;
+        // without this, that stale announcement clears the tombstone and
+        // re-trusts a removed member (their own removal replay would
+        // usually re-apply, but the trust window is real and closes only
+        // while that envelope is still replayable). An announcement with
+        // no epoch on the wire can't prove it's newer — keep the
+        // tombstone.
+        if let existing, existing.revoked {
+            guard let announcedEpoch = payload.epoch else { return }
+            if let removedAtEpoch = existing.statusEpoch,
+               announcedEpoch <= removedAtEpoch {
+                return
+            }
+        }
 
         // PR 9 + H-2 trust check: the verified envelope signer must be
         // the group's known admin, or — for admin-less groups — a
@@ -928,7 +947,12 @@ struct IncomingMessageDispatcher: Sendable {
         guard removalMaxRetries > 0 else { return }
 
         let groupIDHex = payload.groupID.map { String(format: "%02x", $0) }.joined()
-        let key = "\(groupIDHex):\(payload.removedBlsHex.lowercased()):\(payload.epoch)"
+        // Owner-scoped: the same on-chain group can be held by two local
+        // identities, each with its own row and its own delivery. An
+        // unscoped key would let the first identity's claim starve the
+        // second's retry entirely.
+        let key = "\(ownerIdentityID.rawValue.uuidString):\(groupIDHex):"
+            + "\(payload.removedBlsHex.lowercased()):\(payload.epoch)"
         guard await removalRetries.begin(key) else { return }
 
         let dispatcher = self
@@ -1040,6 +1064,15 @@ struct IncomingMessageDispatcher: Sendable {
         }) else {
             return
         }
+
+        // We were removed from this group: refuse new traffic even
+        // though a stale peer can still seal to our unchanged inbox key
+        // until they converge (their fanout skips us only once they
+        // apply the removal). Symmetric with the send-side
+        // `.removedFromGroup` gate — the thread is read-only history
+        // from the moment the removal lands. Also suppresses the
+        // delivered receipt below, so we don't advertise reachability.
+        guard !group.membershipRevoked else { return }
 
         // Sender must be a known member. `memberProfiles` is keyed by
         // lowercase BLS pubkey hex; normalize the payload's claim

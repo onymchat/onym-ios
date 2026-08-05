@@ -331,6 +331,44 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
                        "second delivery of the same message id must be a no-op")
     }
 
+    func test_chatMessage_droppedAndUnacked_whenWeWereRemovedFromTheGroup() async throws {
+        // A stale peer can still seal to our unchanged inbox key until
+        // they apply the removal. Once membershipRevoked is set the
+        // thread is read-only history: drop the message AND send no
+        // delivered receipt (which would advertise reachability).
+        let seeded = await groups.currentGroups()
+        var revoked = try XCTUnwrap(seeded.first { $0.id == groupIDHex })
+        revoked.membershipRevoked = true
+        _ = await groups.insert(revoked)
+
+        let spy = SpyChatReceiptSender()
+        // Counting store so "didn't fall through to the legacy queue"
+        // is observable (the shared repo's snapshots filter by a
+        // current identity this fixture never sets).
+        let queueStore = CountingInvitationStore()
+        let dispatcher = makeDispatcher(
+            plaintext: try JSONEncoder().encode(makePayload(body: "after removal")),
+            envelopeSigner: senderEd25519,
+            receiptSender: spy,
+            invitationsRepository: IncomingInvitationsRepository(store: queueStore)
+        )
+        await dispatcher.dispatch(
+            messageID: "msg-after-removal",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+
+        let stored = await messages.currentMessages(groupID: groupIDHex, owner: owner)
+        XCTAssertTrue(stored.isEmpty,
+                      "a removed member must not persist new group traffic")
+        let sends = await spy.sends
+        XCTAssertTrue(sends.isEmpty, "no delivered receipt from a revoked membership")
+        // Not a legacy-queue candidate either — it decoded fine.
+        let queued = await queueStore.count
+        XCTAssertEqual(queued, 0)
+    }
+
     // MARK: - Helpers
 
     private func makePayload(
@@ -355,7 +393,8 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
         plaintext: Data,
         envelopeSigner: Data?,
         receiptSender: any ChatReceiptSending = NoopChatReceiptSender(),
-        readReceiptsEnabled: @escaping @Sendable () -> Bool = { true }
+        readReceiptsEnabled: @escaping @Sendable () -> Bool = { true },
+        invitationsRepository: IncomingInvitationsRepository? = nil
     ) -> IncomingMessageDispatcher {
         let decrypter = FakeInvitationEnvelopeDecrypter(
             mode: .fixed(plaintext),
@@ -365,7 +404,7 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
             envelopeDecrypter: decrypter,
             identities: StubIdentities(summaries: []),
             groupRepository: groups,
-            invitationsRepository: invitations,
+            invitationsRepository: invitationsRepository ?? invitations,
             chainState: chainState,
             messageRepository: messages,
             receiptSender: receiptSender,
@@ -507,6 +546,30 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
             direction: .outgoing, status: status,
             replyToMessageID: nil, groupType: .tyranny
         ))
+    }
+}
+
+/// Minimal `InvitationStore` that just counts saved rows — lets a test
+/// assert a decoded-but-dropped payload did NOT fall through to the
+/// legacy invitations queue.
+private actor CountingInvitationStore: InvitationStore {
+    private var rows: [String: IncomingInvitationRecord] = [:]
+
+    var count: Int { rows.count }
+
+    func list() -> [IncomingInvitationRecord] { Array(rows.values) }
+
+    @discardableResult
+    func save(_ record: IncomingInvitationRecord) -> Bool {
+        guard rows[record.id] == nil else { return false }
+        rows[record.id] = record
+        return true
+    }
+
+    func updateStatus(id: String, status: IncomingInvitationStatus) {}
+    func delete(id: String) { rows.removeValue(forKey: id) }
+    func deleteOwner(_ ownerIDString: String) {
+        rows = rows.filter { $0.value.ownerIdentityID.rawValue.uuidString != ownerIDString }
     }
 }
 
