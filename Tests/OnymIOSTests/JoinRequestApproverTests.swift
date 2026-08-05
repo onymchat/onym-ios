@@ -88,7 +88,7 @@ final class JoinRequestApproverTests: XCTestCase {
 
     // MARK: - approve happy path
 
-    func test_approve_sendsSealedInviteAndConsumesRequest() async throws {
+    func test_approve_sendsSealedInvite_consumesRequest_keepsIntroKeyLive() async throws {
         let env = try await seedEnvironment()
 
         // Pump once: collector reads the seeded request, decodes,
@@ -104,12 +104,15 @@ final class JoinRequestApproverTests: XCTestCase {
         XCTAssertNotNil(toJoiner,
                         "approve must send to the joiner's inbox tag")
 
-        // Request consumed + intro key revoked.
+        // Request consumed, but the link stays usable.
         let remaining = await introRequestStore.current()
         XCTAssertTrue(remaining.isEmpty,
                       "approved request must be consumed from the store")
         let intro = await introKeyStore.find(introPublicKey: env.introPub)
-        XCTAssertNil(intro, "intro key must be revoked after approve")
+        XCTAssertNotNil(
+            intro,
+            "intro key must survive approve — one link is redeemable by many joiners"
+        )
     }
 
     // MARK: - duplicate collapse
@@ -168,9 +171,13 @@ final class JoinRequestApproverTests: XCTestCase {
         } else {
             XCTFail("expected .transportFailed, got \(outcome)")
         }
-        let intro = await introKeyStore.find(introPublicKey: env.introPub)
-        XCTAssertNotNil(intro,
-                        "intro key must NOT be revoked when transport rejects — caller may retry")
+        // Asserting the intro key survives here is now vacuous — nothing
+        // revokes on any path. The guarantee this path still owes is
+        // that the request stays available so the admin can retry:
+        // `performApprove` returns before consuming it.
+        let remaining = await introRequestStore.current()
+        XCTAssertEqual(remaining.count, 1,
+                       "a transport-rejected request must stay in the store for retry")
     }
 
     // MARK: - PR 4: recordJoiner side effect
@@ -306,7 +313,7 @@ final class JoinRequestApproverTests: XCTestCase {
 
     // MARK: - decline
 
-    func test_decline_dropsRequestAndRevokesKey() async throws {
+    func test_decline_dropsOnlyThatRequest_leavesLinkLive() async throws {
         let env = try await seedEnvironment()
         await env.approver.pumpOnce()
 
@@ -316,7 +323,10 @@ final class JoinRequestApproverTests: XCTestCase {
         XCTAssertTrue(remaining.isEmpty,
                       "declined request must be consumed")
         let intro = await introKeyStore.find(introPublicKey: env.introPub)
-        XCTAssertNil(intro, "intro key revoked even on decline")
+        XCTAssertNotNil(
+            intro,
+            "declining one joiner must not kill the link for everyone else holding it"
+        )
         let sends = await transport.sends
         XCTAssertTrue(sends.isEmpty,
                       "decline ships no envelopes")
