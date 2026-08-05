@@ -19,7 +19,14 @@ protocol IntroRequestStore: Sendable {
     func record(_ request: IntroRequest) async -> Bool
 
     /// Drop a request after the user has acted on it (Approve or
-    /// Decline) so it stops cluttering the surface.
+    /// Decline) so it stops cluttering the surface, and remember its
+    /// id so a replay can't resurrect it.
+    ///
+    /// Conformers MUST tombstone. `NostrInboxTransport`'s REQ carries
+    /// no `since` and no `limit`, so every relay reconnect re-delivers
+    /// the intro inbox in full. Dropping the row from `pending` alone
+    /// means the next replay re-records it and the user sees a request
+    /// they already handled.
     func consume(id: String) async
 
     /// Snapshot read used by tests + bootstrap reads. UI prefers
@@ -29,10 +36,16 @@ protocol IntroRequestStore: Sendable {
 
 actor InMemoryIntroRequestStore: IntroRequestStore {
     private var pending: [IntroRequest] = []
+    /// Event ids the user already acted on. Process-lifetime, matching
+    /// `pending`: a relaunch legitimately re-surfaces anything the user
+    /// never got round to (the type doc's contract), but within a
+    /// session an approved or declined row must stay gone.
+    private var consumed: Set<String> = []
     private var continuations: [UUID: AsyncStream<[IntroRequest]>.Continuation] = [:]
 
     @discardableResult
     func record(_ request: IntroRequest) async -> Bool {
+        if consumed.contains(request.id) { return false }
         if pending.contains(where: { $0.id == request.id }) { return false }
         pending.append(request)
         publish()
@@ -40,6 +53,10 @@ actor InMemoryIntroRequestStore: IntroRequestStore {
     }
 
     func consume(id: String) async {
+        // Tombstone unconditionally, even when the id isn't pending, so
+        // a tombstone can be laid ahead of a replay that hasn't landed
+        // yet.
+        consumed.insert(id)
         let before = pending.count
         pending.removeAll { $0.id == id }
         if pending.count != before { publish() }
