@@ -144,6 +144,49 @@ final class IntroInboxPumpTests: XCTestCase {
         runTask.cancel()
     }
 
+    // MARK: - IntroRequestStore consume tombstone
+
+    func test_record_afterConsume_isRejected_soRelayReplayCannotResurrect() async {
+        let store = InMemoryIntroRequestStore()
+        let request = IntroRequest(
+            id: "evt-1",
+            targetIntroPublicKey: Data(repeating: 0xA1, count: 32),
+            payload: Data([0x01, 0x02]),
+            receivedAt: Date()
+        )
+
+        let recorded = await store.record(request)
+        XCTAssertTrue(recorded)
+        await store.consume(id: request.id)
+
+        // The relay REQ carries no `since`/`limit`, so every reconnect
+        // re-delivers the whole inbox. A handled request must not come
+        // back.
+        let reRecorded = await store.record(request)
+        XCTAssertFalse(reRecorded, "a consumed event id must never be re-recorded")
+        let remaining = await store.current()
+        XCTAssertTrue(remaining.isEmpty)
+    }
+
+    func test_consume_unknownId_stillTombstones_soALateReplayIsRejected() async {
+        let store = InMemoryIntroRequestStore()
+
+        // Tombstone laid before the replay lands — the ordering the
+        // pump can actually produce when a consume races a reconnect.
+        await store.consume(id: "evt-never-seen")
+
+        let late = IntroRequest(
+            id: "evt-never-seen",
+            targetIntroPublicKey: Data(repeating: 0xA1, count: 32),
+            payload: Data([0x03]),
+            receivedAt: Date()
+        )
+        let recordedLate = await store.record(late)
+        XCTAssertFalse(recordedLate)
+        let remaining = await store.current()
+        XCTAssertTrue(remaining.isEmpty)
+    }
+
     // MARK: - Helpers
 
     private func waitFor(

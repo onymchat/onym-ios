@@ -136,4 +136,153 @@ final class InviteIntroducerTests: XCTestCase {
         XCTAssertNotNil(entry)
         XCTAssertEqual(entry?.createdAt, frozen)
     }
+
+    // MARK: - currentOrMint (multi-use links)
+
+    func test_currentOrMint_noLiveKeyForGroup_mintsAndPersistsOne() async throws {
+        let store = InMemoryIntroKeyStore()
+        let introducer = InviteIntroducer(store: store)
+
+        let cap = try await introducer.currentOrMint(
+            ownerIdentityID: alice, groupId: sampleGroupId
+        )
+
+        let listed = await store.listForOwner(alice)
+        XCTAssertEqual(listed.count, 1)
+        XCTAssertEqual(listed.first?.introPublicKey, cap.introPublicKey)
+    }
+
+    func test_currentOrMint_twiceForSameGroup_returnsSameKey_persistsOneEntry() async throws {
+        let store = InMemoryIntroKeyStore()
+        let introducer = InviteIntroducer(store: store)
+
+        let first = try await introducer.currentOrMint(
+            ownerIdentityID: alice, groupId: sampleGroupId
+        )
+        let second = try await introducer.currentOrMint(
+            ownerIdentityID: alice, groupId: sampleGroupId
+        )
+
+        XCTAssertEqual(first.introPublicKey, second.introPublicKey)
+        // The count is what stops this from being "returns the same
+        // link but still writes a row".
+        let listed = await store.listForOwner(alice)
+        XCTAssertEqual(listed.count, 1)
+    }
+
+    func test_currentOrMint_differentGroups_doNotShareAKey() async throws {
+        let store = InMemoryIntroKeyStore()
+        let introducer = InviteIntroducer(store: store)
+        let other = Data(repeating: 0x5A, count: 32)
+
+        let g1 = try await introducer.currentOrMint(
+            ownerIdentityID: alice, groupId: sampleGroupId
+        )
+        let g2 = try await introducer.currentOrMint(ownerIdentityID: alice, groupId: other)
+
+        XCTAssertNotEqual(g1.introPublicKey, g2.introPublicKey)
+        let listed = await store.listForOwner(alice)
+        XCTAssertEqual(listed.count, 2)
+    }
+
+    func test_currentOrMint_expiredKey_mintsAFreshOne() async throws {
+        let store = InMemoryIntroKeyStore()
+        let t0 = Date(timeIntervalSince1970: 1_700_000_000)
+        // Two introducers because `now` is injected at init; they share
+        // the store, so the second sees the first's (expired) entry.
+        let early = InviteIntroducer(store: store, now: { t0 })
+        let late = InviteIntroducer(
+            store: store,
+            now: { t0.addingTimeInterval(IntroKeyEntry.lifetime + 60) }
+        )
+
+        let first = try await early.currentOrMint(
+            ownerIdentityID: alice, groupId: sampleGroupId
+        )
+        let second = try await late.currentOrMint(
+            ownerIdentityID: alice, groupId: sampleGroupId
+        )
+
+        XCTAssertNotEqual(first.introPublicKey, second.introPublicKey)
+    }
+
+    func test_currentOrMint_atExactlyLifetime_isTreatedAsExpired() async throws {
+        let store = InMemoryIntroKeyStore()
+        let t0 = Date(timeIntervalSince1970: 1_700_000_000)
+        let early = InviteIntroducer(store: store, now: { t0 })
+        // Pins the strict comparison in `isLive(at:)` against
+        // `KeychainIntroKeyStore.loadAll`'s cutoff so the two
+        // boundaries can't drift apart.
+        let atBoundary = InviteIntroducer(
+            store: store,
+            now: { t0.addingTimeInterval(IntroKeyEntry.lifetime) }
+        )
+
+        let first = try await early.currentOrMint(
+            ownerIdentityID: alice, groupId: sampleGroupId
+        )
+        let second = try await atBoundary.currentOrMint(
+            ownerIdentityID: alice, groupId: sampleGroupId
+        )
+
+        XCTAssertNotEqual(first.introPublicKey, second.introPublicKey)
+    }
+
+    func test_currentOrMint_doesNotReuseAnotherIdentitysLiveKey() async throws {
+        let store = InMemoryIntroKeyStore()
+        let introducer = InviteIntroducer(store: store)
+
+        // The intro pump only subscribes the *active* identity's tags,
+        // so reusing Bob's key for Alice would hand out a link nobody
+        // is listening on.
+        let bobCap = try await introducer.currentOrMint(
+            ownerIdentityID: bob, groupId: sampleGroupId
+        )
+        let aliceCap = try await introducer.currentOrMint(
+            ownerIdentityID: alice, groupId: sampleGroupId
+        )
+
+        XCTAssertNotEqual(bobCap.introPublicKey, aliceCap.introPublicKey)
+        let aliceKeys = await store.listForOwner(alice)
+        let bobKeys = await store.listForOwner(bob)
+        XCTAssertEqual(aliceKeys.count, 1)
+        XCTAssertEqual(bobKeys.count, 1)
+    }
+
+    func test_currentOrMint_rejectsWrongSizedGroupId_withoutTouchingTheStore() async {
+        let store = InMemoryIntroKeyStore()
+        let introducer = InviteIntroducer(store: store)
+
+        do {
+            _ = try await introducer.currentOrMint(
+                ownerIdentityID: alice,
+                groupId: Data(repeating: 0x01, count: 16)
+            )
+            XCTFail("expected IntroducerError.invalidGroupID")
+        } catch IntroducerError.invalidGroupID {
+            // expected
+        } catch {
+            XCTFail("expected IntroducerError.invalidGroupID, got \(error)")
+        }
+
+        let listed = await store.listForOwner(alice)
+        XCTAssertTrue(listed.isEmpty)
+    }
+
+    func test_mint_alwaysMintsFresh_evenWhenALiveKeyExists() async throws {
+        let store = InMemoryIntroKeyStore()
+        let introducer = InviteIntroducer(store: store)
+
+        // Locks in the two-entry-point split: collapsing `mint` into
+        // `currentOrMint` would silently break the create-time offers'
+        // 1:1 request-to-invitee mapping.
+        let shared = try await introducer.currentOrMint(
+            ownerIdentityID: alice, groupId: sampleGroupId
+        )
+        let fresh = try await introducer.mint(ownerIdentityID: alice, groupId: sampleGroupId)
+
+        XCTAssertNotEqual(shared.introPublicKey, fresh.introPublicKey)
+        let listed = await store.listForOwner(alice)
+        XCTAssertEqual(listed.count, 2)
+    }
 }
