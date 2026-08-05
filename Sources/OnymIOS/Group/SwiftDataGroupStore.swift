@@ -88,6 +88,7 @@ actor SwiftDataGroupStore: GroupStore {
             existing.tierRaw = encoded.tierRaw
             existing.groupTypeRaw = encoded.groupTypeRaw
             existing.isPublishedOnChain = encoded.isPublishedOnChain
+            existing.membershipRevoked = encoded.membershipRevoked
             existing.encryptedName = encoded.encryptedName
             existing.encryptedGroupSecret = encoded.encryptedGroupSecret
             existing.encryptedMembersJSON = encoded.encryptedMembersJSON
@@ -174,6 +175,7 @@ actor SwiftDataGroupStore: GroupStore {
             groupTypeRaw: group.groupType.rawValue,
             isPublishedOnChain: group.isPublishedOnChain,
             lastReadAt: group.lastReadAt,
+            membershipRevoked: group.membershipRevoked,
             encryptedName: try StorageEncryption.encrypt(group.name),
             encryptedGroupSecret: try StorageEncryption.encrypt(group.groupSecret),
             encryptedMembersJSON: try StorageEncryption.encrypt(membersJSON),
@@ -238,7 +240,11 @@ actor SwiftDataGroupStore: GroupStore {
             isPublishedOnChain: row.isPublishedOnChain,
             avatarJPEG: avatarJPEG,
             lastReadAt: row.lastReadAt,
-            invitationMessage: invitationMessage
+            invitationMessage: invitationMessage,
+            // Rows migrated in before the column existed read as
+            // "still a member" — the removal payload re-applies via
+            // inbox replay if that's ever wrong.
+            membershipRevoked: row.membershipRevoked ?? false
         )
     }
 }

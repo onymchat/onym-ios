@@ -18,6 +18,7 @@ struct SearchView: View {
     let makeShareInviteFlow: @MainActor () -> ShareInviteFlow
     let setGroupAvatar: @MainActor (String, Data?) async -> Void
     let setGroupName: @MainActor (String, String) async -> Void
+    let removeGroupMember: @MainActor (String, String) async -> JoinRequestApprover.RemoveOutcome
     let imageLoader: ChatImageLoader
     let videoLoader: ChatVideoLoader
     let voiceLoader: ChatVoiceLoader
@@ -46,6 +47,7 @@ struct SearchView: View {
                 makeShareInviteFlow: makeShareInviteFlow,
                 setGroupAvatar: setGroupAvatar,
                 setGroupName: setGroupName,
+                removeGroupMember: removeGroupMember,
                 imageLoader: imageLoader,
                 videoLoader: videoLoader,
                 voiceLoader: voiceLoader,

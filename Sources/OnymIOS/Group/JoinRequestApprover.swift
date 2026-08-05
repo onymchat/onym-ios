@@ -103,6 +103,43 @@ actor JoinRequestApprover: JoinRequestApproving {
         case anchorRejected(String)
     }
 
+    /// Outcome of `removeMember`. Mirrors `GroupMemberRemover.Outcome`
+    /// from onym-android.
+    enum RemoveOutcome: Equatable, Sendable {
+        /// Anchored on chain, persisted locally, fanned out (best-effort).
+        case sent
+        /// No group with this id under the active identity.
+        case unknownGroup
+        /// No identity selected.
+        case noIdentityLoaded
+        /// Removal only exists for Tyranny groups.
+        case notTyrannyGroup
+        /// Active identity isn't this group's admin.
+        case notAdminOfThisGroup
+        /// The admin can't remove themself.
+        case cannotRemoveSelf
+        /// BLS hex not present in `ChatGroup.memberProfiles`.
+        case unknownMember
+        /// The member's profile is already tombstoned.
+        case alreadyRemoved
+        /// Present in the app-level directory but missing from the
+        /// on-chain `ChatGroup.members` roster — the tree can't be
+        /// shrunk around a leaf that was never in it. (Directory and
+        /// roster are allowed to diverge; removal is the first flow
+        /// that needs them to agree.)
+        case memberNotInRoster
+        /// `RelayerRepository.selectURL()` returned nil.
+        case noActiveRelayer
+        /// No deployed Tyranny contract for the active network.
+        case noContractBinding
+        /// `Tyranny.proveUpdate` failed.
+        case proofFailed(String)
+        /// Relayer accepted the POST but the contract rejected.
+        case anchorRejected(String)
+        /// Local/transport failure outside the prove+anchor leg.
+        case transportFailed(String)
+    }
+
     private let identity: IdentityRepository
     private let introKeyStore: any IntroKeyStore
     private let introRequestStore: any IntroRequestStore
@@ -118,16 +155,18 @@ actor JoinRequestApprover: JoinRequestApproving {
     private var pendingContinuations: [UUID: AsyncStream<[PendingRequest]>.Continuation] = [:]
     private var decryptFailures: Int = 0
     private var collectorTask: Task<Void, Never>?
-    /// Serializes `approve` calls. Each approval reads `group.epoch`,
-    /// proves an `update_commitment` from it, submits, then persists
-    /// `epoch + 1`. The actor re-enters at the multi-second prove /
-    /// submit awaits, so two overlapping approvals would both read the
-    /// same stale epoch — the chain accepts the first and rejects the
-    /// second as a stale-epoch replay (the loser's join silently
-    /// fails). Chaining each approval onto the previous one's
-    /// completion guarantees the read-prove-submit-persist critical
-    /// section runs to completion before the next begins.
-    private var approvalChain: Task<ApproveOutcome, Never>?
+    /// Serializes `approve` AND `removeMember` calls. Each one reads
+    /// `group.epoch`, proves an `update_commitment` from it, submits,
+    /// then persists `epoch + 1`. The actor re-enters at the
+    /// multi-second prove / submit awaits, so two overlapping
+    /// mutations would both read the same stale epoch — the chain
+    /// accepts the first and rejects the second as a stale-epoch
+    /// replay (the loser silently fails). Chaining each operation onto
+    /// the previous one's completion guarantees the
+    /// read-prove-submit-persist critical section runs to completion
+    /// before the next begins. Type-erased to `Void` so approvals and
+    /// removals share one chain (they mutate the same group state).
+    private var approvalChain: Task<Void, Never>?
 
     init(
         identity: IdentityRepository,
@@ -202,19 +241,37 @@ actor JoinRequestApprover: JoinRequestApproving {
         await refresh(from: raw)
     }
 
-    /// Public entry point. Serializes onto any in-flight approval via
-    /// `approvalChain` so each on-chain `update_commitment` reads the
-    /// epoch the previous approval persisted, then defers to
-    /// `performApprove` for the actual anchor flow. The read-and-assign
-    /// of `approvalChain` is synchronous (no `await` between), so
-    /// overlapping callers chain deterministically.
+    /// Public entry point. Serializes onto any in-flight approval /
+    /// removal via `approvalChain` so each on-chain `update_commitment`
+    /// reads the epoch the previous operation persisted, then defers to
+    /// `performApprove` for the actual anchor flow.
     func approve(requestId: String) async -> ApproveOutcome {
-        let previous = approvalChain
-        let task = Task { () -> ApproveOutcome in
-            _ = await previous?.value
-            return await self.performApprove(requestId: requestId)
+        await enqueue { await self.performApprove(requestId: requestId) }
+    }
+
+    /// Remove `victimBlsHex` (lowercase 96-char BLS pubkey hex) from
+    /// `groupIDHex`, with groupSecret rotation. Serialized through the
+    /// same `approvalChain` as `approve` — both are
+    /// read-prove-anchor-persist on the same group and must not
+    /// interleave. See `performRemove` for the flow.
+    func removeMember(groupIDHex: String, victimBlsHex: String) async -> RemoveOutcome {
+        await enqueue {
+            await self.performRemove(groupIDHex: groupIDHex, victimBlsHex: victimBlsHex)
         }
-        approvalChain = task
+    }
+
+    /// Chain `op` onto the previous group-mutating operation. The
+    /// read-and-assign of `approvalChain` is synchronous (no `await`
+    /// between), so overlapping callers chain deterministically.
+    private func enqueue<T: Sendable>(
+        _ op: @escaping @Sendable () async -> T
+    ) async -> T {
+        let previous = approvalChain
+        let task = Task { () -> T in
+            _ = await previous?.value
+            return await op()
+        }
+        approvalChain = Task { _ = await task.value }
         return await task.value
     }
 
@@ -504,6 +561,274 @@ actor JoinRequestApprover: JoinRequestApproving {
         return .ok(updated)
     }
 
+    /// Admin-side "remove member from a Tyranny group" flow, with
+    /// groupSecret rotation. Ordering is anchor → persist → fan out
+    /// (mirrors `performApprove`):
+    ///
+    ///  1. Shrink the roster, prove the Tyranny `update_commitment`
+    ///     over the new Merkle root, submit to the relayer. Epoch
+    ///     bumps, salt rotates, and — unlike a join — a **fresh random
+    ///     groupSecret** is generated so the removed member holds no
+    ///     post-removal member-only secret.
+    ///  2. Persist the advanced local state (roster minus victim, the
+    ///     victim's `MemberProfile` tombstoned via `revoked = true` —
+    ///     never deleted, so past-message rendering and dedup keep
+    ///     working).
+    ///  3. Fan a `MemberRemovalPayload` out per recipient,
+    ///     best-effort: remaining members receive the variant carrying
+    ///     `group_secret_new` + `salt_new`; the victim receives the
+    ///     secret-free variant (they learn the fact, never the
+    ///     secrets).
+    ///
+    /// The fanout is deliberately OFF the critical path: once the
+    /// chain anchor lands and local state persists, the removal is
+    /// real — a member that misses the payload converges later via
+    /// inbox replay. (stellar-mls postmortem lesson: never block the
+    /// security-critical leg on courtesy delivery.)
+    ///
+    /// Mirrors `GroupMemberRemover.remove` from onym-android (where a
+    /// shared `Mutex` stands in for this actor's `approvalChain`).
+    private func performRemove(
+        groupIDHex: String,
+        victimBlsHex: String
+    ) async -> RemoveOutcome {
+        let victimHex = victimBlsHex.lowercased()
+        let activeID = await identity.currentSelectedID()
+        let groups = await groupRepository.currentGroups()
+        // Scope to the active identity's copy — the same on-chain
+        // group id can belong to two local identities, and only the
+        // admin's copy holds the authority to shrink the roster.
+        guard let group = groups.first(where: {
+            $0.id.lowercased() == groupIDHex.lowercased()
+                && (activeID == nil || $0.ownerIdentityID == activeID)
+        }) else { return .unknownGroup }
+        guard activeID != nil else { return .noIdentityLoaded }
+
+        guard group.groupType == .tyranny else { return .notTyrannyGroup }
+        guard let adminPubkeyHex = group.adminPubkeyHex?.lowercased() else {
+            return .notAdminOfThisGroup
+        }
+        guard victimHex != adminPubkeyHex else { return .cannotRemoveSelf }
+
+        guard let victimProfile = group.memberProfiles[victimHex] else {
+            return .unknownMember
+        }
+        guard !victimProfile.revoked else { return .alreadyRemoved }
+
+        let victimBytes = ChatGroup.bytes(fromHex: victimHex)
+        guard group.members.contains(where: {
+            $0.publicKeyCompressed == victimBytes
+        }) else { return .memberNotInRoster }
+
+        // ─── chain-anchor leg (mirrors anchorTyrannyJoin) ────────────
+        guard let relayerURL = await relayers.selectURL() else {
+            return .noActiveRelayer
+        }
+        let activeNetwork = networkPreference.current()
+        let anchorKey = AnchorSelectionKey(
+            network: activeNetwork.contractNetwork,
+            type: .tyranny
+        )
+        guard let binding = await contracts.binding(for: anchorKey) else {
+            return .noContractBinding
+        }
+
+        let adminBytes = ChatGroup.bytes(fromHex: adminPubkeyHex)
+        guard let adminIndexOld = group.members.firstIndex(where: {
+            $0.publicKeyCompressed == adminBytes
+        }) else {
+            return .transportFailed("admin not in members roster")
+        }
+
+        // Removal preserves the existing lex order — filtering can't
+        // reorder an already-sorted roster.
+        let newMembers = group.members.filter {
+            $0.publicKeyCompressed != victimBytes
+        }
+        let memberRootNew: Data
+        do {
+            memberRootNew = try GroupCommitmentBuilder.computeMerkleRoot(
+                members: newMembers,
+                tier: group.tier
+            )
+        } catch {
+            return .proofFailed("merkle_root: \(error)")
+        }
+        let saltNew = GroupCommitmentBuilder.generateSalt()
+        // Fresh random groupSecret — the whole point of the rotation:
+        // the victim keeps the OLD secret, which stops mattering the
+        // moment the remaining members switch.
+        let groupSecretNew: Data
+        do {
+            groupSecretNew = try SecureRandom.data(32)
+        } catch {
+            return .transportFailed("random: \(error)")
+        }
+
+        let blsSecret: Data
+        do {
+            // onym:allow-secret-read
+            blsSecret = try await identity.blsSecretKey()
+        } catch {
+            return .transportFailed("bls_secret: \(error)")
+        }
+
+        // Same pre-flight as the approver: confirm the active identity
+        // actually IS the admin before handing the secret to the
+        // prover — catches "user switched identities" cleanly.
+        let activePubFromSecret: Data
+        do {
+            activePubFromSecret = try GroupCommitmentBuilder.computePublicKey(
+                secretKey: blsSecret
+            )
+        } catch {
+            return .transportFailed("derive_pub: \(error)")
+        }
+        guard activePubFromSecret == group.members[adminIndexOld].publicKeyCompressed else {
+            return .notAdminOfThisGroup
+        }
+
+        let proofInput = GroupProofUpdateInput(
+            groupType: .tyranny,
+            tier: group.tier,
+            oldMembers: group.members,
+            adminBlsSecretKey: blsSecret,
+            adminIndexOld: adminIndexOld,
+            epochOld: group.epoch,
+            memberRootNew: memberRootNew,
+            groupID: group.groupIDData,
+            saltOld: group.salt,
+            saltNew: saltNew
+        )
+        let proof: GroupUpdateProof
+        do {
+            proof = try proofGenerator.proveUpdate(proofInput)
+        } catch let err as GroupProofGeneratorError {
+            return .proofFailed(err.localizedDescription)
+        } catch {
+            return .proofFailed(String(describing: error))
+        }
+
+        let transport = makeContractTransport(relayerURL)
+        let client = SEPContractClient(
+            contractID: binding.contractID,
+            contractType: .tyranny,
+            network: activeNetwork.sepNetwork,
+            transport: transport
+        )
+        let response: SEPSubmissionResponse
+        do {
+            response = try await client.updateCommitmentTyranny(
+                TyrannyUpdateCommitmentPayload(
+                    groupID: group.groupIDData,
+                    proof: proof.proof,
+                    publicInputs: proof.publicInputs
+                )
+            )
+        } catch {
+            return .transportFailed("anchor: \(error)")
+        }
+        guard response.accepted else {
+            return .anchorRejected(response.message ?? "(no message)")
+        }
+
+        // ─── persist ─────────────────────────────────────────────────
+        // The anchor landed: the removal is now the on-chain truth.
+        // Persist BEFORE fanning out so a crash mid-fanout can't lose
+        // the transition (peers converge via inbox replay).
+        var anchored = group
+        anchored.members = newMembers
+        anchored.commitment = proof.commitmentNew
+        anchored.epoch = group.epoch + 1
+        anchored.salt = saltNew
+        anchored.groupSecret = groupSecretNew
+        anchored.memberProfiles[victimHex] = victimProfile.withRevoked(true)
+        await groupRepository.insert(anchored)
+
+        // ─── fan out (best-effort) ───────────────────────────────────
+        await broadcastRemoval(
+            in: anchored,
+            victimHex: victimHex,
+            victimProfile: victimProfile,
+            adminHex: adminPubkeyHex,
+            groupSecretNew: groupSecretNew,
+            saltNew: saltNew
+        )
+        return .sent
+    }
+
+    /// One sealed envelope per recipient, sequential, failures
+    /// swallowed (inbox replay + the on-chain gate make convergence
+    /// eventual). The victim's copy is encoded WITHOUT the rotated
+    /// secrets — build both wire bodies once, outside the loop.
+    /// Mirrors `GroupMemberRemover.broadcastRemoval` from onym-android.
+    private func broadcastRemoval(
+        in group: ChatGroup,
+        victimHex: String,
+        victimProfile: MemberProfile,
+        adminHex: String,
+        groupSecretNew: Data,
+        saltNew: Data
+    ) async {
+        guard let commitment = group.commitment else { return }
+        let sentAt = Int64(Date().timeIntervalSince1970 * 1000)
+        let memberBytes: Data
+        let victimBytes: Data
+        do {
+            let memberPayload = try MemberRemovalPayload(
+                version: 1,
+                groupID: group.groupIDData,
+                removedBlsHex: victimHex,
+                commitment: commitment,
+                epoch: group.epoch,
+                sentAtMillis: sentAt,
+                groupSecretNew: groupSecretNew,
+                saltNew: saltNew
+            )
+            let victimPayload = try MemberRemovalPayload(
+                version: 1,
+                groupID: group.groupIDData,
+                removedBlsHex: victimHex,
+                commitment: commitment,
+                epoch: group.epoch,
+                sentAtMillis: sentAt
+            )
+            memberBytes = try JSONEncoder().encode(memberPayload)
+            victimBytes = try JSONEncoder().encode(victimPayload)
+        } catch {
+            // Encode failures can't happen for sizes the caller
+            // already validated — but skipping fanout beats crashing
+            // after the anchor landed.
+            return
+        }
+
+        for (memberKey, profile) in group.memberProfiles {
+            if memberKey == adminHex { continue } // self
+            let body: Data
+            if memberKey == victimHex {
+                body = victimBytes
+            } else {
+                if profile.revoked { continue } // earlier tombstones
+                body = memberBytes
+            }
+            let inboxKey = memberKey == victimHex
+                ? victimProfile.inboxPublicKey
+                : profile.inboxPublicKey
+            let sealed: Data
+            do {
+                sealed = try await identity.sealInvitation(payload: body, to: inboxKey)
+            } catch {
+                continue
+            }
+            let tag = TransportInboxID(
+                rawValue: IntroInboxPump.inboxTag(from: inboxKey)
+            )
+            // Receipts discarded — fan-out is best-effort; the on-chain
+            // anchor is the truth and inbox replay backfills stragglers.
+            _ = try? await inboxTransport.send(sealed, to: tag)
+        }
+    }
+
     /// Insert/update the joiner's `MemberProfile` on the local
     /// group. Idempotent — a second approval for the same joiner
     /// (e.g. they re-tap the link before the inviter notices the
@@ -593,9 +918,11 @@ actor JoinRequestApprover: JoinRequestApproving {
 
         for (memberKey, profile) in group.memberProfiles {
             // Skip self (admin already knows) + the new joiner
-            // (covered by the GroupInvitationPayload above).
+            // (covered by the GroupInvitationPayload above) + removed
+            // members (tombstoned in place — their inbox gets nothing).
             if memberKey == joinerKey { continue }
             if let adminKey, memberKey == adminKey { continue }
+            if profile.revoked { continue }
 
             let sealed: Data
             do {

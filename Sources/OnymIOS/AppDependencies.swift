@@ -61,4 +61,16 @@ struct AppDependencies {
     /// `GroupNamePayload` out to members. Backs the admin-only rename
     /// affordance in `ChatMembersView`.
     let setGroupName: @MainActor (_ groupIDHex: String, _ name: String) async -> Void
+    /// Admin removes a member from a Tyranny group: anchors the
+    /// shrunken roster on chain (epoch bump + salt/groupSecret
+    /// rotation), tombstones the victim locally, and fans a
+    /// `MemberRemovalPayload` out to every member (the victim's copy
+    /// omits the rotated secrets). Backs the admin-only remove
+    /// affordance in `ChatMembersView`. Routed through
+    /// `JoinRequestApprover.removeMember` so it serializes with
+    /// in-flight approvals.
+    let removeGroupMember: @MainActor (
+        _ groupIDHex: String,
+        _ victimBlsHex: String
+    ) async -> JoinRequestApprover.RemoveOutcome
 }

@@ -237,6 +237,11 @@ actor GroupStateVerifier: GroupStateRefreshing {
         // forged request can't redirect the salt elsewhere.
         let key = Self.hex(request.requesterBlsPublicKey)
         guard let profile = group.memberProfiles[key] else { return }
+        // A removed (tombstoned) member is no longer entitled to the
+        // salt/groupSecret-bearing snapshot — the rotated secrets are
+        // exactly what removal takes away from them. Likewise never
+        // answer from a group WE were removed from (stale authority).
+        guard !profile.revoked, !group.membershipRevoked else { return }
         guard let requesterEd25519, requesterEd25519 == profile.sendingPubkey else { return }
         guard request.requesterInboxPublicKey == profile.inboxPublicKey else { return }
 

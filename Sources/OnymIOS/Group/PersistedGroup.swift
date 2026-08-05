@@ -51,6 +51,12 @@ final class PersistedGroup {
     /// and optional so SwiftData's lightweight migration lands the column
     /// on existing rows without a wipe; `nil` = never opened.
     var lastReadAt: Date?
+    /// `true` once the admin removed this device's owner from the group
+    /// (`ChatGroup.membershipRevoked`). Plain (a single local-only flag,
+    /// like `isPublishedOnChain`) and optional so SwiftData's lightweight
+    /// migration lands the column on existing rows without a wipe;
+    /// `nil` decodes to `false`.
+    var membershipRevoked: Bool?
 
     var encryptedName: Data
     var encryptedGroupSecret: Data
@@ -83,6 +89,7 @@ final class PersistedGroup {
         groupTypeRaw: String,
         isPublishedOnChain: Bool,
         lastReadAt: Date? = nil,
+        membershipRevoked: Bool? = nil,
         encryptedName: Data,
         encryptedGroupSecret: Data,
         encryptedMembersJSON: Data,
@@ -102,6 +109,7 @@ final class PersistedGroup {
         self.groupTypeRaw = groupTypeRaw
         self.isPublishedOnChain = isPublishedOnChain
         self.lastReadAt = lastReadAt
+        self.membershipRevoked = membershipRevoked
         self.encryptedName = encryptedName
         self.encryptedGroupSecret = encryptedGroupSecret
         self.encryptedMembersJSON = encryptedMembersJSON

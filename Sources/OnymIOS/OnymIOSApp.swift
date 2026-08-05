@@ -446,6 +446,12 @@ struct OnymIOSApp: App {
             },
             setGroupName: { groupIDHex, name in
                 await groupAvatarBroadcaster.setName(groupIDHex: groupIDHex, name: name)
+            },
+            removeGroupMember: { groupIDHex, victimBlsHex in
+                await joinRequestApprover.removeMember(
+                    groupIDHex: groupIDHex,
+                    victimBlsHex: victimBlsHex
+                )
             }
         )
     }

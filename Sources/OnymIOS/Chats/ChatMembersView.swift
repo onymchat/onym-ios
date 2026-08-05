@@ -24,11 +24,24 @@ struct ChatMembersView: View {
     let makeShareInviteFlow: @MainActor () -> ShareInviteFlow
     let setGroupAvatar: @MainActor (String, Data?) async -> Void
     let setGroupName: @MainActor (String, String) async -> Void
+    /// Admin removes a member: anchors the shrunken roster on chain,
+    /// rotates the group secret, tombstones the victim, fans the
+    /// removal out. Returns the outcome so non-`.sent` failures can
+    /// surface in the error alert.
+    let removeMember: @MainActor (String, String) async -> JoinRequestApprover.RemoveOutcome
 
     @State private var shareInviteFlow: ShareInviteFlow?
     /// Drives the admin-only rename alert.
     @State private var showRename = false
     @State private var renameText = ""
+    /// The member awaiting the remove confirmation dialog, if any.
+    @State private var memberToRemove: MemberRow?
+    /// BLS hex of the member whose removal is in flight (the
+    /// multi-second PLONK prove + anchor round-trip) — the row shows a
+    /// spinner and further removals are disabled until it resolves.
+    @State private var removalInFlightBlsHex: String?
+    /// Non-`.sent` removal outcome, surfaced in an alert.
+    @State private var removalErrorText: String?
 
     var body: some View {
         Group {
@@ -76,6 +89,35 @@ struct ChatMembersView: View {
                 flow: flow,
                 onDone: { shareInviteFlow = nil }
             )
+        }
+        .confirmationDialog(
+            Text(removalDialogTitle),
+            isPresented: Binding(
+                get: { memberToRemove != nil },
+                set: { if !$0 { memberToRemove = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: memberToRemove
+        ) { row in
+            Button("Remove", role: .destructive) {
+                beginRemoval(row)
+            }
+            .accessibilityIdentifier("members.remove_confirm")
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("They will no longer receive this group's messages. The group key will be rotated for everyone else.")
+        }
+        .alert(
+            "Couldn't remove the member",
+            isPresented: Binding(
+                get: { removalErrorText != nil },
+                set: { if !$0 { removalErrorText = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+                .accessibilityIdentifier("members.remove_error")
+        } message: {
+            Text(removalErrorText ?? "")
         }
         .alert("Rename group", isPresented: $showRename) {
             TextField("Group name", text: $renameText)
@@ -210,6 +252,45 @@ struct ChatMembersView: View {
     /// because only their broadcast passes the receiver's admin check.
     private var canChangeName: Bool { canShareInvite }
 
+    /// Same admin gate again: only the Tyranny admin can remove a
+    /// member, because only they can prove the on-chain
+    /// `update_commitment` that makes the removal real.
+    private var canRemoveMembers: Bool { canShareInvite }
+
+    /// Title for the remove confirmation dialog — names the member so
+    /// a mis-tap can't silently remove the wrong person.
+    private var removalDialogTitle: String {
+        String(
+            format: String(localized: "Remove %@?"),
+            memberToRemove?.displayAlias ?? ""
+        )
+    }
+
+    /// Kick off the removal for a confirmed row: mark the row
+    /// in-flight (spinner), run the anchor + fanout, surface a
+    /// non-`.sent` outcome in the error alert. Roster/count updates
+    /// flow back reactively through `chatsFlow.groups`.
+    private func beginRemoval(_ row: MemberRow) {
+        guard removalInFlightBlsHex == nil else { return }
+        removalInFlightBlsHex = row.blsHex
+        let groupID = groupID
+        let removeMember = removeMember
+        Task {
+            let outcome = await removeMember(groupID, row.blsHex)
+            removalInFlightBlsHex = nil
+            if outcome != .sent {
+                removalErrorText = Self.describe(outcome)
+            }
+        }
+    }
+
+    /// Short diagnostic line for the error alert's message. The alert
+    /// title carries the user-meaningful part; this pins down which
+    /// gate failed (mirrors the Android toast's outcome dump).
+    private static func describe(_ outcome: JoinRequestApprover.RemoveOutcome) -> String {
+        String(describing: outcome)
+    }
+
     private func list(for group: ChatGroup) -> some View {
         ScrollView {
             if let message = group.invitationMessage,
@@ -235,7 +316,10 @@ struct ChatMembersView: View {
             .padding(.horizontal, 16)
             .padding(.top, 12)
 
-            Text("\(group.memberProfiles.count) member\(group.memberProfiles.count == 1 ? "" : "s")")
+            // Removed members are tombstoned in the map but no longer
+            // part of the group — count only the active ones.
+            let activeCount = group.memberProfiles.values.filter { !$0.revoked }.count
+            Text("\(activeCount) member\(activeCount == 1 ? "" : "s")")
                 .font(.system(size: 12))
                 .foregroundStyle(OnymTokens.text3)
                 .padding(.top, 8)
@@ -287,6 +371,29 @@ struct ChatMembersView: View {
                     .foregroundStyle(OnymTokens.text3)
             }
             Spacer(minLength: 0)
+            // Admin-only remove affordance (never on the admin's own
+            // row — the chain rejects self-removal anyway). While the
+            // multi-second prove + anchor runs, the row shows a
+            // spinner and other rows' buttons are disabled.
+            if canRemoveMembers && !row.isSelf {
+                if removalInFlightBlsHex == row.blsHex {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(OnymTokens.text3)
+                } else {
+                    Button(role: .destructive) {
+                        memberToRemove = row
+                    } label: {
+                        Image(systemName: "person.fill.xmark")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Color.red)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(removalInFlightBlsHex != nil)
+                    .accessibilityLabel("Remove member")
+                    .accessibilityIdentifier("members.remove_button.\(row.blsHex)")
+                }
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -345,6 +452,9 @@ struct ChatMembersView: View {
     private func rows(for group: ChatGroup) -> [MemberRow] {
         let activeKey = activeBlsHex
         return group.memberProfiles
+            // Removed members are tombstoned in the map (so message
+            // rendering keeps their alias) but hidden from the roster.
+            .filter { !$0.value.revoked }
             .map { (key, profile) in
                 MemberRow(
                     id: key,

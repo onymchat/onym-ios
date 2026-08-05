@@ -80,6 +80,54 @@ final class SwiftDataGroupStoreTests: XCTestCase {
         XCTAssertEqual(listed[0].memberProfiles, profiles)
     }
 
+    func test_insertOrUpdate_roundtripsRevokedProfileAndMembershipRevoked() async {
+        let victimHex = "33".repeated(48)
+        var group = makeGroup(
+            id: "ac".repeated(32),
+            name: "Removals",
+            memberProfiles: [
+                victimHex: MemberProfile(
+                    alias: "victim",
+                    inboxPublicKey: Data(repeating: 0xCC, count: 32),
+                    sendingPubkey: Data(repeating: 0xE3, count: 32),
+                    revoked: true
+                ),
+            ]
+        )
+        group.membershipRevoked = true
+        _ = await store.insertOrUpdate(group)
+
+        let listed = await store.list()
+        XCTAssertEqual(listed.count, 1)
+        XCTAssertEqual(listed[0].memberProfiles[victimHex]?.revoked, true,
+                       "the tombstone must survive the encrypted round-trip")
+        XCTAssertTrue(listed[0].membershipRevoked)
+    }
+
+    func test_insertOrUpdate_membershipRevokedDefaultsFalse() async {
+        let group = makeGroup(id: "ad".repeated(32), name: "Active")
+        _ = await store.insertOrUpdate(group)
+
+        let listed = await store.list()
+        XCTAssertFalse(listed[0].membershipRevoked)
+        XCTAssertEqual(listed[0].memberProfiles.values.filter(\.revoked).count, 0)
+    }
+
+    /// Legacy persisted JSON (and pre-removal wire payloads) carry no
+    /// `revoked` key — they must decode as active members.
+    func test_memberProfile_legacyJSONWithoutRevokedKey_decodesAsActive() throws {
+        let legacy = """
+        {
+          "alias": "old-timer",
+          "inbox_public_key": "\(Data(repeating: 0xAA, count: 32).base64EncodedString())",
+          "sending_pubkey": "\(Data(repeating: 0xBB, count: 32).base64EncodedString())"
+        }
+        """
+        let decoded = try JSONDecoder().decode(MemberProfile.self, from: Data(legacy.utf8))
+        XCTAssertFalse(decoded.revoked)
+        XCTAssertEqual(decoded.alias, "old-timer")
+    }
+
     func test_insertOrUpdate_emptyProfilesRoundtripAsEmptyDict() async {
         let group = makeGroup(id: "cd".repeated(32), name: "No profiles")
         _ = await store.insertOrUpdate(group)

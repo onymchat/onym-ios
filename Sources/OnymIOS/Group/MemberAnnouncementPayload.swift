@@ -72,12 +72,13 @@ struct MemberAnnouncementPayload: Codable, Equatable, Sendable {
 
     /// One member's directory entry. App-level only — the
     /// cryptographic Poseidon leaf hash is intentionally absent.
-    /// V1 group rosters are static on-chain (the joiner is not yet a
-    /// member of the Merkle tree; `update_commitment` is post-V1
-    /// scope in the SEP contracts), so the leaf hash is meaningless
-    /// to ship today. When on-chain joiner ceremonies land, a
-    /// `leaf_hash` field can return via a non-failing
-    /// `decodeIfPresent` decoder without breaking older receivers.
+    /// The joiner's leaf reaches receivers through the full roster in
+    /// `GroupInvitationPayload.members` (the admin anchors the
+    /// `update_commitment` before fanning this announcement out), so
+    /// re-shipping it here would just be a second copy to keep
+    /// consistent. If a leaner delta ever needs it, a `leaf_hash`
+    /// field can land via a non-failing `decodeIfPresent` decoder
+    /// without breaking older receivers.
     ///
     /// `blsPub` is still carried as the **stable cross-device
     /// identifier**: it's HKDF-derived from the joiner's identity

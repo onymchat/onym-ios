@@ -21,6 +21,7 @@ struct ChatsView: View {
     let makeJoinFlow: @MainActor (IntroCapability) -> JoinFlow
     let setGroupAvatar: @MainActor (String, Data?) async -> Void
     let setGroupName: @MainActor (String, String) async -> Void
+    let removeGroupMember: @MainActor (String, String) async -> JoinRequestApprover.RemoveOutcome
 
     @State private var showCreateGroup = false
     @State private var showScanner = false
@@ -301,6 +302,7 @@ struct ChatsView: View {
                 makeShareInviteFlow: makeShareInviteFlow,
                 setGroupAvatar: setGroupAvatar,
                 setGroupName: setGroupName,
+                removeGroupMember: removeGroupMember,
                 imageLoader: imageLoader,
                 videoLoader: videoLoader,
                 voiceLoader: voiceLoader

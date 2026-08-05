@@ -49,6 +49,8 @@ actor GroupAvatarBroadcaster {
         for (memberKey, profile) in group.memberProfiles {
             // Skip self — the admin already applied the change locally.
             if let adminKey, memberKey == adminKey { continue }
+            // Removed members get nothing — tombstoned in place.
+            if profile.revoked { continue }
             guard let sealed = try? await identity.sealInvitation(
                 payload: payloadBytes,
                 to: profile.inboxPublicKey
@@ -90,6 +92,8 @@ actor GroupAvatarBroadcaster {
         for (memberKey, profile) in group.memberProfiles {
             // Skip self — the admin already applied the change locally.
             if let adminKey, memberKey == adminKey { continue }
+            // Removed members get nothing — tombstoned in place.
+            if profile.revoked { continue }
             guard let sealed = try? await identity.sealInvitation(
                 payload: payloadBytes,
                 to: profile.inboxPublicKey

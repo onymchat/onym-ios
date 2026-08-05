@@ -24,7 +24,10 @@ struct ChatGroup: Identifiable, Equatable, Sendable {
     /// 32-byte shared secret. Used for `topicTag` derivation and message
     /// key HKDF — both still TBD on iOS, but the value must be sealed
     /// into the invitation now so receivers can rebuild the same key.
-    let groupSecret: Data
+    /// Mutable because a member removal rotates it: the admin mints a
+    /// fresh secret and remaining members swap to it via
+    /// `MemberRemovalPayload.groupSecretNew`.
+    var groupSecret: Data
     let createdAt: Date
 
     var members: [GovernanceMember]
@@ -33,13 +36,12 @@ struct ChatGroup: Identifiable, Equatable, Sendable {
     /// Populated for the creator at group-create time and extended as
     /// joiners are admitted (post-PR fanout).
     ///
-    /// Independent of `members`: V1 group rosters are static
-    /// on-chain (`update_commitment` is post-V1 in the SEP
-    /// contracts), so a joiner is "in the group" at the app level —
-    /// receiving messages, listed in the chat detail — without yet
-    /// being a `GovernanceMember` in the cryptographic Merkle tree.
-    /// `members` is the on-chain truth; `memberProfiles` is the
-    /// app-level "who am I talking to" directory. They may diverge.
+    /// Independent of `members`: that's the on-chain Merkle-tree
+    /// roster, advanced by the admin's `update_commitment` on every
+    /// join / removal. `memberProfiles` is the app-level "who am I
+    /// talking to" directory (aliases, inbox keys, tombstones). The
+    /// two usually agree but may briefly diverge while a roster
+    /// mutation propagates.
     var memberProfiles: [String: MemberProfile]
     var epoch: UInt64
     var salt: Data
@@ -89,6 +91,15 @@ struct ChatGroup: Identifiable, Equatable, Sendable {
     /// accepting, and persisted here as the group's intro. `nil` = none.
     /// Defaulted so existing construction sites need no change.
     var invitationMessage: String? = nil
+
+    /// `true` once this device's owner has been removed from the group
+    /// by the admin (a self-targeting `MemberRemovalPayload` landed).
+    /// The thread stays readable but the composer is replaced by a
+    /// "you were removed" banner and `SendMessageInteractor` refuses
+    /// sends. Local-only — never on the wire; defaulted so existing
+    /// construction sites need no change. Mirrors
+    /// `ChatGroup.membershipRevoked` from onym-android.
+    var membershipRevoked: Bool = false
 
     /// Group ID as the raw 32-byte payload (parsed back from `id`).
     /// Used directly when building chain payloads + invitations.

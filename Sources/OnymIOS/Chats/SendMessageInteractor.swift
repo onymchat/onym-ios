@@ -49,6 +49,10 @@ actor SendMessageInteractor {
         /// creator's own profile was never recorded (shouldn't happen
         /// post-PR-3) or when the active identity switched mid-flight.
         case senderNotAMember
+        /// The admin removed this identity from the group
+        /// (`ChatGroup.membershipRevoked`) — the thread is read-only.
+        /// Defense-in-depth behind the UI's disabled composer.
+        case removedFromGroup
         /// Caller-side guard. Empty bodies are technically valid on
         /// the wire (the payload encodes them) but the interactor
         /// refuses to ship them — a no-op send would burn a relay
@@ -121,6 +125,10 @@ actor SendMessageInteractor {
         }) else {
             throw SendError.unknownGroup
         }
+        // The admin removed this identity from the group — the thread
+        // is read-only. Defense-in-depth behind the UI's removed-state
+        // composer banner.
+        guard !group.membershipRevoked else { throw SendError.removedFromGroup }
 
         let myBlsHex = active.blsPublicKey
             .map { String(format: "%02x", $0) }.joined()
@@ -175,6 +183,9 @@ actor SendMessageInteractor {
         // we mark `.sent` if at least one relay accepted any envelope.
         let recipients = group.memberProfiles
             .filter { $0.key != myBlsHex }
+            // Removed members are tombstoned in place — never seal a
+            // new message to a revoked inbox.
+            .filter { !$0.value.revoked }
             .map { $0.value.inboxPublicKey }
 
         let (finalStatus, failureReason) = await fanOut(
@@ -230,6 +241,7 @@ actor SendMessageInteractor {
         }) else {
             throw SendError.unknownGroup
         }
+        guard !group.membershipRevoked else { throw SendError.removedFromGroup }
         let myBlsHex = active.blsPublicKey.map { String(format: "%02x", $0) }.joined()
         guard group.memberProfiles[myBlsHex] != nil else {
             throw SendError.senderNotAMember
@@ -300,6 +312,9 @@ actor SendMessageInteractor {
 
         let recipients = group.memberProfiles
             .filter { $0.key != myBlsHex }
+            // Removed members are tombstoned in place — never seal a
+            // new message to a revoked inbox.
+            .filter { !$0.value.revoked }
             .map { $0.value.inboxPublicKey }
         let finalStatus = await uploadAndFanOut(
             blobs: [(sealed.blob, "image/jpeg")],
@@ -337,6 +352,7 @@ actor SendMessageInteractor {
         }) else {
             throw SendError.unknownGroup
         }
+        guard !group.membershipRevoked else { throw SendError.removedFromGroup }
         let myBlsHex = active.blsPublicKey.map { String(format: "%02x", $0) }.joined()
         guard group.memberProfiles[myBlsHex] != nil else {
             throw SendError.senderNotAMember
@@ -427,6 +443,9 @@ actor SendMessageInteractor {
 
         let recipients = group.memberProfiles
             .filter { $0.key != myBlsHex }
+            // Removed members are tombstoned in place — never seal a
+            // new message to a revoked inbox.
+            .filter { !$0.value.revoked }
             .map { $0.value.inboxPublicKey }
         // Poster first (small, so the recipient's bubble renders quickly),
         // then the video.
@@ -473,6 +492,7 @@ actor SendMessageInteractor {
         }) else {
             throw SendError.unknownGroup
         }
+        guard !group.membershipRevoked else { throw SendError.removedFromGroup }
         let myBlsHex = active.blsPublicKey.map { String(format: "%02x", $0) }.joined()
         guard group.memberProfiles[myBlsHex] != nil else {
             throw SendError.senderNotAMember
@@ -565,6 +585,9 @@ actor SendMessageInteractor {
 
         let recipients = group.memberProfiles
             .filter { $0.key != myBlsHex }
+            // Removed members are tombstoned in place — never seal a
+            // new message to a revoked inbox.
+            .filter { !$0.value.revoked }
             .map { $0.value.inboxPublicKey }
         let finalStatus = await uploadAndFanOut(
             blobs: uploads, payload: payload, recipients: recipients,
@@ -599,6 +622,7 @@ actor SendMessageInteractor {
         }) else {
             throw SendError.unknownGroup
         }
+        guard !group.membershipRevoked else { throw SendError.removedFromGroup }
         let myBlsHex = active.blsPublicKey.map { String(format: "%02x", $0) }.joined()
         guard group.memberProfiles[myBlsHex] != nil else {
             throw SendError.senderNotAMember
@@ -669,6 +693,9 @@ actor SendMessageInteractor {
 
         let recipients = group.memberProfiles
             .filter { $0.key != myBlsHex }
+            // Removed members are tombstoned in place — never seal a
+            // new message to a revoked inbox.
+            .filter { !$0.value.revoked }
             .map { $0.value.inboxPublicKey }
         let finalStatus = await uploadAndFanOut(
             blobs: [(sealed.blob, "audio/mp4")],
@@ -706,6 +733,9 @@ actor SendMessageInteractor {
         guard let group = groups.first(where: {
             $0.id == groupID && $0.ownerIdentityID == activeID
         }) else { return }
+        // Retrying into a group we were removed from would only burn a
+        // relay publish; receivers drop it anyway.
+        guard !group.membershipRevoked else { return }
 
         let messages = await messageRepository.currentMessages(
             groupID: groupID,
@@ -763,6 +793,9 @@ actor SendMessageInteractor {
 
         let recipients = group.memberProfiles
             .filter { $0.key != myBlsHex }
+            // Removed members are tombstoned in place — never seal a
+            // new message to a revoked inbox.
+            .filter { !$0.value.revoked }
             .map { $0.value.inboxPublicKey }
 
         _ = await uploadAndFanOut(

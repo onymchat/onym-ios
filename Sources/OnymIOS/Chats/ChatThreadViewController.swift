@@ -536,6 +536,21 @@ final class ChatThreadViewController: UIViewController {
         emptyStateHost.rootView = makeEmptyState()
     }
 
+    /// Push the group's removed-from-group state in. When `true` the
+    /// composer's input controls are swapped for a "You were removed
+    /// from this group" banner — the thread stays readable but nothing
+    /// can be sent. Called by the SwiftUI wrapper on every render (from
+    /// the live `ChatGroup.membershipRevoked`); no-op when unchanged.
+    func update(membershipRevoked: Bool) {
+        guard membershipRevoked != self.membershipRevoked else { return }
+        self.membershipRevoked = membershipRevoked
+        inputPanel.setMembershipRevoked(membershipRevoked)
+    }
+
+    /// Mirror of the group's `membershipRevoked`, kept so the wrapper's
+    /// per-render pushes are cheap no-ops.
+    private var membershipRevoked = false
+
     private func configureDataSource() {
         dataSource = UITableViewDiffableDataSource<Section, UUID>(
             tableView: tableView

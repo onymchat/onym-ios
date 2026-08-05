@@ -39,6 +39,16 @@ final class ChatInputPanelView: UIView {
     /// Whether any media is staged in the preview strip.
     private var hasPendingMedia = false
 
+    /// Removed-from-group lockout. When `true` every input control
+    /// (attach / text field / mic / send) is hidden and a centered
+    /// "You were removed from this group" banner takes the composer's
+    /// place — the thread stays readable, nothing can be sent. Driven
+    /// by `ChatThreadViewController.update(membershipRevoked:)` from
+    /// the live `ChatGroup.membershipRevoked`.
+    private var membershipRevoked = false
+    /// The banner label shown while `membershipRevoked` is set.
+    private let removedLabel = UILabel()
+
     /// Invoked when the user taps the reply banner's cancel button.
     /// The host clears its armed reply target and calls
     /// `clearReplyBanner()`.
@@ -247,7 +257,43 @@ final class ChatInputPanelView: UIView {
         attachButton.accessibilityLabel = "Attach photo or video"
         addSubview(attachButton)
 
+        // Removed-from-group banner — replaces the whole input row
+        // while `membershipRevoked` is set.
+        removedLabel.text = String(localized: "You were removed from this group")
+        removedLabel.font = .preferredFont(forTextStyle: .subheadline)
+        removedLabel.adjustsFontForContentSizeCategory = true
+        removedLabel.textColor = UIColor(OnymTokens.text2)
+        removedLabel.textAlignment = .center
+        removedLabel.numberOfLines = 1
+        removedLabel.adjustsFontSizeToFitWidth = true
+        removedLabel.isHidden = true
+        removedLabel.translatesAutoresizingMaskIntoConstraints = false
+        removedLabel.accessibilityIdentifier = "chat.input.removed_banner"
+        addSubview(removedLabel)
+
         buildRecordingOverlay()
+    }
+
+    /// Swap the composer between its normal state and the removed-
+    /// from-group lockout. Idempotent; the panel keeps its height (the
+    /// hidden text view still drives the constraints) so the message
+    /// list doesn't jump.
+    func setMembershipRevoked(_ revoked: Bool) {
+        guard revoked != membershipRevoked else { return }
+        membershipRevoked = revoked
+        attachButton.isHidden = revoked
+        textView.isHidden = revoked
+        placeholderLabel.isHidden = revoked || !text.isEmpty
+        removedLabel.isHidden = !revoked
+        if revoked {
+            textView.resignFirstResponder()
+            sendButton.isHidden = true
+            micButton.isHidden = true
+            recordingOverlay.isHidden = true
+        } else {
+            // Re-derive the send/mic toggle from the composer content.
+            refreshAfterTextChange()
+        }
     }
 
     /// The record-time overlay that covers the text field: a pulsing red
@@ -530,6 +576,12 @@ final class ChatInputPanelView: UIView {
             micButton.widthAnchor.constraint(equalToConstant: 40),
             micButton.heightAnchor.constraint(equalToConstant: 40),
 
+            // Removed-from-group banner — centered over the (hidden)
+            // input row, so the panel keeps the same height.
+            removedLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            removedLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            removedLabel.centerYAnchor.constraint(equalTo: textView.centerYAnchor),
+
             // Record-time overlay sits exactly over the text field.
             recordingOverlay.leadingAnchor.constraint(equalTo: textView.leadingAnchor),
             recordingOverlay.trailingAnchor.constraint(equalTo: textView.trailingAnchor),
@@ -640,6 +692,14 @@ final class ChatInputPanelView: UIView {
         // Staged media alone is enough to send (no caption required).
         let hasContent = !trimmed.isEmpty || hasPendingMedia
         sendButton.isEnabled = hasContent
+        // Removed-from-group lockout: every control stays hidden — the
+        // banner owns the panel until `setMembershipRevoked(false)`.
+        if membershipRevoked {
+            sendButton.isHidden = true
+            micButton.isHidden = true
+            placeholderLabel.isHidden = true
+            return
+        }
         // Right-side toggle: mic when the composer is empty, send otherwise.
         // While recording, the mic stays put (the finger is on it) and the
         // overlay covers the field regardless.

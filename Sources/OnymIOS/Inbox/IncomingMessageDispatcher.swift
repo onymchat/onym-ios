@@ -78,6 +78,32 @@ struct IncomingMessageDispatcher: Sendable {
     /// raises a message to `.read` when this device also sends read
     /// receipts. Defaulted to `true` (the shipping default).
     var readReceiptsEnabled: @Sendable () -> Bool = { true }
+    /// Base delay before re-checking the chain for a removal whose
+    /// claimed epoch is ahead of our read (see `applyRemoval`). Must
+    /// exceed `CachingChainStateReader`'s 10s TTL or the retry
+    /// re-reads the same cached entry. Attempt N waits N × this.
+    var removalRetryDelayNanos: UInt64 = 12_000_000_000
+    /// How many delayed re-attempts a chain-behind removal gets before
+    /// this delivery gives up (the next inbox replay retries from
+    /// scratch). `0` disables retries entirely.
+    var removalMaxRetries: Int = 2
+    /// Test seam for the retry delay — production sleeps for real;
+    /// tests inject a no-op so the bounded-retry loop runs instantly.
+    var removalRetrySleep: @Sendable (UInt64) async -> Void = { nanos in
+        try? await Task.sleep(nanoseconds: nanos)
+    }
+    /// Test seam for how a retry attempt is scheduled. Production
+    /// fire-and-forgets a `Task` so a 12–24s wait never blocks the
+    /// inbox pump; tests inject `{ await $0() }` so `dispatch` only
+    /// returns once the retries have run to completion.
+    var removalRetryScheduler: @Sendable (@escaping @Sendable () async -> Void) async -> Void = { work in
+        Task { await work() }
+    }
+    /// Dedup registry for scheduled removal retries — a relay
+    /// re-delivery during the delay window must not stack a second
+    /// timer for the same removal. Reference type so every copy of
+    /// this value-type dispatcher shares one registry.
+    var removalRetries = RemovalRetryRegistry()
 
     func dispatch(
         messageID: String,
@@ -134,6 +160,25 @@ struct IncomingMessageDispatcher: Sendable {
                 refresh,
                 ownerIdentityID: ownerIdentityID,
                 requesterEd25519: envelope.senderEd25519PublicKey
+            )
+            return
+        }
+
+        // Fast path 0.7: MemberRemovalPayload — the admin removed a
+        // member (possibly us). Its required `removal_*` keys are
+        // unique to this type, so the trial-decode is unambiguous.
+        // Tried before the announcement branch: a removal is the only
+        // subtractive roster mutation and must never be mistaken for
+        // an additive one.
+        if let removal = try? JSONDecoder().decode(
+            MemberRemovalPayload.self,
+            from: envelope.plaintext
+        ) {
+            await applyRemoval(
+                removal,
+                ownerIdentityID: ownerIdentityID,
+                senderEd25519PublicKey: envelope.senderEd25519PublicKey,
+                attempt: 0
             )
             return
         }
@@ -595,8 +640,10 @@ struct IncomingMessageDispatcher: Sendable {
         // Admin-less governance: the verified signer must belong to a
         // current member (`memberProfiles` is keyed by BLS hex, but
         // `sendingPubkey` is the Ed25519 that signs every envelope).
+        // Tombstoned (revoked) members are no longer CURRENT members —
+        // their signature stops authorizing mutations.
         return group.memberProfiles.values.contains {
-            $0.sendingPubkey == senderEd25519PublicKey
+            !$0.revoked && $0.sendingPubkey == senderEd25519PublicKey
         }
     }
 
@@ -633,9 +680,13 @@ struct IncomingMessageDispatcher: Sendable {
         // re-delivered on each launch — bailing here keeps those replays
         // from each firing a `get_commitment` against the relayer (the
         // launch-time storm). Cheap, local, and idempotent.
+        // A tombstoned (revoked) profile does NOT dedup: the admin may
+        // have re-admitted a previously-removed member, and that
+        // announcement must overwrite the tombstone (revoked = false
+        // via the fresh MemberProfile below).
         let key = payload.newMember.blsPub
             .map { String(format: "%02x", $0) }.joined()
-        if group.memberProfiles[key] != nil { return }
+        if let existing = group.memberProfiles[key], !existing.revoked { return }
 
         // PR 9 + H-2 trust check: the verified envelope signer must be
         // the group's known admin, or — for admin-less groups — a
@@ -661,6 +712,158 @@ struct IncomingMessageDispatcher: Sendable {
             sendingPubkey: payload.newMember.sendingPub
         )
         await groupRepository.insert(updated)
+    }
+
+    /// Apply an inbound `MemberRemovalPayload`.
+    ///
+    /// Two apply shapes, split on whether the removal names *us*:
+    ///
+    ///  - **Self (victim device):** flip `ChatGroup.membershipRevoked`.
+    ///    History, profiles, and secrets stay untouched (the victim's
+    ///    payload variant carries no new secrets anyway); the UI swaps
+    ///    the composer for a "you were removed" banner.
+    ///  - **Remaining member:** tombstone the victim's `MemberProfile`
+    ///    (`revoked = true` — never deleted), drop them from the
+    ///    on-chain `ChatGroup.members` roster, and advance
+    ///    epoch / commitment / salt / groupSecret to the payload's
+    ///    post-removal values. From this point every fanout excludes
+    ///    the victim's inbox and every trust gate rejects their key.
+    ///
+    /// Order of gates (cheapest first, mirroring `applyAnnouncement`):
+    /// group lookup → idempotency (relays replay the full inbox on
+    /// every reconnect — bail BEFORE any chain read) → admin-Ed25519
+    /// authorization → on-chain converge-forward check.
+    ///
+    /// ## Chain-behind retry
+    ///
+    /// A removal usually lands seconds after the admin anchors, while
+    /// `CachingChainStateReader` may serve a ≤10s-old entry — the
+    /// chain read looks *behind* the claimed epoch. For announcements
+    /// that case is a plain drop (later activity backfills); a dropped
+    /// removal would leave the victim trusted, so instead we re-check
+    /// after `removalRetryDelayNanos` (then 2×) — each attempt past
+    /// the cache TTL. After `removalMaxRetries` the payload is dropped
+    /// for THIS delivery; the next inbox replay retries from scratch,
+    /// so the removal is never permanently lost.
+    ///
+    /// Mirrors `applyRemoval` from onym-android's
+    /// `IncomingMessageDispatcher.kt`.
+    private func applyRemoval(
+        _ payload: MemberRemovalPayload,
+        ownerIdentityID: IdentityID,
+        senderEd25519PublicKey: Data?,
+        attempt: Int
+    ) async {
+        let groups = await groupRepository.currentGroups()
+        guard let group = groups.first(where: {
+            $0.groupIDData == payload.groupID && $0.ownerIdentityID == ownerIdentityID
+        }) else { return }
+        guard group.groupType == .tyranny else { return }
+
+        let victimHex = payload.removedBlsHex.lowercased()
+        let summaries = (try? await identities.currentIdentities()) ?? []
+        let selfHex = summaries.first(where: { $0.id == ownerIdentityID })?
+            .blsPublicKey
+            .map { String(format: "%02x", $0) }.joined()
+        let isSelf = selfHex != nil && selfHex == victimHex
+
+        // Idempotency BEFORE any chain read (launch-storm pattern —
+        // see applyAnnouncement).
+        if isSelf && group.membershipRevoked { return }
+        if !isSelf,
+           let existing = group.memberProfiles[victimHex],
+           existing.revoked, group.epoch >= payload.epoch {
+            return
+        }
+
+        // Trust gate: only the stored admin may shrink the roster.
+        guard isAuthorizedGroupMutation(
+            group: group,
+            senderEd25519PublicKey: senderEd25519PublicKey
+        ) else { return }
+
+        // On-chain converge-forward gate (same posture as
+        // verifyTyrannyAnnouncement: no roster recompute, the anchor
+        // is the strong check). chain ahead → accept (we missed
+        // updates; the admin-signed removal is still legitimate),
+        // exact epoch → byte-verify, chain behind → bounded retry.
+        let onchain: SEPCommitmentEntry
+        do {
+            onchain = try await chainState.tyrannyCommitment(groupID: payload.groupID)
+        } catch {
+            // Unreachable relayer is not evidence of forgery, but
+            // accepting unverified would let a stolen admin key
+            // shrink rosters offline. Retry like chain-behind.
+            await scheduleRemovalRetry(
+                payload,
+                ownerIdentityID: ownerIdentityID,
+                senderEd25519PublicKey: senderEd25519PublicKey,
+                attempt: attempt
+            )
+            return
+        }
+        if onchain.epoch < payload.epoch {
+            await scheduleRemovalRetry(
+                payload,
+                ownerIdentityID: ownerIdentityID,
+                senderEd25519PublicKey: senderEd25519PublicKey,
+                attempt: attempt
+            )
+            return
+        }
+        if onchain.epoch == payload.epoch, onchain.commitment != payload.commitment {
+            return
+        }
+
+        if isSelf {
+            var updated = group
+            updated.membershipRevoked = true
+            await groupRepository.insert(updated)
+            return
+        }
+
+        let victimBytes = ChatGroup.bytes(fromHex: victimHex)
+        var updated = group
+        updated.members.removeAll { $0.publicKeyCompressed == victimBytes }
+        if let victimProfile = updated.memberProfiles[victimHex] {
+            updated.memberProfiles[victimHex] = victimProfile.withRevoked(true)
+        }
+        updated.epoch = payload.epoch
+        updated.commitment = payload.commitment
+        updated.salt = payload.saltNew ?? group.salt
+        // The victim's own copy carries no secrets; a remaining member
+        // that somehow received it keeps the old material and converges
+        // via the admin's refresh path.
+        updated.groupSecret = payload.groupSecretNew ?? group.groupSecret
+        await groupRepository.insert(updated)
+    }
+
+    /// Schedule one delayed `applyRemoval` re-attempt, deduped so a
+    /// relay re-delivery inside the delay window can't stack timers.
+    private func scheduleRemovalRetry(
+        _ payload: MemberRemovalPayload,
+        ownerIdentityID: IdentityID,
+        senderEd25519PublicKey: Data?,
+        attempt: Int
+    ) async {
+        guard attempt < removalMaxRetries else { return }
+        let groupIDHex = payload.groupID.map { String(format: "%02x", $0) }.joined()
+        let key = "\(groupIDHex):\(payload.removedBlsHex.lowercased()):\(payload.epoch)"
+        guard await removalRetries.begin(key) else { return }
+        let dispatcher = self
+        let delay = removalRetryDelayNanos * UInt64(attempt + 1)
+        let sleep = removalRetrySleep
+        let registry = removalRetries
+        await removalRetryScheduler {
+            await sleep(delay)
+            await registry.end(key)
+            await dispatcher.applyRemoval(
+                payload,
+                ownerIdentityID: ownerIdentityID,
+                senderEd25519PublicKey: senderEd25519PublicKey,
+                attempt: attempt + 1
+            )
+        }
     }
 
     /// Apply an inbound group-photo update to the matching local group.
@@ -761,6 +964,11 @@ struct IncomingMessageDispatcher: Sendable {
         guard let senderProfile = group.memberProfiles[senderKey] else {
             return
         }
+
+        // Removed members are tombstoned, not deleted — their key
+        // still resolves, so the trust chain must check the flag:
+        // a removed member's post-removal sends are dropped here.
+        guard !senderProfile.revoked else { return }
 
         // Insider-spoof check: the verified envelope signer must match
         // the stored Ed25519 for the claimed BLS member. Without this,
@@ -882,5 +1090,25 @@ struct IncomingMessageDispatcher: Sendable {
                 owner: ownerIdentityID
             )
         }
+    }
+}
+
+/// Dedup keys of member-removal retries currently scheduled, so a
+/// relay re-delivery during the delay window can't stack a second
+/// timer for the same removal (see
+/// `IncomingMessageDispatcher.scheduleRemovalRetry`). An actor —
+/// the value-type dispatcher shares one reference across its copies.
+/// Mirrors `pendingRemovalRetries` from onym-android's dispatcher.
+actor RemovalRetryRegistry {
+    private var pending: Set<String> = []
+
+    /// Register `key`. Returns `false` when a retry for it is already
+    /// scheduled — the caller must not stack another timer.
+    func begin(_ key: String) -> Bool {
+        pending.insert(key).inserted
+    }
+
+    func end(_ key: String) {
+        pending.remove(key)
     }
 }

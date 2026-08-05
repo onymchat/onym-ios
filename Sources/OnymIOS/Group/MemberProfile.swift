@@ -7,10 +7,10 @@ import Foundation
 /// the peer's lowercase BLS pubkey hex.
 ///
 /// Distinct from `GovernanceMember`: that's the on-chain Merkle-tree
-/// roster (V1: creator only, static). `MemberProfile` covers the
-/// app-level "who's in this conversation" set, which V1 grows as
-/// joiners are admitted even though the on-chain roster doesn't
-/// change.
+/// roster (advanced by the admin's `update_commitment` as joiners are
+/// admitted / members are removed). `MemberProfile` covers the
+/// app-level "who's in this conversation" set — aliases and inbox
+/// keys the cryptographic roster doesn't carry.
 ///
 /// Trust: `alias` is self-asserted by its owner — never load-bearing.
 /// Surfaces should always offer the member's BLS-pubkey fingerprint
@@ -30,17 +30,29 @@ struct MemberProfile: Codable, Equatable, Hashable, Sendable {
     /// against this so an insider can't forge another member's
     /// `senderBlsPubkeyHex` claim.
     let sendingPubkey: Data
+    /// Tombstone for a member removed from the group. A revoked
+    /// profile stays in the map so past-message alias rendering and
+    /// BLS-fingerprint lookups keep working, but every trust surface
+    /// treats the member as gone: sender-auth paths reject their
+    /// envelopes, fanout loops skip their inbox, and the members UI
+    /// hides the row. Decoded with `decodeIfPresent ?? false` so
+    /// legacy persisted JSON and pre-removal wire payloads decode as
+    /// active members; always encoded (Android decoders default the
+    /// same way). Mirrors `MemberProfile.revoked` from onym-android.
+    let revoked: Bool
 
     enum CodingKeys: String, CodingKey {
         case alias
         case inboxPublicKey = "inbox_public_key"
         case sendingPubkey = "sending_pubkey"
+        case revoked
     }
 
-    init(alias: String, inboxPublicKey: Data, sendingPubkey: Data) {
+    init(alias: String, inboxPublicKey: Data, sendingPubkey: Data, revoked: Bool = false) {
         self.alias = alias
         self.inboxPublicKey = inboxPublicKey
         self.sendingPubkey = sendingPubkey
+        self.revoked = revoked
     }
 
     /// The wire-side decode boundary. `MemberProfile` ships inside
@@ -67,6 +79,19 @@ struct MemberProfile: Codable, Equatable, Hashable, Sendable {
         self.alias = alias
         self.inboxPublicKey = inbox
         self.sendingPubkey = sending
+        self.revoked = try c.decodeIfPresent(Bool.self, forKey: .revoked) ?? false
+    }
+
+    /// Copy of this profile with the tombstone flipped. Value-type
+    /// mirror of Android's `copy(revoked = true)` — the apply paths
+    /// tombstone in place, never delete.
+    func withRevoked(_ revoked: Bool) -> MemberProfile {
+        MemberProfile(
+            alias: alias,
+            inboxPublicKey: inboxPublicKey,
+            sendingPubkey: sendingPubkey,
+            revoked: revoked
+        )
     }
 }
 

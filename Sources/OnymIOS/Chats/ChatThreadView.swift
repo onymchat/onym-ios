@@ -29,6 +29,9 @@ struct ChatThreadView: View {
     let makeShareInviteFlow: @MainActor () -> ShareInviteFlow
     let setGroupAvatar: @MainActor (String, Data?) async -> Void
     let setGroupName: @MainActor (String, String) async -> Void
+    /// Admin removes a member (anchor + rotate + fan out). Threaded
+    /// down to `ChatMembersView`'s remove affordance.
+    let removeGroupMember: @MainActor (String, String) async -> JoinRequestApprover.RemoveOutcome
     /// Fetches + decrypts image attachments for the bubbles + viewer.
     let imageLoader: ChatImageLoader
     /// Fetches + decrypts video blobs for the full-screen player.
@@ -69,6 +72,7 @@ struct ChatThreadView: View {
         ChatThreadControllerBridge(
             memberProfiles: currentMemberProfiles,
             invitationMessage: currentInvitationMessage,
+            membershipRevoked: currentMembershipRevoked,
             messages: messages,
             onSendTapped: { body, replyToMessageID in
                 // Fire-and-forget. `SendMessageInteractor` does the
@@ -240,7 +244,8 @@ struct ChatThreadView: View {
                 identitiesFlow: identitiesFlow,
                 makeShareInviteFlow: makeShareInviteFlow,
                 setGroupAvatar: setGroupAvatar,
-                setGroupName: setGroupName
+                setGroupName: setGroupName,
+                removeMember: removeGroupMember
             )
         }
         // Per-thread subscription. `task(id:)` cancels + restarts when
@@ -277,6 +282,9 @@ struct ChatThreadView: View {
     private func sendReadReceipts(for snapshot: [ChatMessage]) async {
         guard ReadReceiptsPreference.isEnabled else { return }
         guard let group = chatsFlow.groups.first(where: { $0.id == groupID }) else { return }
+        // Removed from this group: don't announce read activity into a
+        // roster that no longer trusts (or wants to hear from) us.
+        guard !group.membershipRevoked else { return }
         var bySender: [String: [UUID]] = [:]
         for message in snapshot
         where message.direction == .incoming && !ackedReadIDs.contains(message.id) {
@@ -284,7 +292,10 @@ struct ChatThreadView: View {
         }
         guard !bySender.isEmpty else { return }
         for (senderHex, ids) in bySender {
-            guard let inbox = group.memberProfiles[senderHex]?.inboxPublicKey else { continue }
+            // Skip tombstoned senders — never seal to a revoked inbox.
+            guard let profile = group.memberProfiles[senderHex],
+                  !profile.revoked else { continue }
+            let inbox = profile.inboxPublicKey
             await chatReceiptSender.send(
                 kind: .read,
                 messageIDs: ids,
@@ -364,8 +375,10 @@ struct ChatThreadView: View {
     /// Drives the title subtitle ("N members"). Reads from the same
     /// `chatsFlow.groups` source as the name so an admin admitting
     /// a new joiner updates the bar live as the announcement lands.
+    /// Tombstoned (removed) members don't count.
     private var currentMemberCount: Int {
-        chatsFlow.groups.first { $0.id == groupID }?.memberProfiles.count ?? 0
+        chatsFlow.groups.first { $0.id == groupID }?
+            .memberProfiles.values.filter { !$0.revoked }.count ?? 0
     }
 
     /// Member profiles for the current group, keyed by BLS pubkey hex.
@@ -380,11 +393,20 @@ struct ChatThreadView: View {
     private var currentInvitationMessage: String? {
         chatsFlow.groups.first { $0.id == groupID }?.invitationMessage
     }
+
+    /// Whether the admin removed this identity from the group. Drives
+    /// the composer's "you were removed" lockout — reads from the same
+    /// live `chatsFlow.groups` source as the name so the composer
+    /// swaps the moment the removal payload lands.
+    private var currentMembershipRevoked: Bool {
+        chatsFlow.groups.first { $0.id == groupID }?.membershipRevoked ?? false
+    }
 }
 
 private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
     let memberProfiles: [String: MemberProfile]
     let invitationMessage: String?
+    let membershipRevoked: Bool
     let messages: [ChatMessage]
     let onSendTapped: (String, UUID?) -> Void
     let onRetryRequested: (UUID) -> Void
@@ -425,6 +447,7 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         // reads the profiles to resolve names.
         vc.update(memberProfiles: memberProfiles)
         vc.update(invitationMessage: invitationMessage)
+        vc.update(membershipRevoked: membershipRevoked)
         vc.update(messages: messages)
         vc.setPendingMedia(pendingMedia)
         return vc
@@ -449,6 +472,7 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         vc.onRemovePendingMedia = onRemovePendingMedia
         vc.update(memberProfiles: memberProfiles)
         vc.update(invitationMessage: invitationMessage)
+        vc.update(membershipRevoked: membershipRevoked)
         vc.update(messages: messages)
         vc.setPendingMedia(pendingMedia)
     }
