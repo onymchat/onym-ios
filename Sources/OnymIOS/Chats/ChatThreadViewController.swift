@@ -521,6 +521,11 @@ final class ChatThreadViewController: UIViewController {
     /// metadata (invitation + member aliases).
     private func makeEmptyState() -> ChatEmptyStateView {
         let names = memberProfiles.values
+            // Removed members are tombstoned in place — the intro
+            // body enumerates only active membership. (The full map
+            // stays on `memberProfiles` so message rendering keeps
+            // resolving a removed member's alias.)
+            .filter { !$0.revoked }
             .map { $0.alias.trimmingCharacters(in: .whitespacesAndNewlines) }
             .map { $0.isEmpty ? "(unnamed)" : $0 }
             .sorted { $0.lowercased() < $1.lowercased() }

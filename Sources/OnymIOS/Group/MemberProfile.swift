@@ -39,20 +39,56 @@ struct MemberProfile: Codable, Equatable, Hashable, Sendable {
     /// legacy persisted JSON and pre-removal wire payloads decode as
     /// active members; always encoded (Android decoders default the
     /// same way). Mirrors `MemberProfile.revoked` from onym-android.
+    ///
+    /// ## Retention & disclosure
+    ///
+    /// Tombstones live for the group's lifetime on devices that knew
+    /// the member — they're what makes removal apply idempotently and
+    /// order-independently under relay replay. They are deliberately
+    /// NOT shipped to brand-new joiners (`JoinRequestApprover` filters
+    /// them out of the invitation snapshot): a new member has no
+    /// history to render and no replayed announcements to dedup, so
+    /// disclosing ex-members' aliases + keys to them buys nothing.
+    /// Existing members DO receive them via `GroupStateVerifier`
+    /// refresh replies (convergence needs them). Bounded-retention GC
+    /// is an explicit follow-up.
     let revoked: Bool
+    /// Epoch of the LAST membership-status change known for this
+    /// member — the removal epoch when tombstoning, the (re-)admission
+    /// epoch when admitting. `nil` for profiles that predate this
+    /// field or whose status never changed.
+    ///
+    /// Why it exists: relay dispatch order is arrival order, not epoch
+    /// order. A single group-level epoch guard can't distinguish "a
+    /// stale removal I already superseded" from "an out-of-order
+    /// removal I haven't seen yet" — a removal at epoch 5 replayed
+    /// after one at epoch 6 must STILL tombstone its victim, while a
+    /// removal at epoch 5 replayed after that member's epoch-7
+    /// re-admission must NOT. Per-member status epochs make the
+    /// tombstone decision order-independent while
+    /// epoch / salt / groupSecret remain strictly converge-forward.
+    let statusEpoch: UInt64?
 
     enum CodingKeys: String, CodingKey {
         case alias
         case inboxPublicKey = "inbox_public_key"
         case sendingPubkey = "sending_pubkey"
         case revoked
+        case statusEpoch = "status_epoch"
     }
 
-    init(alias: String, inboxPublicKey: Data, sendingPubkey: Data, revoked: Bool = false) {
+    init(
+        alias: String,
+        inboxPublicKey: Data,
+        sendingPubkey: Data,
+        revoked: Bool = false,
+        statusEpoch: UInt64? = nil
+    ) {
         self.alias = alias
         self.inboxPublicKey = inboxPublicKey
         self.sendingPubkey = sendingPubkey
         self.revoked = revoked
+        self.statusEpoch = statusEpoch
     }
 
     /// The wire-side decode boundary. `MemberProfile` ships inside
@@ -80,17 +116,21 @@ struct MemberProfile: Codable, Equatable, Hashable, Sendable {
         self.inboxPublicKey = inbox
         self.sendingPubkey = sending
         self.revoked = try c.decodeIfPresent(Bool.self, forKey: .revoked) ?? false
+        self.statusEpoch = try c.decodeIfPresent(UInt64.self, forKey: .statusEpoch)
     }
 
-    /// Copy of this profile with the tombstone flipped. Value-type
-    /// mirror of Android's `copy(revoked = true)` — the apply paths
+    /// Copy of this profile with the membership status replaced —
+    /// tombstone flag plus the epoch that status change happened at.
+    /// Value-type mirror of Android's
+    /// `copy(revoked = …, statusEpoch = …)` — the apply paths
     /// tombstone in place, never delete.
-    func withRevoked(_ revoked: Bool) -> MemberProfile {
+    func withStatus(revoked: Bool, statusEpoch: UInt64?) -> MemberProfile {
         MemberProfile(
             alias: alias,
             inboxPublicKey: inboxPublicKey,
             sendingPubkey: sendingPubkey,
-            revoked: revoked
+            revoked: revoked,
+            statusEpoch: statusEpoch
         )
     }
 }

@@ -202,8 +202,11 @@ final class JoinRequestApproverRemovalTests: XCTestCase {
         XCTAssertEqual(after.groupSecret.count, 32)
         XCTAssertNotEqual(after.salt, Data(repeating: 0x66, count: 32), "salt rotates")
         XCTAssertEqual(after.commitment?.count, 32)
-        // Victim tombstoned, NOT deleted; peer untouched.
+        // Victim tombstoned, NOT deleted; peer untouched. The tombstone
+        // carries the removal epoch so receive-side decisions stay
+        // order-independent (MemberProfile.statusEpoch).
         XCTAssertEqual(after.memberProfiles[env.victimHex]?.revoked, true)
+        XCTAssertEqual(after.memberProfiles[env.victimHex]?.statusEpoch, 1)
         XCTAssertEqual(after.memberProfiles[env.peerHex]?.revoked, false)
 
         // ─── fanout ─────────────────────────────────────────────────

@@ -101,6 +101,14 @@ struct ChatGroup: Identifiable, Equatable, Sendable {
     /// `ChatGroup.membershipRevoked` from onym-android.
     var membershipRevoked: Bool = false
 
+    /// `memberProfiles` minus tombstoned (removed) members — what the
+    /// UI means by "the members": counts, rosters, alias enumerations.
+    /// Message-rendering alias lookups keep using the full map so a
+    /// removed member's past messages still show their name.
+    var activeMemberProfiles: [String: MemberProfile] {
+        memberProfiles.filter { !$0.value.revoked }
+    }
+
     /// Group ID as the raw 32-byte payload (parsed back from `id`).
     /// Used directly when building chain payloads + invitations.
     var groupIDData: Data {

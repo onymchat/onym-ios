@@ -35,10 +35,20 @@ struct ChatMembersView: View {
     @State private var showRename = false
     @State private var renameText = ""
     /// The member awaiting the remove confirmation dialog, if any.
+    ///
+    /// This and the two states below are `@State` on a view instance
+    /// bound to ONE `groupID`, so removal UI state is group-scoped by
+    /// construction: a failure on group A can never pop an alert over
+    /// group B's screen, and removals on different groups may run
+    /// concurrently (each screen has its own slot; the approver's
+    /// `approvalChain` serializes the anchors underneath). This is the
+    /// iOS analogue of Android's keyed `removalsInFlight` /
+    /// `removalErrors` maps on its app-scoped ChatsViewModel.
     @State private var memberToRemove: MemberRow?
     /// BLS hex of the member whose removal is in flight (the
     /// multi-second PLONK prove + anchor round-trip) — the row shows a
-    /// spinner and further removals are disabled until it resolves.
+    /// spinner and further removals on THIS group are disabled until
+    /// it resolves.
     @State private var removalInFlightBlsHex: String?
     /// Non-`.sent` removal outcome, surfaced in an alert.
     @State private var removalErrorText: String?
@@ -325,7 +335,7 @@ struct ChatMembersView: View {
 
             // Removed members are tombstoned in the map but no longer
             // part of the group — count only the active ones.
-            let activeCount = group.memberProfiles.values.filter { !$0.revoked }.count
+            let activeCount = group.activeMemberProfiles.count
             Text("\(activeCount) member\(activeCount == 1 ? "" : "s")")
                 .font(.system(size: 12))
                 .foregroundStyle(OnymTokens.text3)
@@ -458,10 +468,9 @@ struct ChatMembersView: View {
 
     private func rows(for group: ChatGroup) -> [MemberRow] {
         let activeKey = activeBlsHex
-        return group.memberProfiles
-            // Removed members are tombstoned in the map (so message
-            // rendering keeps their alias) but hidden from the roster.
-            .filter { !$0.value.revoked }
+        // Removed members are tombstoned in the map (so message
+        // rendering keeps their alias) but hidden from the roster.
+        return group.activeMemberProfiles
             .map { (key, profile) in
                 MemberRow(
                     id: key,

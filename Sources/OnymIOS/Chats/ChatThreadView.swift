@@ -377,8 +377,7 @@ struct ChatThreadView: View {
     /// a new joiner updates the bar live as the announcement lands.
     /// Tombstoned (removed) members don't count.
     private var currentMemberCount: Int {
-        chatsFlow.groups.first { $0.id == groupID }?
-            .memberProfiles.values.filter { !$0.revoked }.count ?? 0
+        chatsFlow.groups.first { $0.id == groupID }?.activeMemberProfiles.count ?? 0
     }
 
     /// Member profiles for the current group, keyed by BLS pubkey hex.

@@ -348,7 +348,14 @@ actor JoinRequestApprover: JoinRequestApproving {
             // peers + admin by name from the moment they land. The
             // joiner's own profile gets backfilled by the receiver's
             // materializer from their active identity.
-            memberProfiles: anchored.memberProfiles.isEmpty ? nil : anchored.memberProfiles,
+            // Tombstoned (removed) members are filtered out: a fresh
+            // joiner has no history to render and no replayed
+            // announcements to dedup, so ex-members' aliases + keys
+            // would be pure disclosure (see MemberProfile.revoked).
+            memberProfiles: {
+                let active = anchored.memberProfiles.filter { !$0.value.revoked }
+                return active.isEmpty ? nil : active
+            }(),
             // Tyranny invitees only get the full snapshot here (the
             // create-time offer carries nothing), so this is where the
             // group photo reaches them.
@@ -742,7 +749,13 @@ actor JoinRequestApprover: JoinRequestApproving {
         anchored.epoch = group.epoch + 1
         anchored.salt = saltNew
         anchored.groupSecret = groupSecretNew
-        anchored.memberProfiles[victimHex] = victimProfile.withRevoked(true)
+        anchored.memberProfiles[victimHex] = victimProfile.withStatus(
+            revoked: true,
+            // Removal epoch — lets receive-side tombstone decisions
+            // stay order-independent under relay replay
+            // (MemberProfile.statusEpoch).
+            statusEpoch: group.epoch + 1
+        )
         await groupRepository.insert(anchored)
 
         // ─── fan out (best-effort) ───────────────────────────────────
@@ -862,7 +875,13 @@ actor JoinRequestApprover: JoinRequestApproving {
         updated.memberProfiles[key] = MemberProfile(
             alias: alias,
             inboxPublicKey: inboxPub,
-            sendingPubkey: sendingPub
+            sendingPubkey: sendingPub,
+            // (Re-)admission epoch — overwrites any tombstone's
+            // statusEpoch so out-of-order removal replays on OTHER
+            // devices are refused for this member. Uses the
+            // post-anchor group snapshot's epoch (the same value the
+            // announcement fanout claims).
+            statusEpoch: group.epoch
         )
         await groupRepository.insert(updated)
     }

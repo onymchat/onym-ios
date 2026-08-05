@@ -225,9 +225,12 @@ final class IncomingMessageDispatcherRemovalTests: XCTestCase {
         XCTAssertEqual(group.memberProfiles[victimHex]?.revoked, true)
 
         // 2. Re-admission: the announcement path resets the tombstone
-        //    (local epoch stays at 2 — announcements don't carry state).
+        //    and stamps the admission epoch (local group epoch stays at
+        //    2 — announcements don't carry group state). Mirrors what
+        //    applyAnnouncement writes.
         let postReadmissionSecret = Data(repeating: 0x71, count: 32)
-        group.memberProfiles[victimHex] = group.memberProfiles[victimHex]?.withRevoked(false)
+        group.memberProfiles[victimHex] = group.memberProfiles[victimHex]?
+            .withStatus(revoked: false, statusEpoch: 3)
         group.groupSecret = postReadmissionSecret
         _ = await groups.insert(group)
 
@@ -245,6 +248,79 @@ final class IncomingMessageDispatcherRemovalTests: XCTestCase {
         XCTAssertEqual(final.epoch, 2)
         // And the replay never even hit the chain (local guard fires first).
         XCTAssertEqual(reader.calls, 1)
+    }
+
+    func test_removal_outOfOrderDelivery_tombstonesBothWithoutRollingStateBack() async throws {
+        // Relay dispatch order is ARRIVAL order: an offline device can
+        // receive "remove other (epoch 3)" before "remove victim
+        // (epoch 2)". Both must land — a single group-epoch guard would
+        // drop the epoch-2 removal forever and leave the victim trusted.
+        let laterCommitment = Data(repeating: 0x80, count: 32)
+        let laterSecret = Data(repeating: 0x81, count: 32)
+        let laterSalt = Data(repeating: 0x82, count: 32)
+        let laterRemoval = try MemberRemovalPayload(
+            version: 1,
+            groupID: groupID,
+            removedBlsHex: otherHex,
+            commitment: laterCommitment,
+            epoch: 3,
+            sentAtMillis: 2_000,
+            groupSecretNew: laterSecret,
+            saltNew: laterSalt
+        )
+        // Chain is at the latest epoch throughout (both removals are
+        // already anchored by the time this device reconnects).
+        let reader = SequencedChainReader([entry(laterCommitment, epoch: 3)])
+
+        // Newest-first replay: epoch 3 lands, advancing state.
+        let laterDispatcher = try makeDispatcher(payload: laterRemoval, reader: reader)
+        await dispatch(laterDispatcher, messageID: "m1")
+        let afterLater = try await currentGroup()
+        XCTAssertEqual(afterLater.memberProfiles[otherHex]?.revoked, true)
+        XCTAssertEqual(afterLater.epoch, 3)
+
+        // Then the older epoch-2 removal arrives.
+        let earlierDispatcher = try makeDispatcher(payload: payloadForMembers(), reader: reader)
+        await dispatch(earlierDispatcher, messageID: "m2")
+
+        let final = try await currentGroup()
+        // BOTH members tombstoned + dropped from the on-chain roster.
+        XCTAssertEqual(final.memberProfiles[victimHex]?.revoked, true,
+                       "stale-but-unseen removal must still tombstone")
+        XCTAssertEqual(final.memberProfiles[otherHex]?.revoked, true)
+        XCTAssertFalse(final.members.contains { $0.publicKeyCompressed == victimBls })
+        XCTAssertFalse(final.members.contains { $0.publicKeyCompressed == otherBls })
+        // Group state stays at the NEWER removal's values — the older
+        // payload must not roll epoch / secrets backward.
+        XCTAssertEqual(final.epoch, 3)
+        XCTAssertEqual(final.groupSecret, laterSecret)
+        XCTAssertEqual(final.salt, laterSalt)
+        XCTAssertEqual(final.commitment, laterCommitment)
+    }
+
+    func test_removal_replayAfterOwnReadmission_doesNotRelockComposer() async throws {
+        // Victim device: removed, then re-admitted (fresh invitation
+        // stamps their own profile's statusEpoch). A replayed stale
+        // self-removal must not re-set membershipRevoked.
+        var readmitted = makeGroup()
+        readmitted.membershipRevoked = false
+        readmitted.epoch = 3
+        readmitted.memberProfiles[victimHex] = readmitted.memberProfiles[victimHex]?
+            .withStatus(revoked: false, statusEpoch: 3)
+        _ = await groups.insert(readmitted)
+
+        let reader = SequencedChainReader([entry(newCommitment, epoch: 2)])
+        let dispatcher = try makeDispatcher(
+            payload: payloadForVictim(),
+            identities: [selfSummary()],
+            reader: reader
+        )
+        await dispatch(dispatcher)
+
+        let final = try await currentGroup()
+        XCTAssertFalse(final.membershipRevoked,
+                       "stale self-removal must not re-lock the thread")
+        XCTAssertEqual(reader.calls, 0)
     }
 
     func test_removal_failsClosedWhenGroupHasNoStoredAdminKey() async throws {

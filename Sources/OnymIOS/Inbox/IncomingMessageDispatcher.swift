@@ -367,10 +367,17 @@ struct IncomingMessageDispatcher: Sendable {
         // self if we can resolve our own identity. The "wire first"
         // ordering means a sender that mistakenly includes us under
         // our own BLS key gets overwritten by our locally-trusted
-        // alias + inbox pub — the receiver's view of itself wins.
+        // alias + inbox pub — the receiver's view of itself wins. The
+        // wire entry's statusEpoch is PRESERVED through the overwrite:
+        // a re-admitted member's own status marker is what refuses a
+        // replayed stale self-removal — erasing it would re-lock the
+        // composer on the next inbox replay.
         var profiles = invitation.memberProfiles ?? [:]
         if let selfEntry = await selfMemberProfileEntry(for: ownerIdentityID) {
-            profiles[selfEntry.key] = selfEntry.value
+            profiles[selfEntry.key] = selfEntry.value.withStatus(
+                revoked: selfEntry.value.revoked,
+                statusEpoch: profiles[selfEntry.key]?.statusEpoch
+            )
         }
 
         // Stamp the inviting envelope's Ed25519 pubkey as the
@@ -708,7 +715,13 @@ struct IncomingMessageDispatcher: Sendable {
         updated.memberProfiles[key] = MemberProfile(
             alias: payload.newMember.alias,
             inboxPublicKey: payload.newMember.inboxPub,
-            sendingPubkey: payload.newMember.sendingPub
+            sendingPubkey: payload.newMember.sendingPub,
+            // Stamp the (re-)admission epoch so an out-of-order
+            // REMOVAL replayed later (with a lower epoch) can't
+            // re-tombstone this member — see
+            // `MemberProfile.statusEpoch`. Nil only from legacy
+            // senders that omit `epoch`, which never race removals.
+            statusEpoch: payload.epoch
         )
         await groupRepository.insert(updated)
     }
@@ -739,20 +752,34 @@ struct IncomingMessageDispatcher: Sendable {
     ///    the victim's inbox and every trust gate rejects their key.
     ///
     /// Order of gates (cheapest first, mirroring `applyAnnouncement`):
-    /// group lookup → fail-closed admin requirement → local
-    /// converge-forward guard (BEFORE any chain read — relays replay
-    /// the full inbox on every reconnect) → self classification →
+    /// group lookup → fail-closed admin requirement → self
+    /// classification → local applicability check (BEFORE any chain
+    /// read — relays replay the full inbox on every reconnect) →
     /// admin-Ed25519 authorization → on-chain converge-forward check.
     ///
-    /// ## Local converge-forward guard
+    /// ## Two independently-guarded effects
     ///
-    /// `group.epoch >= payload.epoch` drops the payload outright: a
-    /// removal may only ever advance local state. Without this, a
-    /// relay-replayed removal envelope arriving AFTER the member was
-    /// re-admitted would pass the on-chain "ahead → accept" branch and
-    /// roll epoch / salt / groupSecret back to the old rotated values
-    /// while re-tombstoning the re-admitted member. It also makes
-    /// re-delivery idempotent without any per-profile bookkeeping.
+    /// Relay dispatch order is ARRIVAL order, not epoch order — an
+    /// offline device can receive "remove B (epoch 6)" before
+    /// "remove A (epoch 5)". A single group-level epoch guard would
+    /// drop the epoch-5 removal forever, leaving A trusted. So the
+    /// apply decomposes:
+    ///
+    ///  - **Group-state advance** (epoch / commitment / salt /
+    ///    groupSecret): strictly converge-forward — only when
+    ///    `payload.epoch > group.epoch`. Never rolls backward, which
+    ///    keeps the re-admission replay from restoring old secrets.
+    ///  - **Tombstone** (per-member, order-independent): applies when
+    ///    this removal is NEWER than the member's last known status
+    ///    change (`MemberProfile.statusEpoch`) — so a stale-but-unseen
+    ///    removal still lands, while a removal replayed after that
+    ///    member's later re-admission is refused. The victim's
+    ///    `ChatGroup.members` leaf is subtracted together with the
+    ///    tombstone (a member removed at epoch 5 is not in ANY later
+    ///    tree unless re-admitted, which resets statusEpoch).
+    ///
+    /// A payload where NEITHER effect applies is dropped before any
+    /// chain read — that's the idempotency for relay re-delivery.
     ///
     /// ## Fail closed on a missing admin key
     ///
@@ -781,10 +808,6 @@ struct IncomingMessageDispatcher: Sendable {
         // otherwise fall back to any-current-member.)
         guard group.adminEd25519PubkeyHex != nil else { return .done }
 
-        // Local converge-forward guard — see the doc comment. Cheap,
-        // local, and BEFORE any chain read (launch-storm pattern).
-        guard group.epoch < payload.epoch else { return .done }
-
         // Self classification. If we can't resolve our own BLS key we
         // can't tell which branch is safe — drop rather than let the
         // victim's own device take the remaining-member branch and
@@ -797,7 +820,21 @@ struct IncomingMessageDispatcher: Sendable {
             .map({ String(format: "%02x", $0) }).joined()
         else { return .done }
         let isSelf = selfHex == victimHex
-        if isSelf && group.membershipRevoked { return .done }
+
+        // Local applicability — BEFORE any chain read (launch-storm
+        // pattern). Which effects would this payload have?
+        let victimProfile = group.memberProfiles[victimHex]
+        let advancesState = payload.epoch > group.epoch
+        let tombstoneApplies: Bool = {
+            guard !isSelf, let victimProfile, !victimProfile.revoked else { return false }
+            return victimProfile.statusEpoch.map { payload.epoch > $0 } ?? true
+        }()
+        let selfApplies: Bool = {
+            guard isSelf, !group.membershipRevoked else { return false }
+            return (victimProfile?.statusEpoch).map { payload.epoch > $0 } ?? true
+        }()
+        if isSelf && !selfApplies { return .done }
+        if !isSelf && !tombstoneApplies && !advancesState { return .done }
 
         // Trust gate: only the stored admin may shrink the roster.
         guard isAuthorizedGroupMutation(
@@ -825,25 +862,36 @@ struct IncomingMessageDispatcher: Sendable {
         }
 
         if isSelf {
+            // Victim device: mark and keep everything else untouched.
+            // (No state advance from the secret-free victim variant.)
             var updated = group
             updated.membershipRevoked = true
             await groupRepository.insert(updated)
             return .done
         }
 
-        let victimBytes = ChatGroup.bytes(fromHex: victimHex)
         var updated = group
-        updated.members.removeAll { $0.publicKeyCompressed == victimBytes }
-        if let victimProfile = updated.memberProfiles[victimHex] {
-            updated.memberProfiles[victimHex] = victimProfile.withRevoked(true)
+        // Tombstone effect — order-independent (see the doc comment).
+        if tombstoneApplies {
+            let victimBytes = ChatGroup.bytes(fromHex: victimHex)
+            updated.members.removeAll { $0.publicKeyCompressed == victimBytes }
+            if let victimProfile {
+                updated.memberProfiles[victimHex] = victimProfile.withStatus(
+                    revoked: true,
+                    statusEpoch: payload.epoch
+                )
+            }
         }
-        updated.epoch = payload.epoch
-        updated.commitment = payload.commitment
-        updated.salt = payload.saltNew ?? group.salt
-        // The victim's own copy carries no secrets; a remaining member
-        // that somehow received it keeps the old material and converges
-        // via the admin's refresh path.
-        updated.groupSecret = payload.groupSecretNew ?? group.groupSecret
+        // Group-state effect — strictly converge-forward. The victim's
+        // own copy carries no secrets; a remaining member that somehow
+        // received it keeps the old material and converges via the
+        // admin's refresh path.
+        if advancesState {
+            updated.epoch = payload.epoch
+            updated.commitment = payload.commitment
+            updated.salt = payload.saltNew ?? group.salt
+            updated.groupSecret = payload.groupSecretNew ?? group.groupSecret
+        }
         await groupRepository.insert(updated)
         return .done
     }

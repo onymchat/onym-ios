@@ -90,7 +90,8 @@ final class SwiftDataGroupStoreTests: XCTestCase {
                     alias: "victim",
                     inboxPublicKey: Data(repeating: 0xCC, count: 32),
                     sendingPubkey: Data(repeating: 0xE3, count: 32),
-                    revoked: true
+                    revoked: true,
+                    statusEpoch: 7
                 ),
             ]
         )
@@ -101,6 +102,8 @@ final class SwiftDataGroupStoreTests: XCTestCase {
         XCTAssertEqual(listed.count, 1)
         XCTAssertEqual(listed[0].memberProfiles[victimHex]?.revoked, true,
                        "the tombstone must survive the encrypted round-trip")
+        XCTAssertEqual(listed[0].memberProfiles[victimHex]?.statusEpoch, 7,
+                       "the status epoch must survive the encrypted round-trip")
         XCTAssertTrue(listed[0].membershipRevoked)
     }
 
@@ -114,7 +117,8 @@ final class SwiftDataGroupStoreTests: XCTestCase {
     }
 
     /// Legacy persisted JSON (and pre-removal wire payloads) carry no
-    /// `revoked` key — they must decode as active members.
+    /// `revoked` / `status_epoch` keys — they must decode as active
+    /// members with no status marker.
     func test_memberProfile_legacyJSONWithoutRevokedKey_decodesAsActive() throws {
         let legacy = """
         {
@@ -125,7 +129,37 @@ final class SwiftDataGroupStoreTests: XCTestCase {
         """
         let decoded = try JSONDecoder().decode(MemberProfile.self, from: Data(legacy.utf8))
         XCTAssertFalse(decoded.revoked)
+        XCTAssertNil(decoded.statusEpoch, "legacy profiles carry no status epoch")
         XCTAssertEqual(decoded.alias, "old-timer")
+    }
+
+    /// `status_epoch` round-trips through JSON both ways (wire parity
+    /// with Android's `MemberProfile.statusEpoch`).
+    func test_memberProfile_statusEpoch_roundTripsThroughJSON() throws {
+        let profile = MemberProfile(
+            alias: "peer",
+            inboxPublicKey: Data(repeating: 0xAA, count: 32),
+            sendingPubkey: Data(repeating: 0xBB, count: 32),
+            revoked: false,
+            statusEpoch: 5
+        )
+        let encoded = try JSONEncoder().encode(profile)
+        let text = try XCTUnwrap(String(data: encoded, encoding: .utf8))
+        XCTAssertTrue(text.contains("\"status_epoch\":5"))
+        let decoded = try JSONDecoder().decode(MemberProfile.self, from: encoded)
+        XCTAssertEqual(decoded, profile)
+
+        // Nil status epoch omits the key entirely (wire-compatible
+        // with legacy decoders on both platforms).
+        let bare = MemberProfile(
+            alias: "peer",
+            inboxPublicKey: Data(repeating: 0xAA, count: 32),
+            sendingPubkey: Data(repeating: 0xBB, count: 32)
+        )
+        let bareText = try XCTUnwrap(
+            String(data: try JSONEncoder().encode(bare), encoding: .utf8)
+        )
+        XCTAssertFalse(bareText.contains("status_epoch"))
     }
 
     func test_insertOrUpdate_emptyProfilesRoundtripAsEmptyDict() async {

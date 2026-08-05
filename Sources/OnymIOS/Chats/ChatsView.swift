@@ -372,7 +372,9 @@ private struct ChatsRow: View {
         if let preview = item.latestPreview, !preview.isEmpty {
             return preview
         }
-        let count = group.memberProfiles.count
+        // Removed members are tombstoned in place — count only active
+        // membership.
+        let count = group.activeMemberProfiles.count
         let memberText: String?
         switch count {
         case 0:  memberText = nil
