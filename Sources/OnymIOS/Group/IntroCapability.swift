@@ -219,6 +219,15 @@ struct IntroCapability: Codable, Equatable, Sendable, Identifiable {
         let e = JSONEncoder()
         // Default `.base64` + matches Android `Base64.getEncoder()`.
         e.dataEncodingStrategy = .base64
+        // `JSONEncoder` does not guarantee key order without this, so
+        // one capability could encode to two different link strings.
+        // That matters now that invite links are multi-use and the
+        // share screen re-surfaces the *same* capability on every
+        // entry: without sorting, the user sees the URL change even
+        // though the underlying key hasn't. Decoding is key-order
+        // agnostic on both platforms, so previously-shared links are
+        // unaffected.
+        e.outputFormatting = .sortedKeys
         return e
     }()
 
