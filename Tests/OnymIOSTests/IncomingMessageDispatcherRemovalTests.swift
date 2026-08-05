@@ -299,28 +299,306 @@ final class IncomingMessageDispatcherRemovalTests: XCTestCase {
     }
 
     func test_removal_replayAfterOwnReadmission_doesNotRelockComposer() async throws {
-        // Victim device: removed, then re-admitted (fresh invitation
-        // stamps their own profile's statusEpoch). A replayed stale
-        // self-removal must not re-set membershipRevoked.
-        var readmitted = makeGroup()
-        readmitted.membershipRevoked = false
-        readmitted.epoch = 3
-        readmitted.memberProfiles[victimHex] = readmitted.memberProfiles[victimHex]?
-            .withStatus(revoked: false, statusEpoch: 3)
-        _ = await groups.insert(readmitted)
+        // Victim device: removed at epoch 2, then re-admitted. A
+        // replayed stale self-removal must not re-set
+        // membershipRevoked.
+        //
+        // The post-readmission state here is produced by DISPATCHING a
+        // real re-admission invitation (the path the admin's approve
+        // actually drives), not hand-written — an earlier version of
+        // this test stamped `statusEpoch` itself and therefore passed
+        // while the real path shipped a nil marker and re-locked the
+        // composer for good.
 
-        let reader = SequencedChainReader([entry(newCommitment, epoch: 2)])
-        let dispatcher = try makeDispatcher(
-            payload: payloadForVictim(),
-            identities: [selfSummary()],
-            reader: reader
+        // 1. Removed at epoch 2 (self branch → membershipRevoked).
+        let removalReader = SequencedChainReader([entry(newCommitment, epoch: 2)])
+        await dispatch(
+            try makeDispatcher(
+                payload: payloadForVictim(),
+                identities: [selfSummary()],
+                reader: removalReader
+            ),
+            messageID: "m1"
         )
-        await dispatch(dispatcher)
+        let afterRemoval = try await currentGroup()
+        XCTAssertTrue(afterRemoval.membershipRevoked)
+
+        // 2. Re-admitted at epoch 3: the admin's approve records the
+        //    joiner BEFORE building the snapshot, so the invitation
+        //    carries our own un-revoked, epoch-stamped profile.
+        try await dispatchInvitation(
+            epoch: 3,
+            members: readmitMembers,
+            profiles: [
+                victimHex: MemberProfile(
+                    alias: "Victim",
+                    inboxPublicKey: Data(repeating: 0x31, count: 32),
+                    sendingPubkey: Data(repeating: 0x32, count: 32),
+                    revoked: false,
+                    statusEpoch: 3
+                ),
+                otherHex: MemberProfile(
+                    alias: "Other",
+                    inboxPublicKey: Data(repeating: 0x41, count: 32),
+                    sendingPubkey: Data(repeating: 0x42, count: 32)
+                ),
+            ]
+        )
+
+        let readmitted = try await currentGroup()
+        XCTAssertFalse(readmitted.membershipRevoked,
+                       "re-admission must unlock the thread")
+        XCTAssertEqual(readmitted.memberProfiles[victimHex]?.statusEpoch, 3,
+                       "our own profile must carry the admission epoch after materialize")
+
+        // 3. Relay replays the OLD epoch-2 removal.
+        let replayReader = SequencedChainReader([entry(newCommitment, epoch: 3)])
+        await dispatch(
+            try makeDispatcher(
+                payload: payloadForVictim(),
+                identities: [selfSummary()],
+                reader: replayReader
+            ),
+            messageID: "m2"
+        )
 
         let final = try await currentGroup()
         XCTAssertFalse(final.membershipRevoked,
                        "stale self-removal must not re-lock the thread")
-        XCTAssertEqual(reader.calls, 0)
+        XCTAssertEqual(replayReader.calls, 0,
+                       "local guard fires before any chain read")
+    }
+
+    func test_invitation_withoutOwnProfile_defaultsStatusEpochSoReplayCannotRelock() async throws {
+        // Belt-and-braces for the sender side: if a re-admission
+        // snapshot omits OUR profile (legacy sender, or an admin build
+        // that filters tombstones before recording the re-joiner),
+        // materializeGroup must still default our statusEpoch to the
+        // invitation's epoch — being in a snapshot at epoch N means
+        // every removal at or before N is stale for us. Without the
+        // default our marker is nil, `selfApplies` is true, and the
+        // replayed removal re-locks the thread permanently.
+        await dispatch(
+            try makeDispatcher(
+                payload: payloadForVictim(),
+                identities: [selfSummary()],
+                reader: SequencedChainReader([entry(newCommitment, epoch: 2)])
+            ),
+            messageID: "m1"
+        )
+        let afterRemoval = try await currentGroup()
+        XCTAssertTrue(afterRemoval.membershipRevoked)
+
+        // Re-admission snapshot at epoch 3 that ships only the OTHER
+        // member's profile — ours is absent from the wire.
+        try await dispatchInvitation(
+            epoch: 3,
+            members: readmitMembers,
+            profiles: [
+                otherHex: MemberProfile(
+                    alias: "Other",
+                    inboxPublicKey: Data(repeating: 0x41, count: 32),
+                    sendingPubkey: Data(repeating: 0x42, count: 32)
+                ),
+            ]
+        )
+
+        let readmitted = try await currentGroup()
+        XCTAssertFalse(readmitted.membershipRevoked)
+        XCTAssertEqual(readmitted.memberProfiles[victimHex]?.statusEpoch, 3,
+                       "self statusEpoch must default to the invitation epoch")
+
+        // The stale epoch-2 removal replays and must be refused.
+        await dispatch(
+            try makeDispatcher(
+                payload: payloadForVictim(),
+                identities: [selfSummary()],
+                reader: SequencedChainReader([entry(newCommitment, epoch: 3)])
+            ),
+            messageID: "m2"
+        )
+        let afterReplay = try await currentGroup()
+        XCTAssertFalse(afterReplay.membershipRevoked,
+                       "replayed removal must not re-lock after re-admission")
+    }
+
+    func test_removal_withoutLocalProfile_stillSubtractsTheLeafWithTheStateAdvance() async throws {
+        // Directory/roster divergence (the receive-side twin of
+        // `.memberNotInRoster`): the victim is in our `members` tree but
+        // has no local `MemberProfile`, so no tombstone applies. We
+        // still accept the state advance — and the commitment we adopt
+        // is over the SHRUNKEN tree, so the leaf has to go with it or
+        // the stored roster disagrees with the stored commitment.
+        var divergent = makeGroup()
+        divergent.memberProfiles.removeValue(forKey: victimHex)
+        _ = await groups.insert(divergent)
+
+        let reader = SequencedChainReader([entry(newCommitment, epoch: 2)])
+        await dispatch(try makeDispatcher(payload: payloadForMembers(), reader: reader))
+
+        let updated = try await currentGroup()
+        XCTAssertFalse(updated.members.contains { $0.publicKeyCompressed == victimBls },
+                       "the leaf must be subtracted alongside the adopted commitment")
+        XCTAssertEqual(updated.epoch, 2)
+        XCTAssertEqual(updated.commitment, newCommitment)
+        XCTAssertNil(updated.memberProfiles[victimHex],
+                     "no profile to tombstone — the directory stays as it was")
+    }
+
+    func test_concurrentRemovals_forOneGroup_bothTombstonesSurvive() async throws {
+        // The retry chain runs OFF the inbox pump, so two applies for
+        // the same group can be in flight at once. Without a lock
+        // spanning read→write they both read the same snapshot and the
+        // later persist clobbers the earlier tombstone — the exact
+        // failure the retry exists to prevent. The gated reader parks
+        // both reads so the interleaving is deterministic.
+        // ONE dispatcher instance, two inbound envelopes — exactly the
+        // production shape (`OnymIOSApp` builds a single dispatcher for
+        // the inbox pump; the retry path re-enters that same value, and
+        // the lock is a reference so every copy shares it).
+        let gate = RetryGate()
+        let reader = SequencedChainReader([entry(newCommitment, epoch: 2)], gate: gate)
+        let victimEnvelope = Data("envelope-victim".utf8)
+        let otherEnvelope = Data("envelope-other".utf8)
+        let otherRemoval = try MemberRemovalPayload(
+            version: 1,
+            groupID: groupID,
+            removedBlsHex: otherHex,
+            commitment: newCommitment,
+            epoch: 2,
+            sentAtMillis: 2_000,
+            groupSecretNew: newSecret,
+            saltNew: newSalt
+        )
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: FakeInvitationEnvelopeDecrypter(
+                mode: .scripted([
+                    victimEnvelope: try JSONEncoder().encode(payloadForMembers()),
+                    otherEnvelope: try JSONEncoder().encode(otherRemoval),
+                ]),
+                senderEd25519PublicKey: adminSending
+            ),
+            identities: RemovalStubIdentities(summaries: [nonVictimSelf()]),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: reader,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
+        )
+
+        let first = Task {
+            await dispatcher.dispatch(
+                messageID: "c1", ownerIdentityID: self.owner,
+                payload: victimEnvelope, receivedAt: Date()
+            )
+        }
+        let second = Task {
+            await dispatcher.dispatch(
+                messageID: "c2", ownerIdentityID: self.owner,
+                payload: otherEnvelope, receivedAt: Date()
+            )
+        }
+        // Let both reach their chain read (or, under the lock, let the
+        // second park on `acquire`) before releasing the reads.
+        for _ in 0..<50 { await Task.yield() }
+        await gate.openGate()
+        _ = await first.value
+        _ = await second.value
+
+        let final = try await currentGroup()
+        XCTAssertEqual(final.memberProfiles[victimHex]?.revoked, true,
+                       "the first removal's tombstone must not be clobbered")
+        XCTAssertEqual(final.memberProfiles[otherHex]?.revoked, true,
+                       "the second removal's tombstone must not be clobbered")
+    }
+
+    func test_invitation_staleSnapshotDoesNotUnlockRemovedMember() async throws {
+        // materializeGroup rebuilds the row from scratch, so without a
+        // guard ANY accepted invitation clears membershipRevoked — e.g.
+        // a stale peer answering a refresh request. A snapshot at or
+        // before the removal's epoch must not unlock the composer.
+        await dispatch(
+            try makeDispatcher(
+                payload: payloadForVictim(),
+                identities: [selfSummary()],
+                reader: SequencedChainReader([entry(newCommitment, epoch: 2)])
+            ),
+            messageID: "m1"
+        )
+        let afterRemoval = try await currentGroup()
+        XCTAssertTrue(afterRemoval.membershipRevoked)
+
+        // A snapshot from BEFORE the removal (epoch 1).
+        try await dispatchInvitation(epoch: 1, members: [], profiles: nil)
+
+        let afterStale = try await currentGroup()
+        XCTAssertTrue(afterStale.membershipRevoked,
+                      "a stale snapshot must not unlock a removed member")
+    }
+
+    /// Roster the re-admission snapshots ship (both original leaves —
+    /// the victim is back in the tree).
+    private var readmitMembers: [GovernanceMember] {
+        [
+            GovernanceMember(
+                publicKeyCompressed: victimBls,
+                leafHash: Data(repeating: 0x0B, count: 32)
+            ),
+            GovernanceMember(
+                publicKeyCompressed: otherBls,
+                leafHash: Data(repeating: 0x0C, count: 32)
+            ),
+        ]
+    }
+
+    /// Dispatch a real `GroupInvitationPayload` for the fixture group
+    /// through a fresh dispatcher. The commitment is the REAL Poseidon
+    /// value for `(members, epoch, salt)` and the chain stub is seeded
+    /// at that exact epoch, so the Tyranny invitation verifier accepts
+    /// (iOS recomputes the commitment via the SDK — no best-effort
+    /// bypass like Android's nullable chain reader).
+    private func dispatchInvitation(
+        epoch: UInt64,
+        members: [GovernanceMember],
+        profiles: [String: MemberProfile]?
+    ) async throws {
+        let salt = Data(repeating: 0xA2, count: 32)
+        let commitment = try IncomingMessageDispatcherTests.makeRealTyrannyCommitment(
+            members: members,
+            epoch: epoch,
+            salt: salt,
+            tier: .small
+        )
+        let invitation = GroupInvitationPayload(
+            version: 1,
+            groupID: groupID,
+            groupSecret: Data(repeating: 0xA1, count: 32),
+            name: "Family",
+            members: members,
+            epoch: epoch,
+            salt: salt,
+            commitment: commitment,
+            tierRaw: SEPTier.small.rawValue,
+            groupTypeRaw: SEPGroupType.tyranny.rawValue,
+            adminPubkeyHex: String(repeating: "de", count: 48),
+            memberProfiles: profiles
+        )
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: FakeInvitationEnvelopeDecrypter(
+                mode: .fixed(try JSONEncoder().encode(invitation)),
+                senderEd25519PublicKey: adminSending
+            ),
+            identities: RemovalStubIdentities(summaries: [selfSummary()]),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: SequencedChainReader([entry(commitment, epoch: epoch)]),
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
+        )
+        await dispatcher.dispatch(
+            messageID: "i-\(epoch)",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
     }
 
     func test_removal_chainBehindRetryIsScopedPerOwnerIdentity() async throws {
@@ -704,25 +982,35 @@ private final class SequencedChainReader: ChainStateReading, @unchecked Sendable
     private let lock = NSLock()
     private let entries: [SEPCommitmentEntry]
     private let failuresBeforeFirstEntry: Int
+    /// When set, every read parks here before returning — lets a test
+    /// hold two applies inside their read-modify-write window at once.
+    private let gate: RetryGate?
     private var _calls = 0
 
     var calls: Int { lock.withLock { _calls } }
 
-    init(_ entries: [SEPCommitmentEntry], failuresBeforeFirstEntry: Int = 0) {
+    init(
+        _ entries: [SEPCommitmentEntry],
+        failuresBeforeFirstEntry: Int = 0,
+        gate: RetryGate? = nil
+    ) {
         self.entries = entries
         self.failuresBeforeFirstEntry = failuresBeforeFirstEntry
+        self.gate = gate
     }
 
     func tyrannyCommitment(groupID: Data) async throws -> SEPCommitmentEntry {
-        try lock.withLock {
+        let result: Result<SEPCommitmentEntry, Error> = lock.withLock {
             let call = _calls
             _calls += 1
             if call < failuresBeforeFirstEntry {
-                throw ChainReadError.noActiveRelayer
+                return .failure(ChainReadError.noActiveRelayer)
             }
             let index = min(call - failuresBeforeFirstEntry, entries.count - 1)
-            return entries[index]
+            return .success(entries[index])
         }
+        await gate?.wait()
+        return try result.get()
     }
 }
 

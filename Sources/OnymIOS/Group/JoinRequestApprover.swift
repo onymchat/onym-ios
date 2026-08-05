@@ -332,6 +332,28 @@ actor JoinRequestApprover: JoinRequestApproving {
             }
         }
 
+        // Record the joiner BEFORE building the invitation snapshot.
+        // Ordering is load-bearing for RE-admission: the joiner's own
+        // entry is still the tombstone from their earlier removal, so
+        // the `!revoked` filter below would drop it off the wire, the
+        // receiver would materialize with a nil
+        // `MemberProfile.statusEpoch`, and the next relay replay of
+        // that old removal would re-lock their composer for good.
+        // Recording first un-revokes + epoch-stamps the entry so it
+        // survives the filter and carries its status marker across.
+        // Skipped when the joiner shipped a pre-PR-4 request — no
+        // stable cross-device key to record under.
+        let joinerBlsPub = req.joinerBlsPublicKey
+        if let joinerBlsPub {
+            anchored = await recordJoiner(
+                in: anchored,
+                blsPub: joinerBlsPub,
+                inboxPub: req.joinerInboxPublicKey,
+                sendingPub: req.joinerSendingPublicKey,
+                alias: req.joinerDisplayLabel
+            )
+        }
+
         let invite = GroupInvitationPayload(
             version: 1,
             groupID: anchored.groupIDData,
@@ -391,22 +413,13 @@ actor JoinRequestApprover: JoinRequestApproving {
         guard receipt.acceptedBy >= 1 else {
             return .transportFailed("no relay accepted the invitation")
         }
-        // Record the joiner in the local group's view-facing roster
-        // (alias / inbox-pub) so the admin sees their alias in the
-        // UI. The cryptographic roster (`anchored.members`) was
-        // already updated by the anchor step. Both side-effects only
-        // run when the joiner shipped a BLS pubkey.
-        if let blsPub = req.joinerBlsPublicKey {
-            await recordJoiner(
-                in: anchored,
-                blsPub: blsPub,
-                inboxPub: req.joinerInboxPublicKey,
-                sendingPub: req.joinerSendingPublicKey,
-                alias: req.joinerDisplayLabel
-            )
+        // The joiner is already recorded above (before the invitation
+        // snapshot — see the ordering comment there). Announce them to
+        // the existing members from the post-record snapshot.
+        if let joinerBlsPub {
             await broadcastJoin(
                 in: anchored,
-                joinerBlsPub: blsPub,
+                joinerBlsPub: joinerBlsPub,
                 joinerInboxPub: req.joinerInboxPublicKey,
                 joinerSendingPub: req.joinerSendingPublicKey,
                 joinerAlias: req.joinerDisplayLabel
@@ -863,13 +876,20 @@ actor JoinRequestApprover: JoinRequestApproving {
     /// alias + inbox-pub. Re-inserting through `GroupRepository`
     /// goes through `SwiftDataGroupStore.insertOrUpdate`, which
     /// updates the row in place rather than minting a new one.
+    ///
+    /// Returns the updated snapshot so the caller can build the
+    /// invitation + announcement from state that already includes the
+    /// joiner — for a RE-admission that's what un-revokes the entry and
+    /// stamps its `MemberProfile.statusEpoch` before the `!revoked`
+    /// filter runs.
+    @discardableResult
     private func recordJoiner(
         in group: ChatGroup,
         blsPub: Data,
         inboxPub: Data,
         sendingPub: Data,
         alias: String
-    ) async {
+    ) async -> ChatGroup {
         let key = blsPub.map { String(format: "%02x", $0) }.joined()
         var updated = group
         updated.memberProfiles[key] = MemberProfile(
@@ -884,6 +904,7 @@ actor JoinRequestApprover: JoinRequestApproving {
             statusEpoch: group.epoch
         )
         await groupRepository.insert(updated)
+        return updated
     }
 
     /// Build a `MemberAnnouncementPayload` for the new joiner and

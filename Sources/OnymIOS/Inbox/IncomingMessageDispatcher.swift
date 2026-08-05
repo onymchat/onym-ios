@@ -104,6 +104,16 @@ struct IncomingMessageDispatcher: Sendable {
     /// timer for the same removal. Reference type so every copy of
     /// this value-type dispatcher shares one registry.
     var removalRetries = RemovalRetryRegistry()
+    /// Serializes `applyRemoval`'s read-modify-write. The retry chain
+    /// runs OFF the inbox pump, so a retry firing at t=12s can
+    /// interleave with the pump applying a second removal for the same
+    /// group: both read the same snapshot, both mutate their copy, and
+    /// the later `insert` wins — silently losing one tombstone, the
+    /// exact failure the retry exists to prevent. `GroupRepository` is
+    /// an actor but only serializes each individual call, so the guard
+    /// has to live here, spanning read→write. Reference type for the
+    /// same reason as `removalRetries`.
+    var removalApplyLock = RemovalApplyLock()
 
     func dispatch(
         messageID: String,
@@ -367,18 +377,39 @@ struct IncomingMessageDispatcher: Sendable {
         // self if we can resolve our own identity. The "wire first"
         // ordering means a sender that mistakenly includes us under
         // our own BLS key gets overwritten by our locally-trusted
-        // alias + inbox pub — the receiver's view of itself wins. The
-        // wire entry's statusEpoch is PRESERVED through the overwrite:
-        // a re-admitted member's own status marker is what refuses a
-        // replayed stale self-removal — erasing it would re-lock the
-        // composer on the next inbox replay.
+        // alias + inbox pub — the receiver's view of itself wins. Our
+        // own statusEpoch is preserved from the wire when present, else
+        // DEFAULTED to the invitation's epoch: being in a snapshot at
+        // epoch N means every removal at or before N is stale for us.
+        // Without that default a re-admitted member whose entry didn't
+        // ship (pre-record snapshots, legacy senders) would materialize
+        // with a nil marker and the next replay of their old removal
+        // would re-lock the composer for good.
         var profiles = invitation.memberProfiles ?? [:]
-        if let selfEntry = await selfMemberProfileEntry(for: ownerIdentityID) {
+        let selfEntry = await selfMemberProfileEntry(for: ownerIdentityID)
+        if let selfEntry {
             profiles[selfEntry.key] = selfEntry.value.withStatus(
                 revoked: selfEntry.value.revoked,
-                statusEpoch: profiles[selfEntry.key]?.statusEpoch
+                statusEpoch: profiles[selfEntry.key]?.statusEpoch ?? invitation.epoch
             )
         }
+
+        // Preserve a prior removal unless this snapshot post-dates it.
+        // materializeGroup rebuilds the row from scratch, so any
+        // accepted invitation would otherwise clear membershipRevoked —
+        // leaving the exact-epoch chain gate as the only thing between
+        // a stale (or stale-peer-answered refresh) invitation and an
+        // unlocked composer.
+        let priorRemovalEpoch: UInt64? = await {
+            let existing = await groupRepository.currentGroups().first {
+                $0.groupIDData == invitation.groupID && $0.ownerIdentityID == ownerIdentityID
+            }
+            guard let existing, existing.membershipRevoked else { return nil }
+            return selfEntry
+                .flatMap { existing.memberProfiles[$0.key]?.statusEpoch }
+                ?? existing.epoch
+        }()
+        let stillRevoked = priorRemovalEpoch.map { invitation.epoch <= $0 } ?? false
 
         // Stamp the inviting envelope's Ed25519 pubkey as the
         // group's admin signing key. PR 9 uses this on every
@@ -420,7 +451,8 @@ struct IncomingMessageDispatcher: Sendable {
             // can still fill it in.
             avatarJPEG: invitation.avatar,
             // The group's invitation/intro, as the sender wrote it.
-            invitationMessage: invitation.invitationMessage
+            invitationMessage: invitation.invitationMessage,
+            membershipRevoked: stillRevoked
         )
         await groupRepository.insert(group)
     }
@@ -816,6 +848,29 @@ struct IncomingMessageDispatcher: Sendable {
         ownerIdentityID: IdentityID,
         senderEd25519PublicKey: Data?
     ) async -> RemovalApplyResult {
+        // Held across the whole read→write body, released before the
+        // caller's retry delay (each attempt re-acquires) — see
+        // `removalApplyLock`. Nothing between acquire and release can
+        // throw or be cancelled out from under us (no `try`, no
+        // cancellation-aware suspension), so the release always runs.
+        await removalApplyLock.acquire()
+        let result = await applyRemovalLocked(
+            payload,
+            ownerIdentityID: ownerIdentityID,
+            senderEd25519PublicKey: senderEd25519PublicKey
+        )
+        await removalApplyLock.release()
+        return result
+    }
+
+    /// `applyRemoval`'s body — always called under
+    /// `removalApplyLock` so the snapshot read and the write can't
+    /// interleave with a concurrent removal for the same group.
+    private func applyRemovalLocked(
+        _ payload: MemberRemovalPayload,
+        ownerIdentityID: IdentityID,
+        senderEd25519PublicKey: Data?
+    ) async -> RemovalApplyResult {
         let groups = await groupRepository.currentGroups()
         guard let group = groups.first(where: {
             $0.groupIDData == payload.groupID && $0.ownerIdentityID == ownerIdentityID
@@ -891,15 +946,21 @@ struct IncomingMessageDispatcher: Sendable {
 
         var updated = group
         // Tombstone effect — order-independent (see the doc comment).
-        if tombstoneApplies {
+        // The leaf also goes whenever we accept the state advance: in
+        // the directory/roster-divergence case (no local profile for
+        // the victim, the receive-side twin of `.memberNotInRoster`)
+        // the anchored commitment we're adopting is over the SHRUNKEN
+        // tree, so keeping the leaf would leave the local roster
+        // disagreeing with the commitment we just stored.
+        if tombstoneApplies || advancesState {
             let victimBytes = ChatGroup.bytes(fromHex: victimHex)
             updated.members.removeAll { $0.publicKeyCompressed == victimBytes }
-            if let victimProfile {
-                updated.memberProfiles[victimHex] = victimProfile.withStatus(
-                    revoked: true,
-                    statusEpoch: payload.epoch
-                )
-            }
+        }
+        if tombstoneApplies, let victimProfile {
+            updated.memberProfiles[victimHex] = victimProfile.withStatus(
+                revoked: true,
+                statusEpoch: payload.epoch
+            )
         }
         // Group-state effect — strictly converge-forward. The victim's
         // own copy carries no secrets; a remaining member that somehow
@@ -1216,6 +1277,34 @@ struct IncomingMessageDispatcher: Sendable {
 /// `IncomingMessageDispatcher.scheduleRemovalRetry`). An actor —
 /// the value-type dispatcher shares one reference across its copies.
 /// Mirrors `pendingRemovalRetries` from onym-android's dispatcher.
+/// Async mutex guarding `IncomingMessageDispatcher.applyRemoval`'s
+/// read-modify-write. Ownership transfers straight to the next waiter
+/// on `release`, so acquisitions are FIFO and no two removal applies
+/// for the same device can interleave between the snapshot read and
+/// the persist. Mirrors `removalApplyMutex` from onym-android's
+/// dispatcher (Kotlin's `Mutex.withLock`).
+actor RemovalApplyLock {
+    private var isHeld = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func acquire() async {
+        guard isHeld else {
+            isHeld = true
+            return
+        }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func release() {
+        if waiters.isEmpty {
+            isHeld = false
+        } else {
+            // Hand ownership to the next waiter — `isHeld` stays true.
+            waiters.removeFirst().resume()
+        }
+    }
+}
+
 actor RemovalRetryRegistry {
     private var pending: Set<String> = []
 
