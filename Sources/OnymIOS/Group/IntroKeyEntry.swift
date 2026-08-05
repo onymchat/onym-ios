@@ -15,9 +15,19 @@ import Foundation
 /// - `groupId` is the on-chain `group_id` the invite is for —
 ///   needed when the inviter's app surfaces "Bob wants to join
 ///   <group>?" so it can render the group's name.
-/// - `createdAt` drives optional expiration UI (later PRs may
-///   prune invites older than N days).
+/// - `createdAt` drives both the enforced TTL (`lifetime`) and the
+///   share screen's reuse-or-mint decision.
 struct IntroKeyEntry: Equatable, Sendable {
+    /// How long a minted invite link stays honored — 24 hours per
+    /// issue onymchat/onym-ios#111. Mirrors onym-android's
+    /// `IntroKeyEntry.LIFETIME_MILLIS`.
+    ///
+    /// This window is the only bound on a link: it is redeemable by
+    /// any number of joiners until it expires. Nothing retires a key
+    /// early — `KeychainIntroKeyStore` filters expired entries out at
+    /// its single read point, and neither Approve nor Decline revokes.
+    static let lifetime: TimeInterval = 24 * 60 * 60
+
     let introPublicKey: Data
     let introPrivateKey: Data
     let ownerIdentityID: IdentityID
@@ -42,5 +52,18 @@ struct IntroKeyEntry: Equatable, Sendable {
         self.ownerIdentityID = ownerIdentityID
         self.groupId = groupId
         self.createdAt = createdAt
+    }
+
+    /// `true` while this entry is still inside its 24h window.
+    ///
+    /// `KeychainIntroKeyStore.loadAll` enforces the same rule at its
+    /// single read point, with the matching strict comparison so the
+    /// two boundaries can't drift. `InviteIntroducer.currentOrMint`
+    /// re-checks here rather than trusting the store, which keeps the
+    /// reuse-or-mint decision a pure function of the entry and a clock
+    /// — and therefore reachable from `InMemoryIntroKeyStore`, which
+    /// has no TTL of its own.
+    func isLive(at now: Date) -> Bool {
+        now.timeIntervalSince(createdAt) < Self.lifetime
     }
 }

@@ -1,13 +1,14 @@
 import SwiftUI
 
 /// Post-create surface. The just-created group is identified by hex
-/// `groupID`; the flow resolves it from the repository, mints a
-/// fresh deeplink capability, and surfaces the link. The user
+/// `groupID`; the flow resolves it from the repository, resolves the
+/// group's deeplink capability, and surfaces the link. The user
 /// shares via the system share sheet, copies it, or skips.
 ///
-/// Mints exactly once per screen entry — re-entry (after Done →
-/// back) re-mints with a fresh intro keypair so the previous share
-/// stays revocable independently.
+/// Loads the link on each screen entry, which is idempotent: the
+/// invite link is multi-use, so the flow hands back the group's
+/// existing live capability rather than minting a new keypair per
+/// visit. A QR code the user already screenshotted keeps working.
 struct ShareInviteView: View {
     let groupID: String
     @Bindable var flow: ShareInviteFlow

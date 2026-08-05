@@ -29,7 +29,12 @@ actor KeychainIntroKeyStore: IntroKeyStore {
     /// subscribing their inboxes, which each cost a relay REQ slot)
     /// and are compacted out of the blob by the load that first sees
     /// them expired.
-    static let entryTTL: TimeInterval = 24 * 60 * 60
+    ///
+    /// This window is the *only* bound on a link: inside it, one link
+    /// is redeemable by any number of joiners. Homed on
+    /// `IntroKeyEntry` so the introducer's reuse-or-mint decision and
+    /// this store's read filter can't drift apart.
+    static let entryTTL: TimeInterval = IntroKeyEntry.lifetime
 
     private let service: String
     /// Per-owner subscriber continuations. Mutations re-emit the

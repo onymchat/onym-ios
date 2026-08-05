@@ -2,15 +2,17 @@ import Foundation
 import Observation
 
 /// Drives the post-create "Share invite" surface. Owns one piece of
-/// state — the share link for the just-minted invite — and exposes
-/// one intent (`mintFor`) to refresh / re-mint.
+/// state — the group's share link — and exposes one intent
+/// (`mintFor`) to load or refresh it.
 ///
-/// Why minting is decoupled from the view's first appearance:
-/// minting is a side effect (writes to `IntroKeyStore`); doing it
-/// in `.onAppear` ties it to view lifecycle (re-entries would mint
-/// twice). This flow holds the side effect off the view tree where
-/// it belongs. The view calls `mintFor` exactly once on appear,
-/// re-mint requires an explicit "Generate new link" tap.
+/// Why resolving the link is decoupled from the view's first
+/// appearance: it touches `IntroKeyStore`, and doing that in
+/// `.onAppear` ties a store write to view lifecycle. This flow holds
+/// the side effect off the view tree where it belongs.
+///
+/// Re-entry is cheap and idempotent — invite links are multi-use, so
+/// `InviteIntroducer.currentOrMint` hands back the group's existing
+/// live key instead of stacking a new one per visit.
 ///
 /// Mirrors onym-android's `ShareInviteViewModel.kt`.
 @MainActor
@@ -45,10 +47,11 @@ final class ShareInviteFlow: Identifiable {
         self.groupRepository = groupRepository
     }
 
-    /// Mint a fresh capability for the group with hex id `groupID` and
-    /// surface the share link. Idempotent for repeated taps from the
-    /// same screen — re-mints a fresh keypair so each share goes
-    /// through a distinct intro slot (per-link revocation friendly).
+    /// Resolve the share link for the group with hex id `groupID` and
+    /// surface it. Idempotent: repeated calls (screen re-entry, Retry
+    /// tap) return the *same* link while the group's intro key is
+    /// inside its 24h `IntroKeyEntry.lifetime`, and only mint a fresh
+    /// keypair once that key has expired. One link, many joiners.
     ///
     /// If `groupID` does not resolve to a local group (race between
     /// persistence + navigation, or a stale deeplink back into share)
@@ -70,7 +73,7 @@ final class ShareInviteFlow: Identifiable {
         }
         state = .minting
         do {
-            let cap = try await introducer.mint(
+            let cap = try await introducer.currentOrMint(
                 ownerIdentityID: activeID,
                 groupId: group.groupIDData,
                 groupName: group.name

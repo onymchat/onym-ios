@@ -82,7 +82,7 @@ final class ShareInviteFlowTests: XCTestCase {
         XCTAssertEqual(listed.count, 0)
     }
 
-    func test_mintFor_calledTwice_mintsTwoIndependentKeypairs() async throws {
+    func test_mintFor_fromASecondFlowOverTheSameStore_reusesTheLiveLink() async throws {
         let identity = IdentityRepository(keychain: keychain, selectionStore: .inMemory())
         _ = try await identity.bootstrap()
         let resolved = await identity.currentSelectedID()
@@ -94,35 +94,41 @@ final class ShareInviteFlowTests: XCTestCase {
         let groupRepo = GroupRepository(store: store, currentIdentityID: owner)
         let introKeyStore = InMemoryIntroKeyStore()
         let introducer = InviteIntroducer(store: introKeyStore)
-        let flow = ShareInviteFlow(
+
+        // Two separate flows over one store, not two calls on one flow.
+        // That's the real production path — `ChatMembersView` builds a
+        // fresh flow per toolbar tap — and it's deterministic: the
+        // second flow starts `.idle`, so waiting for `.ready` genuinely
+        // awaits its resolution rather than observing the first flow's
+        // already-`.ready` state.
+        let first = ShareInviteFlow(
             identity: identity,
             introducer: introducer,
             groupRepository: groupRepo
         )
-
-        flow.mintFor(groupID: group.id)
-        try await waitFor { flow.state.isReady }
-        guard case .ready(let firstLink, _) = flow.state else {
+        first.mintFor(groupID: group.id)
+        try await waitFor { first.state.isReady }
+        guard case .ready(let firstLink, _) = first.state else {
             return XCTFail("expected first .ready")
         }
 
-        flow.mintFor(groupID: group.id)
-        // Wait for the link to actually change (the second mint emits
-        // `.minting` then `.ready` again).
-        try await waitFor {
-            if case .ready(let link, _) = flow.state, link != firstLink { return true }
-            return false
-        }
-        guard case .ready(let secondLink, _) = flow.state else {
+        let second = ShareInviteFlow(
+            identity: identity,
+            introducer: introducer,
+            groupRepository: groupRepo
+        )
+        second.mintFor(groupID: group.id)
+        try await waitFor { second.state.isReady }
+        guard case .ready(let secondLink, _) = second.state else {
             return XCTFail("expected second .ready")
         }
 
-        // Per-link revocation depends on this — re-shares cannot
-        // collapse to the same intro slot or revoking one would kill
-        // the other.
-        XCTAssertNotEqual(firstLink, secondLink, "two shares should produce different links")
+        // Invite links are multi-use, so the share screen is a view onto
+        // the group's live link, not a link factory. Re-entry must not
+        // leave a trail of live intro slots.
+        XCTAssertEqual(firstLink, secondLink, "re-entry should surface the same link")
         let listed = await introKeyStore.listForOwner(owner)
-        XCTAssertEqual(listed.count, 2)
+        XCTAssertEqual(listed.count, 1, "reuse must not persist a second intro slot")
     }
 
     func test_state_transitionsThroughMinting() async throws {
