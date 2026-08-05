@@ -758,9 +758,23 @@ actor JoinRequestApprover: JoinRequestApproving {
     }
 
     /// One sealed envelope per recipient, sequential, failures
-    /// swallowed (inbox replay + the on-chain gate make convergence
-    /// eventual). The victim's copy is encoded WITHOUT the rotated
+    /// swallowed. The victim's copy is encoded WITHOUT the rotated
     /// secrets — build both wire bodies once, outside the loop.
+    ///
+    /// ## Recovery path for a missed envelope
+    ///
+    /// If a recipient's send fails here (no relay accepted it), inbox
+    /// replay can NOT redeliver — the envelope never reached a relay.
+    /// That member's local state stays on the pre-removal epoch +
+    /// groupSecret until something triggers a
+    /// `GroupStateRefreshRequest` toward the admin (whose reply
+    /// carries the full current snapshot). They remain SAFE in the
+    /// meantime — the removal is already anchored and the victim
+    /// can't read anything new — but they'll keep the victim in their
+    /// local roster and keep sealing messages to the victim's inbox
+    /// until they converge. A proactive resend queue is a known
+    /// follow-up.
+    ///
     /// Mirrors `GroupMemberRemover.broadcastRemoval` from onym-android.
     private func broadcastRemoval(
         in group: ChatGroup,

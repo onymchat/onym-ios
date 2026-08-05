@@ -210,6 +210,88 @@ final class IncomingMessageDispatcherRemovalTests: XCTestCase {
         XCTAssertEqual(reader.calls, 2)
     }
 
+    // MARK: - review regressions
+
+    func test_removal_replayAfterReadmission_doesNotRollStateBack() async throws {
+        // 1. Removal (epoch 2) applies.
+        let reader = SequencedChainReader([
+            entry(newCommitment, epoch: 2),
+            // Later reads: chain moved on past the re-admission.
+            entry(Data(repeating: 0x70, count: 32), epoch: 3),
+        ])
+        let dispatcher = try makeDispatcher(payload: payloadForMembers(), reader: reader)
+        await dispatch(dispatcher, messageID: "m1")
+        var group = try await currentGroup()
+        XCTAssertEqual(group.memberProfiles[victimHex]?.revoked, true)
+
+        // 2. Re-admission: the announcement path resets the tombstone
+        //    (local epoch stays at 2 — announcements don't carry state).
+        let postReadmissionSecret = Data(repeating: 0x71, count: 32)
+        group.memberProfiles[victimHex] = group.memberProfiles[victimHex]?.withRevoked(false)
+        group.groupSecret = postReadmissionSecret
+        _ = await groups.insert(group)
+
+        // 3. The relay replays the OLD epoch-2 removal envelope. The
+        //    chain (epoch 3) is ahead — without the local
+        //    converge-forward guard this would re-tombstone the member
+        //    and roll groupSecret/epoch back to the removal values.
+        await dispatch(dispatcher, messageID: "m2")
+
+        let final = try await currentGroup()
+        XCTAssertEqual(final.memberProfiles[victimHex]?.revoked, false,
+                       "re-admitted member must stay active")
+        XCTAssertEqual(final.groupSecret, postReadmissionSecret,
+                       "post-readmission secret must survive the replay")
+        XCTAssertEqual(final.epoch, 2)
+        // And the replay never even hit the chain (local guard fires first).
+        XCTAssertEqual(reader.calls, 1)
+    }
+
+    func test_removal_failsClosedWhenGroupHasNoStoredAdminKey() async throws {
+        // A group materialized from an unsigned invitation stores no
+        // admin Ed25519. isAuthorizedGroupMutation's any-current-member
+        // fallback must NOT apply to a subtractive op — a member's
+        // valid signature is not authority to evict another member.
+        let memberSending = Data(repeating: 0x42, count: 32)
+        var group = makeGroup()
+        group.adminEd25519PubkeyHex = nil
+        group.memberProfiles[otherHex] = MemberProfile(
+            alias: "Other",
+            inboxPublicKey: Data(repeating: 0x41, count: 32),
+            sendingPubkey: memberSending
+        )
+        _ = await groups.insert(group)
+
+        let reader = SequencedChainReader([entry(newCommitment, epoch: 2)])
+        let dispatcher = try makeDispatcher(
+            payload: payloadForMembers(),
+            senderPub: memberSending,  // valid CURRENT member signature
+            reader: reader
+        )
+        await dispatch(dispatcher)
+
+        let after = try await currentGroup()
+        XCTAssertEqual(after.memberProfiles[victimHex]?.revoked, false)
+        XCTAssertEqual(after.epoch, 1)
+        XCTAssertEqual(reader.calls, 0, "fails closed before any chain read")
+    }
+
+    func test_removal_droppedWhenSelfUnresolvable() async throws {
+        // No resolvable self identity → can't classify self vs
+        // remaining-member. The safe posture is drop (previously the
+        // victim's own device would take the remaining-member branch
+        // and delete itself).
+        let reader = SequencedChainReader([entry(newCommitment, epoch: 2)])
+        let dispatcher = try makeDispatcher(
+            payload: payloadForMembers(),
+            identities: [],
+            reader: reader
+        )
+        await dispatch(dispatcher)
+        try await assertUntouched()
+        XCTAssertEqual(reader.calls, 0)
+    }
+
     // MARK: - idempotency
 
     func test_removal_redeliveryBailsBeforeChainRead() async throws {
@@ -270,7 +352,7 @@ final class IncomingMessageDispatcherRemovalTests: XCTestCase {
     private func makeDispatcher(
         payload: MemberRemovalPayload,
         senderPub: Data? = Data(repeating: 0x10, count: 32),
-        identities: [IdentitySummary] = [],
+        identities: [IdentitySummary]? = nil,
         reader: SequencedChainReader,
         maxRetries: Int = 2,
         inlineRetries: Bool = false
@@ -282,7 +364,7 @@ final class IncomingMessageDispatcherRemovalTests: XCTestCase {
         )
         var dispatcher = IncomingMessageDispatcher(
             envelopeDecrypter: decrypter,
-            identities: RemovalStubIdentities(summaries: identities),
+            identities: RemovalStubIdentities(summaries: identities ?? [nonVictimSelf()]),
             groupRepository: groups,
             invitationsRepository: invitations,
             chainState: reader,
@@ -304,6 +386,19 @@ final class IncomingMessageDispatcherRemovalTests: XCTestCase {
             id: owner,
             name: "Me",
             blsPublicKey: victimBls,
+            inboxPublicKey: Data(repeating: 0x21, count: 32),
+            sendingPublicKey: Data(repeating: 0x22, count: 32)
+        )
+    }
+
+    /// Default self-identity: a non-victim member, so the dispatcher
+    /// can classify the removal (an unresolvable self now DROPS —
+    /// see `test_removal_droppedWhenSelfUnresolvable`).
+    private func nonVictimSelf() -> IdentitySummary {
+        IdentitySummary(
+            id: owner,
+            name: "Me",
+            blsPublicKey: Data(repeating: 0x99, count: 48),
             inboxPublicKey: Data(repeating: 0x21, count: 32),
             sendingPublicKey: Data(repeating: 0x22, count: 32)
         )

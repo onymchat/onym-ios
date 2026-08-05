@@ -279,16 +279,23 @@ struct ChatMembersView: View {
             let outcome = await removeMember(groupID, row.blsHex)
             removalInFlightBlsHex = nil
             if outcome != .sent {
-                removalErrorText = Self.describe(outcome)
+                removalErrorText = Self.removalErrorText(outcome)
             }
         }
     }
 
-    /// Short diagnostic line for the error alert's message. The alert
-    /// title carries the user-meaningful part; this pins down which
-    /// gate failed (mirrors the Android toast's outcome dump).
-    private static func describe(_ outcome: JoinRequestApprover.RemoveOutcome) -> String {
-        String(describing: outcome)
+    /// Maps a removal failure to user-facing copy. The approver
+    /// surfaces the typed outcome; localization happens here. Mirrors
+    /// `removalErrorText` from onym-android's `ChatMembersScreen.kt`.
+    private static func removalErrorText(_ outcome: JoinRequestApprover.RemoveOutcome) -> String {
+        switch outcome {
+        case .notAdminOfThisGroup:
+            return String(localized: "Only the group's founder can remove members.")
+        case .noActiveRelayer, .noContractBinding, .transportFailed, .anchorRejected:
+            return String(localized: "Couldn't reach the network. Check your connection and try again.")
+        default:
+            return String(localized: "Something went wrong. Try again.")
+        }
     }
 
     private func list(for group: ChatGroup) -> some View {

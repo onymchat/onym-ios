@@ -34,6 +34,22 @@
         }
       }
     },
+    "Couldn't reach the network. Check your connection and try again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't reach the network. Check your connection and try again."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не удалось подключиться к сети. Проверьте соединение и попробуйте ещё раз."
+          }
+        }
+      }
+    },
     "Couldn't remove the member": {
       "localizations": {
         "en": {
@@ -46,6 +62,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Не удалось удалить участника"
+          }
+        }
+      }
+    },
+    "Only the group's founder can remove members.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only the group's founder can remove members."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Удалять участников может только основатель группы."
           }
         }
       }
@@ -94,6 +126,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Удалить участника"
+          }
+        }
+      }
+    },
+    "Something went wrong. Try again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Something went wrong. Try again."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Что-то пошло не так. Попробуйте ещё раз."
           }
         }
       }
