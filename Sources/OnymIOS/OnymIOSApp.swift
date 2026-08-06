@@ -678,6 +678,11 @@ struct OnymIOSApp: App {
         // approve…". Falls back to the in-memory store if the on-disk
         // container can't be opened, so a storage failure degrades to
         // the old behaviour instead of blocking launch.
+        //
+        // Either store tombstones handled ids durably (supplied inside
+        // OnymGroup): a multi-use link keeps its relay subscription for
+        // good, and the REQ carries no `since`, so every reconnect
+        // replays requests that were already acted on.
         self.introRequestStore = (try? SwiftDataIntroRequestStore())
             ?? InMemoryIntroRequestStore()
 
@@ -1565,7 +1570,23 @@ struct OnymIOSApp: App {
                             continue
                         }
                         let entries = introKeyStore.entriesStream(forOwner: activeID)
-                        currentTask = Task { await pump.run(entries: entries) }
+                        let store = introRequestStore
+                        // Tee the same snapshots the pump reconciles on,
+                        // so a retired link's tombstones go with it.
+                        let (forPump, pumpFeed) = AsyncStream.makeStream(of: [IntroKeyEntry].self)
+                        let tee = Task {
+                            for await snapshot in entries {
+                                await store.pruneTombstones(
+                                    keeping: Set(snapshot.map(\.introPublicKey))
+                                )
+                                pumpFeed.yield(snapshot)
+                            }
+                            pumpFeed.finish()
+                        }
+                        currentTask = Task {
+                            defer { tee.cancel() }
+                            await pump.run(entries: forPump)
+                        }
                     }
                     currentTask?.cancel()
                 }

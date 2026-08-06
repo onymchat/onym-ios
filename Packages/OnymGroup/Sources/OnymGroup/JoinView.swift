@@ -141,6 +141,35 @@ public struct JoinView: View {
             }
             .padding(.top, 24)
             .accessibilityIdentifier("join.awaiting_approval")
+        case .unanswered:
+            VStack(spacing: 12) {
+                Image(systemName: "clock.badge.questionmark")
+                    .font(.system(size: 36))
+                    .foregroundStyle(OnymTokens.text2)
+                Text("No response yet")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(OnymTokens.text)
+                // Host offline or link replaced — indistinguishable
+                // from here, since revocation is silent. Name both.
+                Text("The host may be offline, or this invite may no longer work. Ask them for a new link.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(OnymTokens.text2)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                Text("You can leave this screen open — if they approve, the chat still appears.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(OnymTokens.text2)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                Button("Try again") {
+                    flow.send(displayLabel: displayLabel)
+                }
+                .buttonStyle(.borderedProminent)
+                .padding(.top, 4)
+                .accessibilityIdentifier("join.retry_button")
+            }
+            .padding(.top, 24)
+            .accessibilityIdentifier("join.unanswered")
         case .approved(let group):
             VStack(spacing: 12) {
                 Image(systemName: "checkmark.seal.fill")

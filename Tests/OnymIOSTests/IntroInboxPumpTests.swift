@@ -147,6 +147,102 @@ final class IntroInboxPumpTests: XCTestCase {
         runTask.cancel()
     }
 
+    // MARK: - IntroRequestStore consume tombstone
+
+    func test_record_afterConsume_isRejected_soRelayReplayCannotResurrect() async {
+        let store = InMemoryIntroRequestStore()
+        let request = IntroRequest(
+            id: "evt-1",
+            targetIntroPublicKey: Data(repeating: 0xA1, count: 32),
+            payload: Data([0x01, 0x02]),
+            receivedAt: Date()
+        )
+
+        let recorded = await store.record(request)
+        XCTAssertTrue(recorded)
+        await store.consume(id: request.id)
+
+        // The REQ has no `since`, so reconnects replay the whole inbox.
+        // A handled request must not come back.
+        let reRecorded = await store.record(request)
+        XCTAssertFalse(reRecorded, "a consumed event id must never be re-recorded")
+        let remaining = await store.current()
+        XCTAssertTrue(remaining.isEmpty)
+    }
+
+    func test_consume_unknownId_stillTombstones_soALateReplayIsRejected() async {
+        let store = InMemoryIntroRequestStore()
+
+        // Tombstone laid before the replay lands — the ordering the
+        // pump can actually produce when a consume races a reconnect.
+        await store.consume(id: "evt-never-seen")
+
+        let late = IntroRequest(
+            id: "evt-never-seen",
+            targetIntroPublicKey: Data(repeating: 0xA1, count: 32),
+            payload: Data([0x03]),
+            receivedAt: Date()
+        )
+        let recordedLate = await store.record(late)
+        XCTAssertFalse(recordedLate)
+        let remaining = await store.current()
+        XCTAssertTrue(remaining.isEmpty)
+    }
+
+    func test_tombstoneSurvivesRelaunch_soAHandledRequestStaysGone() async {
+        // A fresh store over the same durable log is what a cold start
+        // looks like. This is the case a process-lifetime set missed.
+        let log = InMemoryHandledIntroRequestLog()
+        let request = IntroRequest(
+            id: "evt-1",
+            targetIntroPublicKey: Data(repeating: 0xA1, count: 32),
+            payload: Data([0x01]),
+            receivedAt: Date()
+        )
+
+        let first = InMemoryIntroRequestStore(handledLog: log)
+        _ = await first.record(request)
+        await first.consume(id: request.id)
+
+        let relaunched = InMemoryIntroRequestStore(handledLog: log)
+        let reRecorded = await relaunched.record(request)
+
+        XCTAssertFalse(reRecorded, "a handled request must not return after relaunch")
+        let remaining = await relaunched.current()
+        XCTAssertTrue(remaining.isEmpty)
+    }
+
+    func test_pruneTombstones_dropsRetiredLinks_keepsLiveOnes() async {
+        let log = InMemoryHandledIntroRequestLog()
+        let livePub = Data(repeating: 0xA1, count: 32)
+        let retiredPub = Data(repeating: 0xB2, count: 32)
+        let store = InMemoryIntroRequestStore(handledLog: log)
+
+        for (id, pub) in [("evt-live", livePub), ("evt-retired", retiredPub)] {
+            _ = await store.record(IntroRequest(
+                id: id, targetIntroPublicKey: pub,
+                payload: Data([0x01]), receivedAt: Date()
+            ))
+            await store.consume(id: id)
+        }
+
+        // The retired link's tombstones go with it, so the set stays
+        // bounded by the invites that still exist.
+        await store.pruneTombstones(keeping: [livePub])
+
+        let after = InMemoryIntroRequestStore(handledLog: log)
+        let liveStillBlocked = await after.record(IntroRequest(
+            id: "evt-live", targetIntroPublicKey: livePub,
+            payload: Data([0x01]), receivedAt: Date()
+        ))
+        let retiredNowFree = await after.record(IntroRequest(
+            id: "evt-retired", targetIntroPublicKey: retiredPub,
+            payload: Data([0x01]), receivedAt: Date()
+        ))
+        XCTAssertFalse(liveStillBlocked)
+        XCTAssertTrue(retiredNowFree)
+    }
+
     // MARK: - Helpers
 
     private func waitFor(

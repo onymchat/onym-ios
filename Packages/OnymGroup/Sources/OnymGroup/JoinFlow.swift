@@ -50,6 +50,9 @@ public final class JoinFlow {
         case ready(IntroCapability)
         case sending
         case awaitingApproval
+        /// Nothing came back in time. Not a failure — a revoked link
+        /// and a slow host are indistinguishable from here.
+        case unanswered
         case approved(ChatGroup)
         case failed(reason: String)
     }
@@ -67,17 +70,23 @@ public final class JoinFlow {
 
     private var sendTask: Task<Void, Never>?
     private var watcherTask: Task<Void, Never>?
+    private var unansweredTask: Task<Void, Never>?
+    /// Wait before flipping to `.unanswered`, nil to never flip.
+    /// Injected so tests drive it in milliseconds.
+    private let unansweredAfter: Duration?
 
     public init(
         capability: IntroCapability,
         suggestedDisplayLabel: String,
         submitRequest: @escaping @Sendable (IntroCapability, String) async -> JoinRequestSender.Outcome,
-        groupRepository: GroupRepository
+        groupRepository: GroupRepository,
+        unansweredAfter: Duration? = JoinFlow.unansweredAfter
     ) {
         self.capability = capability
         self.suggestedDisplayLabel = suggestedDisplayLabel
         self.submitRequest = submitRequest
         self.groupRepository = groupRepository
+        self.unansweredAfter = unansweredAfter
         self.state = .ready(capability)
         startWatcher()
     }
@@ -86,6 +95,13 @@ public final class JoinFlow {
     // capture `[weak self]` so they exit gracefully on deallocation
     // without needing main-actor-isolated cancellation in `deinit`
     // (which Swift's strict concurrency checking would flag).
+
+    /// Generous: approval is a human tap plus a proof and a chain
+    /// round-trip, so anything short cries wolf on a thinking host.
+    ///
+    /// `public` because it is the default for a public initializer's
+    /// parameter, which is part of this type's exported interface.
+    public static let unansweredAfter: Duration = .seconds(90)
 
     /// Ship the join request. No-op if a previous `send` is in flight
     /// (debounce — protects against double-tap on the primary
@@ -98,7 +114,7 @@ public final class JoinFlow {
             // tap will be guarded by the state check below anyway.)
         }
         switch state {
-        case .ready, .failed: break
+        case .ready, .failed, .unanswered: break
         default: return
         }
         sendTask = Task { [weak self, submitRequest, capability] in
@@ -111,11 +127,25 @@ public final class JoinFlow {
             switch outcome {
             case .sent:
                 self.state = .awaitingApproval
+                self.startUnansweredTimer()
             case .noIdentityLoaded:
                 self.state = .failed(reason: "Sign in first.")
             case .transportFailed(let reason):
                 self.state = .failed(reason: "Couldn't send: \(reason)")
             }
+        }
+    }
+
+    /// Flip to `.unanswered` at the deadline. A late approval still
+    /// overwrites it via the watcher.
+    private func startUnansweredTimer() {
+        guard let unansweredAfter else { return }
+        unansweredTask?.cancel()
+        unansweredTask = Task { [weak self] in
+            try? await Task.sleep(for: unansweredAfter)
+            guard let self, !Task.isCancelled else { return }
+            guard case .awaitingApproval = self.state else { return }
+            self.state = .unanswered
         }
     }
 
@@ -130,6 +160,9 @@ public final class JoinFlow {
                     continue
                 }
                 if case .approved = self.state { continue }  // terminal
+                // Beats `.unanswered` too: a late approval is still an
+                // approval.
+                self.unansweredTask?.cancel()
                 self.state = .approved(match)
             }
         }

@@ -67,7 +67,7 @@ OnymIdentity/OnymDesign/OnymChain/OnymPersistence were doc comments only).
 | IntroRequestStore (protocol), InMemoryIntroRequestStore (init, witnesses) | OnymIOSApp, PendingInvitesStore, tests |
 | IntroKeyEntry (all props, init) | KeychainIntroKeyStoreTests, tests' InMemoryIntroKeyStore |
 | IntroKeyStore (protocol) | OnymIOSApp, IdentityRepository wiring in app shell, tests |
-| KeychainIntroKeyStore (init, serviceDefault, account, entryTTL, wipeAll, witnesses) | OnymIOSApp, KeychainIntroKeyStoreTests |
+| KeychainIntroKeyStore (init, serviceDefault, account, wipeAll, witnesses) | OnymIOSApp, KeychainIntroKeyStoreTests |
 | InviteIntroducer (init, mint), IntroducerError | OnymIOSApp, ShareInviteFlow tests, InviteIntroducerTests |
 | IntroInboxPump (init, run, static inboxTag) | OnymIOSApp, GroupStateVerifier, ChatReceiptSender, tests |
 | JoinRequestSender (init, Outcome, send) | OnymIOSApp, PendingInvitesFlow, JoinFlowTests |

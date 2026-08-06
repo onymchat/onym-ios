@@ -2,13 +2,13 @@ import SwiftUI
 import OnymDesign
 
 /// Post-create surface. The just-created group is identified by hex
-/// `groupID`; the flow resolves it from the repository, mints a
-/// fresh deeplink capability, and surfaces the link. The user
+/// `groupID`; the flow resolves it from the repository, resolves the
+/// group's deeplink capability, and surfaces the link. The user
 /// shares via the system share sheet, copies it, or skips.
 ///
-/// Mints exactly once per screen entry — re-entry (after Done →
-/// back) re-mints with a fresh intro keypair so the previous share
-/// stays revocable independently.
+/// Reuses the group's link instead of minting per entry, so a QR
+/// already screenshotted keeps working. "Generate new link" is the
+/// only thing that rotates it.
 public struct ShareInviteView: View {
     let groupID: String
     @Bindable var flow: ShareInviteFlow
@@ -53,6 +53,82 @@ public struct ShareInviteView: View {
         }
         .background(OnymTokens.bg)
         .onAppear { flow.mintFor(groupID: groupID) }
+    }
+
+    /// Rotate. The only way a leaked link stops working, framed as
+    /// generate-a-new-one so the user always holds a working link.
+    private var rotateButton: some View {
+        Button {
+            copied = false
+            flow.rotateLink(groupID: groupID)
+        } label: {
+            HStack(spacing: 8) {
+                if flow.isRotating {
+                    ProgressView().controlSize(.small)
+                }
+                Text(flow.isRotating ? "Generating…" : "Generate new link")
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .foregroundStyle(OnymTokens.text2)
+        }
+        .disabled(flow.isRotating)
+        .accessibilityIdentifier("share_invite.rotate_button")
+        .overlay(alignment: .bottom) {
+            Text("The old link stops working. Anyone still holding it won't be told.")
+                .font(.system(size: 11))
+                .foregroundStyle(OnymTokens.text2)
+                .multilineTextAlignment(.center)
+                .offset(y: 16)
+        }
+        .padding(.bottom, 20)
+    }
+
+    /// The create-time offers, one per invitee. Nothing expires, so
+    /// this list is the only way they are ever retired.
+    @ViewBuilder
+    private var otherInvitesSection: some View {
+        if !flow.otherInvites.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Direct invites")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(OnymTokens.text)
+                Text("Sent when you created the group. Each one can still be used to request to join.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(OnymTokens.text2)
+
+                ForEach(flow.otherInvites) { row in
+                    HStack {
+                        // A literal key so it localizes; a String
+                        // variable would render verbatim.
+                        if let label = row.label {
+                            Text(label)
+                                .font(.system(size: 13, design: .monospaced))
+                                .foregroundStyle(OnymTokens.text)
+                        } else {
+                            Text("Older link")
+                                .font(.system(size: 13))
+                                .foregroundStyle(OnymTokens.text)
+                        }
+                        Spacer()
+                        Button("Revoke") {
+                            flow.revoke(row, groupID: groupID)
+                        }
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.red)
+                        .accessibilityIdentifier(
+                            "share_invite.revoke_button.\(row.label ?? "superseded")"
+                        )
+                    }
+                    .padding(.vertical, 10)
+                    .padding(.horizontal, 12)
+                    .background(OnymTokens.surface2,
+                                in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("share_invite.other_invites")
+        }
     }
 
     private var topBar: some View {
@@ -137,6 +213,9 @@ public struct ShareInviteView: View {
                 // capability aloud in Release.
                 .accessibilityValue(link)
                 #endif
+
+                rotateButton
+                otherInvitesSection
             }
             .padding(.top, 24)
         case .failed(let reason):

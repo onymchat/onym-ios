@@ -22,9 +22,13 @@ public protocol IntroRequestStore: Sendable {
     @discardableResult
     func record(_ request: IntroRequest) async -> Bool
 
-    /// Drop a request after the user has acted on it (Approve or
-    /// Decline) so it stops cluttering the surface.
+    /// Drop a handled request and tombstone its id. Conformers MUST
+    /// tombstone durably: cold starts replay the inbox too.
     func consume(id: String) async
+
+    /// Drop tombstones for links that no longer exist, so the durable
+    /// set stays bounded by the live invites.
+    func pruneTombstones(keeping livePublicKeys: Set<Data>) async
 
     /// Snapshot read used by tests + bootstrap reads. UI prefers
     /// the stream.
@@ -37,13 +41,23 @@ public protocol IntroRequestStore: Sendable {
 /// launch outright.
 public actor InMemoryIntroRequestStore: IntroRequestStore {
 
-    public init() {}
-
     private var pending: [IntroRequest] = []
+    /// Event ids already acted on, mirrored from `handledLog` so the
+    /// hot `record` path doesn't hit storage per inbound.
+    private var consumed: Set<String>
+    /// Durable half of the tombstone. Process-lifetime alone would let
+    /// every handled request re-decode on the next cold start.
+    private let handledLog: any HandledIntroRequestLog
     private var continuations: [UUID: AsyncStream<[IntroRequest]>.Continuation] = [:]
+
+    public init(handledLog: any HandledIntroRequestLog = InMemoryHandledIntroRequestLog()) {
+        self.handledLog = handledLog
+        self.consumed = handledLog.handledIDs()
+    }
 
     @discardableResult
     public func record(_ request: IntroRequest) async -> Bool {
+        if consumed.contains(request.id) { return false }
         if pending.contains(where: { $0.id == request.id }) { return false }
         pending.append(request)
         publish()
@@ -51,9 +65,22 @@ public actor InMemoryIntroRequestStore: IntroRequestStore {
     }
 
     public func consume(id: String) async {
+        // Unconditional, so a tombstone can be laid ahead of a replay
+        // that hasn't landed yet.
+        consumed.insert(id)
+        // Attribute to the link it arrived on so `pruneTombstones` can
+        // drop it when that link is retired.
+        if let raw = pending.first(where: { $0.id == id }) {
+            handledLog.record(id: id, introPublicKey: raw.targetIntroPublicKey)
+        }
         let before = pending.count
         pending.removeAll { $0.id == id }
         if pending.count != before { publish() }
+    }
+
+    public func pruneTombstones(keeping livePublicKeys: Set<Data>) async {
+        handledLog.prune(keeping: livePublicKeys)
+        consumed = handledLog.handledIDs()
     }
 
     public func current() async -> [IntroRequest] {
