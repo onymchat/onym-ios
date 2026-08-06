@@ -21,31 +21,11 @@ actor KeychainIntroKeyStore: IntroKeyStore {
     static let serviceDefault = "app.onym.ios.intro_keys"
     static let account = "blob"
 
-    /// How long an invite link is honored after minting. 24 hours per
-    /// issue onymchat/onym-ios#111 (shrink the leak window of a
-    /// forwarded or screenshotted link) — matches onym-android's
-    /// `IntroKeyEntry.LIFETIME_MILLIS`. Expired entries are invisible
-    /// to `find`/`listForOwner`/streams (so the intro pump stops
-    /// subscribing their inboxes, which each cost a relay REQ slot)
-    /// and are compacted out of the blob by the load that first sees
-    /// them expired.
-    ///
-    /// This window is the *only* bound on a link: inside it, one link
-    /// is redeemable by any number of joiners. Homed on
-    /// `IntroKeyEntry` so the introducer's reuse-or-mint decision and
-    /// this store's read filter can't drift apart.
-    static let entryTTL: TimeInterval = IntroKeyEntry.lifetime
-
     private let service: String
     /// Per-owner subscriber continuations. Mutations re-emit the
     /// filtered+sorted snapshot to every subscriber whose owner
     /// matches.
     private var continuations: [IdentityID: [UUID: AsyncStream<[IntroKeyEntry]>.Continuation]] = [:]
-    /// Reentrancy latch: `loadAll()` publishes when it compacts, and
-    /// `publish` itself calls `loadAll()` — the latch stops that inner
-    /// load from re-entering the compaction path.
-    private var compacting = false
-
     init(testNamespace: String? = nil) {
         if let testNamespace, !testNamespace.isEmpty {
             self.service = "\(Self.serviceDefault).\(testNamespace)"
@@ -176,33 +156,14 @@ actor KeychainIntroKeyStore: IntroKeyStore {
         let status = SecItemCopyMatching(q as CFDictionary, &result)
         guard status == errSecSuccess, let data = result as? Data else { return [] }
         // Corrupted blob → discard rather than crash. Acceptable
-        // because this store holds ephemeral per-invite keys; if we
-        // lose them, the worst that happens is in-flight invites
-        // fail to deliver and the inviter re-shares.
-        let entries = (try? JSONDecoder().decode(StoredIntroKeysBlob.self, from: data))?.entries ?? []
-        // TTL filter at the single load point so expired entries are
-        // invisible to every reader.
-        let cutoff = Int64((Date().timeIntervalSince1970 - Self.entryTTL) * 1000)
-        let live = entries.filter { $0.createdAtMillis > cutoff }
-        // Compact immediately: expired rows carry intro PRIVATE keys,
-        // and a read-only workload would otherwise leave them at rest
-        // indefinitely waiting for a mutation to rewrite the blob.
-        // Publish for the expired entries' owners so a live session's
-        // intro pump drops their relay REQ slots too — but note this
-        // still only runs when *something* touches the store; a fully
-        // quiet session keeps its slots until the next access or
-        // launch.
-        if live.count != entries.count, !compacting {
-            compacting = true
-            writeAll(live)
-            let expiredOwners = Set(
-                entries.filter { $0.createdAtMillis <= cutoff }
-                    .compactMap { IdentityID($0.ownerIdentityID) }
-            )
-            for owner in expiredOwners { publish(forOwner: owner) }
-            compacting = false
-        }
-        return live
+        // because this store holds per-invite keys; if we lose them,
+        // the worst that happens is in-flight invites fail to deliver
+        // and the inviter re-shares.
+        //
+        // No time-based filtering: invite links do not expire. An entry
+        // lives until the inviter revokes it, or their identity goes
+        // away via `deleteForOwner` / `pruneOwners`.
+        return (try? JSONDecoder().decode(StoredIntroKeysBlob.self, from: data))?.entries ?? []
     }
 
     private func writeAll(_ entries: [StoredIntroKey]) {
@@ -241,6 +202,11 @@ private struct StoredIntroKey: Codable {
     let ownerIdentityID: String
     let groupId: Data
     let createdAtMillis: Int64
+    /// Added after the initial release, so it MUST stay optional: the
+    /// blob decode is `(try? decode)?.entries ?? []`, and a
+    /// non-optional field would make every pre-existing invite fail to
+    /// decode and silently vanish on upgrade.
+    let label: String?
 
     enum CodingKeys: String, CodingKey {
         case introPub = "intro_pub"
@@ -248,6 +214,7 @@ private struct StoredIntroKey: Codable {
         case ownerIdentityID = "owner_identity_id"
         case groupId = "group_id"
         case createdAtMillis = "created_at_millis"
+        case label
     }
 
     init(from entry: IntroKeyEntry) {
@@ -256,6 +223,7 @@ private struct StoredIntroKey: Codable {
         self.ownerIdentityID = entry.ownerIdentityID.rawValue.uuidString
         self.groupId = entry.groupId
         self.createdAtMillis = Int64(entry.createdAt.timeIntervalSince1970 * 1000)
+        self.label = entry.label
     }
 
     func toEntry() -> IntroKeyEntry? {
@@ -267,7 +235,8 @@ private struct StoredIntroKey: Codable {
             introPrivateKey: introPriv,
             ownerIdentityID: owner,
             groupId: groupId,
-            createdAt: Date(timeIntervalSince1970: TimeInterval(createdAtMillis) / 1000)
+            createdAt: Date(timeIntervalSince1970: TimeInterval(createdAtMillis) / 1000),
+            label: label
         )
     }
 }

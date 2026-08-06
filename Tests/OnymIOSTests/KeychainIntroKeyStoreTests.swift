@@ -25,42 +25,53 @@ final class KeychainIntroKeyStoreTests: XCTestCase {
         try await super.tearDown()
     }
 
-    // MARK: - TTL
+    // MARK: - no expiry
 
-    func test_expiredEntry_invisibleToReads() async {
-        await store.save(makeEntry(owner: ownerA, age: KeychainIntroKeyStore.entryTTL + 60))
+    func test_oldEntry_staysVisibleAndAtRest() async {
+        // Invite links do not expire. An entry minted long ago is as
+        // usable as one minted a second ago; only `revoke` retires it.
+        let ancient = makeEntry(owner: ownerA, age: 400 * 24 * 60 * 60)
+        await store.save(ancient)
         let fresh = makeEntry(owner: ownerA)
         await store.save(fresh)
 
         let listed = await store.listForOwner(ownerA)
-        XCTAssertEqual(listed.map(\.introPublicKey), [fresh.introPublicKey],
-                       "entries past the 24h TTL must be invisible to listForOwner")
+        XCTAssertEqual(Set(listed.map(\.introPublicKey)),
+                       Set([ancient.introPublicKey, fresh.introPublicKey]))
+        let foundAncient = await store.find(introPublicKey: ancient.introPublicKey)
+        XCTAssertNotNil(foundAncient)
+        XCTAssertEqual(rawEntryCount(), 2, "reads must not silently drop rows")
     }
 
-    func test_expiredEntry_compactsOutOfBlobOnFirstRead() async {
-        let fresh = makeEntry(owner: ownerA)
-        await store.save(fresh)
-        await store.save(makeEntry(owner: ownerB, age: KeychainIntroKeyStore.entryTTL + 60))
-        // No subscribers → save's publish no-ops without reading, so
-        // the expired row really is at rest now.
-        XCTAssertEqual(rawEntryCount(), 2)
+    func test_revokedEntry_disappearsFromReadsAndFromTheBlob() async {
+        let doomed = makeEntry(owner: ownerA, age: 400 * 24 * 60 * 60)
+        await store.save(doomed)
+        let kept = makeEntry(owner: ownerA)
+        await store.save(kept)
 
-        _ = await store.listForOwner(ownerA)
+        await store.revoke(introPublicKey: doomed.introPublicKey)
 
-        XCTAssertEqual(rawEntryCount(), 1,
-                       "the read that first sees an expired intro privkey must rewrite the blob without it")
+        let listed = await store.listForOwner(ownerA)
+        XCTAssertEqual(listed.map(\.introPublicKey), [kept.introPublicKey])
+        let foundDoomed = await store.find(introPublicKey: doomed.introPublicKey)
+        XCTAssertNil(foundDoomed)
+        // The row held an intro PRIVATE key; revoke must remove it at
+        // rest, not just hide it from reads.
+        XCTAssertEqual(rawEntryCount(), 1)
     }
 
-    func test_expiredEntry_streamSnapshotExcludesIt() async {
-        await store.save(makeEntry(owner: ownerB, age: KeychainIntroKeyStore.entryTTL + 60))
+    func test_revoke_publishesToTheOwnersStream_soThePumpDropsTheInbox() async {
+        let doomed = makeEntry(owner: ownerB)
+        await store.save(doomed)
 
         var iterator = store.entriesStream(forOwner: ownerB).makeAsyncIterator()
-        let snapshot = await iterator.next()
+        _ = await iterator.next()  // initial snapshot
 
-        XCTAssertEqual(snapshot, [],
-                       "the intro pump must never see an expired entry's inbox")
-        XCTAssertEqual(rawEntryCount(), 0,
-                       "subscribing triggered the read → the expired privkey is gone at rest too")
+        await store.revoke(introPublicKey: doomed.introPublicKey)
+        let afterRevoke = await iterator.next()
+
+        XCTAssertEqual(afterRevoke, [],
+                       "the intro pump must stop subscribing a revoked inbox")
     }
 
     // MARK: - pruneOwners

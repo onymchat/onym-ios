@@ -25,6 +25,16 @@ final class ShareInviteFlow: Identifiable {
         case failed(reason: String)
     }
 
+    /// One revokable invite on the list. `introPublicKey` is the
+    /// revoke handle; it never reaches the screen.
+    struct InviteRow: Equatable, Identifiable, Sendable {
+        let introPublicKey: Data
+        let label: String
+        let createdAt: Date
+
+        var id: Data { introPublicKey }
+    }
+
     /// Drives `.sheet(item:)` from a single source of truth.
     /// `.sheet(isPresented:)` paired with a separate optional-flow
     /// `@State` raced on first present — the content closure read
@@ -32,6 +42,18 @@ final class ShareInviteFlow: Identifiable {
     nonisolated var id: ObjectIdentifier { ObjectIdentifier(self) }
 
     private(set) var state: State = .idle
+
+    /// Other live invites for this group — the create-time offer keys,
+    /// each aimed at one invitee. The group's shared link is `state`,
+    /// not a row here. Empty for a group created without invitees.
+    ///
+    /// Nothing expires any more, so this list is the only way these
+    /// ever get retired.
+    private(set) var otherInvites: [InviteRow] = []
+
+    /// Set while a rotate is in flight so the UI can disable the
+    /// button — rotating twice in a row would strand a live key.
+    private(set) var isRotating = false
 
     private let identity: IdentityRepository
     private let introducer: InviteIntroducer
@@ -79,8 +101,72 @@ final class ShareInviteFlow: Identifiable {
                 groupName: group.name
             )
             state = .ready(link: cap.toAppLink(), groupName: group.name)
+            await refreshOtherInvites(ownerIdentityID: activeID, groupId: group.groupIDData)
         } catch {
             state = .failed(reason: "\(error)")
         }
+    }
+
+    /// Replace the group's shared link. The old one stops working the
+    /// moment the intro pump drops its subscription — there is no way
+    /// to notify anyone already holding it, so this is the "my link
+    /// leaked" escape hatch, not a polite hand-off.
+    func rotateLink(groupID: String) {
+        Task { await rotateLinkAsync(groupID: groupID) }
+    }
+
+    private func rotateLinkAsync(groupID: String) async {
+        guard !isRotating else { return }
+        let groups = await groupRepository.currentGroups()
+        guard let group = groups.first(where: { $0.id == groupID }) else {
+            state = .failed(reason: "Group not found on this device")
+            return
+        }
+        guard let activeID = await identity.currentSelectedID() else {
+            state = .failed(reason: "No identity selected")
+            return
+        }
+        isRotating = true
+        defer { isRotating = false }
+        do {
+            let cap = try await introducer.rotate(
+                ownerIdentityID: activeID,
+                groupId: group.groupIDData,
+                groupName: group.name
+            )
+            state = .ready(link: cap.toAppLink(), groupName: group.name)
+        } catch {
+            state = .failed(reason: "\(error)")
+        }
+    }
+
+    /// Retire one per-invitee offer key.
+    func revoke(_ row: InviteRow, groupID: String) {
+        Task { await revokeAsync(row, groupID: groupID) }
+    }
+
+    private func revokeAsync(_ row: InviteRow, groupID: String) async {
+        await introducer.revoke(introPublicKey: row.introPublicKey)
+        let groups = await groupRepository.currentGroups()
+        guard let group = groups.first(where: { $0.id == groupID }),
+              let activeID = await identity.currentSelectedID()
+        else { return }
+        await refreshOtherInvites(ownerIdentityID: activeID, groupId: group.groupIDData)
+    }
+
+    private func refreshOtherInvites(ownerIdentityID: IdentityID, groupId: Data) async {
+        // `label == nil` is the group's shared link, which the screen
+        // already renders as the QR + link; only the named per-invitee
+        // offers belong on the list.
+        otherInvites = await introducer
+            .liveInvites(ownerIdentityID: ownerIdentityID, groupId: groupId)
+            .compactMap { entry in
+                guard let label = entry.label else { return nil }
+                return InviteRow(
+                    introPublicKey: entry.introPublicKey,
+                    label: label,
+                    createdAt: entry.createdAt
+                )
+            }
     }
 }

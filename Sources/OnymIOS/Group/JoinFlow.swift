@@ -50,6 +50,12 @@ final class JoinFlow {
         case ready(IntroCapability)
         case sending
         case awaitingApproval
+        /// The request went out and nothing came back for
+        /// `unansweredAfter`. Not a failure — the host may simply be
+        /// offline — but invite links can now be revoked, and a
+        /// revoked link is indistinguishable from a slow host from
+        /// here. Saying so beats an indefinite spinner.
+        case unanswered
         case approved(ChatGroup)
         case failed(reason: String)
     }
@@ -67,17 +73,24 @@ final class JoinFlow {
 
     private var sendTask: Task<Void, Never>?
     private var watcherTask: Task<Void, Never>?
+    private var unansweredTask: Task<Void, Never>?
+    /// How long this flow waits before flipping to `.unanswered`, or
+    /// nil to never flip. Injected so tests can drive the timeout in
+    /// milliseconds instead of sitting out the real 90 seconds.
+    private let unansweredAfter: Duration?
 
     init(
         capability: IntroCapability,
         suggestedDisplayLabel: String,
         submitRequest: @escaping @Sendable (IntroCapability, String) async -> JoinRequestSender.Outcome,
-        groupRepository: GroupRepository
+        groupRepository: GroupRepository,
+        unansweredAfter: Duration? = JoinFlow.unansweredAfter
     ) {
         self.capability = capability
         self.suggestedDisplayLabel = suggestedDisplayLabel
         self.submitRequest = submitRequest
         self.groupRepository = groupRepository
+        self.unansweredAfter = unansweredAfter
         self.state = .ready(capability)
         startWatcher()
     }
@@ -86,6 +99,16 @@ final class JoinFlow {
     // capture `[weak self]` so they exit gracefully on deallocation
     // without needing main-actor-isolated cancellation in `deinit`
     // (which Swift's strict concurrency checking would flag).
+
+    /// How long to wait on `awaitingApproval` before telling the user
+    /// nothing has come back.
+    ///
+    /// Deliberately generous: approval is a human action plus a
+    /// multi-second proof and a chain round-trip on the host's device,
+    /// so anything short would cry wolf on a host who is simply
+    /// thinking. The watcher stays live afterwards — a late approval
+    /// still flips straight to `.approved`.
+    static let unansweredAfter: Duration = .seconds(90)
 
     /// Ship the join request. No-op if a previous `send` is in flight
     /// (debounce — protects against double-tap on the primary
@@ -111,11 +134,26 @@ final class JoinFlow {
             switch outcome {
             case .sent:
                 self.state = .awaitingApproval
+                self.startUnansweredTimer()
             case .noIdentityLoaded:
                 self.state = .failed(reason: "Sign in first.")
             case .transportFailed(let reason):
                 self.state = .failed(reason: "Couldn't send: \(reason)")
             }
+        }
+    }
+
+    /// Flip to `.unanswered` if nothing has landed by the deadline.
+    /// Cancelled implicitly by the flow going away; a late approval
+    /// overwrites the state via the watcher either way.
+    private func startUnansweredTimer() {
+        guard let unansweredAfter else { return }
+        unansweredTask?.cancel()
+        unansweredTask = Task { [weak self] in
+            try? await Task.sleep(for: unansweredAfter)
+            guard let self, !Task.isCancelled else { return }
+            guard case .awaitingApproval = self.state else { return }
+            self.state = .unanswered
         }
     }
 
@@ -130,6 +168,9 @@ final class JoinFlow {
                     continue
                 }
                 if case .approved = self.state { continue }  // terminal
+                // Beats `.unanswered` too: a late approval is still an
+                // approval.
+                self.unansweredTask?.cancel()
                 self.state = .approved(match)
             }
         }

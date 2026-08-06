@@ -185,47 +185,136 @@ final class InviteIntroducerTests: XCTestCase {
         XCTAssertEqual(listed.count, 2)
     }
 
-    func test_currentOrMint_expiredKey_mintsAFreshOne() async throws {
+    func test_currentOrMint_neverExpires_soAnAncientKeyIsStillReused() async throws {
         let store = InMemoryIntroKeyStore()
         let t0 = Date(timeIntervalSince1970: 1_700_000_000)
-        // Two introducers because `now` is injected at init; they share
-        // the store, so the second sees the first's (expired) entry.
         let early = InviteIntroducer(store: store, now: { t0 })
-        let late = InviteIntroducer(
+        // A year later. Invite links have no TTL — only `rotate` or
+        // `revoke` retires one.
+        let muchLater = InviteIntroducer(
             store: store,
-            now: { t0.addingTimeInterval(IntroKeyEntry.lifetime + 60) }
+            now: { t0.addingTimeInterval(365 * 24 * 60 * 60) }
         )
 
         let first = try await early.currentOrMint(
             ownerIdentityID: alice, groupId: sampleGroupId
         )
-        let second = try await late.currentOrMint(
+        let second = try await muchLater.currentOrMint(
             ownerIdentityID: alice, groupId: sampleGroupId
         )
 
-        XCTAssertNotEqual(first.introPublicKey, second.introPublicKey)
+        XCTAssertEqual(first.introPublicKey, second.introPublicKey)
+        let listed = await store.listForOwner(alice)
+        XCTAssertEqual(listed.count, 1)
     }
 
-    func test_currentOrMint_atExactlyLifetime_isTreatedAsExpired() async throws {
+    // MARK: - rotate / revoke
+
+    func test_rotate_mintsAFreshKey_andRetiresTheOldOne() async throws {
         let store = InMemoryIntroKeyStore()
-        let t0 = Date(timeIntervalSince1970: 1_700_000_000)
-        let early = InviteIntroducer(store: store, now: { t0 })
-        // Pins the strict comparison in `isLive(at:)` against
-        // `KeychainIntroKeyStore.loadAll`'s cutoff so the two
-        // boundaries can't drift apart.
-        let atBoundary = InviteIntroducer(
-            store: store,
-            now: { t0.addingTimeInterval(IntroKeyEntry.lifetime) }
-        )
+        let introducer = InviteIntroducer(store: store)
 
-        let first = try await early.currentOrMint(
+        let old = try await introducer.currentOrMint(
             ownerIdentityID: alice, groupId: sampleGroupId
         )
-        let second = try await atBoundary.currentOrMint(
+        let new = try await introducer.rotate(
             ownerIdentityID: alice, groupId: sampleGroupId
         )
 
-        XCTAssertNotEqual(first.introPublicKey, second.introPublicKey)
+        XCTAssertNotEqual(old.introPublicKey, new.introPublicKey)
+        let foundOld = await store.find(introPublicKey: old.introPublicKey)
+        XCTAssertNil(foundOld, "the superseded link must stop decrypting requests")
+        let foundNew = await store.find(introPublicKey: new.introPublicKey)
+        XCTAssertNotNil(foundNew)
+        let listed = await store.listForOwner(alice)
+        XCTAssertEqual(listed.count, 1, "rotate must not leave the old slot behind")
+    }
+
+    func test_rotate_thenCurrentOrMint_returnsTheRotatedKey() async throws {
+        let store = InMemoryIntroKeyStore()
+        let introducer = InviteIntroducer(store: store)
+
+        _ = try await introducer.currentOrMint(ownerIdentityID: alice, groupId: sampleGroupId)
+        let rotated = try await introducer.rotate(
+            ownerIdentityID: alice, groupId: sampleGroupId
+        )
+        let resolved = try await introducer.currentOrMint(
+            ownerIdentityID: alice, groupId: sampleGroupId
+        )
+
+        XCTAssertEqual(rotated.introPublicKey, resolved.introPublicKey)
+    }
+
+    func test_rotate_leavesOtherGroupsAlone() async throws {
+        let store = InMemoryIntroKeyStore()
+        let introducer = InviteIntroducer(store: store)
+        let other = Data(repeating: 0x5A, count: 32)
+
+        let untouched = try await introducer.currentOrMint(
+            ownerIdentityID: alice, groupId: other
+        )
+        _ = try await introducer.currentOrMint(ownerIdentityID: alice, groupId: sampleGroupId)
+        _ = try await introducer.rotate(ownerIdentityID: alice, groupId: sampleGroupId)
+
+        let foundUntouched = await store.find(introPublicKey: untouched.introPublicKey)
+        XCTAssertNotNil(foundUntouched)
+    }
+
+    func test_rotate_doesNotRetireLabelledOfferKeys() async throws {
+        let store = InMemoryIntroKeyStore()
+        let introducer = InviteIntroducer(store: store)
+
+        // Per-invitee offers are revoked one at a time from the invite
+        // list; rotating the shared link must not sweep them away.
+        let offer = try await introducer.mint(
+            ownerIdentityID: alice, groupId: sampleGroupId, label: "aabbccdd"
+        )
+        _ = try await introducer.currentOrMint(ownerIdentityID: alice, groupId: sampleGroupId)
+        _ = try await introducer.rotate(ownerIdentityID: alice, groupId: sampleGroupId)
+
+        let foundOffer = await store.find(introPublicKey: offer.introPublicKey)
+        XCTAssertNotNil(foundOffer)
+    }
+
+    func test_currentOrMint_ignoresLabelledOfferKeys() async throws {
+        let store = InMemoryIntroKeyStore()
+        let introducer = InviteIntroducer(store: store)
+
+        // The create-with-invitees flow lands on the share screen with
+        // the last invitee's offer key as the newest entry. Handing
+        // that out as the group's link would collapse the 1:1
+        // request-to-invitee mapping.
+        let offer = try await introducer.mint(
+            ownerIdentityID: alice, groupId: sampleGroupId, label: "aabbccdd"
+        )
+        let shared = try await introducer.currentOrMint(
+            ownerIdentityID: alice, groupId: sampleGroupId
+        )
+
+        XCTAssertNotEqual(offer.introPublicKey, shared.introPublicKey)
+    }
+
+    func test_liveInvites_listsEveryKeyForTheGroup() async throws {
+        let store = InMemoryIntroKeyStore()
+        let introducer = InviteIntroducer(store: store)
+        let other = Data(repeating: 0x5A, count: 32)
+
+        let shared = try await introducer.currentOrMint(
+            ownerIdentityID: alice, groupId: sampleGroupId
+        )
+        let offer = try await introducer.mint(
+            ownerIdentityID: alice, groupId: sampleGroupId, label: "aabbccdd"
+        )
+        _ = try await introducer.currentOrMint(ownerIdentityID: alice, groupId: other)
+
+        let live = await introducer.liveInvites(
+            ownerIdentityID: alice, groupId: sampleGroupId
+        )
+
+        XCTAssertEqual(Set(live.map(\.introPublicKey)),
+                       Set([shared.introPublicKey, offer.introPublicKey]))
+        XCTAssertEqual(live.first(where: { $0.label == "aabbccdd" })?.introPublicKey,
+                       offer.introPublicKey)
     }
 
     func test_currentOrMint_doesNotReuseAnotherIdentitysLiveKey() async throws {
