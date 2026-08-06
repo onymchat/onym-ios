@@ -219,6 +219,9 @@ struct IntroCapability: Codable, Equatable, Sendable, Identifiable {
         let e = JSONEncoder()
         // Default `.base64` + matches Android `Base64.getEncoder()`.
         e.dataEncodingStrategy = .base64
+        // Without this one capability can encode to two different
+        // link strings. Decoding is order-agnostic, so links keep working.
+        e.outputFormatting = .sortedKeys
         return e
     }()
 

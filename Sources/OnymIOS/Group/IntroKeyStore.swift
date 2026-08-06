@@ -14,7 +14,8 @@ import Foundation
 ///     payload.
 ///  4. On Approve, sender seals the existing
 ///     `GroupInvitationPayload` to the joiner's identity inbox key.
-///     `revoke` is called to retire the intro slot.
+///     The intro key is NOT retired: one link serves many joiners
+///     until the inviter revokes it.
 ///
 /// Owner-scoping: every entry carries an `IdentityID`. Removing an
 /// identity cascades a `deleteForOwner` so we don't leak intro
@@ -38,9 +39,8 @@ protocol IntroKeyStore: Sendable {
     /// list reads here.
     func listForOwner(_ ownerIdentityID: IdentityID) async -> [IntroKeyEntry]
 
-    /// Single-entry deletion. Called after a request is accepted +
-    /// sealed → the intro slot is no longer useful. No-op if the
-    /// pubkey isn't present.
+    /// Single-entry deletion, behind "Generate new link" and the
+    /// per-row revoke. No-op if the pubkey isn't present.
     func revoke(introPublicKey: Data) async
 
     /// Cascade for the identity-removal flow. Returns the count of

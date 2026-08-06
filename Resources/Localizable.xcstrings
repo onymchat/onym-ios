@@ -1540,6 +1540,22 @@
         }
       }
     },
+    "Direct invites": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Direct invites"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Персональные приглашения"
+          }
+        }
+      }
+    },
     "Dismiss": {
       "localizations": {
         "en": {
@@ -1733,6 +1749,22 @@
         }
       }
     },
+    "Generate new link": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Generate new link"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Создать новую ссылку"
+          }
+        }
+      }
+    },
     "Generate with AI": {
       "extractionState": "stale",
       "localizations": {
@@ -1762,6 +1794,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Генерируется доказательство и обновляется обязательство в блокчейне. Обычно занимает несколько секунд."
+          }
+        }
+      }
+    },
+    "Generating…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Generating…"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Создаём…"
           }
         }
       }
@@ -2455,6 +2503,22 @@
         }
       }
     },
+    "No response yet": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No response yet"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Пока нет ответа"
+          }
+        }
+      }
+    },
     "No servers configured. Media can't be sent or received.": {
       "localizations": {
         "ru": {
@@ -2516,6 +2580,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Это не то слово. Проверьте фразу и повторите попытку."
+          }
+        }
+      }
+    },
+    "Older link": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Older link"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Старая ссылка"
           }
         }
       }
@@ -3162,6 +3242,22 @@
         }
       }
     },
+    "Revoke": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Revoke"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Отозвать"
+          }
+        }
+      }
+    },
     "Run a relayer for yourself, your team, or your org. End-to-end encryption stays intact — Onym never sees your messages.": {
       "localizations": {
         "en": {
@@ -3387,6 +3483,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Отправляем запрос…"
+          }
+        }
+      }
+    },
+    "Sent when you created the group. Each one can still be used to request to join.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sent when you created the group. Each one can still be used to request to join."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Отправлены при создании группы. По каждому из них всё ещё можно запросить вступление."
           }
         }
       }
@@ -3701,6 +3813,38 @@
         }
       }
     },
+    "The host may be offline, or this invite may no longer work. Ask them for a new link.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The host may be offline, or this invite may no longer work. Ask them for a new link."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Возможно, владелец группы не в сети или это приглашение больше не действует. Попросите новую ссылку."
+          }
+        }
+      }
+    },
+    "The old link stops working. Anyone still holding it won't be told.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The old link stops working. Anyone still holding it won't be told."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Старая ссылка перестанет работать. Тех, у кого она осталась, об этом не уведомят."
+          }
+        }
+      }
+    },
     "The phrase is generated on-device and never sent off the device.": {
       "localizations": {
         "en": {
@@ -3990,6 +4134,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ждём одобрения от хоста…"
+          }
+        }
+      }
+    },
+    "You can leave this screen open — if they approve, the chat still appears.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You can leave this screen open — if they approve, the chat still appears."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Можно не закрывать этот экран — если заявку одобрят, чат появится сам."
           }
         }
       }
