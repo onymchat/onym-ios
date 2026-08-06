@@ -15,21 +15,25 @@ import Foundation
 /// - `groupId` is the on-chain `group_id` the invite is for —
 ///   needed when the inviter's app surfaces "Bob wants to join
 ///   <group>?" so it can render the group's name.
-/// - `createdAt` drives optional expiration UI (later PRs may
-///   prune invites older than N days).
+/// - `createdAt` is display-only; links live until revoked.
+/// - `label` is nil for the shared link, else the invitee's fingerprint.
 struct IntroKeyEntry: Equatable, Sendable {
     let introPublicKey: Data
     let introPrivateKey: Data
     let ownerIdentityID: IdentityID
     let groupId: Data
     let createdAt: Date
+    /// nil == the group's shared link. Non-nil == a create-time offer
+    /// aimed at one invitee.
+    let label: String?
 
     init(
         introPublicKey: Data,
         introPrivateKey: Data,
         ownerIdentityID: IdentityID,
         groupId: Data,
-        createdAt: Date
+        createdAt: Date,
+        label: String? = nil
     ) {
         precondition(introPublicKey.count == 32,
                      "introPublicKey: expected 32 bytes, got \(introPublicKey.count)")
@@ -42,5 +46,12 @@ struct IntroKeyEntry: Equatable, Sendable {
         self.ownerIdentityID = ownerIdentityID
         self.groupId = groupId
         self.createdAt = createdAt
+        self.label = label
+    }
+
+    /// First 4 bytes of the inbox key — same fingerprint shape the
+    /// approval screen shows.
+    static func fingerprint(of inboxPublicKey: Data) -> String {
+        inboxPublicKey.prefix(4).map { String(format: "%02x", $0) }.joined()
     }
 }

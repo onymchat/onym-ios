@@ -275,9 +275,11 @@ struct OnymIOSApp: App {
         let introKeyStore = KeychainIntroKeyStore()
         let inviteIntroducer = InviteIntroducer(store: introKeyStore)
         self.introKeyStore = introKeyStore
-        // Process-lifetime sink for inbound "request to join"
-        // envelopes. The sender-approval UI (PR-5+) consumes this.
-        self.introRequestStore = InMemoryIntroRequestStore()
+        // Sink for inbound "request to join" envelopes. Pending rows
+        // are process-lifetime; the handled-tombstones are durable.
+        self.introRequestStore = InMemoryIntroRequestStore(
+            handledLog: UserDefaultsHandledIntroRequestLog()
+        )
 
         // Single shared IdentitiesFlow so the toolbar picker on Chats
         // and the Settings → Identities screen observe the same state.
@@ -667,7 +669,23 @@ struct OnymIOSApp: App {
                             continue
                         }
                         let entries = introKeyStore.entriesStream(forOwner: activeID)
-                        currentTask = Task { await pump.run(entries: entries) }
+                        let store = introRequestStore
+                        // Tee the same snapshots the pump reconciles on,
+                        // so a retired link's tombstones go with it.
+                        let (forPump, pumpFeed) = AsyncStream.makeStream(of: [IntroKeyEntry].self)
+                        let tee = Task {
+                            for await snapshot in entries {
+                                await store.pruneTombstones(
+                                    keeping: Set(snapshot.map(\.introPublicKey))
+                                )
+                                pumpFeed.yield(snapshot)
+                            }
+                            pumpFeed.finish()
+                        }
+                        currentTask = Task {
+                            defer { tee.cancel() }
+                            await pump.run(entries: forPump)
+                        }
                     }
                     currentTask?.cancel()
                 }
