@@ -27,6 +27,7 @@ packages:
   OnymGroup: {path: Packages/OnymGroup}
   OnymChatsCore: {path: Packages/OnymChatsCore}
   OnymInbox: {path: Packages/OnymInbox}
+  OnymSearch: {path: Packages/OnymSearch}
 
 targets:
   OnymIOS:
@@ -48,6 +49,7 @@ targets:
       - package: OnymGroup
       - package: OnymChatsCore
       - package: OnymInbox
+      - package: OnymSearch
     # Hand-written Info.plist via xcodegen's `info:` block. We tried
     # the GENERATE_INFOPLIST_FILE + INFOPLIST_KEY_* approach first but
     # `INFOPLIST_KEY_UILaunchScreen_BackgroundColor` / `_ImageName` are
@@ -203,6 +205,7 @@ targets:
       - package: OnymGroup
       - package: OnymChatsCore
       - package: OnymInbox
+      - package: OnymSearch
 
   OnymIOSUITests:
     type: bundle.ui-testing

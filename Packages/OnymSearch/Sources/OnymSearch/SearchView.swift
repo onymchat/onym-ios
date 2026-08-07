@@ -1,6 +1,5 @@
 import SwiftUI
 import OnymIdentity
-import OnymGroup
 import OnymChatsCore
 
 /// Search tab: full-text search across the active identity's chat
@@ -12,23 +11,28 @@ import OnymChatsCore
 /// Results open within the Search tab's own navigation stack, so Back
 /// returns to the results list. Search is scoped to the active identity,
 /// consistent with the owner-scoping used everywhere else in the app.
-struct SearchView: View {
+public struct SearchView: View {
     let messageRepository: MessageRepository
-    @Bindable var chatsFlow: ChatsFlow
     @Bindable var identitiesFlow: IdentitiesFlow
-    let sendMessageInteractor: SendMessageInteractor
-    let chatReceiptSender: any ChatReceiptSending
-    let makeShareInviteFlow: @MainActor () -> ShareInviteFlow
-    let setGroupAvatar: @MainActor (String, Data?) async -> Void
-    let setGroupName: @MainActor (String, String) async -> Void
-    let imageLoader: ChatImageLoader
-    let videoLoader: ChatVideoLoader
-    let voiceLoader: ChatVoiceLoader
+    let groupNameForID: @MainActor (String) -> String?
+    let startChats: @MainActor () -> Void
 
     @State private var query = ""
     @State private var results: [MessageSearchResult] = []
 
-    var body: some View {
+    public init(
+        messageRepository: MessageRepository,
+        identitiesFlow: IdentitiesFlow,
+        groupNameForID: @escaping @MainActor (String) -> String?,
+        startChats: @escaping @MainActor () -> Void
+    ) {
+        self.messageRepository = messageRepository
+        self.identitiesFlow = identitiesFlow
+        self.groupNameForID = groupNameForID
+        self.startChats = startChats
+    }
+
+    public var body: some View {
         List(results) { result in
             NavigationLink(value: result) {
                 SearchResultRow(result: result)
@@ -38,24 +42,7 @@ struct SearchView: View {
         .overlay { emptyState }
         .searchable(text: $query, prompt: "Search messages")
         .navigationTitle("Search")
-        .navigationDestination(for: MessageSearchResult.self) { result in
-            ChatThreadView(
-                groupID: result.groupID,
-                chatsFlow: chatsFlow,
-                identitiesFlow: identitiesFlow,
-                messageRepository: messageRepository,
-                sendMessageInteractor: sendMessageInteractor,
-                chatReceiptSender: chatReceiptSender,
-                makeShareInviteFlow: makeShareInviteFlow,
-                setGroupAvatar: setGroupAvatar,
-                setGroupName: setGroupName,
-                imageLoader: imageLoader,
-                videoLoader: videoLoader,
-                voiceLoader: voiceLoader,
-                scrollToMessageID: result.messageID
-            )
-        }
-        .task { chatsFlow.start() }
+        .task { startChats() }
         // `.task(id:)` cancels + restarts on every keystroke, which
         // doubles as the debounce (the sleep below is cancelled if the
         // user keeps typing).
@@ -89,14 +76,11 @@ struct SearchView: View {
         let matches = await messageRepository.search(owner: owner, query: trimmed)
         if Task.isCancelled { return }
 
-        let groupsByID = Dictionary(
-            chatsFlow.groups.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }
-        )
         results = matches.map { message in
             MessageSearchResult(
                 messageID: message.id,
                 groupID: message.groupID,
-                groupName: groupsByID[message.groupID]?.name ?? "Chat",
+                groupName: groupNameForID(message.groupID) ?? "Chat",
                 snippet: message.body,
                 sentAt: message.sentAt
             )
@@ -107,14 +91,22 @@ struct SearchView: View {
 /// One search hit: group name, a snippet of the matched message body,
 /// and a relative date. `Hashable`/`Identifiable` so it can drive both
 /// `List` identity and `navigationDestination(for:)`.
-struct MessageSearchResult: Identifiable, Hashable {
-    let messageID: UUID
-    let groupID: String
-    let groupName: String
-    let snippet: String
-    let sentAt: Date
+public struct MessageSearchResult: Identifiable, Hashable {
+    public let messageID: UUID
+    public let groupID: String
+    public let groupName: String
+    public let snippet: String
+    public let sentAt: Date
 
-    var id: UUID { messageID }
+    public var id: UUID { messageID }
+
+    public init(messageID: UUID, groupID: String, groupName: String, snippet: String, sentAt: Date) {
+        self.messageID = messageID
+        self.groupID = groupID
+        self.groupName = groupName
+        self.snippet = snippet
+        self.sentAt = sentAt
+    }
 }
 
 private struct SearchResultRow: View {
