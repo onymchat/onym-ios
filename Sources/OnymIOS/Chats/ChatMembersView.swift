@@ -1,6 +1,7 @@
 import SwiftUI
 import OnymDesign
 import OnymIdentity
+import OnymGroup
 
 /// Member roster for one chat. Drilled into from a `ChatsRow` tap.
 /// Reads the latest `ChatGroup` from `ChatsFlow` by ID so the view

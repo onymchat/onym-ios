@@ -4,6 +4,8 @@ import XCTest
 import OnymTransport
 import OnymChain
 import OnymIdentity
+import OnymGroup
+import OnymPersistence
 
 /// Behavioral tests for `InboxFanoutInteractor`. Uses a real
 /// `IdentityRepository` (isolated keychain) so the inbox-tag derivation

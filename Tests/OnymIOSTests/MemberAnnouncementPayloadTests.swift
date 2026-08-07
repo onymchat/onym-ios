@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymGroup
 
 /// Wire-format pin for `MemberAnnouncementPayload`. Authored on iOS
 /// first; onym-android will mirror. Cross-platform parity is checked

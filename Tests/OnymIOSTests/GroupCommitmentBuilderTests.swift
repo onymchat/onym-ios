@@ -2,6 +2,7 @@ import CryptoKit
 import XCTest
 @testable import OnymIOS
 import OnymChain
+import OnymGroup
 
 /// Unit tests for `GroupCommitmentBuilder`. The pure-Swift helpers
 /// (salt generation + derivation) are exercised directly; the FFI-

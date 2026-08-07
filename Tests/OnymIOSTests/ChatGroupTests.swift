@@ -1,6 +1,7 @@
 import XCTest
 @testable import OnymIOS
 import OnymIdentity
+import OnymGroup
 
 final class ChatGroupTests: XCTestCase {
 

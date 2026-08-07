@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import OnymGroup
 
 /// One row on the Chats list: a group enriched with its latest-message
 /// preview + unread count, used to render the subtitle + badge and to

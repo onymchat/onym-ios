@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import OnymGroup
 
 /// `@Observable @MainActor` driver for the invitee-side "you've been
 /// invited" surface — the push counterpart to `JoinFlow` (which handles

@@ -1,6 +1,7 @@
 import Foundation
 import OnymChain
 import OnymIdentity
+import OnymGroup
 
 /// Receive-side fan-out target for the inbox pump. Inspects every
 /// inbound message after decryption and routes it to the right

@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymGroup
 
 /// Wire-format pin for `GroupNamePayload` (admin group rename). Its
 /// distinct `name_*` keys keep the dispatcher's structural decode from

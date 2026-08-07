@@ -4,6 +4,7 @@ import XCTest
 import OnymTransport
 import OnymChain
 import OnymIdentity
+import OnymGroup
 
 /// Behavioral tests for `JoinRequestApprover` covering PR 4
 /// (`recordJoiner` side effect) + PR 5 (`broadcastJoin` fanout) +

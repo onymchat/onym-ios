@@ -1,5 +1,6 @@
 import Foundation
 import OnymIdentity
+import OnymPersistence
 
 /// Domain shape for a received invitation as exposed to interactors and
 /// (eventually) views. Re-exports `IncomingInvitationRecord` from the

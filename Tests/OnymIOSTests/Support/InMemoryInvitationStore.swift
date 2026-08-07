@@ -1,5 +1,6 @@
 import Foundation
 @testable import OnymIOS
+import OnymPersistence
 
 /// `InvitationStore` impl for tests that don't need to exercise the
 /// SwiftData backend itself — much faster (no `ModelContainer`

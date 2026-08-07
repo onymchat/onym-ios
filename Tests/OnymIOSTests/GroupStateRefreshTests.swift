@@ -4,6 +4,7 @@ import XCTest
 import OnymTransport
 import OnymChain
 import OnymIdentity
+import OnymGroup
 
 final class GroupStateRefreshRequestCodecTests: XCTestCase {
     func test_roundTrip() throws {

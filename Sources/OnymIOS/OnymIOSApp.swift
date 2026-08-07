@@ -4,6 +4,8 @@ import OnymChain
 import OnymIdentity
 import OnymTransportBlossom
 import OnymTransportNostr
+import OnymGroup
+import OnymPersistence
 
 @main
 struct OnymIOSApp: App {

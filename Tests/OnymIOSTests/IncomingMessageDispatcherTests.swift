@@ -2,6 +2,8 @@ import XCTest
 @testable import OnymIOS
 import OnymChain
 import OnymIdentity
+import OnymGroup
+import OnymPersistence
 
 /// Behavioral tests for `IncomingMessageDispatcher` — the receive-side
 /// fan-out target that decides whether an inbound inbox message is a

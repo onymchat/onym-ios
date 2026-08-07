@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymGroup
 
 /// Wire-format pin for `GroupAvatarPayload`. The load-bearing property
 /// is that its distinct `avatar_*` keys keep the dispatcher's structural

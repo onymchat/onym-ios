@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymGroup
 
 /// Wire-format pin for `MemberProfile`. The struct rides inside two
 /// other payloads (`GroupInvitationPayload.memberProfiles` and as a

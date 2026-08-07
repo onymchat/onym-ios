@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+@testable import OnymGroup
 
 @MainActor
 final class ApproveRequestsFlowTests: XCTestCase {
