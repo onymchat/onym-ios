@@ -1,4 +1,5 @@
 import Foundation
+import OnymFoundation
 
 /// Network seam that fetches the curated list of known relayers from
 /// the latest GitHub Release of `onymchat/onym-relayer`. The repo

@@ -1,4 +1,5 @@
 import SwiftUI
+import OnymDesign
 
 /// One numbered step in a `SelfHostGuideView`.
 struct SelfHostGuideStep: Identifiable {

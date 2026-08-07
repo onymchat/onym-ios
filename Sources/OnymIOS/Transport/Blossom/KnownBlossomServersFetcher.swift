@@ -1,4 +1,5 @@
 import Foundation
+import OnymFoundation
 
 /// Fetches the Onym-published default Blossom-server list from a GitHub
 /// release asset. Mirrors `KnownNostrRelaysFetcher` / the chain relayer's

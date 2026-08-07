@@ -1,4 +1,5 @@
 import Foundation
+import OnymTransport
 
 /// Descriptor returned by a Blossom server for a stored blob (BUD-02).
 struct BlobDescriptor: Equatable, Sendable {

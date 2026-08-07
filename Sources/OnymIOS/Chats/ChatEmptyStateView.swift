@@ -1,4 +1,5 @@
 import SwiftUI
+import OnymDesign
 
 /// Rich empty-state shown in a chat thread that has no messages yet.
 /// Surfaces the group's invitation message (if any), the member roster

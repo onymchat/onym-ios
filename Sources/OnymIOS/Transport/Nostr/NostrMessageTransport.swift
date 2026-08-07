@@ -1,4 +1,5 @@
 import Foundation
+import OnymTransport
 
 /// Nostr-relay-backed `MessageTransport`. Each call to `publish` builds
 /// a kind-44114 event with the topic in a `["t", topic]` tag, the payload

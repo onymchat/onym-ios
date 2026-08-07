@@ -2,6 +2,7 @@ import SwiftUI
 import PhotosUI
 #if canImport(ImagePlayground)
 import ImagePlayground
+import OnymDesign
 #endif
 
 /// Tappable group-avatar slot: shows the photo-or-mark (`OnymGroupAvatar`)

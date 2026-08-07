@@ -1,4 +1,5 @@
 import Foundation
+import OnymTransport
 
 /// Plaintext payload that gets sealed (X25519 + AES-GCM via
 /// `IdentityRepository.sealInvitation`) and dropped on

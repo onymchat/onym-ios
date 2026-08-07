@@ -1,4 +1,5 @@
 import Foundation
+import OnymTransport
 
 /// Seam the dispatcher delegates Tyranny group-state verification to.
 /// Two roles, because any device is both a potential invitee and a

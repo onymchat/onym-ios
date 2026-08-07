@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymDesign
 
 /// Producer-side checks for the inbox-key invite URL emitted by
 /// Settings → Invite Key. The consumer side

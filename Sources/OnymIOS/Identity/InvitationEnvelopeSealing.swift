@@ -1,4 +1,5 @@
 import Foundation
+import OnymTransport
 
 /// Sender-side mirror of `InvitationEnvelopeDecrypting`. The chain
 /// interactor that creates a group depends on this seam to wrap each

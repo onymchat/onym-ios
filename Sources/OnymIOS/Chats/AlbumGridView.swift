@@ -1,4 +1,5 @@
 import UIKit
+import OnymDesign
 
 /// Renders a multi-media album inside a chat bubble as a compact grid of
 /// up to four tiles (a "+N" overlay on the fourth when there are more).

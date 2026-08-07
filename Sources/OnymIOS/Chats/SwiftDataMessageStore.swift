@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import OnymFoundation
 
 /// SwiftData-backed `MessageStore`. Owns one `ModelContainer` for the
 /// message schema; each call hops to this actor's executor so

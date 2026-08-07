@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymTransport
 
 /// Covers the pure event-building and filter-shape paths of the inbox
 /// adapter. Connection-bearing paths await an integration test layer.

@@ -1,4 +1,5 @@
 import SwiftUI
+import OnymDesign
 
 /// Post-create surface. The just-created group is identified by hex
 /// `groupID`; the flow resolves it from the repository, mints a

@@ -1,4 +1,5 @@
 import Foundation
+import OnymFoundation
 
 /// Fetches the Onym-published default Nostr-relay list from a GitHub
 /// release asset. Mirrors `KnownRelayersFetcher` (the chain relayer's

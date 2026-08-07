@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymTransport
 
 /// Covers the pure event-building path of the broadcast adapter. The
 /// connection / publish / subscribe paths require a real or fake

@@ -1,4 +1,5 @@
 import SwiftUI
+import OnymDesign
 
 /// The unified Settings "Identity" surface: a horizontally-swipeable
 /// carousel of every identity's invite-key QR (alias highlighted), where

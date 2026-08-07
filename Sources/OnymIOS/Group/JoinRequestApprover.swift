@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import OnymTransport
 
 /// Test seam used by `ApproveRequestsFlow`. The production conformer
 /// is `JoinRequestApprover` itself; tests inject a stub instead of

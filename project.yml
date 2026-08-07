@@ -16,6 +16,9 @@ packages:
   OnymSDK:
     url: https://github.com/onymchat/onym-sdk-swift.git
     from: 0.0.2
+  OnymDesign: {path: Packages/OnymDesign}
+  OnymFoundation: {path: Packages/OnymFoundation}
+  OnymTransport: {path: Packages/OnymTransport}
 
 targets:
   OnymIOS:
@@ -26,6 +29,9 @@ targets:
       - Resources
     dependencies:
       - package: OnymSDK
+      - package: OnymDesign
+      - package: OnymFoundation
+      - package: OnymTransport
     # Hand-written Info.plist via xcodegen's `info:` block. We tried
     # the GENERATE_INFOPLIST_FILE + INFOPLIST_KEY_* approach first but
     # `INFOPLIST_KEY_UILaunchScreen_BackgroundColor` / `_ImageName` are
@@ -170,6 +176,9 @@ targets:
     dependencies:
       - target: OnymIOS
       - package: OnymSDK
+      - package: OnymDesign
+      - package: OnymFoundation
+      - package: OnymTransport
 
   OnymIOSUITests:
     type: bundle.ui-testing

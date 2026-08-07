@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import OnymTransport
 
 /// Nostr-relay-backed `InboxTransport`. Each `send` builds a kind-34113
 /// parameterised-replaceable event with the recipient inbox encoded as a

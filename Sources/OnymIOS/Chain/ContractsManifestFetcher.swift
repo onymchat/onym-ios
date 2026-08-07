@@ -1,4 +1,5 @@
 import Foundation
+import OnymFoundation
 
 /// Network seam: fetches the curated `contracts-manifest.json` asset
 /// from the latest release of `onymchat/onym-contracts`. Same redirect

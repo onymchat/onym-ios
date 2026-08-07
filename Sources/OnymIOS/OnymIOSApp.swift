@@ -1,4 +1,5 @@
 import SwiftUI
+import OnymTransport
 
 @main
 struct OnymIOSApp: App {

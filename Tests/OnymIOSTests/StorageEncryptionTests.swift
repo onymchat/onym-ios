@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymFoundation
 
 /// Pin AES-GCM roundtrip semantics + Keychain key stability. The key
 /// itself isn't exercised here (test runs share the same install root

@@ -1,4 +1,5 @@
 import SwiftUI
+import OnymDesign
 
 /// Post-deeplink-tap "Join this chat" surface. Replaces PR-6's
 /// `JoinInviteCapturedPlaceholderView` once both the joiner-side

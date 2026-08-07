@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymTransport
 
 /// Pump tests for the seam-A → interactor → seam-B pattern. The
 /// interactor itself owns no state, so these tests assert pump shape:

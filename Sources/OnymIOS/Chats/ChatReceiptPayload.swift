@@ -1,4 +1,5 @@
 import Foundation
+import OnymTransport
 
 /// Delivery / read receipt sent back to a message's original sender.
 /// Sealed + shipped over the same `InboxTransport` path as

@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import OnymTransport
 
 /// NIP-01 Nostr event. Codable on the wire, integrity-checked via
 /// `verifyEventID`, and constructable through `build` which computes the

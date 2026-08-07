@@ -1,5 +1,6 @@
 import AVFoundation
 import UIKit
+import OnymDesign
 
 /// Inline voice-message player rendered inside a chat bubble: a
 /// play/pause button, a static waveform (from the descriptor), and an

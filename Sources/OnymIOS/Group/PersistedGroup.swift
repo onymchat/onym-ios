@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import OnymFoundation
 
 /// SwiftData row for one chat group on disk. Splits the schema into
 /// plain (queryable, non-identifying) and AES-GCM-encrypted (sensitive)

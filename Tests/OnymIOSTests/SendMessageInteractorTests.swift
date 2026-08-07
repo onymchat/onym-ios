@@ -2,6 +2,7 @@ import CryptoKit
 import UIKit
 import XCTest
 @testable import OnymIOS
+import OnymTransport
 
 /// In-memory `BlossomClient` fake for the send tests — records uploaded
 /// blobs by their sha256 and can be flipped to fail.

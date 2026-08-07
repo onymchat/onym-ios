@@ -1,4 +1,5 @@
 import SwiftUI
+import OnymDesign
 
 /// Modal surface listing pending join requests with Approve / Decline
 /// actions. Driven by the shared `ApproveRequestsFlow`. Empty state

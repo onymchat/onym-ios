@@ -1,4 +1,5 @@
 import SwiftUI
+import OnymDesign
 
 /// Settings tab — Onym design home. Identity hero (active identity
 /// avatar + truncated BLS fingerprint) and a per-identity invite QR

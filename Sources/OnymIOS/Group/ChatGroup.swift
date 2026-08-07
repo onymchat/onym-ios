@@ -1,4 +1,5 @@
 import Foundation
+import OnymDesign
 
 /// In-memory snapshot of a chat group as the iOS app understands it.
 /// PR-A holds this purely as a value type — `GroupRepository` and the

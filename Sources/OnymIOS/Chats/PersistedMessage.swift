@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import OnymFoundation
 
 /// SwiftData row for one chat message on disk. Same plain-vs-encrypted
 /// split as `PersistedGroup`: anything we need to filter or sort on

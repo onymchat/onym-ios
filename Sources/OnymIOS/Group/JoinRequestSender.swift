@@ -1,4 +1,5 @@
 import Foundation
+import OnymTransport
 
 /// Joiner-side: tap-the-deeplink → ship a sealed `JoinRequestPayload`
 /// to the inviter's intro inbox.

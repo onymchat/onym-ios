@@ -1,4 +1,5 @@
 import SwiftUI
+import OnymDesign
 
 /// Top-level view for the Create Group flow. Pixel-port of the
 /// Claude Designed reference (`onym-ios/project/Onym Create Group.html`)

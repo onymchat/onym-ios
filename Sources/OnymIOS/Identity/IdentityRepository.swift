@@ -2,6 +2,7 @@ import CryptoKit
 import Foundation
 import OnymSDK
 import UIKit
+import OnymFoundation
 
 /// Owns every on-device identity. All Keychain I/O and OnymSDK calls
 /// happen here; views observe `identitiesStream` + `currentIdentityID`

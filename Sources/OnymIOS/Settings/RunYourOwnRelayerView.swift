@@ -1,4 +1,5 @@
 import SwiftUI
+import OnymDesign
 
 /// Settings → Relayer → Run your own. 4-step explainer linking to
 /// `github.com/onymchat/onym-relayer`. Each step has a copyable

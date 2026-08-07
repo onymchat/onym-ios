@@ -1,4 +1,5 @@
 import SwiftUI
+import OnymDesign
 
 /// Settings → Relayer. Reskinned to the Onym design — segmented
 /// strategy toggle, configured-relayers card with star-to-promote and

@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import OnymTransport
 
 /// Outgoing-message pipeline: persist a `.pending` row locally,
 /// seal + ship one envelope per other group member, then flip the

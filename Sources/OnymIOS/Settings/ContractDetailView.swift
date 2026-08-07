@@ -1,4 +1,5 @@
 import SwiftUI
+import OnymDesign
 
 /// Settings → Anchors → Network → Governance → Version → ContractDetail.
 /// Read-only view of one published contract release: shows on-chain

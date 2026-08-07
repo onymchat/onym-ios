@@ -1,6 +1,7 @@
 import Foundation
 import OnymSDK
 import Security
+import OnymTransport
 
 /// `NostrSigner` backed by a 32-byte secp256k1 secret. Uses
 /// `OnymSDK.Common` for the underlying BIP340 operations. Lives in the

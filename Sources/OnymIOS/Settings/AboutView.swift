@@ -1,4 +1,5 @@
 import SwiftUI
+import OnymDesign
 
 /// Settings → About Onym. Hero (5-tap mark spins as a small easter
 /// egg), version metadata, and Resources/Help/Legal cards linking to
