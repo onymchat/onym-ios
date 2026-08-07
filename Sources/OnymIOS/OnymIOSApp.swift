@@ -1,5 +1,9 @@
 import SwiftUI
 import OnymTransport
+import OnymChain
+import OnymIdentity
+import OnymTransportBlossom
+import OnymTransportNostr
 
 @main
 struct OnymIOSApp: App {

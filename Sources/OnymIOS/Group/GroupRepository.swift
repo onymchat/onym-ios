@@ -1,4 +1,5 @@
 import Foundation
+import OnymIdentity
 
 /// Owns the `GroupStore` and exposes a per-identity reactive snapshots
 /// stream. Mirrors `IncomingInvitationsRepository`: every successful

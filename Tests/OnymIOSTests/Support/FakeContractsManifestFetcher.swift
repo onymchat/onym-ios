@@ -1,5 +1,6 @@
 import Foundation
 @testable import OnymIOS
+import OnymChain
 
 /// `ContractsManifestFetcher` test double. Three modes mirror the
 /// `FakeKnownRelayersFetcher` pattern from PR #18 so tests look the

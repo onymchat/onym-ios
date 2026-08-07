@@ -1,5 +1,6 @@
 import SwiftUI
 import OnymDesign
+import OnymChain
 
 /// Settings → Anchors → ... → Use existing address. Lets the user
 /// paste a Stellar Soroban contract ID (uppercase 56-char `C…`),

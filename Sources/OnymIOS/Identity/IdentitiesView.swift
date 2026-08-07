@@ -1,5 +1,6 @@
 import SwiftUI
 import OnymDesign
+import OnymIdentity
 
 /// Settings → Identities. Reskinned to match the Onym design while
 /// keeping every flow intent (add / select / remove) wired through

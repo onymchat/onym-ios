@@ -1,4 +1,5 @@
 import Foundation
+import OnymIdentity
 
 /// A Tyranny group whose invitation snapshot couldn't be verified at an
 /// exact epoch (the chain had advanced past it), so it's awaiting a

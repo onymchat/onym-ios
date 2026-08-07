@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymChain
 
 /// Pure tests for `RelayerConfiguration.selectURL` — the resolver
 /// chain interactors will call per request. No actor, no I/O, just

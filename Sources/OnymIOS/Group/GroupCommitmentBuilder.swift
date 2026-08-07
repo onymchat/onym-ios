@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import OnymSDK
+import OnymChain
 
 /// Thin wrapper around `OnymSDK.Common` that speaks `GovernanceMember`
 /// rather than raw byte buffers. Mirrors `SEPCommitmentBuilder` in

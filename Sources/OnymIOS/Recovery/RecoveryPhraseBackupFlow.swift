@@ -1,6 +1,7 @@
 import Foundation
 import UIKit
 import UniformTypeIdentifiers
+import OnymIdentity
 
 /// Single source of truth for the "Back up keys" flow.
 ///

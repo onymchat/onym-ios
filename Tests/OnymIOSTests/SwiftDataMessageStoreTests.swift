@@ -1,6 +1,7 @@
 import XCTest
 @testable import OnymIOS
 import OnymFoundation
+import OnymIdentity
 
 /// Round-trip tests for `SwiftDataMessageStore`. Uses
 /// `SwiftDataMessageStore.inMemory()` so the on-disk store under

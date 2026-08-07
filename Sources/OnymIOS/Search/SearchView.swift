@@ -1,4 +1,5 @@
 import SwiftUI
+import OnymIdentity
 
 /// Search tab: full-text search across the active identity's chat
 /// messages. Typing a query decrypts + scans this identity's message

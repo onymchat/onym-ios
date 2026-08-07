@@ -1,5 +1,6 @@
 import Foundation
 import OnymTransport
+import OnymIdentity
 
 /// Stateless pump: subscribe to an `InboxTransport`, persist every
 /// inbound message as a pending `IncomingInvitation` via the

@@ -2,6 +2,8 @@ import Foundation
 import XCTest
 @testable import OnymIOS
 import OnymTransport
+import OnymChain
+import OnymIdentity
 
 final class GroupStateRefreshRequestCodecTests: XCTestCase {
     func test_roundTrip() throws {

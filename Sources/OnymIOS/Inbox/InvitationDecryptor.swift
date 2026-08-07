@@ -1,4 +1,5 @@
 import Foundation
+import OnymIdentity
 
 /// Stateless interactor: takes a persisted `IncomingInvitation` (opaque
 /// ciphertext) and turns it into a parsed `DecryptedInvitation`. Two

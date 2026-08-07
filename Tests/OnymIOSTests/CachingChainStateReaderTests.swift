@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymChain
 
 /// Tests for the cache + retry decorator that tames the launch-time
 /// `get_commitment` storm and survives transient relayer throttling.

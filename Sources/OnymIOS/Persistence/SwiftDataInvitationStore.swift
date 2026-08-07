@@ -1,6 +1,7 @@
 import Foundation
 import SwiftData
 import OnymFoundation
+import OnymIdentity
 
 /// SwiftData-backed `@Model` row for a received invitation. Sensitive
 /// fields are stored as AES-GCM-wrapped `Data` (via `StorageEncryption`);

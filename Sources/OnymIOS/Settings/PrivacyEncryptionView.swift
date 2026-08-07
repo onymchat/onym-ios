@@ -1,5 +1,6 @@
 import SwiftUI
 import OnymDesign
+import OnymIdentity
 
 /// Settings → Privacy & Encryption. Scaffold screen — encryption hero,
 /// "How it works" explainers, your-keys summary, and toggles for app

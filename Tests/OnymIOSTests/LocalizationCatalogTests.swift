@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymChain
 
 /// Sanity tests that every chain-layer enum case has a non-empty,
 /// genuinely-localised `displayName`. "Genuinely localised" =

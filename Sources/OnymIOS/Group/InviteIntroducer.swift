@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import OnymIdentity
 
 /// Mints fresh per-invite X25519 keypairs and persists them via
 /// `IntroKeyStore`. Returns an `IntroCapability` (the public-facing

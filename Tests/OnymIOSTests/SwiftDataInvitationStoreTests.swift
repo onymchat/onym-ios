@@ -1,6 +1,7 @@
 import XCTest
 @testable import OnymIOS
 import OnymFoundation
+import OnymIdentity
 
 /// Exercises the real SwiftData backend (in-memory `ModelContainer` so
 /// each test gets a fresh, isolated store). Pins the seam contract:

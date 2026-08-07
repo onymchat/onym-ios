@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+@testable import OnymIdentity
 
 /// Multi-identity API surface added in PR-2. Verifies add / select /
 /// remove flows + the new reactive streams (`identitiesStream`,

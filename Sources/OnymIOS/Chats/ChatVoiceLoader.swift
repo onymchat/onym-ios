@@ -1,4 +1,5 @@
 import Foundation
+import OnymTransportBlossom
 
 /// Fetches + decrypts chat voice blobs for playback, caching the decrypted
 /// `.m4a` on disk keyed by the blob SHA-256. Downloads the ciphertext from

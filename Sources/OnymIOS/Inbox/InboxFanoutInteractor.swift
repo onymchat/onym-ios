@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import OnymTransport
+import OnymIdentity
 
 /// Fan out an `InboxTransport` subscription across every persisted
 /// identity. Spawns one concurrent subscription Task per identity;

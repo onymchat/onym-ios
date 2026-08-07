@@ -1,6 +1,7 @@
 import CryptoKit
 import XCTest
 @testable import OnymIOS
+import OnymIdentity
 
 /// Real X25519 + AES-GCM round-trip against `IdentityRepository`. Uses
 /// an isolated Keychain service per test (same pattern as

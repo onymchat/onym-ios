@@ -1,6 +1,8 @@
 #if DEBUG
 import Foundation
 import OnymTransport
+import OnymChain
+import OnymTransportBlossom
 
 /// App-side fakes used by `OnymIOSApp` when launched with the
 /// `--ui-testing` argument. They live in production sources (not the

@@ -4,6 +4,7 @@ import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
 import OnymDesign
+import OnymIdentity
 
 /// SwiftUI host for `ChatThreadViewController`. The chat screen is
 /// UIKit (per the design call on #150) but the surrounding app is

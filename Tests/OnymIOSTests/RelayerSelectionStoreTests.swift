@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymChain
 
 /// UserDefaults round-trip with per-test suite isolation. Same pattern
 /// as `AnchorSelectionStoreTests` and the per-test Keychain service in

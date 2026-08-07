@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymIdentity
 
 final class IdentityIDTests: XCTestCase {
     func test_init_default_generatesDistinctIDs() {

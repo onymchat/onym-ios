@@ -1,4 +1,5 @@
 import Foundation
+import OnymIdentity
 
 /// One per-invite ephemeral keypair persisted on the inviter's
 /// device. Maps an invite link's `introPublicKey` (the public half

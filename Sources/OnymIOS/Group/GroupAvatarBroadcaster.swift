@@ -1,5 +1,6 @@
 import Foundation
 import OnymTransport
+import OnymIdentity
 
 /// Admin-side broadcaster for mutable group metadata (photo + name):
 /// applies the change locally, then fans it out to every member's inbox,

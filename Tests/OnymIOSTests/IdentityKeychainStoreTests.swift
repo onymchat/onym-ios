@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+@testable import OnymIdentity
 
 /// Per-identity keychain store tests. Each test gets a unique
 /// `testNamespace` so concurrent runs don't stomp on each other; the

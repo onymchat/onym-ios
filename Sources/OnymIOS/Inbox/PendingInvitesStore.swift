@@ -1,4 +1,5 @@
 import Foundation
+import OnymIdentity
 
 /// One decoded `GroupInviteOfferPayload` awaiting the user's explicit
 /// Accept / Dismiss. Unlike `IncomingInvitation` (opaque ciphertext),

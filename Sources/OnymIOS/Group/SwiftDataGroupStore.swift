@@ -1,6 +1,8 @@
 import Foundation
 import SwiftData
 import OnymFoundation
+import OnymChain
+import OnymIdentity
 
 /// SwiftData-backed `GroupStore`. Owns one `ModelContainer` for the
 /// group schema; each call hops to this actor's executor so concurrent

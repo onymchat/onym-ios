@@ -1,5 +1,6 @@
 import Foundation
 @testable import OnymIOS
+import OnymIdentity
 
 /// Reusable in-memory `IntroKeyStore`. Same contract as
 /// `KeychainIntroKeyStore` without the Keychain plumbing — fast

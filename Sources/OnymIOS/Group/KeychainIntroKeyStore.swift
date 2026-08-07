@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import OnymIdentity
 
 /// Production `IntroKeyStore` backed by a single Keychain item per
 /// device. Whole-blob persistence — every mutation rewrites the

@@ -1,5 +1,6 @@
 import SwiftUI
 import OnymDesign
+import OnymChain
 
 /// Settings → Anchors. Reskinned to the Onym design — three-level
 /// drill-down (Network → Governance → Version), plus two new entry

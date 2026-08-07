@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymIdentity
 
 /// State-machine tests for `JoinFlow`. Mirrors `JoinViewModelTest.kt`.
 /// The full crypto round-trip (joiner → seal → inviter approves →

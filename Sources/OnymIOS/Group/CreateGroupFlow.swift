@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import OnymDesign
+import OnymChain
 
 /// The five routes the design's flow walks through. Each screen
 /// renders based on `flow.route`; transitions are driven by

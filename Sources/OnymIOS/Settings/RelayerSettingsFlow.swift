@@ -1,4 +1,5 @@
 import Foundation
+import OnymChain
 
 /// Stateless interactor backing the relayer Settings screen. Drains
 /// `RelayerRepository` snapshots into local `state.snapshot`; intents

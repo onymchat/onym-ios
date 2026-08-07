@@ -2,6 +2,8 @@ import Foundation
 import XCTest
 @testable import OnymIOS
 import OnymTransport
+import OnymChain
+import OnymIdentity
 
 /// End-to-end integration test for the Create Group flow against the
 /// **deployed** onym-relayer + Stellar testnet contract. Skipped by

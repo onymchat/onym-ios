@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymChain
 
 /// Hits the production `URLSession`-backed fetcher with `StubURLProtocol`
 /// in front so we can pin the wire format (the `relayers.json` shape we

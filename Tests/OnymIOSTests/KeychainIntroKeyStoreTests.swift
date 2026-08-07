@@ -1,6 +1,7 @@
 import Security
 import XCTest
 @testable import OnymIOS
+import OnymIdentity
 
 /// TTL + GC behavior of the production intro-key store. These paths
 /// hide/destroy intro PRIVATE keys, so they get coverage in the PR

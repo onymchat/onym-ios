@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import OnymTransportNostr
 
 /// `@Observable @MainActor` view-model for the Nostr-relays Settings
 /// screen. Drains `NostrRelaysRepository` snapshots into local

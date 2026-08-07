@@ -1,6 +1,7 @@
 import XCTest
 @testable import OnymIOS
 import OnymTransport
+import OnymIdentity
 
 /// Behavioral tests for `IntroInboxPump`. Mirrors
 /// `IntroInboxPumpTest.kt` test-for-test. Uses the shared

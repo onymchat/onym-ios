@@ -1,4 +1,5 @@
 import Foundation
+import OnymIdentity
 
 /// Lifecycle of a received invitation. The interactor only writes
 /// `pending`; later flows transition to `accepted` (joined the group) or

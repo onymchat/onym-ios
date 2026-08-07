@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+@testable import OnymChain
 
 /// Picker flow against a real `ContractsRepository` backed by the
 /// in-memory fakes. Asserts the read-helper rules (default-to-latest

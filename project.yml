@@ -19,6 +19,10 @@ packages:
   OnymDesign: {path: Packages/OnymDesign}
   OnymFoundation: {path: Packages/OnymFoundation}
   OnymTransport: {path: Packages/OnymTransport}
+  OnymChain: {path: Packages/OnymChain}
+  OnymTransportNostr: {path: Packages/OnymTransportNostr}
+  OnymTransportBlossom: {path: Packages/OnymTransportBlossom}
+  OnymIdentity: {path: Packages/OnymIdentity}
 
 targets:
   OnymIOS:
@@ -32,6 +36,10 @@ targets:
       - package: OnymDesign
       - package: OnymFoundation
       - package: OnymTransport
+      - package: OnymChain
+      - package: OnymTransportNostr
+      - package: OnymTransportBlossom
+      - package: OnymIdentity
     # Hand-written Info.plist via xcodegen's `info:` block. We tried
     # the GENERATE_INFOPLIST_FILE + INFOPLIST_KEY_* approach first but
     # `INFOPLIST_KEY_UILaunchScreen_BackgroundColor` / `_ImageName` are
@@ -179,6 +187,10 @@ targets:
       - package: OnymDesign
       - package: OnymFoundation
       - package: OnymTransport
+      - package: OnymChain
+      - package: OnymTransportNostr
+      - package: OnymTransportBlossom
+      - package: OnymIdentity
 
   OnymIOSUITests:
     type: bundle.ui-testing

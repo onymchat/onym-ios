@@ -1,6 +1,7 @@
 import XCTest
 import OnymSDK
 @testable import OnymIOS
+import OnymChain
 
 /// Real proof generation against the OnymSDK Tyranny circuit. The tier
 /// is `.small` (depth 5) — fastest to prove (~1s on the simulator) but

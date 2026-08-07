@@ -1,4 +1,5 @@
 import OnymDesign
+import OnymChain
 
 // MARK: - OnymUIGovernance ↔ SEPGroupType bridge
 

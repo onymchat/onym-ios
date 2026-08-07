@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymChain
 
 /// Settings flow against a real `RelayerRepository` backed by the
 /// in-memory store + fake fetcher. Asserts intent dispatch

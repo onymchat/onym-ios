@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymChain
 
 /// Repository against the in-memory fakes — fast, focused on:
 /// - construction loads cached state from the store,

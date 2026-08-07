@@ -1,5 +1,6 @@
 import SwiftUI
 import OnymDesign
+import OnymChain
 
 /// Settings → Anchors → … → Deploy from source.
 ///

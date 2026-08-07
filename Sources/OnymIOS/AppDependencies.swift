@@ -1,4 +1,5 @@
 import Foundation
+import OnymIdentity
 
 /// App-wide composition root. Constructed exactly once by `OnymIOSApp`
 /// and threaded down to views via `RootView`. Each member is a factory

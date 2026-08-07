@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import OnymIdentity
 
 /// Drives the post-create "Share invite" surface. Owns one piece of
 /// state — the share link for the just-minted invite — and exposes

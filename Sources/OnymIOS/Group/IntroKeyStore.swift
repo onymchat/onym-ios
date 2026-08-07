@@ -1,4 +1,5 @@
 import Foundation
+import OnymIdentity
 
 /// Persistence seam for per-invite ephemeral X25519 keypairs.
 ///

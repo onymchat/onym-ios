@@ -1,4 +1,5 @@
 import Foundation
+import OnymIdentity
 
 /// Owns the `MessageStore` and exposes a reactive snapshots stream per
 /// `(group, owner identity)`. Mirrors `GroupRepository`: every

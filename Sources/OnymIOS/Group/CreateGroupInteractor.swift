@@ -2,6 +2,8 @@ import CryptoKit
 import Foundation
 import OnymFoundation
 import OnymTransport
+import OnymChain
+import OnymIdentity
 
 /// Stateless orchestration for the create-group flow. Holds dependencies
 /// only — every call to `create` is independent. The view-model

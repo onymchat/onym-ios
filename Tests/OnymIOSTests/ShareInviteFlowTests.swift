@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymIdentity
 
 /// State-machine tests for `ShareInviteFlow` — the post-create
 /// deeplink-share surface. Mirrors `ShareInviteViewModelTest.kt`.

@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymIdentity
 
 /// Tests for the chat-message branch of `IncomingMessageDispatcher`.
 /// Kept separate from the announcement / invitation paths so the

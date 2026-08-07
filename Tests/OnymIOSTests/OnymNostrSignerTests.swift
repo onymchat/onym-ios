@@ -2,6 +2,7 @@ import XCTest
 import OnymSDK
 @testable import OnymIOS
 import OnymTransport
+import OnymIdentity
 
 /// Hits OnymSDK's BIP340 / secp256k1 FFI through `OnymNostrSigner` —
 /// no mocks. The roundtrip uses `Common.nostrVerifyEventSignature` so

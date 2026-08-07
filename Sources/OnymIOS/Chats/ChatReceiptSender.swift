@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import OnymTransport
+import OnymIdentity
 
 /// Seals + ships `ChatReceiptPayload`s back to a message's sender.
 /// Injected into the dispatcher (delivered receipts on receive) and the

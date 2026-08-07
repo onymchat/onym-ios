@@ -1,4 +1,5 @@
 import UIKit
+import OnymTransportBlossom
 
 /// Fetches + decrypts chat image blobs for rendering, with in-memory
 /// and on-disk caches keyed by the blob SHA-256. Downloads the

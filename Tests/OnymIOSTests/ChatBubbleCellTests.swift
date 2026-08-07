@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymIdentity
 
 /// Cell-style switch tests for `ChatBubbleCell`. The direction
 /// determines which alignment constraint is active and which color

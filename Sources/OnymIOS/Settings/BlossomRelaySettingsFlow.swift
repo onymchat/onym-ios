@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import OnymTransportBlossom
 
 /// `@Observable @MainActor` view-model for the Blossom-servers Settings
 /// screen. Drains `BlossomServersRepository` snapshots into local

@@ -1,0 +1,237 @@
+import CryptoKit
+import Foundation
+import OnymTransport
+
+/// Nostr-relay-backed `InboxTransport`. Each `send` builds a kind-34113
+/// parameterised-replaceable event with the recipient inbox encoded as a
+/// `["d", "sep-inbox:" + inbox]` tag (so relays can serve it across
+/// reconnects), plus a `["t", inbox]` tag that lets clients filter by
+/// kind-24113 / legacy paths. The payload goes into `content` as
+/// base64. Subscribers receive every event whose `d` or `t` tag matches
+/// their inbox identifier across the three filter shapes.
+public final class NostrInboxTransport: InboxTransport {
+    private static let primaryKind = 34113
+    private static let legacyKind = 24113
+    private static let inboxTagPrefix = "sep-inbox:"
+
+    private let state: State
+    private let signerProvider: any NostrEphemeralSignerProvider
+
+    public init(signerProvider: any NostrEphemeralSignerProvider) {
+        self.state = State()
+        self.signerProvider = signerProvider
+    }
+
+    public func connect(to endpoints: [TransportEndpoint]) async {
+        await state.connect(to: endpoints)
+    }
+
+    public func disconnect() async {
+        await state.disconnect()
+    }
+
+    @discardableResult
+    public func send(_ payload: Data, to inbox: TransportInboxID) async throws -> PublishReceipt {
+        let signer = try signerProvider.makeEphemeralSigner()
+        let event = try Self.buildSendEvent(payload: payload, inbox: inbox, signer: signer)
+        let accepted = try await state.send(event: event)
+        return PublishReceipt(messageID: event.id, acceptedBy: accepted)
+    }
+
+    /// Pure event-builder for the send path. Exposed publicly only so
+    /// tests can verify the inbox tag set without standing up a relay.
+    public static func buildSendEvent(
+        payload: Data,
+        inbox: TransportInboxID,
+        signer: NostrSigner
+    ) throws -> NostrEvent {
+        let tags: [[String]] = [
+            ["d", inboxTagPrefix + inbox.rawValue],
+            ["t", inbox.rawValue],
+            ["sep_inbox", inbox.rawValue],
+            ["sep_version", "1"],
+        ]
+        return try NostrEvent.build(
+            kind: primaryKind,
+            tags: tags,
+            content: payload.base64EncodedString(),
+            signer: signer
+        )
+    }
+
+    public func subscribe(inbox: TransportInboxID) -> AsyncStream<InboundInbox> {
+        AsyncStream<InboundInbox> { continuation in
+            Task { [state] in
+                await state.subscribe(inbox: inbox, continuation: continuation)
+            }
+            continuation.onTermination = { @Sendable [state] _ in
+                Task { await state.unsubscribe(inbox: inbox) }
+            }
+        }
+    }
+
+    public func unsubscribe(inbox: TransportInboxID) async {
+        await state.unsubscribe(inbox: inbox)
+    }
+
+    /// Three filter shapes the subscriber installs on each relay:
+    /// the primary `#d` (parameterised-replaceable) plus a `#t`
+    /// fallback on the same kind, plus the legacy kind 24113 path
+    /// during migration. Public only so tests can assert the shape.
+    public static func subscriptionFilters(inbox: String) -> [[String: Any]] {
+        [
+            [
+                "kinds": [primaryKind],
+                "#d": [inboxTagPrefix + inbox],
+            ],
+            [
+                "kinds": [primaryKind],
+                "#t": [inbox],
+            ],
+            [
+                "kinds": [legacyKind],
+                "#t": [inbox],
+            ],
+        ]
+    }
+
+    // MARK: - State
+
+    fileprivate actor State {
+        private var connections: [URL: NostrRelayConnection] = [:]
+        private var activeSubscriptions: [TransportInboxID: Task<Void, Never>] = [:]
+        /// Monotonic counter baked into every subscription id. A
+        /// resubscribe for the same inbox cancels the old stream, whose
+        /// `onTermination` sends CLOSE for *its* id — with a fixed id
+        /// that CLOSE would tear down the replacement REQ and silence
+        /// the inbox until the next resubscribe. Same scheme as
+        /// `NostrMessageTransport.subscriptionGeneration`.
+        private var subscriptionGeneration: UInt64 = 0
+
+        func connect(to endpoints: [TransportEndpoint]) async {
+            for endpoint in endpoints {
+                if connections[endpoint.url] == nil {
+                    let conn = NostrRelayConnection(url: endpoint.url)
+                    connections[endpoint.url] = conn
+                    await conn.connect()
+                }
+            }
+        }
+
+        func disconnect() async {
+            for task in activeSubscriptions.values {
+                task.cancel()
+            }
+            activeSubscriptions.removeAll()
+            for conn in connections.values {
+                await conn.disconnect()
+            }
+            connections.removeAll()
+        }
+
+        /// Per-relay publish outcome — split so the thrown error can
+        /// tell "a relay answered and said no" (`publishRejected`)
+        /// apart from "no relay was reachable at all" (`unreachable`,
+        /// carrying the first network error's code so the app layer
+        /// can explain TLS / offline / timeout to the user).
+        private enum PublishOutcome {
+            case accepted
+            case rejected
+            case failed(any Error)
+        }
+
+        func send(event: NostrEvent) async throws -> Int {
+            let conns = Array(connections.values)
+            guard !conns.isEmpty else {
+                throw TransportError.notConnected
+            }
+            let outcomes = await withTaskGroup(of: PublishOutcome.self) { group in
+                for conn in conns {
+                    group.addTask {
+                        do {
+                            return try await conn.publishAndAwaitOK(event: event)
+                                ? .accepted : .rejected
+                        } catch {
+                            return .failed(error)
+                        }
+                    }
+                }
+                var collected: [PublishOutcome] = []
+                for await outcome in group { collected.append(outcome) }
+                return collected
+            }
+            let accepted = outcomes.filter {
+                if case .accepted = $0 { return true } else { return false }
+            }.count
+            if accepted > 0 { return accepted }
+
+            let anyRejected = outcomes.contains {
+                if case .rejected = $0 { return true } else { return false }
+            }
+            if anyRejected {
+                throw TransportError.publishRejected
+            }
+            let firstErrorCode = outcomes.compactMap { outcome -> URLError.Code? in
+                if case .failed(let error) = outcome { return (error as? URLError)?.code }
+                return nil
+            }.first
+            throw TransportError.unreachable(firstErrorCode)
+        }
+
+        func subscribe(
+            inbox: TransportInboxID,
+            continuation: AsyncStream<InboundInbox>.Continuation
+        ) {
+            activeSubscriptions[inbox]?.cancel()
+            subscriptionGeneration += 1
+            // NIP-01 caps subscription ids at 64 chars; the raw inbox
+            // pubkey is already 64, so ship a truncated digest instead.
+            let subID = "inbox-\(Self.subIDHash(inbox.rawValue))-\(subscriptionGeneration)"
+            let filters = NostrInboxTransport.subscriptionFilters(inbox: inbox.rawValue)
+            let conns = Array(connections.values)
+
+            // All filter shapes ride in ONE REQ per relay: relays cap
+            // concurrent REQs per connection (strfry rejects overflow with
+            // "too many concurrent REQs"), and one REQ also makes the relay
+            // dedup events that match several of the overlapping filters.
+            let task = Task {
+                await withTaskGroup(of: Void.self) { group in
+                    for conn in conns {
+                        group.addTask {
+                            let stream = await conn.subscribe(subscriptionID: subID, filters: filters)
+                            for await event in stream {
+                                guard !Task.isCancelled else { break }
+                                guard let payload = Data(base64Encoded: event.content) else {
+                                    continue
+                                }
+                                let received = Date(timeIntervalSince1970: TimeInterval(event.displayMilliseconds) / 1000.0)
+                                continuation.yield(InboundInbox(
+                                    inbox: inbox,
+                                    payload: payload,
+                                    receivedAt: received,
+                                    messageID: event.id
+                                ))
+                            }
+                        }
+                    }
+                }
+            }
+            activeSubscriptions[inbox] = task
+        }
+
+        func unsubscribe(inbox: TransportInboxID) {
+            activeSubscriptions[inbox]?.cancel()
+            activeSubscriptions.removeValue(forKey: inbox)
+        }
+
+        /// First 16 hex chars of SHA-256 — collision-safe for the
+        /// handful of inboxes one client subscribes to, and short
+        /// enough to leave room for the generation suffix.
+        private static func subIDHash(_ inbox: String) -> String {
+            SHA256.hash(data: Data(inbox.utf8))
+                .prefix(8)
+                .map { String(format: "%02x", $0) }
+                .joined()
+        }
+    }
+}

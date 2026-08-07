@@ -1,4 +1,6 @@
 import Foundation
+import OnymChain
+import OnymIdentity
 
 /// One persisted chat message — what the UI renders and what the
 /// store hands back. Mirrors `ChatMessagePayload` but flattens the

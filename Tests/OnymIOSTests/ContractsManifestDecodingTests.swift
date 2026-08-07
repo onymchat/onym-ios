@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymChain
 
 /// Pin the wire format + the unknown-enum-dropping behaviour of the
 /// manifest decoder. A future contracts release that adds (e.g.) a

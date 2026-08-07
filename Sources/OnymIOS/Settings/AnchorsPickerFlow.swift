@@ -1,4 +1,5 @@
 import Foundation
+import OnymChain
 
 /// Stateless interactor for the anchors drill-down. Drains
 /// `ContractsRepository` snapshots into `state.snapshot`; intents

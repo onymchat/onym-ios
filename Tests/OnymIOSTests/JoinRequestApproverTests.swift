@@ -2,6 +2,8 @@ import CryptoKit
 import XCTest
 @testable import OnymIOS
 import OnymTransport
+import OnymChain
+import OnymIdentity
 
 /// Behavioral tests for `JoinRequestApprover` covering PR 4
 /// (`recordJoiner` side effect) + PR 5 (`broadcastJoin` fanout) +

@@ -1,5 +1,7 @@
 import XCTest
 @testable import OnymIOS
+import OnymIdentity
+import OnymTransportNostr
 
 /// Tests for the NIP-01 wire format and the integrity check that
 /// `NostrRelayConnection` runs on every inbound event. These are the

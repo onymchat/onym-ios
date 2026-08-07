@@ -1,4 +1,5 @@
 import SwiftUI
+import OnymIdentity
 
 /// Top-bar leading dropdown on the Chats tab. Shows the currently-
 /// selected identity's name (with a small `person.fill` glyph); tap to

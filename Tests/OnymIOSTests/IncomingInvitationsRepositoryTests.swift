@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymIdentity
 
 /// Repository contract on top of the in-memory store fake — fast,
 /// focused on the reactive surface (snapshots emit current value on

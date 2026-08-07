@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymIdentity
 
 /// Unit tests for `InviteIntroducer` + `IntroKeyStore` contract.
 /// Backed by `InMemoryIntroKeyStore` — the Keychain-backed prod

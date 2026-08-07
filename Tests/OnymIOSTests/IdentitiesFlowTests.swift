@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+@testable import OnymIdentity
 
 /// View-model tests for `IdentitiesFlow`. Real `IdentityRepository`
 /// (isolated keychain) drives the streams; the flow is exercised

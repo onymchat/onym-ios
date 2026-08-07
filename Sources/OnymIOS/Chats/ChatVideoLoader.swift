@@ -1,4 +1,5 @@
 import Foundation
+import OnymTransportBlossom
 
 /// Fetches + decrypts chat video blobs for playback, caching the
 /// decrypted MP4 on disk keyed by the blob SHA-256. Downloads the

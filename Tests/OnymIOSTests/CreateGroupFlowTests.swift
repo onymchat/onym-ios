@@ -1,6 +1,8 @@
 import XCTest
 @testable import OnymIOS
 import OnymTransport
+import OnymChain
+import OnymIdentity
 
 /// View-model tests for `CreateGroupFlow`. The interactor is real but
 /// uses the same in-memory environment as `CreateGroupInteractorTests`,
