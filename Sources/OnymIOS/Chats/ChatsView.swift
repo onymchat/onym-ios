@@ -3,6 +3,8 @@ import OnymDesign
 import OnymChain
 import OnymIdentity
 import OnymGroup
+import OnymChatsCore
+import OnymInbox
 
 /// Chats tab — root list of groups the user has created. PR-C only
 /// supports Tyranny groups; this list is whatever

@@ -5,6 +5,7 @@ import OnymTransport
 import OnymChain
 import OnymIdentity
 import OnymGroup
+import OnymInbox
 
 final class GroupStateRefreshRequestCodecTests: XCTestCase {
     func test_roundTrip() throws {

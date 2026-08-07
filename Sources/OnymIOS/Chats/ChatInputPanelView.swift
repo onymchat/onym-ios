@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import OnymDesign
+import OnymChatsCore
 
 /// Bottom input panel for the chat thread. Hosts the message
 /// composer's `UITextView`, a Send button, and the hairline divider

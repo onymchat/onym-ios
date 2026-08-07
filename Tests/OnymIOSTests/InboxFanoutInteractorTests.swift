@@ -6,6 +6,8 @@ import OnymChain
 import OnymIdentity
 import OnymGroup
 import OnymPersistence
+import OnymChatsCore
+import OnymInbox
 
 /// Behavioral tests for `InboxFanoutInteractor`. Uses a real
 /// `IdentityRepository` (isolated keychain) so the inbox-tag derivation

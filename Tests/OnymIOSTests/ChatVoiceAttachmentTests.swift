@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymChatsCore
 
 /// Wire-format + waveform coverage for voice messages
 /// (`ChatVoiceAttachment` on `ChatMessagePayload`, `ChatVoiceEncoder`).

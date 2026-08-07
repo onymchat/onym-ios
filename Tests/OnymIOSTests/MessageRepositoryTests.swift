@@ -1,6 +1,7 @@
 import XCTest
 @testable import OnymIOS
 import OnymIdentity
+import OnymChatsCore
 
 /// Reactive-surface tests for `MessageRepository`. Backed by an
 /// in-memory `MessageStore` fake — same pattern as

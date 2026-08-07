@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 import OnymDesign
 import OnymGroup
+import OnymChatsCore
 
 /// Top-level chat-screen controller. UIKit-first per the design call
 /// (#150 plan): the message list and input panel are UIKit. SwiftUI

@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymChatsCore
 
 /// Behavioral tests for `ChatInputPanelView`. The two contracts
 /// other PRs depend on:

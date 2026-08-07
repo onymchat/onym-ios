@@ -4,6 +4,8 @@ import OnymChain
 import OnymIdentity
 import OnymGroup
 import OnymPersistence
+import OnymChatsCore
+import OnymInbox
 
 /// Behavioral tests for `IncomingMessageDispatcher` — the receive-side
 /// fan-out target that decides whether an inbound inbox message is a

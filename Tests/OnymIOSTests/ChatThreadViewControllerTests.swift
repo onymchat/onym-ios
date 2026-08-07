@@ -3,6 +3,7 @@ import XCTest
 import OnymChain
 import OnymIdentity
 import OnymGroup
+import OnymChatsCore
 
 /// Smoke tests for `ChatThreadViewController` — the message list +
 /// input panel. The title / member count / back / info now live in the

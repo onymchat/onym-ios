@@ -6,6 +6,8 @@ import OnymTransportBlossom
 import OnymTransportNostr
 import OnymGroup
 import OnymPersistence
+import OnymChatsCore
+import OnymInbox
 
 @main
 struct OnymIOSApp: App {

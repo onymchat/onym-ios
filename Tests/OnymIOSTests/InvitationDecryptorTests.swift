@@ -2,6 +2,7 @@ import XCTest
 @testable import OnymIOS
 import OnymIdentity
 import OnymPersistence
+import OnymInbox
 
 /// Interactor tests against `FakeInvitationEnvelopeDecrypter` — fast,
 /// no real crypto. Asserts the pump shape: takes an `IncomingInvitation`,

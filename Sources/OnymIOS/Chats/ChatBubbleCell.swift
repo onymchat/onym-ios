@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import OnymDesign
+import OnymChatsCore
 
 /// Resolved sender presentation for one bubble — computed by
 /// `ChatThreadViewController` (which alone knows the group's member
