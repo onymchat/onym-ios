@@ -137,11 +137,34 @@ final class ModerationCanonicalOrderTests: XCTestCase {
     // MARK: - Response and appeal
 
     func test_responseAndAppealSigningBytesExcludeTheirSignature() throws {
-        let response = CaseResponse(statement: "context changes its meaning", signature: "c2ln")
-        XCTAssertEqual(try keyOrder(of: try response.signingBytes()), ["evidence", "statement"])
+        let response = CaseResponse(
+            caseId: "case-1",
+            statement: "context changes its meaning",
+            signature: "c2ln"
+        )
+        XCTAssertEqual(try keyOrder(of: try response.signingBytes()), ["caseId", "evidence", "statement"])
 
-        let appeal = AppealSubmission(kind: .newHolderClaim, statement: "I bought this phone", signature: "c2ln")
-        XCTAssertEqual(try keyOrder(of: try appeal.signingBytes()), ["kind", "statement"])
+        let appeal = AppealSubmission(
+            caseId: "case-1",
+            kind: .newHolderClaim,
+            statement: "I bought this phone",
+            signature: "c2ln"
+        )
+        XCTAssertEqual(try keyOrder(of: try appeal.signingBytes()), ["caseId", "kind", "statement"])
+    }
+
+    /// The case a response answers is *inside* what gets signed. Left
+    /// outside, the same signed bytes would verify against any case,
+    /// and an answer to one accusation could be replayed as an answer
+    /// to another the signer never saw.
+    func test_responseAndAppealSigningBytesBindTheirCase() throws {
+        let first = CaseResponse(caseId: "case-1", statement: "not me")
+        let second = CaseResponse(caseId: "case-2", statement: "not me")
+        XCTAssertNotEqual(try first.signingBytes(), try second.signingBytes())
+
+        let appealed = AppealSubmission(caseId: "case-1", kind: .appeal, statement: "wrong")
+        let elsewhere = AppealSubmission(caseId: "case-2", kind: .appeal, statement: "wrong")
+        XCTAssertNotEqual(try appealed.signingBytes(), try elsewhere.signingBytes())
     }
 
     /// Signing bytes must not change when the signature is attached —

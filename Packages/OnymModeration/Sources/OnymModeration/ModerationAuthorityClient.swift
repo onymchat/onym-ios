@@ -19,11 +19,24 @@ public struct ReportReceipt: Codable, Sendable, Equatable {
 /// through the same object, so `submit-evidence` needs no separate
 /// operation client-side.
 public struct CaseResponse: Codable, Sendable, Equatable {
+    /// The case being answered. Carried in the object — and therefore
+    /// inside the signed bytes — rather than alongside it: a signed
+    /// statement that names no case can be lifted from the case it was
+    /// written for and replayed onto another, so an innocuous "that
+    /// wasn't me" would register as an answer to an accusation its
+    /// signer never saw.
+    public let caseId: String
     public let statement: String
     public let evidence: [EvidenceItem]
     public var signature: String
 
-    public init(statement: String, evidence: [EvidenceItem] = [], signature: String = "") {
+    public init(
+        caseId: String,
+        statement: String,
+        evidence: [EvidenceItem] = [],
+        signature: String = ""
+    ) {
+        self.caseId = caseId
         self.statement = statement
         self.evidence = evidence
         self.signature = signature
@@ -33,11 +46,12 @@ public struct CaseResponse: Codable, Sendable, Equatable {
     /// See `ModerationCanonicalEncoder` for why the ordering matters.
     public func signingBytes() throws -> Data {
         struct Unsigned: Encodable {
+            let caseId: String
             let statement: String
             let evidence: [EvidenceItem]
         }
         return try ModerationCanonicalEncoder.encode(
-            Unsigned(statement: statement, evidence: evidence)
+            Unsigned(caseId: caseId, statement: statement, evidence: evidence)
         )
     }
 }
@@ -51,11 +65,15 @@ public struct AppealSubmission: Codable, Sendable, Equatable {
         case newHolderClaim = "new-holder-claim"
     }
 
+    /// The case appealed. Signed, for the same replay reason as
+    /// `CaseResponse.caseId`.
+    public let caseId: String
     public let kind: Kind
     public let statement: String
     public var signature: String
 
-    public init(kind: Kind, statement: String, signature: String = "") {
+    public init(caseId: String, kind: Kind, statement: String, signature: String = "") {
+        self.caseId = caseId
         self.kind = kind
         self.statement = statement
         self.signature = signature
@@ -69,11 +87,12 @@ public struct AppealSubmission: Codable, Sendable, Equatable {
     /// the mandated user (§5.7).
     public func signingBytes() throws -> Data {
         struct Unsigned: Encodable {
+            let caseId: String
             let kind: Kind
             let statement: String
         }
         return try ModerationCanonicalEncoder.encode(
-            Unsigned(kind: kind, statement: statement)
+            Unsigned(caseId: caseId, kind: kind, statement: statement)
         )
     }
 }
@@ -106,8 +125,8 @@ public struct CaseStatus: Codable, Sendable, Equatable {
 /// authority, which is what makes authorities swappable.
 public protocol ModerationAuthorityClient: Sendable {
     func fileReport(_ report: Report) async throws -> ReportReceipt
-    func respond(caseId: String, _ response: CaseResponse) async throws
-    func appeal(caseId: String, _ submission: AppealSubmission) async throws
+    func respond(_ response: CaseResponse) async throws
+    func appeal(_ submission: AppealSubmission) async throws
     func queryStatus(caseId: String) async throws -> CaseStatus
 }
 
@@ -121,11 +140,11 @@ public struct StubModerationAuthorityClient: ModerationAuthorityClient {
         throw ModerationError.notImplemented("file-report")
     }
 
-    public func respond(caseId: String, _ response: CaseResponse) async throws {
+    public func respond(_ response: CaseResponse) async throws {
         throw ModerationError.notImplemented("respond")
     }
 
-    public func appeal(caseId: String, _ submission: AppealSubmission) async throws {
+    public func appeal(_ submission: AppealSubmission) async throws {
         throw ModerationError.notImplemented("appeal")
     }
 
