@@ -5,6 +5,7 @@ import OnymIdentity
 import OnymIdentityUI
 import OnymRecovery
 import OnymChatsCore
+import OnymModerationUI
 
 /// Settings tab — Onym design home. Identity hero (active identity
 /// avatar + truncated BLS fingerprint) and a per-identity invite QR
@@ -25,6 +26,11 @@ public struct SettingsView: View {
     /// Wipes every local message (keeps chats). Wired to
     /// `MessageRepository.removeAll`. Runs behind a two-step confirm.
     let onClearAllMessages: () async -> Void
+    /// Moderation drill-down factories. Optional so the Settings
+    /// screen renders without the moderation stack (the row is hidden
+    /// until the app wires these in).
+    let makeModerationSettingsFlow: (@MainActor () -> ModerationSettingsFlow)?
+    let makeModerationConsentFlow: (@MainActor (ModerationConsentFlow.Mode) -> ModerationConsentFlow)?
 
     public init(
         makeBackupFlow: @escaping @MainActor () -> RecoveryPhraseBackupFlow,
@@ -33,7 +39,9 @@ public struct SettingsView: View {
         makeBlossomRelaySettingsFlow: @escaping @MainActor () -> BlossomRelaySettingsFlow,
         makeAnchorsPickerFlow: @escaping @MainActor () -> AnchorsPickerFlow,
         identitiesFlow: IdentitiesFlow,
-        onClearAllMessages: @escaping () async -> Void
+        onClearAllMessages: @escaping () async -> Void,
+        makeModerationSettingsFlow: (@MainActor () -> ModerationSettingsFlow)? = nil,
+        makeModerationConsentFlow: (@MainActor (ModerationConsentFlow.Mode) -> ModerationConsentFlow)? = nil
     ) {
         self.makeBackupFlow = makeBackupFlow
         self.makeRelayerSettingsFlow = makeRelayerSettingsFlow
@@ -42,6 +50,8 @@ public struct SettingsView: View {
         self.makeAnchorsPickerFlow = makeAnchorsPickerFlow
         self.identitiesFlow = identitiesFlow
         self.onClearAllMessages = onClearAllMessages
+        self.makeModerationSettingsFlow = makeModerationSettingsFlow
+        self.makeModerationConsentFlow = makeModerationConsentFlow
     }
 
     @State private var showRecoveryPhrase = false
@@ -153,6 +163,29 @@ public struct SettingsView: View {
                     .accessibilityIdentifier("settings.blossom_relays_row")
                 }
                 SettingsFootnote("Nostr relays and Blossom servers carry your messages and media. Replace them with your own instances for maximum privacy.")
+
+                if let makeModerationSettingsFlow, let makeModerationConsentFlow {
+                    SettingsSectionLabel("MODERATION")
+                    SettingsCard {
+                        NavigationLink {
+                            ModerationSettingsView(
+                                flow: makeModerationSettingsFlow(),
+                                makeConsentFlow: makeModerationConsentFlow
+                            )
+                        } label: {
+                            SettingsRow(
+                                title: "Moderation",
+                                subtitle: "Your consented authority and its terms",
+                                last: true
+                            ) {
+                                SettingsIconTile(symbol: "checkmark.shield", bg: SettingsTile.green)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("settings.moderation_row")
+                    }
+                    SettingsFootnote("The moderation authority handles reports of prohibited content under terms you consented to. You can switch to a different authority at any time.")
+                }
 
                 SettingsSectionLabel("DATA")
                 SettingsCard {

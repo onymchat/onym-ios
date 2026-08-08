@@ -80,6 +80,8 @@ public struct SettingsContentTile<Content: View>: View {
 /// Section label above a card. All-caps, mid-grey, small letterspacing.
 public struct SettingsSectionLabel<Trailing: View>: View {
     let text: LocalizedStringKey
+    /// Runtime data rather than UI copy — see `SettingsRow.verbatimTitle`.
+    var verbatimText: String? = nil
     @ViewBuilder var trailing: () -> Trailing
 
     // The trailing-content variant has no external consumer today, so
@@ -89,9 +91,15 @@ public struct SettingsSectionLabel<Trailing: View>: View {
         self.trailing = trailing
     }
 
+    init(verbatimText: String, @ViewBuilder trailing: @escaping () -> Trailing = { EmptyView() }) {
+        self.text = ""
+        self.verbatimText = verbatimText
+        self.trailing = trailing
+    }
+
     public var body: some View {
         HStack(alignment: .bottom) {
-            Text(text)
+            (verbatimText.map { Text(verbatim: $0) } ?? Text(text))
                 .font(.system(size: 12.5, weight: .medium))
                 .foregroundStyle(OnymTokens.text2)
             Spacer()
@@ -107,15 +115,28 @@ extension SettingsSectionLabel where Trailing == EmptyView {
     public init(_ text: LocalizedStringKey) {
         self.init(text, trailing: { EmptyView() })
     }
+
+    /// Label from runtime data (e.g. an authority-supplied class id).
+    public init(verbatim text: String) {
+        self.init(verbatimText: text, trailing: { EmptyView() })
+    }
 }
 
 /// Footnote text beneath a card — italic-equivalent grey copy used as
 /// section explanations.
 public struct SettingsFootnote: View {
     let text: LocalizedStringKey
+    /// Runtime data rather than UI copy — see `SettingsRow.verbatimTitle`.
+    var verbatimText: String? = nil
     public init(_ text: LocalizedStringKey) { self.text = text }
+    /// Footnote from runtime data (e.g. an already-localized error
+    /// message, which must not be re-looked-up as a key).
+    public init(verbatim text: String) {
+        self.text = ""
+        self.verbatimText = text
+    }
     public var body: some View {
-        Text(text)
+        (verbatimText.map { Text(verbatim: $0) } ?? Text(text))
             .font(.system(size: 12.5))
             .foregroundStyle(OnymTokens.text2)
             .lineSpacing(2)
@@ -129,9 +150,16 @@ public struct SettingsFootnote: View {
 /// shows beneath the nav bar on each top-level screen.
 public struct SettingsLargeTitle: View {
     let text: LocalizedStringKey
+    /// Runtime data rather than UI copy — see `SettingsRow.verbatimTitle`.
+    var verbatimText: String? = nil
     public init(_ text: LocalizedStringKey) { self.text = text }
+    /// Title from runtime data (e.g. an authority's published name).
+    public init(verbatim text: String) {
+        self.text = ""
+        self.verbatimText = text
+    }
     public var body: some View {
-        Text(text)
+        (verbatimText.map { Text(verbatim: $0) } ?? Text(text))
             .font(.system(size: 34, weight: .bold))
             .foregroundStyle(OnymTokens.text)
             .tracking(-0.75)
@@ -257,6 +285,12 @@ public struct SettingsRowDivider: View {
 /// itself owns the tap.
 public struct SettingsRow<Tile: View, Right: View>: View {
     let title: LocalizedStringKey
+    /// Set instead of `title` when the text is runtime data (a name
+    /// fetched from the network, an identifier) rather than UI copy.
+    /// Such a string must not be looked up as a localization key — a
+    /// remote value that happens to match one would render the
+    /// translation instead of itself.
+    var verbatimTitle: String? = nil
     var titleColor: Color = OnymTokens.text
     var titleMono: Bool = false
     var subtitle: String? = nil
@@ -299,6 +333,39 @@ public struct SettingsRow<Tile: View, Right: View>: View {
         self.right = right
     }
 
+    /// Row whose title is runtime data rather than UI copy — rendered
+    /// verbatim, never looked up as a localization key. Distinct
+    /// argument label (not an overload on `title:`) so a string literal
+    /// can't silently resolve to the wrong initializer.
+    public init(
+        titleText: String,
+        titleColor: Color = OnymTokens.text,
+        titleMono: Bool = false,
+        subtitle: String? = nil,
+        subtitleMono: Bool = false,
+        subtitleLineLimit: Int? = 1,
+        hasChevron: Bool = true,
+        inset: CGFloat = 60,
+        last: Bool = false,
+        onTap: (() -> Void)? = nil,
+        @ViewBuilder tile: @escaping () -> Tile,
+        @ViewBuilder right: @escaping () -> Right
+    ) {
+        self.title = ""
+        self.verbatimTitle = titleText
+        self.titleColor = titleColor
+        self.titleMono = titleMono
+        self.subtitle = subtitle
+        self.subtitleMono = subtitleMono
+        self.subtitleLineLimit = subtitleLineLimit
+        self.hasChevron = hasChevron
+        self.inset = inset
+        self.last = last
+        self.onTap = onTap
+        self.tile = tile
+        self.right = right
+    }
+
     public var body: some View {
         if let onTap {
             // Tappable variant — used for in-place actions (Copy
@@ -316,7 +383,7 @@ public struct SettingsRow<Tile: View, Right: View>: View {
             HStack(spacing: 12) {
                 tile()
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(title)
+                    (verbatimTitle.map { Text(verbatim: $0) } ?? Text(title))
                         .font(titleMono
                               ? .system(size: 16.5, design: .monospaced)
                               : .system(size: 16.5))
@@ -366,6 +433,36 @@ extension SettingsRow where Right == EmptyView {
         @ViewBuilder tile: @escaping () -> Tile
     ) {
         self.title = title
+        self.titleColor = titleColor
+        self.titleMono = titleMono
+        self.subtitle = subtitle
+        self.subtitleMono = subtitleMono
+        self.subtitleLineLimit = subtitleLineLimit
+        self.hasChevron = hasChevron
+        self.inset = inset
+        self.last = last
+        self.onTap = onTap
+        self.tile = tile
+        self.right = { EmptyView() }
+    }
+
+    /// Tile-only row whose title is runtime data — see the
+    /// `titleText:` initializer on `SettingsRow`.
+    public init(
+        titleText: String,
+        titleColor: Color = OnymTokens.text,
+        titleMono: Bool = false,
+        subtitle: String? = nil,
+        subtitleMono: Bool = false,
+        subtitleLineLimit: Int? = 1,
+        hasChevron: Bool = true,
+        inset: CGFloat = 60,
+        last: Bool = false,
+        onTap: (() -> Void)? = nil,
+        @ViewBuilder tile: @escaping () -> Tile
+    ) {
+        self.title = ""
+        self.verbatimTitle = titleText
         self.titleColor = titleColor
         self.titleMono = titleMono
         self.subtitle = subtitle
