@@ -13,8 +13,11 @@ import Foundation
 /// answer `.checkRequired(.attestationUnavailable)` instead —
 /// nil token never means unmoderated operation (profile §8.5).
 public struct StubEnforcementBackendClient: EnforcementBackendClient, @unchecked Sendable {
-    /// Which canned world the stub simulates. Driven by the
-    /// `--moderation-scenario` launch argument in DEBUG builds.
+    /// Which canned world the stub simulates. Chosen by whoever
+    /// constructs the client; nothing reads a launch argument yet — PR-3
+    /// wires the app and will supply the scenario from
+    /// `--moderation-scenario` in DEBUG builds (the raw values here are
+    /// that argument's vocabulary).
     public enum Scenario: String, Sendable {
         case clear
         case caseOpen = "case-open"
@@ -28,6 +31,12 @@ public struct StubEnforcementBackendClient: EnforcementBackendClient, @unchecked
     public static let countersignSentinel = "stub:interface-unsigned"
 
     private static let bindingKey = "app.onym.ios.moderation.stub.deviceBinding"
+
+    /// Serializes the read-then-write in `enrollDevice`. Without it two
+    /// concurrent enrollments can both miss the stored value and mint
+    /// different bindings, and the caller that loses the write walks away
+    /// with a mandate bound to a `deviceBinding` nothing persisted.
+    private static let bindingLock = NSLock()
 
     private let scenario: Scenario
     private let defaults: UserDefaults
@@ -44,8 +53,12 @@ public struct StubEnforcementBackendClient: EnforcementBackendClient, @unchecked
     }
 
     /// Stable across calls — an enrollment identifier that churns
-    /// would sever every mandate's `deviceBinding` on next launch.
+    /// would sever every mandate's `deviceBinding` on next launch. The
+    /// check-then-store is taken under `bindingLock` so concurrent
+    /// enrollments all observe the same binding.
     public func enrollDevice(token: Data?, userKey: String, signature: Data) async throws -> DeviceEnrollment {
+        Self.bindingLock.lock()
+        defer { Self.bindingLock.unlock() }
         if let existing = defaults.string(forKey: Self.bindingKey) {
             return DeviceEnrollment(deviceBinding: existing)
         }

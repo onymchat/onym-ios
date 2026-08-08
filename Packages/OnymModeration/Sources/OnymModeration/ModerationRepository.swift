@@ -52,6 +52,7 @@ public actor ModerationRepository {
 
     private let authoritiesFetcher: any KnownAuthoritiesFetcher
     private let manifestFetcher: any AuthorityManifestFetcher
+    private let manifestValidator: AuthorityManifestValidator
     private let mandateStore: any MandateStore
     private let backend: any EnforcementBackendClient
     private let attestation: any DeviceAttestationProvider
@@ -71,10 +72,12 @@ public actor ModerationRepository {
         backend: any EnforcementBackendClient,
         attestation: any DeviceAttestationProvider,
         signer: any ModerationSigner,
+        manifestValidator: AuthorityManifestValidator = AuthorityManifestValidator(),
         clock: @escaping @Sendable () -> Date = Date.init
     ) {
         self.authoritiesFetcher = authoritiesFetcher
         self.manifestFetcher = manifestFetcher
+        self.manifestValidator = manifestValidator
         self.mandateStore = mandateStore
         self.backend = backend
         self.attestation = attestation
@@ -112,14 +115,20 @@ public actor ModerationRepository {
 
     // MARK: - Consent
 
-    /// Consent to `listing`: fetch + verify + pin its manifest, enroll
-    /// this device, sign the mandate, obtain the interface
-    /// countersignature, persist. Any previously active record is
+    /// Consent to `listing`: fetch + verify + validate + pin its
+    /// manifest, enroll this device, sign the mandate, obtain the
+    /// interface countersignature, persist. Any previously active record is
     /// deactivated untouched — its mandate stays bound to the manifest
     /// hash it consented to, forever.
     @discardableResult
     public func consent(to listing: AuthorityListing) async throws -> MandateRecord {
         let signedManifest = try await manifestFetcher.fetch(listing)
+
+        // Validity conditions (validUntil, supported profile, external
+        // appellate for permanent classes) gate enrollment and signing —
+        // not just the consent UI. An invalid manifest must never end up
+        // pinned by a signed mandate.
+        try manifestValidator.validateForConsent(signedManifest, now: clock())
 
         // Enrollment: (identity signature, device token) presented
         // together is the only token↔enrollment linkage. A nil token

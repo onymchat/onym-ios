@@ -99,7 +99,8 @@ public struct Verdict: Codable, Sendable, Equatable {
     /// The bytes the authority signs: every field except `signature`,
     /// JSON with sorted keys + ISO 8601 dates. Same PROVISIONAL caveat
     /// as `ModerationMandate.signingBytes()` — no canonical JSON exists
-    /// in the draft spec yet.
+    /// in the draft spec yet. The explicit mirror below is guarded
+    /// against field drift by `ModerationSigningPayloadTests`.
     public func signingBytes() throws -> Data {
         struct Unsigned: Encodable {
             let verdictVersion: Int

@@ -76,6 +76,13 @@ public enum GateStatus: Sendable, Equatable {
     /// No active mandate yet — the consent gate applies, not this
     /// one. The protocol remains usable without a mandate; it's this
     /// interface that requires one.
+    ///
+    /// NOT an operational state and never an escape hatch: losing the
+    /// mandate routes to re-consent, after which a fresh gate check
+    /// re-reads the device bits. PR-3 owns the RootView gate composition
+    /// and must carry the invariant (with a test) that `.notMandated`
+    /// cannot reach the operational app, plus a `checkNow()` immediately
+    /// after consent.
     case notMandated
     /// Operating. Non-empty `openCases` renders the (non-blocking)
     /// case banner — the case-open mark must not degrade service.
@@ -133,12 +140,27 @@ public actor GateCheckRepository {
     // MARK: - Lifecycle
 
     /// Launch check + interval loop. Idempotent.
+    ///
+    /// Each sleep runs to a wall-clock deadline anchored on the previous
+    /// check rather than "interval after this check finished", so check
+    /// duration doesn't accumulate drift; a deadline already past (the
+    /// app was suspended across it) checks immediately and re-anchors.
+    /// This loop is the *cadence* floor only — PR-3 must additionally
+    /// call `checkNow()` on foreground, and should test a multi-day warm
+    /// resume.
     public func start() {
         guard loopTask == nil else { return }
-        loopTask = Task { [weak self, policy] in
+        loopTask = Task { [weak self, policy, clock] in
+            var due = clock()
             while !Task.isCancelled {
                 await self?.checkNow()
-                try? await Task.sleep(nanoseconds: UInt64(policy.interval * 1_000_000_000))
+                due = due.addingTimeInterval(policy.interval)
+                let delay = due.timeIntervalSince(clock())
+                if delay > 0 {
+                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                } else {
+                    due = clock()
+                }
             }
         }
     }

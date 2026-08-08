@@ -27,10 +27,12 @@ public struct VerdictValidator: Sendable {
     /// manifest that mandate consented to.
     ///
     /// - Parameters:
-    ///   - verifier: Ed25519 verifier keyed on the consented manifest's
-    ///     operator key. Signature failures throw only under
-    ///     `enforceSignature` (soft mode logs and continues — no real
-    ///     authority signs verdicts yet; see `ModerationTrust`).
+    ///   - consented: must be the very manifest `mandate.manifestHash`
+    ///     pins — validating against any other manifest would validate
+    ///     against terms the user never consented to.
+    ///   - enforceSignature: signature failures throw only under
+    ///     enforcement (soft mode logs and continues — no real authority
+    ///     signs verdicts yet; see `ModerationTrust`).
     /// - Returns: whether the verdict is executable now or stored until
     ///   its `executeAfter`.
     /// - Throws: `ModerationError` on any shape violation.
@@ -39,11 +41,20 @@ public struct VerdictValidator: Sendable {
         mandate: ModerationMandate,
         consented: SignedManifest,
         now: Date,
-        verifier: Ed25519DetachedSignatureVerifier,
         enforceSignature: Bool = ModerationTrust.enforceVerdictSignatures
     ) throws -> Outcome {
+        // The manifest handed in must be the mandate's pinned manifest,
+        // not merely *a* manifest from this authority.
+        guard consented.manifestHash == mandate.manifestHash else {
+            throw ModerationError.verdictInvalid("consented manifest is not the mandate's pinned manifest")
+        }
+
         // Authority signature (spec §5.7: "authority signature" is the
-        // first mechanical check).
+        // first mechanical check), keyed on the consented manifest's
+        // operator key through the one `AuthorityKey` parser. An
+        // unparseable key yields a nil-key verifier, which never
+        // validates — the soft/enforce policy then applies.
+        let verifier = Ed25519DetachedSignatureVerifier(publicKey: try? consented.manifest.operatorPublicKey())
         try validateSignature(verdict, verifier: verifier, enforce: enforceSignature)
 
         // Mandate reference: the verdict must name a mandate this user
@@ -53,6 +64,9 @@ public struct VerdictValidator: Sendable {
         }
         guard let mandateHash = try? mandate.mandateHash(), verdict.mandateRef == mandateHash else {
             throw ModerationError.noMandate
+        }
+        guard verdict.accusedKeys.contains(mandate.user) else {
+            throw ModerationError.verdictInvalid("the mandate's user is not among accusedKeys")
         }
         guard verdict.deviceBinding == mandate.deviceBinding else {
             throw ModerationError.verdictInvalid("deviceBinding outside the mandate")

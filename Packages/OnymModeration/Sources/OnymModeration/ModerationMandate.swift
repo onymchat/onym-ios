@@ -52,7 +52,10 @@ public struct ModerationMandate: Codable, Sendable, Equatable {
 
     /// The bytes the user (and later the interface) sign: every field
     /// except `signatures`, JSON-encoded with sorted keys and ISO 8601
-    /// dates.
+    /// dates. Built from an explicit payload type — no `signatures`
+    /// field at all, so countersigning can't change the signed content,
+    /// and no string surgery on already-encoded JSON. `ModerationSigningPayloadTests`
+    /// guards the mirror against field drift.
     ///
     /// PROVISIONAL: the draft spec defines no canonical JSON form.
     /// `.sortedKeys` + ISO 8601 is deterministic for this encoder but
@@ -60,22 +63,27 @@ public struct ModerationMandate: Codable, Sendable, Equatable {
     /// spec fixes one, only this helper changes, and mandates signed
     /// before then will need re-consent.
     public func signingBytes() throws -> Data {
-        var unsigned = self
-        unsigned.signatures = []
+        struct Unsigned: Encodable {
+            let mandateVersion: Int
+            let user, interface, authority, manifestHash: String
+            let classes: [String]
+            let deviceBinding: String
+            let acceptedAt: Date
+        }
+        let unsigned = Unsigned(
+            mandateVersion: mandateVersion,
+            user: user,
+            interface: interface,
+            authority: authority,
+            manifestHash: manifestHash,
+            classes: classes,
+            deviceBinding: deviceBinding,
+            acceptedAt: acceptedAt
+        )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
-        var data = try encoder.encode(unsigned)
-        // Excise the empty `signatures` array so countersigning later
-        // doesn't change the signed content: the signed form has no
-        // signatures field at all.
-        if let text = String(data: data, encoding: .utf8) {
-            let stripped = text
-                .replacingOccurrences(of: ",\"signatures\":[]", with: "")
-                .replacingOccurrences(of: "\"signatures\":[],", with: "")
-            data = Data(stripped.utf8)
-        }
-        return data
+        return try encoder.encode(unsigned)
     }
 
     /// `mandateRef` as verdicts and notices carry it: SHA-256

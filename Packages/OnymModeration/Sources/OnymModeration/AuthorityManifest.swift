@@ -50,8 +50,10 @@ public struct AuthorityManifest: Codable, Sendable, Equatable {
     /// mandates and verdicts.
     public let componentId: String
     public let seat: String
-    /// `onym:key:<authority-identity>` — the verdict/manifest signing
-    /// key. `operator` is the spec's field name.
+    /// `onym:key:<hex>` — the verdict/manifest signing key. `operator`
+    /// is the spec's field name. Not an independent trust root: the
+    /// fetcher requires it to equal the directory-pinned key byte for
+    /// byte (`AuthorityManifestFetcher`).
     public let operatorKey: String
     public let moderationProfileId: String
     public let violationClasses: [ViolationClass]
@@ -66,35 +68,42 @@ public struct AuthorityManifest: Codable, Sendable, Equatable {
     public let confidentiality: String?
     public let statistics: String?
     public let offers: [String]?
-    /// Bounds new mandates and new cases, not live process.
+    /// Bounds new mandates and new cases, not live process. Enforced at
+    /// consent by `AuthorityManifestValidator`.
     public let validUntil: Date
-    /// Authority signature over the manifest. Verified against the
-    /// directory-pinned operator key (see `AuthorityManifestFetcher`).
-    public let signature: String
 
     enum CodingKeys: String, CodingKey {
         case version, componentId, seat
         case operatorKey = "operator"
         case moderationProfileId, violationClasses, evidenceRules
         case reputationPolicy, newHolderAppeal, appellate
-        case confidentiality, statistics, offers, validUntil, signature
+        case confidentiality, statistics, offers, validUntil
     }
 
     public func violationClass(id: String) -> ViolationClass? {
         violationClasses.first { $0.classId == id }
     }
+
+    /// The authority's signing key, parsed from `operator` by the one
+    /// `AuthorityKey` parser the directory pin is checked with — so
+    /// verdict verification and the fetch-time pin key on the same
+    /// bytes.
+    public func operatorPublicKey() throws -> Curve25519.Signing.PublicKey {
+        try AuthorityKey.publicKey(fromReference: operatorKey)
+    }
 }
 
 /// The unit of consent: a decoded manifest together with the exact
 /// bytes it was fetched as. `manifestHash` — SHA-256 over those exact
-/// bytes — is what the mandate pins.
+/// bytes — is what the mandate pins, and those same bytes are what the
+/// authority's **detached** signature covers.
 ///
-/// Hashing the fetched bytes rather than a canonical re-encoding is
-/// deliberate: the draft spec defines no canonical JSON, hashing exact
-/// bytes matches the repo's `SignedAsset` model (signatures over exact
-/// bytes), and persisting `rawBytes` alongside the mandate keeps the
-/// consented terms displayable and re-verifiable even if the authority
-/// later edits the hosted file or disappears.
+/// Hashing (and signing) the fetched bytes rather than a canonical
+/// re-encoding is deliberate: the draft spec defines no canonical JSON,
+/// exact bytes match the repo's `SignedAsset` model, and persisting
+/// `rawBytes` alongside the mandate keeps the consented terms
+/// displayable and re-verifiable even if the authority later edits the
+/// hosted file or disappears.
 public struct SignedManifest: Sendable, Equatable {
     public let manifest: AuthorityManifest
     public let rawBytes: Data

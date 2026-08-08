@@ -18,8 +18,13 @@ public enum ModerationError: Error, Sendable, Equatable {
     /// A verdict failed mechanical shape validation (Moderation.md
     /// §5.6). The reason is developer-facing diagnostic detail.
     case verdictInvalid(String)
-    /// The manifest failed decode or signature validation at consent.
+    /// The manifest failed decode, signature, or consent-time validity
+    /// validation (`AuthorityManifestValidator`).
     case manifestInvalid(String)
+    /// A key reference (`onym:key:<hex>`, or a directory listing's
+    /// base64 operator key) could not be parsed as an Ed25519 public
+    /// key. See `AuthorityKey`.
+    case keyInvalid(String)
     /// DeviceCheck is unsupported here (simulator, enterprise-signed
     /// build). Callers degrade toward gate-check-required, never toward
     /// unmoderated operation (profile §8.5).
