@@ -6,6 +6,9 @@ import XCTest
 /// guarantees, and the never-fabricate-a-token rule.
 final class ModerationRepositoryTests: XCTestCase {
 
+    /// The instant the fixture repositories' injected clock returns.
+    private let now = Date(timeIntervalSince1970: 1_700_000_000)
+
     // MARK: - Fakes
 
     private struct FakeAuthoritiesFetcher: KnownAuthoritiesFetcher {
@@ -40,21 +43,24 @@ final class ModerationRepositoryTests: XCTestCase {
     /// actually presented (tokens, signatures).
     private final class RecordingBackend: EnforcementBackendClient, @unchecked Sendable {
         private let lock = NSLock()
-        var enrollTokens: [Data?] { lock.withLock { _enrollTokens } }
+        var enrollRequests: [EnrollmentRequest] { lock.withLock { _enrollRequests } }
+        var enrollTokens: [Data?] { enrollRequests.map(\.deviceToken) }
         var gateRequests: [GateCheckRequest] { lock.withLock { _gateRequests } }
-        private var _enrollTokens: [Data?] = []
+        private var _enrollRequests: [EnrollmentRequest] = []
         private var _gateRequests: [GateCheckRequest] = []
         var gateResult: GateCheckResult = .clear
+        /// When set, `countersignMandate` returns this instead of the
+        /// stub sentinel — lets a test assert what the client does with
+        /// a backend-supplied signature.
+        var countersignature: String = StubEnforcementBackendClient.countersignSentinel
 
-        func enrollDevice(token: Data?, userKey: String, signature: Data) async throws -> DeviceEnrollment {
-            lock.withLock { _enrollTokens.append(token) }
+        func enrollDevice(_ request: EnrollmentRequest) async throws -> DeviceEnrollment {
+            lock.withLock { _enrollRequests.append(request) }
             return DeviceEnrollment(deviceBinding: "recorded-enrollment")
         }
 
-        func countersignMandate(_ mandate: ModerationMandate) async throws -> ModerationMandate {
-            var countersigned = mandate
-            countersigned.signatures.append(StubEnforcementBackendClient.countersignSentinel)
-            return countersigned
+        func countersignMandate(_ mandate: ModerationMandate) async throws -> InterfaceCountersignature {
+            InterfaceCountersignature(signature: lock.withLock { countersignature })
         }
 
         func gateCheck(_ request: GateCheckRequest) async throws -> GateCheckResult {
@@ -99,6 +105,7 @@ final class ModerationRepositoryTests: XCTestCase {
             }
           ],
           "appellate": "onym:component:appellate",
+          "newHolderAppeal": "hash:new-holder",
           "validUntil": "2030-01-01T00:00:00Z",
           "signature": "unsigned-fixture"
         }
@@ -214,8 +221,17 @@ final class ModerationRepositoryTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suite) }
         let stub = StubEnforcementBackendClient(defaults: defaults)
 
-        let first = try await stub.enrollDevice(token: nil, userKey: "u", signature: Data())
-        let second = try await stub.enrollDevice(token: Data("t".utf8), userKey: "u", signature: Data())
+        let first = try await stub.enrollDevice(
+            EnrollmentRequest(deviceToken: nil, userKey: "u", timestamp: now, signature: Data())
+        )
+        let second = try await stub.enrollDevice(
+            EnrollmentRequest(
+                deviceToken: Data("t".utf8),
+                userKey: "u",
+                timestamp: now.addingTimeInterval(60),
+                signature: Data()
+            )
+        )
         XCTAssertEqual(first.deviceBinding, second.deviceBinding)
     }
 
