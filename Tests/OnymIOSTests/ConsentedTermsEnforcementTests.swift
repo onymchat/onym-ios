@@ -285,12 +285,73 @@ final class ConsentedTermsEnforcementTests: XCTestCase {
     }
 
     func testNonComponentAppellateRefused() throws {
-        for appellate in ["self", "", "the appeals board", "https://authority.example/appeals"] {
+        for appellate in [
+            "self",
+            "",
+            "the appeals board",
+            "https://authority.example/appeals",
+            // The bare prefix carries the right shape while naming
+            // nobody — an appellate that resolves to no component can
+            // hear no appeal.
+            "onym:component:",
+            "onym:component:   ",
+            "onym:component:has whitespace",
+        ] {
             XCTAssertThrowsError(
                 try validateManifest(manifestJSON(appellate: appellate)),
                 appellate
             )
         }
+    }
+
+    /// A manifest whose own `componentId` doesn't resolve can't
+    /// establish that its appellate is anyone else.
+    func testUnparseableIssuerComponentIdRefusedForPermanentClass() throws {
+        XCTAssertThrowsError(
+            try validateManifest(manifestJSON(componentId: "onym:component:"))
+        )
+        XCTAssertThrowsError(
+            try validateManifest(manifestJSON(componentId: "authority"))
+        )
+    }
+
+    // MARK: - ComponentReference
+
+    func testComponentReferenceParsesAndRejects() throws {
+        XCTAssertEqual(
+            try ComponentReference.identifier(from: "onym:component:appellate"),
+            "appellate"
+        )
+        XCTAssertEqual(
+            ComponentReference.reference(for: "appellate"),
+            "onym:component:appellate"
+        )
+        for bad in [
+            "",
+            "onym:component:",
+            "onym:component: ",
+            "onym:component:\t",
+            "onym:component:a b",
+            "appellate",
+            "onym:key:00",
+            "ONYM:COMPONENT:appellate",
+        ] {
+            XCTAssertThrowsError(try ComponentReference.identifier(from: bad), bad)
+        }
+    }
+
+    func testNamesSameComponentIsFalseForUnparseableReferences() {
+        XCTAssertTrue(
+            ComponentReference.namesSameComponent("onym:component:a", "onym:component:a")
+        )
+        XCTAssertFalse(
+            ComponentReference.namesSameComponent("onym:component:a", "onym:component:b")
+        )
+        // Two identically-malformed references must not read as "the
+        // same component" — neither names one.
+        XCTAssertFalse(
+            ComponentReference.namesSameComponent("onym:component:", "onym:component:")
+        )
     }
 
     func testMissingAppellateRefusedOnlyForPermanentClasses() throws {
