@@ -39,9 +39,9 @@ public struct ModerationSettingsView: View {
                 if !flow.previousMandates.isEmpty {
                     SettingsSectionLabel("PREVIOUS MANDATES")
                     SettingsCard {
-                        ForEach(Array(flow.previousMandates.enumerated()), id: \.element.mandate.acceptedAt) { idx, record in
+                        ForEach(Array(flow.previousMandates.enumerated()), id: \.element.historyRowID) { idx, record in
                             SettingsRow(
-                                title: LocalizedStringKey(record.authorityName),
+                                titleText: record.authorityName,
                                 subtitle: "Consented \(record.mandate.acceptedAt.formatted(date: .abbreviated, time: .omitted)) · \(String(record.mandate.manifestHash.prefix(16)))…",
                                 hasChevron: false,
                                 last: idx == flow.previousMandates.count - 1
@@ -59,6 +59,7 @@ public struct ModerationSettingsView: View {
         .navigationTitle("Moderation")
         .navigationBarTitleDisplayMode(.inline)
         .task { flow.start() }
+        .onDisappear { flow.stop() }
         .sheet(isPresented: $showSwitchConsent) {
             ModerationConsentView(flow: makeConsentFlow(.switching))
         }
@@ -133,5 +134,15 @@ public struct ModerationSettingsView: View {
                 .foregroundStyle(OnymTokens.text2)
                 .textSelection(.enabled)
         }
+    }
+}
+
+private extension MandateRecord {
+    /// Stable list identity for the read-only history. `acceptedAt`
+    /// alone isn't enough: the repository stamps it from an injectable
+    /// clock, so two records can share an instant (trivially so under
+    /// a fixed test clock) and collide as `ForEach` ids.
+    var historyRowID: String {
+        "\(mandate.authority)|\(mandate.manifestHash)|\(mandate.acceptedAt.timeIntervalSince1970)"
     }
 }

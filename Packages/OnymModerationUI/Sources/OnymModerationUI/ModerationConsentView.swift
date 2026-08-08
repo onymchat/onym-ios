@@ -9,6 +9,7 @@ import OnymModeration
 /// nothing buried in unrelated terms.
 public struct ModerationConsentView: View {
     @State private var flow: ModerationConsentFlow
+    @Environment(\.dismiss) private var dismiss
 
     public init(flow: ModerationConsentFlow) {
         _flow = State(initialValue: flow)
@@ -34,9 +35,32 @@ public struct ModerationConsentView: View {
             .background(OnymTokens.surface.ignoresSafeArea())
             .navigationTitle(flow.mode == .onboarding ? "Moderation" : "Switch Authority")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                // Switching is a normal, abandonable settings task, and
+                // the `.done` step has no other way out — `onConsented`
+                // belongs to the app factory and can't dismiss us.
+                // Onboarding deliberately has no escape: consent is the
+                // gate.
+                if flow.mode == .switching {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button(dismissLabel) { dismiss() }
+                            .accessibilityIdentifier("moderation.consent.dismiss")
+                    }
+                }
+            }
             .task { flow.start() }
+            .onDisappear { flow.stop() }
         }
         .interactiveDismissDisabled(flow.mode == .onboarding)
+    }
+
+    /// "Cancel" while the task can still be abandoned; "Done" once the
+    /// mandate exists, whichever terms it ended up binding.
+    private var dismissLabel: LocalizedStringKey {
+        switch flow.state.step {
+        case .done: return "Done"
+        default: return "Cancel"
+        }
     }
 
     // MARK: - Steps
@@ -94,7 +118,7 @@ public struct ModerationConsentView: View {
                 ForEach(Array(flow.state.authorities.enumerated()), id: \.element.componentId) { idx, listing in
                     Button { flow.selectedAuthority(listing) } label: {
                         SettingsRow(
-                            title: LocalizedStringKey(listing.name),
+                            titleText: listing.name,
                             subtitle: listing.componentId,
                             last: idx == flow.state.authorities.count - 1
                         ) {
@@ -108,14 +132,14 @@ public struct ModerationConsentView: View {
         }
 
         if let error = flow.state.errorMessage {
-            SettingsFootnote(LocalizedStringKey(error))
+            SettingsFootnote(verbatim: error)
         }
     }
 
     @ViewBuilder
     private var review: some View {
-        if let reviewing = flow.state.reviewingManifest {
-            SettingsLargeTitle(LocalizedStringKey(flow.state.selectedListing?.name ?? "Terms"))
+        if let reviewing = flow.state.reviewingManifest?.signedManifest {
+            SettingsLargeTitle(verbatim: flow.state.selectedListing?.name ?? String(localized: "Terms"))
 
             Text("These are the exact terms you're consenting to. A case can only ever reach you under a violation class listed here, with these windows and this appeal path.")
                 .font(.system(size: 14))
@@ -147,7 +171,7 @@ public struct ModerationConsentView: View {
             SettingsFootnote("Your consent binds to this hash of these exact terms. The authority cannot edit them under your mandate — changed terms bind only new consents.")
 
             if let error = flow.state.errorMessage {
-                SettingsFootnote(LocalizedStringKey(error))
+                SettingsFootnote(verbatim: error)
             }
 
             VStack(spacing: 10) {
@@ -191,7 +215,7 @@ public struct ModerationConsentView: View {
     /// One violation class with all five mandatory terms visible.
     private func classCard(_ violationClass: ViolationClass) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionLabel(LocalizedStringKey(violationClass.classId.replacingOccurrences(of: "-", with: " ").uppercased()))
+            SettingsSectionLabel(verbatim: violationClass.classId.replacingOccurrences(of: "-", with: " ").uppercased())
             SettingsCard {
                 VStack(alignment: .leading, spacing: 8) {
                     termRow("Response window", violationClass.responseWindow.display)
@@ -219,7 +243,7 @@ public struct ModerationConsentView: View {
 
     /// Appellate, new-holder path, and validity — the manifest-level
     /// terms shared by all classes.
-    private func proceduralCard(_ reviewing: ModerationConsentFlow.ReviewedManifest) -> some View {
+    private func proceduralCard(_ reviewing: SignedManifest) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             SettingsSectionLabel("PROCEDURE")
             SettingsCard {

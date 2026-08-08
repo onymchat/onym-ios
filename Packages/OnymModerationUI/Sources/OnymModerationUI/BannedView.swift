@@ -9,16 +9,25 @@ import OnymModeration
 /// is nonconforming; this screen is the conforming alternative.
 public struct BannedView: View {
     let state: BanState
-    /// Entry point into the authority's appeal path. Stubbed today
-    /// (`ModerationAuthorityClient.appeal` throws `.notImplemented`);
-    /// the URLs below remain the declared out-of-band procedure.
-    let onNewHolderClaim: () -> Void
+    /// Entry point into the authority's new-holder procedure when the
+    /// verdict carries no `newHolderURL`. No default: this is the most
+    /// safety-critical affordance on the screen, and an empty closure
+    /// would make tapping it do nothing — a dead button on a blocking
+    /// screen is the silent brick the profile forbids. Callers with no
+    /// in-app path pass `nil`, and the screen falls back to the
+    /// authority's contact instead of offering a button that lies.
+    let onNewHolderClaim: (() -> Void)?
 
     @Environment(\.openURL) private var openURL
 
-    public init(state: BanState, onNewHolderClaim: @escaping () -> Void = {}) {
+    public init(state: BanState, onNewHolderClaim: (() -> Void)? = nil) {
         self.state = state
         self.onNewHolderClaim = onNewHolderClaim
+    }
+
+    /// Whether the new-holder path can actually be reached from here.
+    private var hasNewHolderPath: Bool {
+        state.newHolderURL != nil || onNewHolderClaim != nil
     }
 
     public var body: some View {
@@ -71,26 +80,34 @@ public struct BannedView: View {
                     // The new-holder path is its own affordance, not a
                     // footnote: DeviceCheck bits survive resale, and the
                     // device's next owner is the person this screen is
-                    // most likely wronging.
-                    Button {
-                        if let url = state.newHolderURL {
-                            openURL(url)
-                        } else {
-                            onNewHolderClaim()
+                    // most likely wronging. Shown only when it actually
+                    // leads somewhere; otherwise the footnote below
+                    // routes them to the authority directly.
+                    if hasNewHolderPath {
+                        Button {
+                            if let url = state.newHolderURL {
+                                openURL(url)
+                            } else {
+                                onNewHolderClaim?()
+                            }
+                        } label: {
+                            Text("I'm this device's new owner")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(OnymTokens.text)
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                                .background(OnymTokens.surface2,
+                                            in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
-                    } label: {
-                        Text("I'm this device's new owner")
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(OnymTokens.text)
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                            .background(OnymTokens.surface2,
-                                        in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("moderation.banned.new_holder")
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("moderation.banned.new_holder")
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 16)
+
+                if !hasNewHolderPath {
+                    SettingsFootnote("If you're this device's new owner, contact the authority above — device bans survive a change of hands, and the authority runs an expedited procedure for it.")
+                }
             }
             .padding(.bottom, 32)
         }

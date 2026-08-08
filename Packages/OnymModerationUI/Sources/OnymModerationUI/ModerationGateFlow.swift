@@ -9,7 +9,9 @@ import OnymModeration
 @Observable
 public final class ModerationGateFlow {
     public enum RootGate: Equatable {
-        /// Repositories haven't reported yet — keep the launch screen.
+        /// Repositories haven't reported yet. The app renders normally
+        /// in this state — see `recompute`, which explains why blocking
+        /// launch on the first gate answer waits on a real backend.
         case checking
         /// No active mandate: present the consent flow (blocking).
         case needsConsent

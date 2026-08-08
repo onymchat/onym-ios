@@ -27,22 +27,19 @@ public final class ModerationConsentFlow {
         public var authorities: [AuthorityListing] = []
         public var fetchStatus: AuthorityFetchStatus = .idle
         public var selectedListing: AuthorityListing?
+        /// The exact manifest on the consent surface. This same value is
+        /// handed back to `consent(to:reviewedManifest:)`, so what the
+        /// user read is what the mandate pins — and being a
+        /// `ReviewedManifest`, it can only have come from the
+        /// repository's verified fetch.
         public var reviewingManifest: ReviewedManifest?
         public var errorMessage: String?
-    }
-
-    /// The manifest under review plus the hash the mandate will pin —
-    /// displayed on the consent surface so what's signed is inspectable.
-    public struct ReviewedManifest: Equatable {
-        public let manifest: AuthorityManifest
-        public let manifestHash: String
     }
 
     public let mode: Mode
     public private(set) var state = State()
 
     private let repository: ModerationRepository
-    private let manifestFetcher: any AuthorityManifestFetcher
     private var snapshotTask: Task<Void, Never>?
     /// Called after a successful consent so the presenter can dismiss
     /// and trigger an immediate gate check.
@@ -51,12 +48,10 @@ public final class ModerationConsentFlow {
     public init(
         mode: Mode,
         repository: ModerationRepository,
-        manifestFetcher: any AuthorityManifestFetcher,
         onConsented: @escaping @MainActor () -> Void = {}
     ) {
         self.mode = mode
         self.repository = repository
-        self.manifestFetcher = manifestFetcher
         self.onConsented = onConsented
     }
 
@@ -87,18 +82,15 @@ public final class ModerationConsentFlow {
 
     // MARK: - Intents
 
-    /// Row tap in the authority picker: fetch + pin the manifest and
-    /// move to the review (consent) surface.
+    /// Row tap in the authority picker: fetch, verify, and validate the
+    /// manifest, then move to the review (consent) surface. The value
+    /// retained here is the one that gets signed — see `tappedAgree`.
     public func selectedAuthority(_ listing: AuthorityListing) {
         state.selectedListing = listing
         state.errorMessage = nil
         Task {
             do {
-                let signed = try await manifestFetcher.fetch(listing)
-                state.reviewingManifest = ReviewedManifest(
-                    manifest: signed.manifest,
-                    manifestHash: signed.manifestHash
-                )
+                state.reviewingManifest = try await repository.manifestForReview(listing)
                 state.step = .reviewingManifest
             } catch {
                 state.errorMessage = String(localized: "Couldn't load this authority's terms. Try again.")
@@ -107,13 +99,21 @@ public final class ModerationConsentFlow {
     }
 
     /// "I agree and sign" on the consent surface.
+    ///
+    /// Hands back the exact `SignedManifest` that was displayed, so the
+    /// mandate pins the bytes the user read. The repository never
+    /// refetches, which is what closes the window where an authority
+    /// could serve different terms between review and agreement — the
+    /// footnote on the consent surface promises precisely this.
     public func tappedAgree() {
-        guard let listing = state.selectedListing else { return }
+        guard let listing = state.selectedListing,
+              let reviewed = state.reviewingManifest
+        else { return }
         state.step = .signing
         state.errorMessage = nil
         Task {
             do {
-                try await repository.consent(to: listing)
+                try await repository.consent(to: listing, reviewedManifest: reviewed)
                 state.step = .done
                 onConsented()
             } catch {

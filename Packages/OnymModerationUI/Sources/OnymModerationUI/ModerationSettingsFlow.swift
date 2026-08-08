@@ -36,8 +36,14 @@ public final class ModerationSettingsFlow {
         gateTask = Task { [weak self] in
             guard let self else { return }
             for await status in self.gateCheck.snapshots {
-                if case .operational(let openCases) = status {
+                // Assign on every status, not just `.operational`:
+                // keeping the last-seen notices when the gate moves
+                // elsewhere would leave a closed case on screen.
+                switch status {
+                case .operational(let openCases):
                     self.state.openCases = openCases
+                case .notMandated, .banned, .gateCheckRequired:
+                    self.state.openCases = []
                 }
             }
         }
