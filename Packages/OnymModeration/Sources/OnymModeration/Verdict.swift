@@ -132,9 +132,6 @@ public struct Verdict: Codable, Sendable, Equatable {
             decidedAt: decidedAt,
             final: isFinal
         )
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        return try encoder.encode(unsigned)
+        return try ModerationCanonicalEncoder.encode(unsigned)
     }
 }

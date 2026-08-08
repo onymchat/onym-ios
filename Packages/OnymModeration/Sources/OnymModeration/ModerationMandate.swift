@@ -80,10 +80,7 @@ public struct ModerationMandate: Codable, Sendable, Equatable {
             deviceBinding: deviceBinding,
             acceptedAt: acceptedAt
         )
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        return try encoder.encode(unsigned)
+        return try ModerationCanonicalEncoder.encode(unsigned)
     }
 
     /// `mandateRef` as verdicts and notices carry it: SHA-256
