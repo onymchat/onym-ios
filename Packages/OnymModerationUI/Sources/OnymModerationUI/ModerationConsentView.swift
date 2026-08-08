@@ -1,0 +1,284 @@
+import SwiftUI
+import OnymDesign
+import OnymModeration
+
+/// The consent surface (Moderation.md §8 interface obligation 1):
+/// full-screen, every violation class with all five terms, the
+/// appellate and new-holder paths, the manifest hash being pinned,
+/// and one explicit agree button. Nothing collapsed by default,
+/// nothing buried in unrelated terms.
+public struct ModerationConsentView: View {
+    @State private var flow: ModerationConsentFlow
+
+    public init(flow: ModerationConsentFlow) {
+        _flow = State(initialValue: flow)
+    }
+
+    public var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    switch flow.state.step {
+                    case .loadingDirectory:
+                        loading
+                    case .pickingAuthority:
+                        picker
+                    case .reviewingManifest, .signing:
+                        review
+                    case .done:
+                        done
+                    }
+                }
+                .padding(.bottom, 32)
+            }
+            .background(OnymTokens.surface.ignoresSafeArea())
+            .navigationTitle(flow.mode == .onboarding ? "Moderation" : "Switch Authority")
+            .navigationBarTitleDisplayMode(.inline)
+            .task { flow.start() }
+        }
+        .interactiveDismissDisabled(flow.mode == .onboarding)
+    }
+
+    // MARK: - Steps
+
+    private var loading: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+            Text("Loading moderation authorities…")
+                .font(.system(size: 14))
+                .foregroundStyle(OnymTokens.text2)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 120)
+    }
+
+    @ViewBuilder
+    private var picker: some View {
+        SettingsLargeTitle("Choose a moderation authority")
+        Text("Onym requires a moderation authority to handle reports of prohibited content. You choose who that is. Its entire power over you is written in the terms you'll review next — nothing can be added to them later without your fresh consent.")
+            .font(.system(size: 14))
+            .foregroundStyle(OnymTokens.text2)
+            .lineSpacing(3)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 16)
+
+        switch flow.state.fetchStatus {
+        case .failed(let message):
+            SettingsCard {
+                VStack(spacing: 10) {
+                    Text(message)
+                        .font(.system(size: 14))
+                        .foregroundStyle(OnymTokens.text2)
+                    Button("Retry") { flow.tappedRetry() }
+                        .accessibilityIdentifier("moderation.consent.retry")
+                }
+                .frame(maxWidth: .infinity)
+                .padding(16)
+            }
+        case .fetching, .idle:
+            SettingsCard {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .padding(16)
+            }
+        case .success where flow.state.authorities.isEmpty:
+            SettingsCard {
+                Text("No authorities are published yet.")
+                    .font(.system(size: 14))
+                    .foregroundStyle(OnymTokens.text3)
+                    .frame(maxWidth: .infinity)
+                    .padding(16)
+            }
+        case .success:
+            SettingsCard {
+                ForEach(Array(flow.state.authorities.enumerated()), id: \.element.componentId) { idx, listing in
+                    Button { flow.selectedAuthority(listing) } label: {
+                        SettingsRow(
+                            title: LocalizedStringKey(listing.name),
+                            subtitle: listing.componentId,
+                            last: idx == flow.state.authorities.count - 1
+                        ) {
+                            SettingsIconTile(symbol: "checkmark.shield", bg: SettingsTile.indigo)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("moderation.consent.authority.\(listing.componentId)")
+                }
+            }
+        }
+
+        if let error = flow.state.errorMessage {
+            SettingsFootnote(LocalizedStringKey(error))
+        }
+    }
+
+    @ViewBuilder
+    private var review: some View {
+        if let reviewing = flow.state.reviewingManifest {
+            SettingsLargeTitle(LocalizedStringKey(flow.state.selectedListing?.name ?? "Terms"))
+
+            Text("These are the exact terms you're consenting to. A case can only ever reach you under a violation class listed here, with these windows and this appeal path.")
+                .font(.system(size: 14))
+                .foregroundStyle(OnymTokens.text2)
+                .lineSpacing(3)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
+
+            ForEach(reviewing.manifest.violationClasses, id: \.classId) { violationClass in
+                classCard(violationClass)
+            }
+
+            proceduralCard(reviewing)
+
+            SettingsSectionLabel("WHAT YOU'RE SIGNING")
+            SettingsCard {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Manifest hash")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(OnymTokens.text)
+                    Text(reviewing.manifestHash)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(OnymTokens.text2)
+                        .textSelection(.enabled)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(16)
+            }
+            SettingsFootnote("Your consent binds to this hash of these exact terms. The authority cannot edit them under your mandate — changed terms bind only new consents.")
+
+            if let error = flow.state.errorMessage {
+                SettingsFootnote(LocalizedStringKey(error))
+            }
+
+            VStack(spacing: 10) {
+                SettingsPrimaryButton(action: { flow.tappedAgree() }) {
+                    if flow.state.step == .signing {
+                        ProgressView().tint(OnymTokens.onAccent)
+                    } else {
+                        Text("I agree and sign")
+                    }
+                }
+                .disabled(flow.state.step == .signing)
+                .accessibilityIdentifier("moderation.consent.agree")
+
+                Button("Back") { flow.tappedBack() }
+                    .font(.system(size: 14))
+                    .foregroundStyle(OnymTokens.text2)
+                    .disabled(flow.state.step == .signing)
+                    .accessibilityIdentifier("moderation.consent.back")
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+        }
+    }
+
+    private var done: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 44))
+                .foregroundStyle(OnymTokens.green)
+            Text("Mandate signed")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(OnymTokens.text)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 120)
+        .accessibilityIdentifier("moderation.consent.done")
+    }
+
+    // MARK: - Cards
+
+    /// One violation class with all five mandatory terms visible.
+    private func classCard(_ violationClass: ViolationClass) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSectionLabel(LocalizedStringKey(violationClass.classId.replacingOccurrences(of: "-", with: " ").uppercased()))
+            SettingsCard {
+                VStack(alignment: .leading, spacing: 8) {
+                    termRow("Response window", violationClass.responseWindow.display)
+                    termRow("Decision deadline", violationClass.decisionDeadline.display)
+                    termRow("Ban term", banTermDisplay(violationClass.banTerm))
+                    termRow("Appeal window", violationClass.appealWindow.display)
+                    termRow("Appeal effect", violationClass.appealEffect == .suspensive
+                            ? String(localized: "Suspensive — no ban until the appeal window passes unused")
+                            : String(localized: "Non-suspensive — the ban executes at once; appeal can reverse it"))
+                    if let lawful = violationClass.lawfulReporting {
+                        termRow("Lawful reporting", lawful)
+                    }
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Definition")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(OnymTokens.text)
+                        definitionLink(violationClass.definition)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(16)
+            }
+        }
+    }
+
+    /// Appellate, new-holder path, and validity — the manifest-level
+    /// terms shared by all classes.
+    private func proceduralCard(_ reviewing: ModerationConsentFlow.ReviewedManifest) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSectionLabel("PROCEDURE")
+            SettingsCard {
+                VStack(alignment: .leading, spacing: 8) {
+                    if let appellate = reviewing.manifest.appellate {
+                        termRow("Appeals heard by", appellate)
+                    }
+                    if let newHolder = reviewing.manifest.newHolderAppeal {
+                        termRow("New device owner", newHolder)
+                    }
+                    termRow("Terms valid until", reviewing.manifest.validUntil.formatted(date: .abbreviated, time: .omitted))
+                    termRow("Operated by", reviewing.manifest.operatorKey)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(16)
+            }
+        }
+    }
+
+    private func termRow(_ label: LocalizedStringKey, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(OnymTokens.text)
+            Text(value)
+                .font(.system(size: 13))
+                .foregroundStyle(OnymTokens.text2)
+        }
+    }
+
+    /// Definitions are content-addressed; when the address is a URL,
+    /// make it tappable so the exact wording is one tap away.
+    @ViewBuilder
+    private func definitionLink(_ address: String) -> some View {
+        if let url = URL(string: address), url.scheme == "https" {
+            Link(address, destination: url)
+                .font(.system(size: 12, design: .monospaced))
+        } else {
+            Text(address)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundStyle(OnymTokens.text2)
+                .textSelection(.enabled)
+        }
+    }
+
+    private func banTermDisplay(_ term: BanTerm) -> String {
+        switch term {
+        case .permanent:
+            return String(localized: "Permanent (appealable at the external appellate for as long as it is in force)")
+        case .duration(let duration):
+            return duration.display
+        }
+    }
+}
+
+extension ISO8601Duration {
+    /// "3 days", "1 day" — the consent surface shows human terms, with
+    /// the raw ISO string preserved in the manifest hash it pins.
+    var display: String {
+        days == 1 ? String(localized: "1 day") : String(localized: "\(days) days")
+    }
+}
