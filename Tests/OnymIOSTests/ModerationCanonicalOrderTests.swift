@@ -16,7 +16,7 @@ import OnymModeration
 /// These tests pin the byte-order rule so a future switch to
 /// `JSONSerialization` fails here instead.
 final class ModerationCanonicalOrderTests: XCTestCase {
-    private func keyOrder(of data: Data) throws -> [String] {
+    private func keyOrder(of data: Data, atDepth targetDepth: Int = 1) throws -> [String] {
         // Scan the raw JSON rather than parsing: parsing into a
         // dictionary discards the very thing under test.
         let text = try XCTUnwrap(String(data: data, encoding: .utf8))
@@ -25,23 +25,56 @@ final class ModerationCanonicalOrderTests: XCTestCase {
         var depth = 0
         while index < text.endIndex {
             let character = text[index]
-            if character == "{" || character == "[" { depth += 1 }
-            if character == "}" || character == "]" { depth -= 1 }
-            if character == "\"", depth == 1 {
-                let start = text.index(after: index)
-                if let end = text[start...].firstIndex(of: "\"") {
-                    let candidate = String(text[start..<end])
-                    let after = text.index(after: end)
-                    if after < text.endIndex, text[after] == ":" {
-                        keys.append(candidate)
+            if character == "{" || character == "[" {
+                depth += 1
+                index = text.index(after: index)
+                continue
+            }
+            if character == "}" || character == "]" {
+                depth -= 1
+                index = text.index(after: index)
+                continue
+            }
+            if character == "\"" {
+                var cursor = text.index(after: index)
+                var candidate = ""
+                var escaped = false
+                while cursor < text.endIndex {
+                    let current = text[cursor]
+                    if escaped {
+                        candidate.append(current)
+                        escaped = false
+                    } else if current == "\\" {
+                        escaped = true
+                    } else if current == "\"" {
+                        break
+                    } else {
+                        candidate.append(current)
                     }
-                    index = after
-                    continue
+                    cursor = text.index(after: cursor)
                 }
+                guard cursor < text.endIndex else {
+                    XCTFail("unterminated JSON string")
+                    return keys
+                }
+
+                var after = text.index(after: cursor)
+                while after < text.endIndex, text[after].isWhitespace {
+                    after = text.index(after: after)
+                }
+                if depth == targetDepth, after < text.endIndex, text[after] == ":" {
+                    keys.append(candidate)
+                }
+                index = after
+                continue
             }
             index = text.index(after: index)
         }
         return keys
+    }
+
+    private func byteOrdered(_ keys: [String]) -> [String] {
+        keys.sorted { Array($0.utf8).lexicographicallyPrecedes(Array($1.utf8)) }
     }
 
     private func makeReport() -> Report {
@@ -54,7 +87,8 @@ final class ModerationCanonicalOrderTests: XCTestCase {
             evidence: [
                 EvidenceItem(
                     disclosedContent: "the disclosed message",
-                    authenticityProof: "c2VuZGVyLXNpZ25hdHVyZQ=="
+                    authenticityProof: "c2VuZGVyLXNpZ25hdHVyZQ==",
+                    context: "the preceding exchange"
                 )
             ],
             filedAt: Date(timeIntervalSince1970: 1_700_000_000),
@@ -96,6 +130,13 @@ final class ModerationCanonicalOrderTests: XCTestCase {
         )
     }
 
+    func test_reportSigningBytes_haveTheExactNestedEvidenceKeyOrder() throws {
+        XCTAssertEqual(
+            try keyOrder(of: try makeReport().signingBytes(), atDepth: 3),
+            ["authenticityProof", "context", "disclosedContent"]
+        )
+    }
+
     /// Guard against anyone "simplifying" the encoder: this is what the
     /// bytes would look like if produced through `JSONSerialization`,
     /// and it must not be what we emit.
@@ -116,22 +157,14 @@ final class ModerationCanonicalOrderTests: XCTestCase {
         XCTAssertNotEqual(oursCollisionPart, theirs)
     }
 
-    /// The objects that already cross this boundary sort identically
-    /// under both rules — which is why the interface has interoperated
-    /// so far. Pinned so a renamed field can't quietly change that.
-    func test_mandateAndVerdictKeysAreUnaffectedByTheOrderingDifference() throws {
-        for keys in [
-            ["mandateVersion", "user", "interface", "authority", "manifestHash",
-             "classes", "deviceBinding", "acceptedAt"],
-            ["verdictVersion", "caseId", "authority", "mandateRef", "accusedKeys",
-             "deviceBinding", "classId", "disposition", "marks", "banExpires",
-             "executeAfter", "reasoning", "appealDeadline", "decidedAt", "final"],
-        ] {
-            let byteOrder = keys.sorted { Array($0.utf8).lexicographicallyPrecedes(Array($1.utf8)) }
-            let object = Dictionary(uniqueKeysWithValues: keys.map { ($0, 1) })
-            let serialized = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
-            XCTAssertEqual(try keyOrder(of: serialized), byteOrder)
-        }
+    /// Pin the ordering check to the actual signed forms rather than
+    /// parallel hardcoded key lists that can drift from the types.
+    func test_mandateAndVerdictSigningBytes_sortKeysByByteOrder() throws {
+        let mandateKeys = try keyOrder(of: try makeMandate().signingBytes())
+        XCTAssertEqual(mandateKeys, byteOrdered(mandateKeys))
+
+        let verdictKeys = try keyOrder(of: try makeVerdict().signingBytes())
+        XCTAssertEqual(verdictKeys, byteOrdered(verdictKeys))
     }
 
     // MARK: - Response and appeal
@@ -139,7 +172,7 @@ final class ModerationCanonicalOrderTests: XCTestCase {
     func test_responseAndAppealSigningBytesExcludeTheirSignature() throws {
         let response = CaseResponse(
             caseId: "case-1",
-            statement: "context changes its meaning",
+            statement: #"context { changes "its" [meaning] }"#,
             signature: "c2ln"
         )
         XCTAssertEqual(try keyOrder(of: try response.signingBytes()), ["caseId", "evidence", "statement"])
@@ -174,5 +207,38 @@ final class ModerationCanonicalOrderTests: XCTestCase {
         let before = try report.signingBytes()
         report.signature = "ZGlmZmVyZW50LXNpZ25hdHVyZQ=="
         XCTAssertEqual(try report.signingBytes(), before)
+    }
+
+    private func makeMandate() -> ModerationMandate {
+        ModerationMandate(
+            user: "onym:key:\(String(repeating: "ab", count: 32))",
+            interface: ModerationRepository.interfaceComponentId,
+            authority: "onym:component:test-authority",
+            manifestHash: String(repeating: "0", count: 64),
+            classes: ["unsolicited-pornography"],
+            deviceBinding: "enrollment-1",
+            acceptedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            signatures: ["dXNlci1zaWc="]
+        )
+    }
+
+    private func makeVerdict() -> Verdict {
+        Verdict(
+            caseId: "case-1",
+            authority: "onym:component:test-authority",
+            mandateRef: String(repeating: "1", count: 64),
+            accusedKeys: ["onym:key:\(String(repeating: "ab", count: 32))"],
+            deviceBinding: "enrollment-1",
+            classId: "unsolicited-pornography",
+            disposition: .ban,
+            marks: Marks(caseOpen: false, banned: true),
+            banExpires: Date(timeIntervalSince1970: 1_800_000_000),
+            executeAfter: Date(timeIntervalSince1970: 1_700_000_000),
+            reasoning: "reasoning-hash",
+            appealDeadline: Date(timeIntervalSince1970: 1_700_000_000),
+            decidedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            signature: "YXV0aG9yaXR5LXNpZw==",
+            isFinal: false
+        )
     }
 }

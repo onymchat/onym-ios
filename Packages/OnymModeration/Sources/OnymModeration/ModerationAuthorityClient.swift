@@ -123,6 +123,11 @@ public struct CaseStatus: Codable, Sendable, Equatable {
 /// window), and `accept-mandate` is authority-side. One implementation
 /// per authority; the repository picks the client for the mandated
 /// authority, which is what makes authorities swappable.
+///
+/// An HTTP implementation must put `CaseResponse.caseId` and
+/// `AppealSubmission.caseId` in both the request path and the signed body.
+/// The authority must reject a path/body mismatch; trusting either one alone
+/// would reopen the cross-case replay that signing `caseId` prevents.
 public protocol ModerationAuthorityClient: Sendable {
     func fileReport(_ report: Report) async throws -> ReportReceipt
     func respond(_ response: CaseResponse) async throws

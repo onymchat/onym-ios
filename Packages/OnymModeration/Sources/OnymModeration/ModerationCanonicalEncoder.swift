@@ -2,7 +2,7 @@ import Foundation
 
 /// The one encoder configuration every moderation signing form uses.
 ///
-/// Two settings, both load-bearing:
+/// Three rules, all load-bearing:
 ///
 /// - **`.sortedKeys`** — `JSONEncoder` sorts keys by UTF-8 byte order.
 ///   Beware that `JSONSerialization` has an option of the same name
@@ -13,6 +13,10 @@ import Foundation
 ///   must never be produced through `JSONSerialization`.
 /// - **`.iso8601` dates** — seconds precision, UTC, matching the form
 ///   every timestamp crosses the wire in.
+/// - **Nil optionals are omitted** — Swift's synthesized `Encodable`
+///   uses `encodeIfPresent`, so absent values are not emitted as JSON
+///   `null`. This applies to `EvidenceItem.context` and the optional
+///   verdict dates; another implementation must preserve that form.
 ///
 /// Byte order is also what every non-Apple JSON library does by
 /// default (serde_json, Go's `encoding/json`, Python's `sort_keys`),

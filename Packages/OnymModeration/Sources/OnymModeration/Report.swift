@@ -72,7 +72,7 @@ public struct Report: Codable, Sendable, Equatable {
     /// these bytes with a byte-ordered JSON library (serde_json, Go's
     /// encoding/json, Python's `sort_keys`) would reject every
     /// signature produced the other way, so this must stay on
-    /// `JSONEncoder`. `SigningBytesTests` pins exactly that.
+    /// `JSONEncoder`. `ModerationCanonicalOrderTests` pins exactly that.
     ///
     /// Same PROVISIONAL caveat as `ModerationMandate.signingBytes()`:
     /// the draft spec fixes no canonical JSON form, so this agreement

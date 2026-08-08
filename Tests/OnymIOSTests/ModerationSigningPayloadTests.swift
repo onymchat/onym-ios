@@ -52,6 +52,24 @@ final class ModerationSigningPayloadTests: XCTestCase {
         )
     }
 
+    private func makeReport() -> Report {
+        Report(
+            reportId: "report-1",
+            reporter: "onym:key:\(String(repeating: "ab", count: 32))",
+            reporterMandate: String(repeating: "1", count: 64),
+            accused: "onym:key:\(String(repeating: "cd", count: 32))",
+            classId: "unsolicited-pornography",
+            evidence: [
+                EvidenceItem(
+                    disclosedContent: "the disclosed message",
+                    authenticityProof: "c2VuZGVyLXNpZ25hdHVyZQ=="
+                )
+            ],
+            filedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            signature: "cmVwb3J0ZXItc2ln"
+        )
+    }
+
     // MARK: - Mandate
 
     func test_mandateSigningBytes_coverEveryFieldExceptSignatures() throws {
@@ -77,6 +95,39 @@ final class ModerationSigningPayloadTests: XCTestCase {
         let verdict = makeVerdict()
         let signed = try keys(of: verdict.signingBytes())
         XCTAssertEqual(signed, try encodedKeys(of: verdict).subtracting(["signature"]))
+        XCTAssertFalse(signed.contains("signature"))
+    }
+
+    // MARK: - Report, response and appeal
+
+    func test_reportSigningBytes_coverEveryFieldExceptSignature() throws {
+        let report = makeReport()
+        let signed = try keys(of: report.signingBytes())
+        XCTAssertEqual(signed, try encodedKeys(of: report).subtracting(["signature"]))
+        XCTAssertFalse(signed.contains("signature"))
+    }
+
+    func test_responseSigningBytes_coverEveryFieldExceptSignature() throws {
+        let response = CaseResponse(
+            caseId: "case-1",
+            statement: "context changes its meaning",
+            evidence: makeReport().evidence,
+            signature: "c2ln"
+        )
+        let signed = try keys(of: response.signingBytes())
+        XCTAssertEqual(signed, try encodedKeys(of: response).subtracting(["signature"]))
+        XCTAssertFalse(signed.contains("signature"))
+    }
+
+    func test_appealSigningBytes_coverEveryFieldExceptSignature() throws {
+        let appeal = AppealSubmission(
+            caseId: "case-1",
+            kind: .appeal,
+            statement: "the decision is wrong",
+            signature: "c2ln"
+        )
+        let signed = try keys(of: appeal.signingBytes())
+        XCTAssertEqual(signed, try encodedKeys(of: appeal).subtracting(["signature"]))
         XCTAssertFalse(signed.contains("signature"))
     }
 }
