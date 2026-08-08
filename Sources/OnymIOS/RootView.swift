@@ -2,6 +2,7 @@ import SwiftUI
 import OnymSearch
 import OnymChatsUI
 import OnymSettings
+import OnymModerationUI
 
 /// App shell — `TabView` with the iOS 18+ `Tab(_, systemImage:, value:)`
 /// syntax. The `.search` role places its tab in the system's bottom-right
@@ -24,8 +25,52 @@ struct RootView: View {
     let dependencies: AppDependencies
 
     @State private var selectedTab: RootTab = .chats
+    @Environment(\.scenePhase) private var scenePhase
+
+    /// Whether the blocking consent sheet is up. Driven by the gate;
+    /// a `Bool` binding because `fullScreenCover(isPresented:)` wants
+    /// one, with the gate as the single source of truth.
+    @State private var showConsent = false
 
     var body: some View {
+        // The moderation gate is the enforcement surface (DeviceCheck
+        // profile §5): banned and gate-check-required replace the app
+        // wholesale; consent covers it; an open case only banners it.
+        Group {
+            switch dependencies.moderationGateFlow.gate {
+            case .banned(let banState):
+                BannedView(state: banState)
+            case .gateCheckRequired(let reason):
+                GateCheckRequiredView(reason: reason) {
+                    dependencies.moderationGateFlow.tappedRetry()
+                }
+            case .checking, .needsConsent, .operational:
+                tabs
+                    .overlay(alignment: .top) {
+                        if case .operational(let openCases) = dependencies.moderationGateFlow.gate,
+                           !openCases.isEmpty {
+                            OpenCaseBanner(notices: openCases)
+                        }
+                    }
+            }
+        }
+        .task { dependencies.moderationGateFlow.start() }
+        .onChange(of: dependencies.moderationGateFlow.gate) { _, gate in
+            showConsent = gate == .needsConsent
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                dependencies.moderationGateFlow.appForegrounded()
+            }
+        }
+        .fullScreenCover(isPresented: $showConsent) {
+            ModerationConsentView(
+                flow: dependencies.makeModerationConsentFlow(.onboarding)
+            )
+        }
+    }
+
+    private var tabs: some View {
         TabView(selection: $selectedTab) {
             Tab("Chats", systemImage: "bubble.left.and.bubble.right.fill", value: .chats) {
                 NavigationStack {
@@ -58,7 +103,9 @@ struct RootView: View {
                         makeBlossomRelaySettingsFlow: dependencies.makeBlossomRelaySettingsFlow,
                         makeAnchorsPickerFlow: dependencies.makeAnchorsPickerFlow,
                         identitiesFlow: dependencies.identitiesFlow,
-                        onClearAllMessages: { await dependencies.messageRepository.removeAll() }
+                        onClearAllMessages: { await dependencies.messageRepository.removeAll() },
+                        makeModerationSettingsFlow: dependencies.makeModerationSettingsFlow,
+                        makeModerationConsentFlow: dependencies.makeModerationConsentFlow
                     )
                 }
             }

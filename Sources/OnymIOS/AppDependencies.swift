@@ -6,6 +6,7 @@ import OnymInbox
 import OnymRecovery
 import OnymChatsUI
 import OnymSettings
+import OnymModerationUI
 
 /// App-wide composition root. Constructed exactly once by `OnymIOSApp`
 /// and threaded down to views via `RootView`. Each member is a factory
@@ -68,4 +69,10 @@ struct AppDependencies {
     /// `GroupNamePayload` out to members. Backs the admin-only rename
     /// affordance in `ChatMembersView`.
     let setGroupName: @MainActor (_ groupIDHex: String, _ name: String) async -> Void
+    /// Single shared instance — the app root switches on its gate
+    /// (consent / banned / check-required / operational) and Settings
+    /// observes the same state, so a factory would split them.
+    let moderationGateFlow: ModerationGateFlow
+    let makeModerationConsentFlow: @MainActor (ModerationConsentFlow.Mode) -> ModerationConsentFlow
+    let makeModerationSettingsFlow: @MainActor () -> ModerationSettingsFlow
 }
