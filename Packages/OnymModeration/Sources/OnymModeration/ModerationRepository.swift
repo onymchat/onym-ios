@@ -41,6 +41,27 @@ public struct ModerationState: Sendable, Equatable {
     }
 }
 
+/// A manifest this repository fetched, authenticated, and validated —
+/// the unit of consent, mintable only by `manifestForReview(_:)`.
+///
+/// `SignedManifest` is a plain value with a public initializer, so taking
+/// one at signing time would move authenticity (directory-pinned operator
+/// key, detached signature over the exact bytes) out of the repository and
+/// onto whoever calls it — and a hand-built value can pair `rawBytes` of
+/// one manifest with the decoded fields of another, pinning a hash whose
+/// contents differ from the classes the mandate enumerates. Wrapping it in
+/// a type with no public initializer keeps the check where the invariant
+/// lives: the only bytes that can reach a signed mandate are bytes the
+/// fetcher verified.
+public struct ReviewedManifest: Sendable, Equatable {
+    /// The reviewed manifest, for the consent surface to display.
+    public let signedManifest: SignedManifest
+
+    init(_ signedManifest: SignedManifest) {
+        self.signedManifest = signedManifest
+    }
+}
+
 /// Owns authority designation + mandate lifecycle: fetches the
 /// directory, verifies and pins manifests, signs mandates, and keeps
 /// exactly one record active per device. `manifestForReview(_:)` and
@@ -120,10 +141,10 @@ public actor ModerationRepository {
     /// consent surface. The returned value is the unit of consent: callers
     /// must retain it and pass that same value to
     /// `consent(to:reviewedManifest:)` after the user agrees.
-    public func manifestForReview(_ listing: AuthorityListing) async throws -> SignedManifest {
+    public func manifestForReview(_ listing: AuthorityListing) async throws -> ReviewedManifest {
         let signedManifest = try await manifestFetcher.fetch(listing)
         try manifestValidator.validateForConsent(signedManifest, now: clock())
-        return signedManifest
+        return ReviewedManifest(signedManifest)
     }
 
     /// Consent to the exact manifest the user reviewed: validate it again
@@ -138,8 +159,9 @@ public actor ModerationRepository {
     @discardableResult
     public func consent(
         to listing: AuthorityListing,
-        reviewedManifest signedManifest: SignedManifest
+        reviewedManifest: ReviewedManifest
     ) async throws -> MandateRecord {
+        let signedManifest = reviewedManifest.signedManifest
         guard signedManifest.manifest.componentId == listing.componentId else {
             throw ModerationError.manifestInvalid(
                 "reviewed manifest componentId does not match the selected authority"
