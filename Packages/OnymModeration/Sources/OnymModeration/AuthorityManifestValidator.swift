@@ -11,11 +11,15 @@ import Foundation
 /// manifest can never end up pinned by a signed mandate — and keeping
 /// them here stops the rules from scattering across the consent path.
 public struct AuthorityManifestValidator: Sendable {
-    /// Moderation profiles this client implements. PROVISIONAL: the
-    /// draft spec doesn't fix the id string yet, so it lives in exactly
-    /// one place; a manifest declaring anything else is refused rather
-    /// than half-honored.
-    public static let defaultSupportedProfileIds: Set<String> = ["onym:profile:devicecheck"]
+    /// Moderation profiles this client implements. The spec fixes this
+    /// string — Moderation.md §5.1 declares the profile's `profileId`
+    /// and §5.2 carries it as the manifest's `moderationProfileId` — so
+    /// a conforming manifest names exactly this. It lives in one place;
+    /// a manifest declaring anything else is refused rather than
+    /// half-honored.
+    public static let defaultSupportedProfileIds: Set<String> = [
+        "onym:moderation-profile:consent-bound-v1",
+    ]
 
     private let supportedProfileIds: Set<String>
 
