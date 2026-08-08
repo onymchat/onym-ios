@@ -56,6 +56,8 @@ public struct GateCheckRequiredView: View {
             return String(localized: "Device verification isn't available in this environment.")
         case .reidentificationRequired:
             return String(localized: "This device needs to be re-identified. Sign in with your identity to continue.")
+        case .clockRollback:
+            return String(localized: "This device's clock is set earlier than its last verification. Check the date and time, then connect to continue.")
         }
     }
 }
