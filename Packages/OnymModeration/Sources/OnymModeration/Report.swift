@@ -58,4 +58,43 @@ public struct Report: Codable, Sendable, Equatable {
         self.filedAt = filedAt
         self.signature = signature
     }
+
+    /// The bytes the reporter signs: every field except `signature`.
+    ///
+    /// Keys sort by **UTF-8 byte order**, which is what
+    /// `JSONEncoder.OutputFormatting.sortedKeys` does. That is not a
+    /// free choice here: `Foundation` also offers
+    /// `JSONSerialization`'s `.sortedKeys`, which sorts
+    /// *case-insensitively*, and `Report` is the one moderation object
+    /// whose keys actually disagree between the two —
+    /// `reportId` and `reportVersion` precede `reporter` by byte order
+    /// and follow it case-insensitively. An authority reconstructing
+    /// these bytes with a byte-ordered JSON library (serde_json, Go's
+    /// encoding/json, Python's `sort_keys`) would reject every
+    /// signature produced the other way, so this must stay on
+    /// `JSONEncoder`. `SigningBytesTests` pins exactly that.
+    ///
+    /// Same PROVISIONAL caveat as `ModerationMandate.signingBytes()`:
+    /// the draft spec fixes no canonical JSON form, so this agreement
+    /// holds by construction between implementations rather than by
+    /// specification.
+    public func signingBytes() throws -> Data {
+        struct Unsigned: Encodable {
+            let reportVersion: Int
+            let reportId, reporter, reporterMandate, accused, classId: String
+            let evidence: [EvidenceItem]
+            let filedAt: Date
+        }
+        let unsigned = Unsigned(
+            reportVersion: reportVersion,
+            reportId: reportId,
+            reporter: reporter,
+            reporterMandate: reporterMandate,
+            accused: accused,
+            classId: classId,
+            evidence: evidence,
+            filedAt: filedAt
+        )
+        return try ModerationCanonicalEncoder.encode(unsigned)
+    }
 }

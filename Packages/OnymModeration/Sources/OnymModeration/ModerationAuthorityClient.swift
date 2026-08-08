@@ -28,6 +28,18 @@ public struct CaseResponse: Codable, Sendable, Equatable {
         self.evidence = evidence
         self.signature = signature
     }
+
+    /// The bytes the accused signs: every field except `signature`.
+    /// See `ModerationCanonicalEncoder` for why the ordering matters.
+    public func signingBytes() throws -> Data {
+        struct Unsigned: Encodable {
+            let statement: String
+            let evidence: [EvidenceItem]
+        }
+        return try ModerationCanonicalEncoder.encode(
+            Unsigned(statement: statement, evidence: evidence)
+        )
+    }
 }
 
 /// An appeal filed within the declared window — or a new-holder claim,
@@ -47,6 +59,22 @@ public struct AppealSubmission: Codable, Sendable, Equatable {
         self.kind = kind
         self.statement = statement
         self.signature = signature
+    }
+
+    /// The bytes the accused signs: every field except `signature`.
+    ///
+    /// A `newHolderClaim` is signed too where the holder still has the
+    /// mandated identity, but an authority cannot require it — the
+    /// whole premise of that path is a device whose new owner is *not*
+    /// the mandated user (§5.7).
+    public func signingBytes() throws -> Data {
+        struct Unsigned: Encodable {
+            let kind: Kind
+            let statement: String
+        }
+        return try ModerationCanonicalEncoder.encode(
+            Unsigned(kind: kind, statement: statement)
+        )
     }
 }
 
