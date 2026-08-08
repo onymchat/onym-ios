@@ -66,7 +66,9 @@ public struct AuthorityManifestValidator: Sendable {
     /// §5.2 constraint 2 in full: the appellate must be a component
     /// reference, and a component *other than the issuer*. Accepting any
     /// non-`"self"` string let a manifest name its own `componentId`
-    /// (or a non-component value) and still declare permanent bans.
+    /// (or a non-component value) and still declare permanent bans,
+    /// and a bare prefix check let `"onym:component:"` — a reference
+    /// naming nobody — stand in for a living forum.
     private static func requireExternalAppellate(
         of manifest: AuthorityManifest,
         forClasses permanentClasses: [String]
@@ -77,17 +79,33 @@ public struct AuthorityManifestValidator: Sendable {
                 "permanent ban term (\(classes)) requires an external appellate"
             )
         }
-        guard appellate.hasPrefix(Self.componentReferencePrefix) else {
+        // Parsed, not prefix-matched: `"onym:component:"` carries the
+        // prefix while naming nobody, and an appellate that resolves to
+        // no component can hear no appeal.
+        let appellateIdentifier: String
+        do {
+            appellateIdentifier = try ComponentReference.identifier(from: appellate)
+        } catch {
             throw ModerationError.manifestInvalid(
-                "permanent ban term (\(classes)) requires the appellate to be a \(Self.componentReferencePrefix) reference"
+                "permanent ban term (\(classes)) requires the appellate to be a valid \(ComponentReference.prefix) reference: \(appellate)"
             )
         }
-        guard appellate != manifest.componentId else {
+        // The issuer is parsed too: if its own `componentId` doesn't
+        // resolve, "the appellate differs from the issuer" can't be
+        // established, and silently passing would be the wrong
+        // failure direction for a permanent sanction.
+        let issuerIdentifier: String
+        do {
+            issuerIdentifier = try ComponentReference.identifier(from: manifest.componentId)
+        } catch {
+            throw ModerationError.manifestInvalid(
+                "permanent ban term (\(classes)) requires a valid issuer componentId: \(manifest.componentId)"
+            )
+        }
+        guard appellateIdentifier != issuerIdentifier else {
             throw ModerationError.manifestInvalid(
                 "permanent ban term (\(classes)) names the issuer as its own appellate"
             )
         }
     }
-
-    static let componentReferencePrefix = "onym:component:"
 }

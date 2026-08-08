@@ -25,6 +25,10 @@ public enum ModerationError: Error, Sendable, Equatable {
     /// base64 operator key) could not be parsed as an Ed25519 public
     /// key. See `AuthorityKey`.
     case keyInvalid(String)
+    /// A component reference (`onym:component:<identifier>`) could not
+    /// be parsed — absent prefix, or an empty/blank identifier naming
+    /// no component. See `ComponentReference`.
+    case componentReferenceInvalid(String)
     /// DeviceCheck is unsupported here (simulator, enterprise-signed
     /// build). Callers degrade toward gate-check-required, never toward
     /// unmoderated operation (profile §8.5).
