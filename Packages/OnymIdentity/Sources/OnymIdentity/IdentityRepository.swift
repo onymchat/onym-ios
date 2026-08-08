@@ -252,6 +252,25 @@ public actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelop
         return snapshot.blsSecretKey
     }
 
+    /// Ed25519 detached signature over `message` with the
+    /// currently-selected identity's derived Stellar signing key. Used
+    /// by the moderation layer to sign mandates and gate-check
+    /// sessions. Same posture as `blsSecretKey()`: the private key is
+    /// derived per call from the Keychain snapshot and never leaves
+    /// this repository — only the signature does.
+    public func signWithStellarKey(_ message: Data) throws -> Data {
+        guard let currentID else {
+            throw IdentityError.identityNotLoaded
+        }
+        guard let snapshot = try keychain.read(currentID) else {
+            throw IdentityError.identityNotLoaded
+        }
+        let privateKey = try Self.stellarSigningPrivateKey(
+            fromNostrSecret: snapshot.nostrSecretKey
+        )
+        return try privateKey.signature(for: message)
+    }
+
     // MARK: - Streams
 
     public nonisolated var snapshots: AsyncStream<Identity?> {

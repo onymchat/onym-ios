@@ -11,6 +11,8 @@ import OnymInbox
 import OnymRecovery
 import OnymChatsUI
 import OnymSettings
+import OnymModeration
+import OnymModerationUI
 
 @main
 struct OnymIOSApp: App {
@@ -32,6 +34,11 @@ struct OnymIOSApp: App {
     private let groupStateVerifier: GroupStateVerifier
     private let introKeyStore: any IntroKeyStore
     private let introRequestStore: any IntroRequestStore
+    /// Moderation seat: authority designation + mandate lifecycle,
+    /// and the DeviceCheck gate-check cadence. The enforcement
+    /// backend is a stub until one is deployed.
+    private let moderationRepository: ModerationRepository
+    private let gateCheckRepository: GateCheckRepository
     /// Factory for the per-request SEP contract transport. Normally
     /// `URLSessionSEPContractTransport`; swapped for an in-memory
     /// ledger-backed fake under `--ui-loopback` so a Tyranny group
@@ -102,6 +109,79 @@ struct OnymIOSApp: App {
         self.identityRepository = repository
         self.relayerRepository = relayerRepository
         self.contractsRepository = contractsRepository
+
+        // Moderation seat. Authorities are swappable data (a signed
+        // directory + per-authority manifests); the enforcement
+        // backend seam is stubbed — `StubEnforcementBackendClient`
+        // answers the gate per `--moderation-scenario` in UI tests
+        // and `.clear` in production until a real backend exists.
+        let moderationSigner = IdentityModerationSigner(repository: repository)
+        let moderationRepository: ModerationRepository
+        let gateCheckRepository: GateCheckRepository
+        let moderationManifestFetcher: any AuthorityManifestFetcher
+        #if DEBUG
+        if args.contains("--ui-testing") {
+            let backend = StubEnforcementBackendClient(
+                scenario: Self.resolveModerationScenario(args: args)
+            )
+            moderationManifestFetcher = UITestAuthorityManifestFetcher()
+            moderationRepository = ModerationRepository(
+                authoritiesFetcher: UITestKnownAuthoritiesFetcher(),
+                manifestFetcher: moderationManifestFetcher,
+                mandateStore: UITestMandateStore(
+                    seeded: !args.contains("--moderation-needs-consent")
+                ),
+                backend: backend,
+                attestation: UITestDeviceAttestationProvider(),
+                signer: moderationSigner
+            )
+            gateCheckRepository = GateCheckRepository(
+                attestation: UITestDeviceAttestationProvider(),
+                backend: backend,
+                moderation: moderationRepository,
+                signer: moderationSigner,
+                store: UITestGateStateStore()
+            )
+        } else {
+            let backend = StubEnforcementBackendClient()
+            moderationManifestFetcher = URLSessionAuthorityManifestFetcher()
+            moderationRepository = ModerationRepository(
+                authoritiesFetcher: GitHubReleasesKnownAuthoritiesFetcher(),
+                manifestFetcher: moderationManifestFetcher,
+                mandateStore: UserDefaultsMandateStore(),
+                backend: backend,
+                attestation: DCDeviceAttestationProvider(),
+                signer: moderationSigner
+            )
+            gateCheckRepository = GateCheckRepository(
+                attestation: DCDeviceAttestationProvider(),
+                backend: backend,
+                moderation: moderationRepository,
+                signer: moderationSigner,
+                store: UserDefaultsGateStateStore()
+            )
+        }
+        #else
+        let moderationBackend = StubEnforcementBackendClient()
+        moderationManifestFetcher = URLSessionAuthorityManifestFetcher()
+        moderationRepository = ModerationRepository(
+            authoritiesFetcher: GitHubReleasesKnownAuthoritiesFetcher(),
+            manifestFetcher: moderationManifestFetcher,
+            mandateStore: UserDefaultsMandateStore(),
+            backend: moderationBackend,
+            attestation: DCDeviceAttestationProvider(),
+            signer: moderationSigner
+        )
+        gateCheckRepository = GateCheckRepository(
+            attestation: DCDeviceAttestationProvider(),
+            backend: moderationBackend,
+            moderation: moderationRepository,
+            signer: moderationSigner,
+            store: UserDefaultsGateStateStore()
+        )
+        #endif
+        self.moderationRepository = moderationRepository
+        self.gateCheckRepository = gateCheckRepository
 
         // Group repository — falls back to in-memory if the on-disk
         // store can't open (rare; FileProtection / sandbox issues).
@@ -364,6 +444,11 @@ struct OnymIOSApp: App {
             }
         )
 
+        let moderationGateFlow = ModerationGateFlow(
+            moderation: moderationRepository,
+            gateCheck: gateCheckRepository
+        )
+
         self.dependencies = AppDependencies(
             makeRecoveryPhraseBackupFlow: { @MainActor in
                 RecoveryPhraseBackupFlow(
@@ -458,11 +543,39 @@ struct OnymIOSApp: App {
             },
             setGroupName: { groupIDHex, name in
                 await groupAvatarBroadcaster.setName(groupIDHex: groupIDHex, name: name)
+            },
+            moderationGateFlow: moderationGateFlow,
+            makeModerationConsentFlow: { @MainActor mode in
+                ModerationConsentFlow(
+                    mode: mode,
+                    repository: moderationRepository,
+                    onConsented: { moderationGateFlow.consentCompleted() }
+                )
+            },
+            makeModerationSettingsFlow: { @MainActor in
+                ModerationSettingsFlow(
+                    repository: moderationRepository,
+                    gateCheck: gateCheckRepository
+                )
             }
         )
     }
 
     #if DEBUG
+    /// `--moderation-scenario clear|case-open|banned|check-required`
+    /// (with `--ui-testing`): which canned world the stub enforcement
+    /// backend answers, so UI tests can drive the ban screen, the
+    /// open-case banner, and the gate-required screen deterministically.
+    private static func resolveModerationScenario(
+        args: [String]
+    ) -> StubEnforcementBackendClient.Scenario {
+        guard let flagIndex = args.firstIndex(of: "--moderation-scenario"),
+              flagIndex + 1 < args.count,
+              let scenario = StubEnforcementBackendClient.Scenario(rawValue: args[flagIndex + 1])
+        else { return .clear }
+        return scenario
+    }
+
     /// Canned `ChatVideoEncoder.Encoded` for the UI-test video-send path:
     /// a real poster (from the shared test JPEG) plus small placeholder
     /// MP4 bytes. The test only asserts the poster renders + round-trips;
@@ -538,6 +651,13 @@ struct OnymIOSApp: App {
                     // UI harness — the hardcoded seed stays the default).
                     await nostrRelaysRepository.start()
                     await blossomServersRepository.start()
+                    // Moderation: refresh the designated-authorities
+                    // directory and begin the gate-check cadence
+                    // (launch check + P1D interval). Runs after
+                    // identity bootstrap above so gate sessions can
+                    // carry an identity signature.
+                    await moderationRepository.start()
+                    await gateCheckRepository.start()
                     // Replay groups + invitations for the in-memory snapshot streams.
                     await groupRepository.reload()
                     await incomingInvitations.reload()

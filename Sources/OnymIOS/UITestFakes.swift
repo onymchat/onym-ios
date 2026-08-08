@@ -4,6 +4,7 @@ import OnymTransport
 import OnymChain
 import OnymTransportBlossom
 import OnymChatsCore
+import OnymModeration
 
 /// App-side fakes used by `OnymIOSApp` when launched with the
 /// `--ui-testing` argument. They live in production sources (not the
@@ -303,6 +304,138 @@ final class UITestBlossomClient: BlossomClient, @unchecked Sendable {
             throw BlossomError.badStatus(404)
         }
         return data
+    }
+}
+
+// MARK: - Moderation
+
+/// One canned authority so consent-flow UI tests have a deterministic
+/// row to pick.
+struct UITestKnownAuthoritiesFetcher: KnownAuthoritiesFetcher {
+    static let authority = AuthorityListing(
+        componentId: "onym:component:uitest-authority",
+        name: "UITest Authority",
+        manifestURL: URL(string: "https://uitest-authority.example/manifest.json")!,
+        operatorPublicKeyBase64: ""
+    )
+
+    func fetchLatest() async throws -> [AuthorityListing] {
+        [Self.authority]
+    }
+}
+
+/// Serves a fixture manifest as exact bytes so the consent flow's
+/// hash pinning behaves exactly like production (the hash is of these
+/// bytes, deterministically).
+struct UITestAuthorityManifestFetcher: AuthorityManifestFetcher {
+    static let manifestJSON = Data("""
+    {
+      "version": 1,
+      "componentId": "onym:component:uitest-authority",
+      "seat": "moderation",
+      "operator": "onym:key:uitest-operator",
+      "moderationProfileId": "onym:moderation-profile:consent-bound-v1",
+      "violationClasses": [
+        {
+          "classId": "csam",
+          "definition": "https://uitest-authority.example/defs/csam",
+          "responseWindow": "P3D",
+          "decisionDeadline": "P7D",
+          "banTerm": "permanent",
+          "appealWindow": "P30D",
+          "appealEffect": "non-suspensive"
+        },
+        {
+          "classId": "unsolicited-pornography",
+          "definition": "https://uitest-authority.example/defs/unsolicited-pornography",
+          "responseWindow": "P7D",
+          "decisionDeadline": "P14D",
+          "banTerm": "P90D",
+          "appealWindow": "P30D",
+          "appealEffect": "suspensive"
+        }
+      ],
+      "appellate": "onym:component:uitest-appellate",
+      "newHolderAppeal": "https://uitest-authority.example/new-holder",
+      "validUntil": "2030-01-01T00:00:00Z",
+      "signature": "uitest-unsigned"
+    }
+    """.utf8)
+
+    func fetch(_ listing: AuthorityListing) async throws -> SignedManifest {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let manifest = try decoder.decode(AuthorityManifest.self, from: Self.manifestJSON)
+        return SignedManifest(manifest: manifest, rawBytes: Self.manifestJSON)
+    }
+}
+
+/// In-memory mandate store. Seeded with a pre-signed fixture mandate
+/// by default so the consent gate doesn't block every unrelated UI
+/// test; `--moderation-needs-consent` starts it empty to exercise the
+/// consent flow itself.
+final class UITestMandateStore: MandateStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private var records: [MandateRecord]
+
+    init(seeded: Bool) {
+        if seeded {
+            let manifest = UITestAuthorityManifestFetcher.manifestJSON
+            let mandate = ModerationMandate(
+                user: "onym:key:uitest-user",
+                interface: ModerationRepository.interfaceComponentId,
+                authority: "onym:component:uitest-authority",
+                manifestHash: SignedManifest.hash(of: manifest),
+                classes: ["csam", "unsolicited-pornography"],
+                deviceBinding: "uitest-enrollment",
+                acceptedAt: Date(timeIntervalSince1970: 1_700_000_000),
+                signatures: ["uitest-user-signature"]
+            )
+            records = [MandateRecord(
+                mandate: mandate,
+                manifestBytes: manifest,
+                authorityName: "UITest Authority",
+                countersigned: false,
+                isActive: true,
+                createdAt: Date(timeIntervalSince1970: 1_700_000_000)
+            )]
+        } else {
+            records = []
+        }
+    }
+
+    func load() -> [MandateRecord] {
+        lock.withLock { records }
+    }
+
+    func save(_ records: [MandateRecord]) {
+        lock.withLock { self.records = records }
+    }
+}
+
+/// In-memory gate state so every launch starts with no persisted
+/// grace window.
+final class UITestGateStateStore: GateStateStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private var state: PersistedGateState?
+
+    func load() -> PersistedGateState? {
+        lock.withLock { state }
+    }
+
+    func save(_ state: PersistedGateState?) {
+        lock.withLock { self.state = state }
+    }
+}
+
+/// Simulator has no DeviceCheck; UI tests use a provider that
+/// pretends support and returns fixed token bytes so the stub
+/// backend's request shape stays realistic.
+struct UITestDeviceAttestationProvider: DeviceAttestationProvider {
+    var isSupported: Bool { true }
+
+    func generateToken() async throws -> Data {
+        Data("uitest-device-token".utf8)
     }
 }
 
