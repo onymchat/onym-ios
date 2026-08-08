@@ -32,6 +32,7 @@ packages:
   OnymIdentityUI: {path: Packages/OnymIdentityUI}
   OnymChatsUI: {path: Packages/OnymChatsUI}
   OnymSettings: {path: Packages/OnymSettings}
+  OnymModeration: {path: Packages/OnymModeration}
 
 targets:
   OnymIOS:
@@ -58,6 +59,7 @@ targets:
       - package: OnymIdentityUI
       - package: OnymChatsUI
       - package: OnymSettings
+      - package: OnymModeration
     # Hand-written Info.plist via xcodegen's `info:` block. We tried
     # the GENERATE_INFOPLIST_FILE + INFOPLIST_KEY_* approach first but
     # `INFOPLIST_KEY_UILaunchScreen_BackgroundColor` / `_ImageName` are
@@ -218,6 +220,7 @@ targets:
       - package: OnymIdentityUI
       - package: OnymChatsUI
       - package: OnymSettings
+      - package: OnymModeration
 
   OnymIOSUITests:
     type: bundle.ui-testing
