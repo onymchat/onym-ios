@@ -141,13 +141,24 @@ public actor ModerationRepository {
             token = nil
         }
         let userKey = try await signer.userKeyID()
+        // The signed bytes are built from exactly the fields the
+        // request transmits, so the backend can recompute and verify
+        // them — the timestamp travels with the signature it covers.
+        let enrollmentTimestamp = clock()
         let enrollmentSignature = try await signer.sign(
-            GateCheckRequest.signedPayload(deviceToken: token, timestamp: clock())
+            EnrollmentRequest.signedPayload(
+                deviceToken: token,
+                userKey: userKey,
+                timestamp: enrollmentTimestamp
+            )
         )
         let enrollment = try await backend.enrollDevice(
-            token: token,
-            userKey: userKey,
-            signature: enrollmentSignature
+            EnrollmentRequest(
+                deviceToken: token,
+                userKey: userKey,
+                timestamp: enrollmentTimestamp,
+                signature: enrollmentSignature
+            )
         )
 
         var mandate = ModerationMandate(
@@ -162,12 +173,19 @@ public actor ModerationRepository {
         let userSignature = try await signer.sign(mandate.signingBytes())
         mandate.signatures = [userSignature.base64EncodedString()]
 
-        let countersigned = try await backend.countersignMandate(mandate)
-        let isCountersigned = countersigned.signatures.count > 1
-            && countersigned.signatures.last != StubEnforcementBackendClient.countersignSentinel
+        // The countersignature is appended to the client's own copy.
+        // The backend never hands back a mandate, so no consented
+        // field can change behind the user's signature.
+        let countersignature = try await backend.countersignMandate(mandate)
+        let isCountersigned = countersignature.signature
+            != StubEnforcementBackendClient.countersignSentinel
+        mandate.signatures = [
+            userSignature.base64EncodedString(),
+            countersignature.signature,
+        ]
 
         let record = MandateRecord(
-            mandate: countersigned,
+            mandate: mandate,
             manifestBytes: signedManifest.rawBytes,
             authorityName: listing.name,
             countersigned: isCountersigned,

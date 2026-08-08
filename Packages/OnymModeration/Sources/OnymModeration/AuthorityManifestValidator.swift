@@ -34,8 +34,14 @@ public struct AuthorityManifestValidator: Sendable {
     ///   - `moderationProfileId` is a profile this client doesn't
     ///     implement;
     ///   - a class declares a `permanent` ban term without the external
-    ///     appellate §5.2 constraint 2 requires (`nil`, empty, or
-    ///     `"self"` is not an external appellate).
+    ///     appellate §5.2 constraint 2 requires — it must be a
+    ///     `onym:component:` reference naming someone *other than* the
+    ///     issuer, since the rule exists so no permanent sanction
+    ///     depends on its issuer staying alive; or
+    ///   - `newHolderAppeal` is absent. Device marks survive resale, so
+    ///     §5.7 makes the new-holder path mandatory and the ban UX is
+    ///     required to display it — a manifest without one cannot
+    ///     deliver the remedy the user is consenting to.
     public func validateForConsent(_ signed: SignedManifest, now: Date) throws {
         let manifest = signed.manifest
         guard manifest.validUntil > now else {
@@ -44,15 +50,44 @@ public struct AuthorityManifestValidator: Sendable {
         guard supportedProfileIds.contains(manifest.moderationProfileId) else {
             throw ModerationError.unsupportedProfile(manifest.moderationProfileId)
         }
+        guard let newHolderAppeal = manifest.newHolderAppeal, !newHolderAppeal.isEmpty else {
+            throw ModerationError.manifestInvalid(
+                "manifest declares no newHolderAppeal path (mandatory — device marks outlive the device's owner)"
+            )
+        }
         let permanentClasses = manifest.violationClasses
             .filter { $0.banTerm == .permanent }
             .map(\.classId)
         if !permanentClasses.isEmpty {
-            guard let appellate = manifest.appellate, !appellate.isEmpty, appellate != "self" else {
-                throw ModerationError.manifestInvalid(
-                    "permanent ban term (\(permanentClasses.joined(separator: ", "))) requires an external appellate"
-                )
-            }
+            try Self.requireExternalAppellate(of: manifest, forClasses: permanentClasses)
         }
     }
+
+    /// §5.2 constraint 2 in full: the appellate must be a component
+    /// reference, and a component *other than the issuer*. Accepting any
+    /// non-`"self"` string let a manifest name its own `componentId`
+    /// (or a non-component value) and still declare permanent bans.
+    private static func requireExternalAppellate(
+        of manifest: AuthorityManifest,
+        forClasses permanentClasses: [String]
+    ) throws {
+        let classes = permanentClasses.joined(separator: ", ")
+        guard let appellate = manifest.appellate, !appellate.isEmpty, appellate != "self" else {
+            throw ModerationError.manifestInvalid(
+                "permanent ban term (\(classes)) requires an external appellate"
+            )
+        }
+        guard appellate.hasPrefix(Self.componentReferencePrefix) else {
+            throw ModerationError.manifestInvalid(
+                "permanent ban term (\(classes)) requires the appellate to be a \(Self.componentReferencePrefix) reference"
+            )
+        }
+        guard appellate != manifest.componentId else {
+            throw ModerationError.manifestInvalid(
+                "permanent ban term (\(classes)) names the issuer as its own appellate"
+            )
+        }
+    }
+
+    static let componentReferencePrefix = "onym:component:"
 }

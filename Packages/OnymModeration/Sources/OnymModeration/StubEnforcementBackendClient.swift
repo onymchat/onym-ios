@@ -56,7 +56,7 @@ public struct StubEnforcementBackendClient: EnforcementBackendClient, @unchecked
     /// would sever every mandate's `deviceBinding` on next launch. The
     /// check-then-store is taken under `bindingLock` so concurrent
     /// enrollments all observe the same binding.
-    public func enrollDevice(token: Data?, userKey: String, signature: Data) async throws -> DeviceEnrollment {
+    public func enrollDevice(_ request: EnrollmentRequest) async throws -> DeviceEnrollment {
         Self.bindingLock.lock()
         defer { Self.bindingLock.unlock() }
         if let existing = defaults.string(forKey: Self.bindingKey) {
@@ -67,10 +67,8 @@ public struct StubEnforcementBackendClient: EnforcementBackendClient, @unchecked
         return DeviceEnrollment(deviceBinding: binding)
     }
 
-    public func countersignMandate(_ mandate: ModerationMandate) async throws -> ModerationMandate {
-        var countersigned = mandate
-        countersigned.signatures.append(Self.countersignSentinel)
-        return countersigned
+    public func countersignMandate(_ mandate: ModerationMandate) async throws -> InterfaceCountersignature {
+        InterfaceCountersignature(signature: Self.countersignSentinel)
     }
 
     public func gateCheck(_ request: GateCheckRequest) async throws -> GateCheckResult {
@@ -106,8 +104,15 @@ public struct StubEnforcementBackendClient: EnforcementBackendClient, @unchecked
 
     /// Canned ban with the full display surface: verdict reference,
     /// authority contact, expiry, appeal and new-holder paths.
+    ///
+    /// The dates model an executed **suspensive** P90D ban with a P30D
+    /// appeal window, so the fixture satisfies `VerdictValidator`'s
+    /// derived-deadline rules rather than merely rendering: decided 40
+    /// days ago, appeal window lapsed 10 days ago, execution began
+    /// there, expiry is execution + the consented term.
     static func fixtureBanState(for request: GateCheckRequest, now: Date) -> BanState {
-        let decidedAt = now.addingTimeInterval(-86_400)
+        let decidedAt = now.addingTimeInterval(-40 * 86_400)
+        let appealDeadline = decidedAt.addingTimeInterval(30 * 86_400)
         let verdict = Verdict(
             caseId: "stub-case-1",
             authority: "onym:component:stub-authority",
@@ -117,10 +122,10 @@ public struct StubEnforcementBackendClient: EnforcementBackendClient, @unchecked
             classId: "unsolicited-pornography",
             disposition: .ban,
             marks: Marks(caseOpen: false, banned: true),
-            banExpires: now.addingTimeInterval(90 * 86_400),
-            executeAfter: decidedAt,
+            banExpires: appealDeadline.addingTimeInterval(90 * 86_400),
+            executeAfter: appealDeadline,
             reasoning: "stub-reasoning-hash",
-            appealDeadline: now.addingTimeInterval(30 * 86_400),
+            appealDeadline: appealDeadline,
             decidedAt: decidedAt,
             signature: "stub:authority-unsigned",
             isFinal: false

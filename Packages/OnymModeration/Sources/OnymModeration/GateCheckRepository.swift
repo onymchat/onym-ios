@@ -118,6 +118,8 @@ public actor GateCheckRepository {
     private var cached: GateStatus = .notMandated
     private var continuations: [UUID: AsyncStream<GateStatus>.Continuation] = [:]
     private var loopTask: Task<Void, Never>?
+    /// Monotonic tag for in-flight checks; stale completions are dropped.
+    private var generation: UInt64 = 0
 
     public init(
         attestation: any DeviceAttestationProvider,
@@ -173,14 +175,26 @@ public actor GateCheckRepository {
     // MARK: - Gate check
 
     /// Run one gate check now (launch, foreground, retry button).
+    ///
+    /// Actor isolation does not span the awaits below, so the cadence
+    /// loop and a foreground/retry call can be in flight together. Each
+    /// call takes a generation, and a completion whose generation is no
+    /// longer the newest is discarded — otherwise a slow `.clear` could
+    /// land after a fast `.banned` and reopen the app.
     public func checkNow() async {
+        generation &+= 1
+        let generation = generation
+
         guard let record = await moderation.activeMandateRecord() else {
+            guard generation == self.generation else { return }
             cached = .notMandated
             publish()
             return
         }
 
         let attempt = await performAttempt(for: record)
+        guard generation == self.generation else { return }
+
         let (status, persisted) = Self.derive(
             persisted: store.load(),
             attempt: attempt,
@@ -204,13 +218,19 @@ public actor GateCheckRepository {
 
         do {
             let timestamp = clock()
+            let mandateRef = try? record.mandate.mandateHash()
             let signature = try await signer.sign(
-                GateCheckRequest.signedPayload(deviceToken: token, timestamp: timestamp)
+                GateCheckRequest.signedPayload(
+                    deviceToken: token,
+                    userKey: record.mandate.user,
+                    mandateRef: mandateRef,
+                    timestamp: timestamp
+                )
             )
             let request = GateCheckRequest(
                 deviceToken: token,
                 userKey: record.mandate.user,
-                mandateRef: try? record.mandate.mandateHash(),
+                mandateRef: mandateRef,
                 timestamp: timestamp,
                 signature: signature
             )
@@ -228,7 +248,12 @@ public actor GateCheckRepository {
     ///   serving the last known state;
     /// - unreachable past grace → `.gateCheckRequired(.offlineGraceExpired)`,
     ///   persisted state kept (a later success overwrites it);
-    /// - unreachable with no history → `.gateCheckRequired(.neverChecked)`.
+    /// - unreachable with no history → `.gateCheckRequired(.neverChecked)`;
+    /// - unreachable with the clock behind `lastSuccessAt` →
+    ///   `.gateCheckRequired(.clockRollback)`. A negative age would
+    ///   otherwise satisfy the grace comparison forever, so winding the
+    ///   clock back and blocking only the backend would pin a cached
+    ///   `.clear` indefinitely.
     /// Degradation only ever moves toward blocking.
     public static func derive(
         persisted: PersistedGateState?,
@@ -243,7 +268,11 @@ public actor GateCheckRepository {
             guard let persisted else {
                 return (.gateCheckRequired(.neverChecked), nil)
             }
-            if now.timeIntervalSince(persisted.lastSuccessAt) <= policy.offlineGrace {
+            let age = now.timeIntervalSince(persisted.lastSuccessAt)
+            if age < 0 {
+                return (.gateCheckRequired(.clockRollback), persisted)
+            }
+            if age <= policy.offlineGrace {
                 return (status(for: persisted.lastResult), persisted)
             }
             return (.gateCheckRequired(.offlineGraceExpired), persisted)

@@ -1,5 +1,18 @@
 import Foundation
 
+/// The interface's countersignature over the mandate the user signed
+/// (Moderation.md §5.3). Deliberately just the signature: the client
+/// appends it to its own copy, so the countersigning round-trip cannot
+/// change any consented field.
+public struct InterfaceCountersignature: Codable, Sendable, Equatable {
+    /// Base64 detached signature over the mandate's `signingBytes()`.
+    public let signature: String
+
+    public init(signature: String) {
+        self.signature = signature
+    }
+}
+
 /// The vendor-local enrollment identifier the mandate's
 /// `deviceBinding` carries. Issued by the backend — never derived
 /// from DeviceCheck tokens, which are ephemeral and unlinkable, so no
@@ -9,6 +22,41 @@ public struct DeviceEnrollment: Codable, Sendable, Equatable {
 
     public init(deviceBinding: String) {
         self.deviceBinding = deviceBinding
+    }
+}
+
+/// First-session enrollment as the client presents it. Every field the
+/// signature covers is transmitted, so the backend can reconstruct the
+/// signed bytes and actually verify — see `signedPayload`.
+public struct EnrollmentRequest: Codable, Sendable, Equatable {
+    /// Fresh `DCDevice` token, or nil when attestation is unavailable.
+    /// The client never fabricates one.
+    public let deviceToken: Data?
+    public let userKey: String
+    public let timestamp: Date
+    /// User-key signature over `signedPayload(deviceToken:userKey:timestamp:)`.
+    public let signature: Data
+
+    public init(deviceToken: Data?, userKey: String, timestamp: Date, signature: Data) {
+        self.deviceToken = deviceToken
+        self.userKey = userKey
+        self.timestamp = timestamp
+        self.signature = signature
+    }
+
+    /// The bytes the user key signs, built from **exactly** the fields
+    /// this request transmits — the backend recomputes this from what
+    /// it received. Length-prefixed so no field boundary is ambiguous.
+    /// PROVISIONAL until the enforcement backend's wire contract is
+    /// specified.
+    public static func signedPayload(deviceToken: Data?, userKey: String, timestamp: Date) -> Data {
+        SignedSessionPayload.bytes(
+            context: "onym-moderation-enroll-v1",
+            deviceToken: deviceToken,
+            userKey: userKey,
+            timestamp: timestamp,
+            mandateRef: nil
+        )
     }
 }
 
@@ -39,14 +87,66 @@ public struct GateCheckRequest: Codable, Sendable, Equatable {
         self.signature = signature
     }
 
-    /// The bytes the user key signs: the token (empty when absent)
-    /// followed by the ISO 8601 timestamp. PROVISIONAL until the
-    /// enforcement backend's wire contract is specified.
-    public static func signedPayload(deviceToken: Data?, timestamp: Date) -> Data {
-        var payload = deviceToken ?? Data()
-        payload.append(Data(ISO8601DateFormatter().string(from: timestamp).utf8))
+    /// The bytes the user key signs, built from **exactly** the fields
+    /// this request transmits — `mandateRef` included, so a signature
+    /// can't be replayed against a different mandate. PROVISIONAL until
+    /// the enforcement backend's wire contract is specified.
+    public static func signedPayload(
+        deviceToken: Data?,
+        userKey: String,
+        mandateRef: String?,
+        timestamp: Date
+    ) -> Data {
+        SignedSessionPayload.bytes(
+            context: "onym-moderation-gate-v1",
+            deviceToken: deviceToken,
+            userKey: userKey,
+            timestamp: timestamp,
+            mandateRef: mandateRef
+        )
+    }
+}
+
+/// Shared construction for the session payloads the user key signs.
+/// Every field is length-prefixed and the payload is domain-separated
+/// by `context`, so no two field layouts can collide and an enrollment
+/// signature can never be replayed as a gate-check signature.
+enum SignedSessionPayload {
+    static func bytes(
+        context: String,
+        deviceToken: Data?,
+        userKey: String,
+        timestamp: Date,
+        mandateRef: String?
+    ) -> Data {
+        var payload = Data()
+        append(&payload, Data(context.utf8))
+        append(&payload, deviceToken ?? Data())
+        append(&payload, Data(userKey.utf8))
+        append(&payload, Data(ISO8601DateFormatter.moderation.string(from: timestamp).utf8))
+        append(&payload, Data((mandateRef ?? "").utf8))
         return payload
     }
+
+    /// Big-endian 32-bit length prefix, so concatenation is injective.
+    private static func append(_ payload: inout Data, _ field: Data) {
+        var length = UInt32(field.count).bigEndian
+        withUnsafeBytes(of: &length) { payload.append(contentsOf: $0) }
+        payload.append(field)
+    }
+}
+
+extension ISO8601DateFormatter {
+    /// One formatter configuration for signed payloads — the default
+    /// `ISO8601DateFormatter()` options are the stable subset (no
+    /// fractional seconds), pinned here so the signed bytes can't shift
+    /// with a caller's formatter settings.
+    static let moderation: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter
+    }()
 }
 
 /// Why the backend (or local policy) demands a successful gate check
@@ -67,6 +167,10 @@ public enum CheckRequiredReason: String, Codable, Sendable, Equatable {
     case offlineGraceExpired
     /// Local policy: no successful check has ever completed.
     case neverChecked
+    /// Local policy: the device clock now reads earlier than the last
+    /// successful check, so elapsed time can't be trusted to bound
+    /// staleness — the grace window is refused rather than extended.
+    case clockRollback
 }
 
 /// The ban state a gate check returns for display. The client renders
@@ -134,12 +238,17 @@ public protocol EnforcementBackendClient: Sendable {
     /// signature, device token) pair is the only token↔enrollment
     /// linkage. Returns the vendor-local `deviceBinding` the mandate
     /// will carry.
-    func enrollDevice(token: Data?, userKey: String, signature: Data) async throws -> DeviceEnrollment
+    func enrollDevice(_ request: EnrollmentRequest) async throws -> DeviceEnrollment
 
     /// Interface countersignature over the user-signed mandate
     /// (Moderation.md §5.3 — signed by the user, countersigned by
     /// the interface).
-    func countersignMandate(_ mandate: ModerationMandate) async throws -> ModerationMandate
+    ///
+    /// Returns **only the interface's signature**, never a rebuilt
+    /// mandate: the object the user signed is the consent record, and
+    /// handing back a full mandate would let a buggy or compromised
+    /// backend alter fields the user's signature no longer covers.
+    func countersignMandate(_ mandate: ModerationMandate) async throws -> InterfaceCountersignature
 
     /// The launch/interval gate check (profile §5).
     func gateCheck(_ request: GateCheckRequest) async throws -> GateCheckResult

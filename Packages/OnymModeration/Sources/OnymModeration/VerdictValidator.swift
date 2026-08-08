@@ -132,26 +132,70 @@ public struct VerdictValidator: Sendable {
         guard verdict.marks == Marks(caseOpen: false, banned: true) else {
             throw ModerationError.verdictInvalid("ban marks inconsistent with disposition")
         }
-        if violationClass.banTerm != .permanent, verdict.banExpires == nil {
-            throw ModerationError.verdictInvalid("ban missing banExpires on non-permanent class")
+
+        // The appeal window is a consented term, so the deadline is
+        // derived, not declared: without this an authority could set
+        // `appealDeadline == decidedAt` and offer zero appeal on a
+        // class the user consented to with P30D.
+        guard let appealDeadline = verdict.appealDeadline else {
+            throw ModerationError.verdictInvalid("ban missing appealDeadline")
         }
+        let consentedAppealDeadline = verdict.decidedAt.addingTimeInterval(
+            violationClass.appealWindow.timeInterval
+        )
+        guard Self.sameInstant(appealDeadline, consentedAppealDeadline) else {
+            throw ModerationError.verdictInvalid(
+                "appealDeadline must equal decidedAt + the consented appealWindow (\(violationClass.appealWindow.raw))"
+            )
+        }
+
         guard let executeAfter = verdict.executeAfter else {
             throw ModerationError.verdictInvalid("ban missing executeAfter")
         }
         switch violationClass.appealEffect {
         case .nonSuspensive:
-            guard executeAfter == verdict.decidedAt else {
+            guard Self.sameInstant(executeAfter, verdict.decidedAt) else {
                 throw ModerationError.verdictInvalid("non-suspensive executeAfter must equal decidedAt")
             }
         case .suspensive:
-            guard let appealDeadline = verdict.appealDeadline, executeAfter == appealDeadline else {
+            guard Self.sameInstant(executeAfter, appealDeadline) else {
                 throw ModerationError.verdictInvalid("suspensive executeAfter must equal appealDeadline")
             }
         }
+
+        // The served term is the consented `banTerm` measured from
+        // execution (§5.6 constraint 3) — otherwise a P90D class could
+        // carry a ten-year expiry and still validate.
+        switch violationClass.banTerm {
+        case .permanent:
+            guard verdict.banExpires == nil else {
+                throw ModerationError.verdictInvalid("permanent class carries banExpires")
+            }
+        case .duration(let term):
+            guard let banExpires = verdict.banExpires else {
+                throw ModerationError.verdictInvalid("ban missing banExpires on non-permanent class")
+            }
+            let consentedExpiry = executeAfter.addingTimeInterval(term.timeInterval)
+            guard Self.sameInstant(banExpires, consentedExpiry) else {
+                throw ModerationError.verdictInvalid(
+                    "banExpires must equal executeAfter + the consented banTerm (\(term.raw))"
+                )
+            }
+        }
+
         if executeAfter > now {
             return .storeUntilExecuteAfter(executeAfter)
         }
         return .execute
+    }
+
+    /// Derived deadlines are compared with a one-second tolerance.
+    /// Manifest windows are whole days, but an authority computing them
+    /// in a different language/timezone can land a second off; demanding
+    /// exact `Date` equality would reject conforming verdicts over
+    /// rounding, while a second of slack changes no consented bound.
+    static func sameInstant(_ lhs: Date, _ rhs: Date) -> Bool {
+        abs(lhs.timeIntervalSince(rhs)) <= 1
     }
 
     // MARK: - Signature
