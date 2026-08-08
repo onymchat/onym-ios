@@ -43,9 +43,10 @@ public struct ModerationState: Sendable, Equatable {
 
 /// Owns authority designation + mandate lifecycle: fetches the
 /// directory, verifies and pins manifests, signs mandates, and keeps
-/// exactly one record active per device. `consent(to:)` is one path
-/// for both onboarding and switching — swapping authorities *is*
-/// signing a fresh mandate (Moderation.md §5.3).
+/// exactly one record active per device. `manifestForReview(_:)` and
+/// `consent(to:reviewedManifest:)` form one two-step path for both
+/// onboarding and switching — swapping authorities *is* signing a
+/// fresh mandate (Moderation.md §5.3).
 public actor ModerationRepository {
     /// This interface's component id, carried in every mandate.
     public static let interfaceComponentId = "onym:component:onym-ios"
@@ -115,14 +116,35 @@ public actor ModerationRepository {
 
     // MARK: - Consent
 
-    /// Consent to `listing`: fetch + verify + validate + pin its
-    /// manifest, enroll this device, sign the mandate, obtain the
-    /// interface countersignature, persist. Any previously active record is
-    /// deactivated untouched — its mandate stays bound to the manifest
-    /// hash it consented to, forever.
-    @discardableResult
-    public func consent(to listing: AuthorityListing) async throws -> MandateRecord {
+    /// Fetch, verify, and validate the exact manifest bytes to put on the
+    /// consent surface. The returned value is the unit of consent: callers
+    /// must retain it and pass that same value to
+    /// `consent(to:reviewedManifest:)` after the user agrees.
+    public func manifestForReview(_ listing: AuthorityListing) async throws -> SignedManifest {
         let signedManifest = try await manifestFetcher.fetch(listing)
+        try manifestValidator.validateForConsent(signedManifest, now: clock())
+        return signedManifest
+    }
+
+    /// Consent to the exact manifest the user reviewed: validate it again
+    /// at signing time, pin its already-computed hash and raw bytes, enroll
+    /// this device, sign the mandate, obtain the interface countersignature,
+    /// and persist. This method deliberately never refetches the manifest;
+    /// an authority changing its hosted terms between review and agreement
+    /// therefore cannot replace the artifact that gets signed.
+    ///
+    /// Any previously active record is deactivated untouched — its mandate
+    /// stays bound to the manifest hash it consented to, forever.
+    @discardableResult
+    public func consent(
+        to listing: AuthorityListing,
+        reviewedManifest signedManifest: SignedManifest
+    ) async throws -> MandateRecord {
+        guard signedManifest.manifest.componentId == listing.componentId else {
+            throw ModerationError.manifestInvalid(
+                "reviewed manifest componentId does not match the selected authority"
+            )
+        }
 
         // Validity conditions (validUntil, supported profile, external
         // appellate for permanent classes) gate enrollment and signing —
