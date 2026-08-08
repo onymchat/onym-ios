@@ -139,6 +139,97 @@ final class ModerationRepositoryTests: XCTestCase {
         )
     }
 
+    /// Serves one set of bytes on the first fetch and different bytes
+    /// afterwards — an authority editing its hosted terms between the
+    /// user's review and their agreement.
+    private final class SwitchingManifestFetcher: AuthorityManifestFetcher, @unchecked Sendable {
+        private let lock = NSLock()
+        private var fetchCount = 0
+        let first: Data
+        let second: Data
+
+        init(first: Data, second: Data) {
+            self.first = first
+            self.second = second
+        }
+
+        var fetches: Int { lock.withLock { fetchCount } }
+
+        func fetch(_ listing: AuthorityListing) async throws -> SignedManifest {
+            let bytes = lock.withLock { () -> Data in
+                fetchCount += 1
+                return fetchCount == 1 ? first : second
+            }
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return SignedManifest(
+                manifest: try decoder.decode(AuthorityManifest.self, from: bytes),
+                rawBytes: bytes
+            )
+        }
+    }
+
+    // MARK: - The reviewed manifest is the signed one
+
+    /// The consent surface promises the mandate binds the exact terms
+    /// shown. If `consent` refetched, an authority could swap them in
+    /// the window between review and agreement.
+    func testConsentPinsTheReviewedManifestNotARefetchedOne() async throws {
+        let componentId = "onym:component:a"
+        let reviewedBytes = manifestBytes(componentId: componentId)
+        let swappedBytes = manifestBytes(componentId: componentId, tweak: "-swapped")
+        XCTAssertNotEqual(reviewedBytes, swappedBytes)
+
+        let fetcher = SwitchingManifestFetcher(first: reviewedBytes, second: swappedBytes)
+        let repository = ModerationRepository(
+            authoritiesFetcher: FakeAuthoritiesFetcher(listings: [listing(componentId, name: "A")]),
+            manifestFetcher: fetcher,
+            mandateStore: InMemoryMandateStore(),
+            backend: RecordingBackend(),
+            attestation: FakeAttestation(supported: true),
+            signer: FakeSigner(),
+            clock: { Date(timeIntervalSince1970: 1_700_000_000) }
+        )
+
+        let reviewed = try await repository.manifestForReview(listing(componentId, name: "A"))
+        let record = try await repository.consent(
+            to: listing(componentId, name: "A"),
+            reviewedManifest: reviewed
+        )
+
+        XCTAssertEqual(record.mandate.manifestHash, SignedManifest.hash(of: reviewedBytes))
+        XCTAssertEqual(record.manifestBytes, reviewedBytes)
+        XCTAssertNotEqual(record.mandate.manifestHash, SignedManifest.hash(of: swappedBytes))
+        // Exactly one fetch: signing must not go back to the network.
+        XCTAssertEqual(fetcher.fetches, 1)
+    }
+
+    /// A reviewed manifest from a different authority can't be signed
+    /// against this listing.
+    func testConsentRejectsManifestForADifferentAuthority() async throws {
+        let aID = "onym:component:a"
+        let bID = "onym:component:b"
+        let repository = makeRepository(
+            listings: [listing(aID, name: "A"), listing(bID, name: "B")],
+            bytesByComponent: [
+                aID: manifestBytes(componentId: aID),
+                bID: manifestBytes(componentId: bID),
+            ],
+            backend: RecordingBackend()
+        )
+
+        let otherManifest = try await repository.manifestForReview(listing(bID, name: "B"))
+        do {
+            _ = try await repository.consent(
+                to: listing(aID, name: "A"),
+                reviewedManifest: otherManifest
+            )
+            XCTFail("expected a mismatched-authority manifest to be refused")
+        } catch {
+            // expected
+        }
+    }
+
     // MARK: - Consent pins fetched bytes
 
     func testConsentPinsHashOfExactFetchedBytes() async throws {
@@ -150,7 +241,7 @@ final class ModerationRepositoryTests: XCTestCase {
             backend: RecordingBackend()
         )
 
-        let record = try await repository.consent(to: listing(componentId, name: "A"))
+        let record = try await repository.reviewAndConsent(to: listing(componentId, name: "A"))
 
         XCTAssertEqual(record.manifestBytes, bytes)
         XCTAssertEqual(record.mandate.manifestHash, SignedManifest.hash(of: bytes))
@@ -178,8 +269,8 @@ final class ModerationRepositoryTests: XCTestCase {
             store: store
         )
 
-        let first = try await repository.consent(to: listing(aID, name: "A"))
-        let second = try await repository.consent(to: listing(bID, name: "B"))
+        let first = try await repository.reviewAndConsent(to: listing(aID, name: "A"))
+        let second = try await repository.reviewAndConsent(to: listing(bID, name: "B"))
 
         let records = store.load()
         XCTAssertEqual(records.count, 2)
@@ -208,7 +299,7 @@ final class ModerationRepositoryTests: XCTestCase {
             backend: RecordingBackend()  // appends the stub sentinel
         )
 
-        let record = try await repository.consent(to: listing(componentId, name: "A"))
+        let record = try await repository.reviewAndConsent(to: listing(componentId, name: "A"))
 
         XCTAssertFalse(record.countersigned)
         XCTAssertEqual(record.mandate.signatures.count, 2)
@@ -247,7 +338,7 @@ final class ModerationRepositoryTests: XCTestCase {
             attestation: FakeAttestation(supported: false)
         )
 
-        _ = try await repository.consent(to: listing(componentId, name: "A"))
+        _ = try await repository.reviewAndConsent(to: listing(componentId, name: "A"))
 
         XCTAssertEqual(backend.enrollTokens, [nil])
     }
@@ -262,7 +353,7 @@ final class ModerationRepositoryTests: XCTestCase {
             backend: backend,
             attestation: FakeAttestation(supported: false)
         )
-        _ = try await moderation.consent(to: listing(componentId, name: "A"))
+        _ = try await moderation.reviewAndConsent(to: listing(componentId, name: "A"))
 
         let gate = GateCheckRepository(
             attestation: FakeAttestation(supported: false),
@@ -309,5 +400,17 @@ final class ModerationRepositoryTests: XCTestCase {
         private var state: PersistedGateState?
         func load() -> PersistedGateState? { lock.withLock { state } }
         func save(_ state: PersistedGateState?) { lock.withLock { self.state = state } }
+    }
+}
+
+extension ModerationRepository {
+    /// Test convenience for the two-step consent path: review the
+    /// manifest, then consent to that exact value — what the UI does.
+    /// Tests that care about the review/sign split call the two methods
+    /// directly instead.
+    @discardableResult
+    func reviewAndConsent(to listing: AuthorityListing) async throws -> MandateRecord {
+        let reviewed = try await manifestForReview(listing)
+        return try await consent(to: listing, reviewedManifest: reviewed)
     }
 }
