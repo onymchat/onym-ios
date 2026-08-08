@@ -1,6 +1,10 @@
 import Foundation
 import XCTest
 @testable import OnymIOS
+import OnymTransport
+import OnymChain
+import OnymIdentity
+import OnymGroup
 
 /// End-to-end tests for the `CreateGroupInteractor` pipeline. Real
 /// `IdentityRepository` (Keychain-isolated per test), real

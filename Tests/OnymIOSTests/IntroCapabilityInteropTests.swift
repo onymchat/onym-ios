@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymGroup
 
 /// Cross-platform wire-format pin. The hand-constructed JSON byte
 /// patterns below MUST decode to the same `IntroCapability` on both

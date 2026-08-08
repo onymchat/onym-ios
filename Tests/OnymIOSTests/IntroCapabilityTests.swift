@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymGroup
 
 /// Wire-format pin for `IntroCapability`. The shape is the contract
 /// onym-android already ships — keep it stable. Mirrors

@@ -1,5 +1,7 @@
 import XCTest
 @testable import OnymIOS
+import OnymIdentity
+import OnymChatsCore
 
 /// Unit coverage for `ChatMessage.chatListPreview` — the one-line subtitle
 /// the Chats list renders per row.

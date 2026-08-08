@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymIdentity
 
 /// Pin the SealedEnvelope wire format. Cross-platform interop with the
 /// stellar-mls reference impl rides on these JSON field names — a

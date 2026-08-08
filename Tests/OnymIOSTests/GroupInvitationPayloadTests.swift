@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymGroup
 
 /// Wire-format pin for `GroupInvitationPayload`. Focused on the
 /// `member_profiles` field added in PR 8a; the rest of the wire

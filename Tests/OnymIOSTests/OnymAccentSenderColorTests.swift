@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymDesign
 
 /// Tests for the per-sender accent derivation that drives chat
 /// sender-differentiation. The contract that matters:

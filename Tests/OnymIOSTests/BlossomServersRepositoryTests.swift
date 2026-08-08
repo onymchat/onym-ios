@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymTransportBlossom
 
 /// Behavioral tests for `BlossomServersRepository` covering the
 /// first-launch seed, mutation idempotency, and reset-to-default.

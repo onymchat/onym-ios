@@ -1,6 +1,7 @@
 import CryptoKit
 import XCTest
 @testable import OnymIOS
+import OnymIdentity
 
 /// Sender side of the invitation envelope. Mirrors
 /// `IdentityRepositoryInvitationDecryptTests` but exercises the new

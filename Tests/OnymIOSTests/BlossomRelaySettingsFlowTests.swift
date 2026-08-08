@@ -1,5 +1,7 @@
 import XCTest
 @testable import OnymIOS
+import OnymTransportBlossom
+import OnymSettings
 
 @MainActor
 final class BlossomRelaySettingsFlowTests: XCTestCase {

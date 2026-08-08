@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymGroup
 
 /// Pure-XCTest tests for `DeeplinkCapture.introCapability(from:)`.
 /// The `URL` overload is one line of glue; the host/scheme allowlist

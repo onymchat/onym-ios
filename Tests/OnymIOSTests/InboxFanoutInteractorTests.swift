@@ -1,6 +1,13 @@
 import CryptoKit
 import XCTest
 @testable import OnymIOS
+import OnymTransport
+import OnymChain
+import OnymIdentity
+import OnymGroup
+import OnymPersistence
+import OnymChatsCore
+import OnymInbox
 
 /// Behavioral tests for `InboxFanoutInteractor`. Uses a real
 /// `IdentityRepository` (isolated keychain) so the inbox-tag derivation

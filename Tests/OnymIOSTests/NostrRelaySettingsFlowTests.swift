@@ -1,5 +1,7 @@
 import XCTest
 @testable import OnymIOS
+import OnymTransportNostr
+import OnymSettings
 
 @MainActor
 final class NostrRelaySettingsFlowTests: XCTestCase {

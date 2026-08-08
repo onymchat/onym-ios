@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymChain
 
 /// UserDefaults round-trip with per-test suite isolation. Mirrors
 /// `RelayerSelectionStoreTests` from PR #18.

@@ -1,5 +1,7 @@
 import XCTest
 @testable import OnymIOS
+import OnymIdentity
+import OnymRecovery
 
 /// Drives `RecoveryPhraseBackupFlow` against:
 ///   - a real `IdentityRepository` (per-test unique Keychain service so

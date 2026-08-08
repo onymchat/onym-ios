@@ -1,5 +1,7 @@
 import XCTest
 @testable import OnymIOS
+import OnymFoundation
+import OnymGroup
 
 /// Coverage for the shared CSPRNG helper (`SecureRandom`) introduced to
 /// close H-1 — the family of `_ = SecRandomCopyBytes(...)` call sites

@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymTransportNostr
 
 /// Behavioral tests for `NostrRelaysRepository` covering the
 /// first-launch seed, mutation idempotency, and reset-to-default.

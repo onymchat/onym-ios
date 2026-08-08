@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+@testable import OnymIdentity
 
 /// Each test uses its own Keychain service so test runs are isolated and
 /// do not collide with the production identity item or with each other.

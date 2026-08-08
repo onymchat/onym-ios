@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymChain
 
 /// Pin the wire-format compat between the iOS app and the published
 /// `relayers.json` (and any saves from earlier app versions). The

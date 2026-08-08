@@ -1,6 +1,7 @@
 import XCTest
 import UIKit
 @testable import OnymIOS
+import OnymGroup
 
 /// `GroupAvatarImage` is the single funnel every avatar source passes
 /// through, so these lock the two invariants the wire format depends

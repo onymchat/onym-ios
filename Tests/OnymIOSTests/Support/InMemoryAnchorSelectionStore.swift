@@ -1,5 +1,6 @@
 import Foundation
 @testable import OnymIOS
+import OnymChain
 
 /// `AnchorSelectionStore` impl backed by plain in-memory state. Used
 /// by repository tests that don't care about UserDefaults plumbing —

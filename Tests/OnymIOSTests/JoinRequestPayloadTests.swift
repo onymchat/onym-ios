@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymGroup
 
 /// Wire-format pin for `JoinRequestPayload`. Mirrors
 /// `JoinRequestPayloadTest.kt`. Cross-platform parity is checked

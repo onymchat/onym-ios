@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymChain
 
 /// Pure-Swift unit tests for `SEPContractClient` — no real HTTP. A
 /// `RecordingTransport` captures the encoded invocation and returns a

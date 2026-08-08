@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+@testable import OnymChain
 
 /// Repository against the in-memory fakes — focused on the binding
 /// resolution rules (the part chains will read forever) plus the

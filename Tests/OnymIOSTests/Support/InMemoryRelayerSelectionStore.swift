@@ -1,5 +1,6 @@
 import Foundation
 @testable import OnymIOS
+import OnymChain
 
 /// `RelayerSelectionStore` impl backed by in-memory state. Used by
 /// repository tests that don't need to exercise the UserDefaults

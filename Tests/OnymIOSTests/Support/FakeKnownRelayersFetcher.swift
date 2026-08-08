@@ -1,5 +1,6 @@
 import Foundation
 @testable import OnymIOS
+import OnymChain
 
 /// `KnownRelayersFetcher` test double. Three modes:
 ///

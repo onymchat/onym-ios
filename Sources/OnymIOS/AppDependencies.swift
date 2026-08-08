@@ -1,4 +1,11 @@
 import Foundation
+import OnymIdentity
+import OnymGroup
+import OnymChatsCore
+import OnymInbox
+import OnymRecovery
+import OnymChatsUI
+import OnymSettings
 
 /// App-wide composition root. Constructed exactly once by `OnymIOSApp`
 /// and threaded down to views via `RootView`. Each member is a factory

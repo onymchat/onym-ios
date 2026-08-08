@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 @testable import OnymIOS
+import OnymIdentity
 
 /// Test-only helper that produces real `SealedEnvelope` ciphertext so
 /// `IdentityRepositoryInvitationDecryptTests` can do an end-to-end

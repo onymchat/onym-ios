@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymGroup
 
 /// Regression coverage for the bls12-381 canonical-Fr predicate +
 /// rejection sampler that `CreateGroupInteractor` uses to mint

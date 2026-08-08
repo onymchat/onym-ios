@@ -1,6 +1,8 @@
 import XCTest
 import CryptoKit
 @testable import OnymIOS
+import OnymFoundation
+import OnymChain
 
 /// H-3 — client-side Ed25519 detached-signature verification for the
 /// trust-critical fetched assets. Covers the pure verifier, the shared

@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+@testable import OnymIdentity
 
 /// `reconcileFreshInstall()` — the launch-time verdict that decides
 /// whether keychain identities are orphans of a deleted install. The

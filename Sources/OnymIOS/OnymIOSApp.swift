@@ -1,4 +1,16 @@
 import SwiftUI
+import OnymTransport
+import OnymChain
+import OnymIdentity
+import OnymTransportBlossom
+import OnymTransportNostr
+import OnymGroup
+import OnymPersistence
+import OnymChatsCore
+import OnymInbox
+import OnymRecovery
+import OnymChatsUI
+import OnymSettings
 
 @main
 struct OnymIOSApp: App {

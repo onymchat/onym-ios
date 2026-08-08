@@ -16,6 +16,22 @@ packages:
   OnymSDK:
     url: https://github.com/onymchat/onym-sdk-swift.git
     from: 0.0.2
+  OnymDesign: {path: Packages/OnymDesign}
+  OnymFoundation: {path: Packages/OnymFoundation}
+  OnymTransport: {path: Packages/OnymTransport}
+  OnymChain: {path: Packages/OnymChain}
+  OnymTransportNostr: {path: Packages/OnymTransportNostr}
+  OnymTransportBlossom: {path: Packages/OnymTransportBlossom}
+  OnymIdentity: {path: Packages/OnymIdentity}
+  OnymPersistence: {path: Packages/OnymPersistence}
+  OnymGroup: {path: Packages/OnymGroup}
+  OnymChatsCore: {path: Packages/OnymChatsCore}
+  OnymInbox: {path: Packages/OnymInbox}
+  OnymSearch: {path: Packages/OnymSearch}
+  OnymRecovery: {path: Packages/OnymRecovery}
+  OnymIdentityUI: {path: Packages/OnymIdentityUI}
+  OnymChatsUI: {path: Packages/OnymChatsUI}
+  OnymSettings: {path: Packages/OnymSettings}
 
 targets:
   OnymIOS:
@@ -26,6 +42,22 @@ targets:
       - Resources
     dependencies:
       - package: OnymSDK
+      - package: OnymDesign
+      - package: OnymFoundation
+      - package: OnymTransport
+      - package: OnymChain
+      - package: OnymTransportNostr
+      - package: OnymTransportBlossom
+      - package: OnymIdentity
+      - package: OnymPersistence
+      - package: OnymGroup
+      - package: OnymChatsCore
+      - package: OnymInbox
+      - package: OnymSearch
+      - package: OnymRecovery
+      - package: OnymIdentityUI
+      - package: OnymChatsUI
+      - package: OnymSettings
     # Hand-written Info.plist via xcodegen's `info:` block. We tried
     # the GENERATE_INFOPLIST_FILE + INFOPLIST_KEY_* approach first but
     # `INFOPLIST_KEY_UILaunchScreen_BackgroundColor` / `_ImageName` are
@@ -170,6 +202,22 @@ targets:
     dependencies:
       - target: OnymIOS
       - package: OnymSDK
+      - package: OnymDesign
+      - package: OnymFoundation
+      - package: OnymTransport
+      - package: OnymChain
+      - package: OnymTransportNostr
+      - package: OnymTransportBlossom
+      - package: OnymIdentity
+      - package: OnymPersistence
+      - package: OnymGroup
+      - package: OnymChatsCore
+      - package: OnymInbox
+      - package: OnymSearch
+      - package: OnymRecovery
+      - package: OnymIdentityUI
+      - package: OnymChatsUI
+      - package: OnymSettings
 
   OnymIOSUITests:
     type: bundle.ui-testing

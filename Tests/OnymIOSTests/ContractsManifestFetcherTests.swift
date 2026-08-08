@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymChain
 
 /// Hits the production fetcher with `StubURLProtocol` (the reusable
 /// scaffolding from PR #18) in front. Pins the network behaviour:

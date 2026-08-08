@@ -1,5 +1,7 @@
 import XCTest
 @testable import OnymIOS
+import OnymChain
+import OnymChatsCore
 
 /// Wire-format pin for `ChatMessagePayload`. The struct is the
 /// plaintext that gets sealed in the same envelope as

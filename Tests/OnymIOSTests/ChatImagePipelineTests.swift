@@ -1,6 +1,10 @@
 import UIKit
 import XCTest
 @testable import OnymIOS
+import OnymIdentity
+import OnymTransportBlossom
+import OnymTransportNostr
+import OnymChatsCore
 
 /// Phase 1 coverage for the image pipeline: AES-GCM blob crypto, the
 /// BlurHash placeholder codec, and the Blossom BUD-01 auth header.

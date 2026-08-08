@@ -1,5 +1,7 @@
 import Foundation
 @testable import OnymIOS
+import OnymTransport
+import OnymInbox
 
 /// Test-controllable `InboxTransport`. Each `subscribe(inbox:)` call
 /// returns an `AsyncStream` whose continuation is owned by the caller

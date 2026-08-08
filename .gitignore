@@ -36,8 +36,11 @@ DerivedData/
 *.xcarchive/
 
 # Swift Package Manager
+# NOTE: `Packages/` is deliberately NOT ignored — it holds our
+# first-party local packages (OnymFoundation, OnymDesign, …), not the
+# legacy SPM ≤3 dependency-checkout directory that the old ignore
+# entry targeted.
 .build/
-Packages/
 .swiftpm/xcode/package.xcworkspace/
 .swiftpm/xcode/xcuserdata/
 .swiftpm/configuration/registries.json

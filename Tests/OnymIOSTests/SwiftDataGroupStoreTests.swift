@@ -1,5 +1,9 @@
 import XCTest
 @testable import OnymIOS
+import OnymFoundation
+import OnymChain
+import OnymIdentity
+import OnymGroup
 
 /// Round-trip tests for `SwiftDataGroupStore`. Uses
 /// `SwiftDataGroupStore.inMemory()` so the on-disk store under

@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymChatsCore
 
 /// Wire-format coverage for the video attachment added to
 /// `ChatMessagePayload` (Blossom video messages).

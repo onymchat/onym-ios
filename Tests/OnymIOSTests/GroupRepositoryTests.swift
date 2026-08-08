@@ -1,5 +1,7 @@
 import XCTest
 @testable import OnymIOS
+import OnymIdentity
+import OnymGroup
 
 /// Reactive-surface tests for `GroupRepository`. Backed by an in-memory
 /// `GroupStore` fake. Every test pre-selects an identity via the repo's

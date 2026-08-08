@@ -1,6 +1,10 @@
 import Foundation
 import XCTest
 @testable import OnymIOS
+import OnymTransport
+@testable import OnymChain
+import OnymIdentity
+import OnymGroup
 
 /// End-to-end integration test for the **1-on-1 dialog** Create Group
 /// flow against the deployed onym-relayer + Stellar testnet's

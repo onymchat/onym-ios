@@ -1,4 +1,7 @@
 import SwiftUI
+import OnymSearch
+import OnymChatsUI
+import OnymSettings
 
 /// App shell — `TabView` with the iOS 18+ `Tab(_, systemImage:, value:)`
 /// syntax. The `.search` role places its tab in the system's bottom-right
@@ -61,20 +64,33 @@ struct RootView: View {
             }
 
             Tab("Search", systemImage: "magnifyingglass", value: .search, role: .search) {
+                let chatsFlow = dependencies.makeChatsFlow()
                 NavigationStack {
                     SearchView(
                         messageRepository: dependencies.messageRepository,
-                        chatsFlow: dependencies.makeChatsFlow(),
                         identitiesFlow: dependencies.identitiesFlow,
-                        sendMessageInteractor: dependencies.sendMessageInteractor,
-                        chatReceiptSender: dependencies.chatReceiptSender,
-                        makeShareInviteFlow: dependencies.makeShareInviteFlow,
-                        setGroupAvatar: dependencies.setGroupAvatar,
-                        setGroupName: dependencies.setGroupName,
-                        imageLoader: dependencies.imageLoader,
-                        videoLoader: dependencies.videoLoader,
-                        voiceLoader: dependencies.voiceLoader
+                        groupNameForID: { groupID in
+                            chatsFlow.groups.first(where: { $0.id == groupID })?.name
+                        },
+                        startChats: { chatsFlow.start() }
                     )
+                    .navigationDestination(for: MessageSearchResult.self) { result in
+                        ChatThreadView(
+                            groupID: result.groupID,
+                            chatsFlow: dependencies.makeChatsFlow(),
+                            identitiesFlow: dependencies.identitiesFlow,
+                            messageRepository: dependencies.messageRepository,
+                            sendMessageInteractor: dependencies.sendMessageInteractor,
+                            chatReceiptSender: dependencies.chatReceiptSender,
+                            makeShareInviteFlow: dependencies.makeShareInviteFlow,
+                            setGroupAvatar: dependencies.setGroupAvatar,
+                            setGroupName: dependencies.setGroupName,
+                            imageLoader: dependencies.imageLoader,
+                            videoLoader: dependencies.videoLoader,
+                            voiceLoader: dependencies.voiceLoader,
+                            scrollToMessageID: result.messageID
+                        )
+                    }
                 }
             }
         }
