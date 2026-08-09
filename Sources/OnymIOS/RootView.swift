@@ -39,7 +39,10 @@ struct RootView: View {
         Group {
             switch dependencies.moderationGateFlow.gate {
             case .banned(let banState):
-                BannedView(state: banState)
+                BannedView(
+                    state: banState,
+                    makeCaseFlow: dependencies.makeModerationBanCaseFlow
+                )
             case .gateCheckRequired(let reason):
                 GateCheckRequiredView(reason: reason) {
                     dependencies.moderationGateFlow.tappedRetry()
@@ -49,7 +52,10 @@ struct RootView: View {
                     .overlay(alignment: .top) {
                         if case .operational(let openCases) = dependencies.moderationGateFlow.gate,
                            !openCases.isEmpty {
-                            OpenCaseBanner(notices: openCases)
+                            OpenCaseBanner(
+                                notices: openCases,
+                                makeCaseFlow: dependencies.makeModerationCaseFlow
+                            )
                         }
                     }
             }
@@ -106,7 +112,8 @@ struct RootView: View {
                         identitiesFlow: dependencies.identitiesFlow,
                         onClearAllMessages: { await dependencies.messageRepository.removeAll() },
                         makeModerationSettingsFlow: dependencies.makeModerationSettingsFlow,
-                        makeModerationConsentFlow: dependencies.makeModerationConsentFlow
+                        makeModerationConsentFlow: dependencies.makeModerationConsentFlow,
+                        makeModerationCaseFlow: dependencies.makeModerationCaseFlow
                     )
                 }
             }

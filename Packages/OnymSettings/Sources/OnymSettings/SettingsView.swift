@@ -5,6 +5,7 @@ import OnymIdentity
 import OnymIdentityUI
 import OnymRecovery
 import OnymChatsCore
+import OnymModeration
 import OnymModerationUI
 
 /// Settings tab — Onym design home. Identity hero (active identity
@@ -31,6 +32,7 @@ public struct SettingsView: View {
     /// until the app wires these in).
     let makeModerationSettingsFlow: (@MainActor () -> ModerationSettingsFlow)?
     let makeModerationConsentFlow: (@MainActor (ModerationConsentFlow.Mode) -> ModerationConsentFlow)?
+    let makeModerationCaseFlow: (@MainActor (CaseNotice) -> ModerationCaseFlow)?
 
     public init(
         makeBackupFlow: @escaping @MainActor () -> RecoveryPhraseBackupFlow,
@@ -41,7 +43,8 @@ public struct SettingsView: View {
         identitiesFlow: IdentitiesFlow,
         onClearAllMessages: @escaping () async -> Void,
         makeModerationSettingsFlow: (@MainActor () -> ModerationSettingsFlow)? = nil,
-        makeModerationConsentFlow: (@MainActor (ModerationConsentFlow.Mode) -> ModerationConsentFlow)? = nil
+        makeModerationConsentFlow: (@MainActor (ModerationConsentFlow.Mode) -> ModerationConsentFlow)? = nil,
+        makeModerationCaseFlow: (@MainActor (CaseNotice) -> ModerationCaseFlow)? = nil
     ) {
         self.makeBackupFlow = makeBackupFlow
         self.makeRelayerSettingsFlow = makeRelayerSettingsFlow
@@ -52,6 +55,7 @@ public struct SettingsView: View {
         self.onClearAllMessages = onClearAllMessages
         self.makeModerationSettingsFlow = makeModerationSettingsFlow
         self.makeModerationConsentFlow = makeModerationConsentFlow
+        self.makeModerationCaseFlow = makeModerationCaseFlow
     }
 
     @State private var showRecoveryPhrase = false
@@ -164,13 +168,18 @@ public struct SettingsView: View {
                 }
                 SettingsFootnote("Nostr relays and Blossom servers carry your messages and media. Replace them with your own instances for maximum privacy.")
 
+                // The section gates on the two original factories; the
+                // case factory only enriches the open-case banner and
+                // must not make the whole MODERATION entry vanish for
+                // callers that don't supply it.
                 if let makeModerationSettingsFlow, let makeModerationConsentFlow {
                     SettingsSectionLabel("MODERATION")
                     SettingsCard {
                         NavigationLink {
                             ModerationSettingsView(
                                 flow: makeModerationSettingsFlow(),
-                                makeConsentFlow: makeModerationConsentFlow
+                                makeConsentFlow: makeModerationConsentFlow,
+                                makeCaseFlow: makeModerationCaseFlow
                             )
                         } label: {
                             SettingsRow(

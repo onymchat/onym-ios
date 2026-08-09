@@ -9,10 +9,20 @@ import OnymModeration
 /// through to the notice detail.
 public struct OpenCaseBanner: View {
     let notices: [CaseNotice]
+    /// Builds the case flow for a tapped notice. `CaseNotice` carries
+    /// both `caseId` and `mandateRef`, which is exactly the standing
+    /// the repository resolves by. Optional so surfaces without the
+    /// factory degrade to the informational notice (with the
+    /// authority-contact fallback) instead of vanishing.
+    let makeCaseFlow: (@MainActor (CaseNotice) -> ModerationCaseFlow)?
     @State private var presented: CaseNotice?
 
-    public init(notices: [CaseNotice]) {
+    public init(
+        notices: [CaseNotice],
+        makeCaseFlow: (@MainActor (CaseNotice) -> ModerationCaseFlow)? = nil
+    ) {
         self.notices = notices
+        self.makeCaseFlow = makeCaseFlow
     }
 
     public var body: some View {
@@ -45,7 +55,7 @@ public struct OpenCaseBanner: View {
             .accessibilityIdentifier("moderation.case_banner")
             .sheet(item: $presented) { notice in
                 NavigationStack {
-                    CaseNoticeDetailView(notice: notice)
+                    CaseNoticeDetailView(notice: notice, makeCaseFlow: makeCaseFlow)
                 }
             }
         }
@@ -57,14 +67,18 @@ extension CaseNotice: @retroactive Identifiable {
 }
 
 /// The served notice, presented faithfully: class, deadlines,
-/// evidence reference, and the response path (stubbed — the client
-/// operation throws `.notImplemented` until an authority service
-/// exists; the screen says so instead of pretending).
+/// evidence reference, and the path into the case itself — status,
+/// response, and (after a decision) appeal.
 public struct CaseNoticeDetailView: View {
     let notice: CaseNotice
+    let makeCaseFlow: (@MainActor (CaseNotice) -> ModerationCaseFlow)?
 
-    public init(notice: CaseNotice) {
+    public init(
+        notice: CaseNotice,
+        makeCaseFlow: (@MainActor (CaseNotice) -> ModerationCaseFlow)? = nil
+    ) {
         self.notice = notice
+        self.makeCaseFlow = makeCaseFlow
     }
 
     public var body: some View {
@@ -88,12 +102,40 @@ public struct CaseNoticeDetailView: View {
                 SettingsFootnote("If the authority doesn't decide by the deadline, the case is dismissed automatically — silence never bans anyone. Not responding doesn't concede the case; it proceeds on the record.")
 
                 SettingsSectionLabel("RESPONSE")
-                SettingsCard {
-                    Text("Responding from the app isn't available yet. Use the authority's contact channel to respond before the deadline.")
-                        .font(.system(size: 14))
-                        .foregroundStyle(OnymTokens.text2)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(16)
+                if let makeCaseFlow {
+                    SettingsCard {
+                        NavigationLink {
+                            ModerationCaseView(flow: makeCaseFlow(notice))
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("Review and respond")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(OnymTokens.text)
+                                    Text("Fetch the case's current status, file your signed response, and follow the decision.")
+                                        .font(.system(size: 13))
+                                        .foregroundStyle(OnymTokens.text2)
+                                }
+                                Spacer(minLength: 4)
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(OnymTokens.text2)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(16)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("moderation.case_detail.open_case")
+                    }
+                } else {
+                    SettingsCard {
+                        Text("Responding from this surface isn't wired up. Use the authority's contact channel to respond before the deadline.")
+                            .font(.system(size: 14))
+                            .foregroundStyle(OnymTokens.text2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(16)
+                    }
                 }
             }
             .padding(.bottom, 32)

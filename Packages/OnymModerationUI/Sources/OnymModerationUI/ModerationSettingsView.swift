@@ -9,15 +9,18 @@ import OnymModeration
 public struct ModerationSettingsView: View {
     @State private var flow: ModerationSettingsFlow
     private let makeConsentFlow: @MainActor (ModerationConsentFlow.Mode) -> ModerationConsentFlow
+    private let makeCaseFlow: (@MainActor (CaseNotice) -> ModerationCaseFlow)?
 
     @State private var showSwitchConsent = false
 
     public init(
         flow: ModerationSettingsFlow,
-        makeConsentFlow: @escaping @MainActor (ModerationConsentFlow.Mode) -> ModerationConsentFlow
+        makeConsentFlow: @escaping @MainActor (ModerationConsentFlow.Mode) -> ModerationConsentFlow,
+        makeCaseFlow: (@MainActor (CaseNotice) -> ModerationCaseFlow)? = nil
     ) {
         _flow = State(initialValue: flow)
         self.makeConsentFlow = makeConsentFlow
+        self.makeCaseFlow = makeCaseFlow
     }
 
     public var body: some View {
@@ -26,7 +29,7 @@ public struct ModerationSettingsView: View {
                 SettingsLargeTitle("Moderation")
 
                 if !flow.state.openCases.isEmpty {
-                    OpenCaseBanner(notices: flow.state.openCases)
+                    OpenCaseBanner(notices: flow.state.openCases, makeCaseFlow: makeCaseFlow)
                         .padding(.bottom, 8)
                 }
 

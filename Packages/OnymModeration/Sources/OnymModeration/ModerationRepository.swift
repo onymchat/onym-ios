@@ -579,8 +579,18 @@ public actor ModerationRepository {
 
     /// The last fetched snapshot for a case, if any — for rendering
     /// offline or before the first fetch of a session completes.
-    public func storedCaseStatus(caseId: String) -> CaseStatusRecord? {
-        caseRecords.first { $0.caseId == caseId }
+    /// Owner-checked: a snapshot persisted for another local
+    /// identity's case never leaves the repository, so no caller can
+    /// render foreign case content while a network fetch is in flight.
+    public func storedCaseStatus(caseId: String) async -> CaseStatusRecord? {
+        guard let record = caseRecords.first(where: { $0.caseId == caseId }) else {
+            return nil
+        }
+        guard let userKey = try? await signer.userKeyID(),
+              record.user == userKey else {
+            return nil
+        }
+        return record
     }
 
     /// Drop every case snapshot not owned by one of `users`
