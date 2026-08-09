@@ -44,9 +44,13 @@ struct RootView: View {
                     makeCaseFlow: dependencies.makeModerationBanCaseFlow
                 )
             case .gateCheckRequired(let reason):
-                GateCheckRequiredView(reason: reason) {
-                    dependencies.moderationGateFlow.tappedRetry()
-                }
+                GateCheckRequiredView(
+                    reason: reason,
+                    onRetry: { dependencies.moderationGateFlow.tappedRetry() },
+                    makeRecoveryCaseFlow: { caseId in
+                        await dependencies.makeModerationRecoveryCaseFlow(caseId)
+                    }
+                )
             case .checking, .needsConsent, .operational:
                 tabs
             }

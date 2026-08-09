@@ -596,6 +596,17 @@ struct OnymIOSApp: App {
                     repository: moderationRepository,
                     banContext: true
                 )
+            },
+            makeModerationRecoveryCaseFlow: { @MainActor caseId in
+                guard let record = await moderationRepository.activeMandateRecord(),
+                      let mandateRef = try? record.mandate.mandateHash()
+                else { return nil }
+                return ModerationCaseFlow(
+                    caseId: caseId,
+                    mandateRef: mandateRef,
+                    repository: moderationRepository,
+                    banContext: true
+                )
             }
         )
     }

@@ -91,4 +91,7 @@ struct AppDependencies {
     let makeModerationCaseFlow: @MainActor (CaseNotice) -> ModerationCaseFlow
     /// Case screen from the ban surface: appeal + new-holder filings.
     let makeModerationBanCaseFlow: @MainActor (_ caseId: String, _ mandateRef: String) -> ModerationCaseFlow
+    /// Recovery case screen after a reinstall: resolves the retained
+    /// identity's active mandate before opening the signed appeal flow.
+    let makeModerationRecoveryCaseFlow: @MainActor (_ caseId: String) async -> ModerationCaseFlow?
 }
