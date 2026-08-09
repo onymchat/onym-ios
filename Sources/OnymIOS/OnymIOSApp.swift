@@ -710,17 +710,22 @@ struct OnymIOSApp: App {
                     // carry an identity signature.
                     await moderationRepository.start()
                     await gateCheckRepository.start()
-                    // Replay groups + invitations for the in-memory snapshot streams.
-                    await groupRepository.reload()
-                    await incomingInvitations.reload()
-                    // Wire identity selection → group + invitations filter
-                    // so both lists flip when the user switches identity.
+                    // Install the selected-identity filters before replaying
+                    // persisted snapshots. Reloading first publishes through
+                    // a nil filter, so a ChatsFlow that subscribes during
+                    // cold start can permanently receive an empty initial
+                    // list until the view is recreated (Settings → back).
                     if let initialID = await identityRepository.currentSelectedID() {
                         await groupRepository.setCurrentIdentity(initialID)
                         await incomingInvitations.setCurrentIdentity(initialID)
                         await pendingInvitesStore.setCurrentIdentity(initialID)
                         await pendingVerificationStore.setCurrentIdentity(initialID)
                     }
+                    // Replay groups + invitations only after their identity
+                    // filters are ready, so every startup subscriber sees
+                    // the persisted rows for the active identity.
+                    await groupRepository.reload()
+                    await incomingInvitations.reload()
                 }
                 .task {
                     // Long-lived listener: forward every selection change
