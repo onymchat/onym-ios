@@ -75,11 +75,27 @@ public final class ModerationCaseFlow {
         await refresh()
     }
 
+    /// A refresh requested while one is in flight is QUEUED, not
+    /// dropped: the post-submission refresh must not silently no-op
+    /// against a concurrent pull-to-refresh, or the status card keeps
+    /// claiming "Response on file: No" after a successful filing.
+    private var followUpRequested = false
+
     public func refresh() async {
-        guard !state.isLoading else { return }
-        state.isLoading = true
+        guard !state.isLoading else {
+            followUpRequested = true
+            return
+        }
+        repeat {
+            followUpRequested = false
+            state.isLoading = true
+            await performRefresh()
+            state.isLoading = false
+        } while followUpRequested
+    }
+
+    private func performRefresh() async {
         state.statusErrorMessage = nil
-        defer { state.isLoading = false }
         do {
             let status = try await fetchStatusRecoveringDirectory()
             state.status = status
@@ -110,8 +126,16 @@ public final class ModerationCaseFlow {
                 caseId: caseId,
                 mandateRef: mandateRef
             )
-        } catch ModerationError.authorityUnavailable {
-            try await repository.refresh()
+        } catch let ModerationError.authorityUnavailable(authority) {
+            do {
+                try await repository.refresh()
+            } catch {
+                // The recovery fetch failing IS the directory being
+                // unavailable — keep the actionable connectivity copy
+                // instead of letting a transport error fall through to
+                // the generic message.
+                throw ModerationError.authorityUnavailable(authority)
+            }
             return try await repository.caseStatus(
                 caseId: caseId,
                 mandateRef: mandateRef

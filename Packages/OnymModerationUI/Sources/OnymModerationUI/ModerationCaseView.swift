@@ -57,7 +57,16 @@ public struct ModerationCaseView: View {
                 .padding(.bottom, 32)
             }
             .onAppear {
-                if focusNewHolder { proxy.scrollTo("newHolder", anchor: .top) }
+                // Deferred one hop: scrolling in `onAppear` runs before
+                // the scroll content is laid out and is commonly a
+                // no-op — the tap that opened this sheet must actually
+                // land on the section it named.
+                guard focusNewHolder else { return }
+                Task { @MainActor in
+                    withAnimation {
+                        proxy.scrollTo("newHolder", anchor: .center)
+                    }
+                }
             }
         }
         .background(OnymTokens.surface.ignoresSafeArea())
@@ -79,7 +88,7 @@ public struct ModerationCaseView: View {
                         row("Case", status.caseId, monospaced: true)
                         row("Stage", stageLine(status))
                         if let classId = status.classId {
-                            row("Violation class", classId)
+                            row("Violation class", bounded(classId))
                         }
                         if let opened = status.openedAt {
                             row("Opened", opened.formatted(date: .abbreviated, time: .shortened))
@@ -92,13 +101,13 @@ public struct ModerationCaseView: View {
                         }
                         row("Response on file", responsesLine(status))
                         if let appealState = status.appealState, appealState != "none" {
-                            row("Appeal", appealState)
+                            row("Appeal", bounded(appealState))
                         }
                         if let deadline = status.appealDeadline {
                             row("Appeal deadline", deadline.formatted(date: .abbreviated, time: .shortened))
                         }
                         if let newHolderState = status.newHolderState, newHolderState != "none" {
-                            row("New-holder claim", newHolderState)
+                            row("New-holder claim", bounded(newHolderState))
                         }
                     } else if flow.state.isLoading {
                         HStack(spacing: 8) {
@@ -369,7 +378,7 @@ public struct ModerationCaseView: View {
         case ("decided", "reversed"):
             return String(localized: "Decided — reversed on appeal")
         default:
-            return status.stage
+            return bounded(status.stage)
         }
     }
 
@@ -395,8 +404,15 @@ public struct ModerationCaseView: View {
         case "decided": return String(localized: "Decided")
         case "decision_overdue": return String(localized: "Decision overdue")
         case "appeal_reversed": return String(localized: "Reversed on appeal")
-        default: return kind
+        default: return bounded(kind)
         }
+    }
+
+    /// Authority-controlled identifiers rendered verbatim get the same
+    /// bound as rejection messages — a hostile or buggy authority must
+    /// not be able to flood a row.
+    private func bounded(_ value: String) -> String {
+        String(value.prefix(120))
     }
 
     private func trimmed(_ text: String) -> String {

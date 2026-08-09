@@ -165,6 +165,26 @@ public struct BannedView: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("moderation.banned.new_holder")
+                        // The authority's own procedure SUPPLEMENTS the
+                        // in-app claim, exactly like the appeal path:
+                        // the canonical new holder has a fresh install,
+                        // so the in-app filing (which signs with a
+                        // retained mandate context) can dead-end with
+                        // "mandate no longer on this device" — a
+                        // working authority URL must never be hidden
+                        // behind a form that cannot succeed for them.
+                        if caseFlowBuilder != nil, let url = state.newHolderURL {
+                            Button {
+                                openURL(url)
+                            } label: {
+                                Text("File the claim at the authority instead")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(OnymTokens.text2)
+                                    .frame(maxWidth: .infinity, minHeight: 36)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("moderation.banned.new_holder_external")
+                        }
                     }
                 }
                 .padding(.horizontal, 16)
