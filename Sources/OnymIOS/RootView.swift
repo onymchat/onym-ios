@@ -81,7 +81,7 @@ struct RootView: View {
             Tab("Chats", systemImage: "bubble.left.and.bubble.right.fill", value: .chats) {
                 NavigationStack {
                     ChatsView(
-                        flow: dependencies.makeChatsFlow(),
+                        flow: dependencies.chatsFlow,
                         identitiesFlow: dependencies.identitiesFlow,
                         approveRequestsFlow: dependencies.approveRequestsFlow,
                         pendingInvitesFlow: dependencies.pendingInvitesFlow,
@@ -119,7 +119,7 @@ struct RootView: View {
             }
 
             Tab("Search", systemImage: "magnifyingglass", value: .search, role: .search) {
-                let chatsFlow = dependencies.makeChatsFlow()
+                let chatsFlow = dependencies.chatsFlow
                 NavigationStack {
                     SearchView(
                         messageRepository: dependencies.messageRepository,
@@ -132,7 +132,7 @@ struct RootView: View {
                     .navigationDestination(for: MessageSearchResult.self) { result in
                         ChatThreadView(
                             groupID: result.groupID,
-                            chatsFlow: dependencies.makeChatsFlow(),
+                            chatsFlow: dependencies.chatsFlow,
                             identitiesFlow: dependencies.identitiesFlow,
                             messageRepository: dependencies.messageRepository,
                             sendMessageInteractor: dependencies.sendMessageInteractor,

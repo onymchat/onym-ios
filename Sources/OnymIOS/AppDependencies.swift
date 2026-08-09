@@ -25,7 +25,12 @@ struct AppDependencies {
     let makeCreateGroupFlow: @MainActor () -> CreateGroupFlow
     let makeShareInviteFlow: @MainActor () -> ShareInviteFlow
     let makeJoinFlow: @MainActor (IntroCapability) -> JoinFlow
-    let makeChatsFlow: @MainActor () -> ChatsFlow
+    /// Single shared instance — the Chats tab, search destination, and
+    /// thread screens must observe the same list state. Recreating this
+    /// flow during a RootView redraw can leave its startup task attached
+    /// to an old view instance, making chats appear only after Settings
+    /// recreates the tab.
+    let chatsFlow: ChatsFlow
     /// Single shared instance — the toolbar picker on Chats and the
     /// Settings → Identities screen observe the same state, so a
     /// factory closure here would split them.

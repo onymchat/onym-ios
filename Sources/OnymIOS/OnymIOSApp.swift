@@ -532,9 +532,7 @@ struct OnymIOSApp: App {
                     groupRepository: groupRepository
                 )
             },
-            makeChatsFlow: { @MainActor in
-                ChatsFlow(repository: groupRepository, messages: messageRepository)
-            },
+            chatsFlow: ChatsFlow(repository: groupRepository, messages: messageRepository),
             identitiesFlow: identitiesFlow,
             approveRequestsFlow: approveRequestsFlow,
             pendingInvitesFlow: pendingInvitesFlow,
