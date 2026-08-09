@@ -12,31 +12,42 @@ public struct ModerationCaseView: View {
     @State private var responseText = ""
     @State private var appealText = ""
     @State private var newHolderText = ""
+    /// Scrolls to the new-holder section on first appearance — the ban
+    /// screen's "I'm this device's new owner" must land the user on
+    /// the affordance they tapped, not on the status card.
+    private let focusNewHolder: Bool
 
-    public init(flow: ModerationCaseFlow) {
+    public init(flow: ModerationCaseFlow, focusNewHolder: Bool = false) {
         _flow = State(initialValue: flow)
+        self.focusNewHolder = focusNewHolder
     }
 
     public var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                SettingsLargeTitle("Moderation case")
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    SettingsLargeTitle("Moderation case")
 
-                statusSection
-                if let events = flow.state.status?.events, !events.isEmpty {
-                    eventsSection(events)
+                    statusSection
+                    if let events = flow.state.status?.events, !events.isEmpty {
+                        eventsSection(events)
+                    }
+                    if flow.canRespond {
+                        responseSection
+                    }
+                    if flow.showsAppealSection {
+                        appealSection
+                    }
+                    if flow.banContext {
+                        newHolderSection
+                            .id("newHolder")
+                    }
                 }
-                if flow.canRespond {
-                    responseSection
-                }
-                if flow.showsAppealSection {
-                    appealSection
-                }
-                if flow.banContext {
-                    newHolderSection
-                }
+                .padding(.bottom, 32)
             }
-            .padding(.bottom, 32)
+            .onAppear {
+                if focusNewHolder { proxy.scrollTo("newHolder", anchor: .top) }
+            }
         }
         .background(OnymTokens.surface.ignoresSafeArea())
         .navigationTitle("Case")
@@ -213,8 +224,7 @@ public struct ModerationCaseView: View {
             SettingsSectionLabel("APPEAL")
             SettingsCard {
                 VStack(alignment: .leading, spacing: 10) {
-                    if let receipt = flow.state.appealReceipt,
-                       receipt.kind == AppealSubmission.Kind.appeal.rawValue {
+                    if flow.state.appealReceipt != nil {
                         Label("Your appeal is filed. The authority reviews it; a successful appeal issues a reversal.", systemImage: "checkmark.circle.fill")
                             .font(.system(size: 13))
                             .foregroundStyle(OnymTokens.text)
@@ -268,8 +278,7 @@ public struct ModerationCaseView: View {
                     Text("If you acquired this device after the ban, you can file a new-holder claim. A human reviews it on an expedited basis — a device is not a person.")
                         .font(.system(size: 13))
                         .foregroundStyle(OnymTokens.text2)
-                    if let receipt = flow.state.appealReceipt,
-                       receipt.kind == AppealSubmission.Kind.newHolderClaim.rawValue {
+                    if flow.state.newHolderReceipt != nil {
                         Label("Your claim is submitted for expedited human review.", systemImage: "checkmark.circle.fill")
                             .font(.system(size: 13))
                             .foregroundStyle(OnymTokens.text)
@@ -283,10 +292,14 @@ public struct ModerationCaseView: View {
                             .background(OnymTokens.surface,
                                         in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                             .accessibilityIdentifier("moderation.case.new_holder_editor")
+                        if let message = flow.state.newHolderErrorMessage {
+                            inlineError(message, id: "moderation.case.new_holder_error")
+                        }
                         Button {
                             let statement = newHolderText
                             Task {
                                 await flow.submitAppeal(kind: .newHolderClaim, statement: statement)
+                                if flow.state.newHolderErrorMessage == nil { newHolderText = "" }
                             }
                         } label: {
                             Text("File new-holder claim")

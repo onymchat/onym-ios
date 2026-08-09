@@ -20,10 +20,15 @@ public final class ModerationCaseFlow {
         public var isSubmittingResponse = false
         public var isSubmittingAppeal = false
         public var responseReceipt: CaseResponseReceipt?
+        /// Per-kind receipts and errors: an ordinary appeal and a
+        /// new-holder claim are independent filings, and one must never
+        /// erase or mask the other's outcome.
         public var appealReceipt: AppealReceipt?
+        public var newHolderReceipt: AppealReceipt?
         public var statusErrorMessage: String?
         public var responseErrorMessage: String?
         public var appealErrorMessage: String?
+        public var newHolderErrorMessage: String?
     }
 
     public private(set) var state = State()
@@ -52,7 +57,14 @@ public final class ModerationCaseFlow {
     }
 
     public func start() async {
-        if let stored = await repository.storedCaseStatus(caseId: caseId) {
+        // Load the offline snapshot once (re-appearance must not
+        // relabel an already-fresh status as a snapshot), and only if
+        // it belongs to this flow's mandate — a snapshot persisted for
+        // another identity's case must never render just because the
+        // caseId matches.
+        if state.status == nil,
+           let stored = await repository.storedCaseStatus(caseId: caseId),
+           stored.mandateRef == mandateRef {
             state.status = stored.status
             state.snapshotFetchedAt = stored.fetchedAt
         }
@@ -77,7 +89,13 @@ public final class ModerationCaseFlow {
             state.snapshotFetchedAt = nil
         } catch {
             // A stale snapshot (if any) stays rendered; the error only
-            // annotates it.
+            // annotates it — EXCEPT when the repository refused
+            // standing: the active identity doesn't own this case's
+            // mandate, so nothing about the case may stay on screen.
+            if case ModerationError.caseAccessUnavailable = error {
+                state.status = nil
+                state.snapshotFetchedAt = nil
+            }
             state.statusErrorMessage = Self.statusMessage(for: error)
         }
     }
@@ -103,35 +121,60 @@ public final class ModerationCaseFlow {
     public func submitAppeal(kind: AppealSubmission.Kind, statement: String) async {
         guard !state.isSubmittingAppeal else { return }
         state.isSubmittingAppeal = true
-        state.appealErrorMessage = nil
+        switch kind {
+        case .appeal: state.appealErrorMessage = nil
+        case .newHolderClaim: state.newHolderErrorMessage = nil
+        }
         defer { state.isSubmittingAppeal = false }
         do {
-            state.appealReceipt = try await repository.appeal(
+            let receipt = try await repository.appeal(
                 caseId: caseId,
                 mandateRef: mandateRef,
                 kind: kind,
                 statement: statement
             )
+            switch kind {
+            case .appeal: state.appealReceipt = receipt
+            case .newHolderClaim: state.newHolderReceipt = receipt
+            }
             await refresh()
         } catch {
-            state.appealErrorMessage = Self.submissionMessage(for: error)
+            switch kind {
+            case .appeal:
+                state.appealErrorMessage = Self.submissionMessage(for: error)
+            case .newHolderClaim:
+                state.newHolderErrorMessage = Self.submissionMessage(for: error)
+            }
         }
     }
 
     // MARK: - Advisory gating
 
     /// The reference accepts responses on any open case — even late,
-    /// flagged `late` — so the composer shows exactly while the case
-    /// is open.
+    /// flagged `late` — so the composer shows while the case is open,
+    /// AND while no status is available at all: the notice that led
+    /// here already asserts the case is open, and hiding the composer
+    /// offline would hard-block the response path this flow promises
+    /// never to. The Authority arbitrates either way.
     public var canRespond: Bool {
-        state.status?.stage == "open"
+        // No status at all: default open from the notice path (which
+        // asserts an open case), closed from the ban surface (whose
+        // caller holds a decided verdict).
+        guard let status = state.status else { return !banContext }
+        return status.stage == "open"
     }
 
     /// Appeal affordance: a ban whose review isn't already decided.
-    /// From the ban surface it also shows before a status fetch —
-    /// the caller holds the verdict, and the Authority is the final
-    /// arbiter of the window either way.
+    /// From the ban surface it also shows before a status fetch — the
+    /// caller holds the verdict — and whenever the rendered status is
+    /// only a stale snapshot: a snapshot predating the ban (stage
+    /// "open", no disposition) must not hide the appeal exactly in the
+    /// offline case the snapshot exists for. Only a FRESH status may
+    /// conclude the appeal isn't available.
     public var showsAppealSection: Bool {
+        if banContext, state.status == nil || state.snapshotFetchedAt != nil {
+            return true
+        }
         if let status = state.status {
             guard status.disposition == "ban" else { return false }
             switch status.appealState {

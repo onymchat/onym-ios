@@ -23,8 +23,13 @@ public struct BannedView: View {
     /// the contact fallback remain for verdicts without a case path.
     let makeCaseFlow: (@MainActor (_ caseId: String, _ mandateRef: String) -> ModerationCaseFlow)?
 
+    private enum CaseSheet: String, Identifiable {
+        case appeal, newHolder
+        var id: String { rawValue }
+    }
+
     @Environment(\.openURL) private var openURL
-    @State private var showsCase = false
+    @State private var caseSheet: CaseSheet?
 
     public init(
         state: BanState,
@@ -91,13 +96,16 @@ public struct BannedView: View {
                     // In-app appeal outranks a link-out: the flow
                     // retains the exact signed filing and its receipt.
                     if let builder = caseFlowBuilder {
-                        SettingsPrimaryButton(action: { showsCase = true }) {
+                        SettingsPrimaryButton(action: { caseSheet = .appeal }) {
                             Text("Review case and appeal")
                         }
                         .accessibilityIdentifier("moderation.banned.appeal")
-                        .sheet(isPresented: $showsCase) {
+                        .sheet(item: $caseSheet) { sheet in
                             NavigationStack {
-                                ModerationCaseView(flow: builder())
+                                ModerationCaseView(
+                                    flow: builder(),
+                                    focusNewHolder: sheet == .newHolder
+                                )
                             }
                         }
                     } else if let appealURL = state.appealURL {
@@ -118,8 +126,9 @@ public struct BannedView: View {
                                 openURL(url)
                             } else if caseFlowBuilder != nil {
                                 // The case sheet carries the
-                                // new-holder section (banContext).
-                                showsCase = true
+                                // new-holder section (banContext);
+                                // open it scrolled to that section.
+                                caseSheet = .newHolder
                             } else {
                                 onNewHolderClaim?()
                             }

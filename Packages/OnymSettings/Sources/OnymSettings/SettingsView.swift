@@ -168,8 +168,11 @@ public struct SettingsView: View {
                 }
                 SettingsFootnote("Nostr relays and Blossom servers carry your messages and media. Replace them with your own instances for maximum privacy.")
 
-                if let makeModerationSettingsFlow, let makeModerationConsentFlow,
-                   let makeModerationCaseFlow {
+                // The section gates on the two original factories; the
+                // case factory only enriches the open-case banner and
+                // must not make the whole MODERATION entry vanish for
+                // callers that don't supply it.
+                if let makeModerationSettingsFlow, let makeModerationConsentFlow {
                     SettingsSectionLabel("MODERATION")
                     SettingsCard {
                         NavigationLink {

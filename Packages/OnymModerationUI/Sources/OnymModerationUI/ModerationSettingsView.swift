@@ -9,14 +9,14 @@ import OnymModeration
 public struct ModerationSettingsView: View {
     @State private var flow: ModerationSettingsFlow
     private let makeConsentFlow: @MainActor (ModerationConsentFlow.Mode) -> ModerationConsentFlow
-    private let makeCaseFlow: @MainActor (CaseNotice) -> ModerationCaseFlow
+    private let makeCaseFlow: (@MainActor (CaseNotice) -> ModerationCaseFlow)?
 
     @State private var showSwitchConsent = false
 
     public init(
         flow: ModerationSettingsFlow,
         makeConsentFlow: @escaping @MainActor (ModerationConsentFlow.Mode) -> ModerationConsentFlow,
-        makeCaseFlow: @escaping @MainActor (CaseNotice) -> ModerationCaseFlow
+        makeCaseFlow: (@MainActor (CaseNotice) -> ModerationCaseFlow)? = nil
     ) {
         _flow = State(initialValue: flow)
         self.makeConsentFlow = makeConsentFlow
