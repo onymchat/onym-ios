@@ -33,11 +33,6 @@ public struct AuthorityListing: Codable, Sendable, Equatable {
         self.operatorPublicKeyBase64 = operatorPublicKeyBase64
     }
 
-    /// Named at call sites to make the directory's trust designation
-    /// visible where a client is constructed.
-    public var resolvedAPIBaseURL: URL {
-        apiBaseURL
-    }
 }
 
 struct KnownAuthoritiesDocument: Codable {

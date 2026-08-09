@@ -17,8 +17,9 @@ public struct ModerationState: Sendable, Equatable {
     public let fetchStatus: AuthorityFetchStatus
     /// The active record, if the user has consented.
     public let activeMandate: MandateRecord?
-    /// Every record ever signed on this device, newest first —
-    /// old mandates stay pinned to their consented manifest hashes.
+    /// Accepted mandates and registration attempts whose outcome is
+    /// still ambiguous, newest first. Definitively refused attempts are
+    /// not mandates and are removed from this retained state.
     public let history: [MandateRecord]
 
     public static let empty = ModerationState(
@@ -173,12 +174,6 @@ public actor ModerationRepository {
         reviewedManifest: ReviewedManifest
     ) async throws -> MandateRecord {
         let signedManifest = reviewedManifest.signedManifest
-        guard signedManifest.manifest.componentId == listing.componentId else {
-            throw ModerationError.manifestInvalid(
-                "reviewed manifest componentId does not match the selected authority"
-            )
-        }
-        try manifestValidator.validateForConsent(signedManifest, now: clock())
         let userKey = try await signer.userKeyID()
         let key = ConsentKey(
             authority: listing.componentId,
@@ -387,7 +382,7 @@ public actor ModerationRepository {
             // become valid through exact replay and must not deadlock
             // every future consent attempt.
             if isDeterministicRegistrationRejection(error) {
-                markRegistrationRejected(pending)
+                discardRegistrationAttempt(pending)
             }
             throw error
         }
@@ -395,11 +390,11 @@ public actor ModerationRepository {
         // checks here preserves the invariant for every factory-injected
         // implementation of the protocol.
         guard receipt.accepted else {
-            markRegistrationRejected(pending)
+            discardRegistrationAttempt(pending)
             throw AuthorityClientError.mandateNotAccepted(mandateRef: receipt.mandateRef)
         }
         guard receipt.mandateRef == expectedRef else {
-            markRegistrationRejected(pending)
+            discardRegistrationAttempt(pending)
             throw AuthorityClientError.mandateReferenceMismatch(
                 expected: expectedRef,
                 received: receipt.mandateRef
@@ -433,9 +428,9 @@ public actor ModerationRepository {
         })
     }
 
-    private func markRegistrationRejected(_ record: MandateRecord) {
+    private func discardRegistrationAttempt(_ record: MandateRecord) {
         guard let index = recordIndex(of: record) else { return }
-        records[index].registrationRejected = true
+        records.remove(at: index)
         mandateStore.save(records)
         publish()
     }
@@ -446,7 +441,9 @@ public actor ModerationRepository {
         case .mandateNotAccepted, .mandateReferenceMismatch:
             return true
         case .rejected(let rejection):
-            return rejection.code == .badRequest || rejection.code == .signatureInvalid
+            return (400..<500).contains(rejection.statusCode)
+                && rejection.statusCode != 408
+                && rejection.statusCode != 429
         case .invalidResponse, .malformedResponse, .localMandateRecordMissing:
             return false
         }

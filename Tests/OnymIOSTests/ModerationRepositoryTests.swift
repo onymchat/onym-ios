@@ -112,6 +112,7 @@ final class ModerationRepositoryTests: XCTestCase {
         private var _shouldFail = false
         private var _returnedReference: String?
         private var _accepted = true
+        private var _registrationError: AuthorityClientError?
 
         var mandates: [ModerationMandate] { lock.withLock { _mandates } }
         var shouldFail: Bool {
@@ -126,15 +127,20 @@ final class ModerationRepositoryTests: XCTestCase {
             get { lock.withLock { _accepted } }
             set { lock.withLock { _accepted = newValue } }
         }
+        var registrationError: AuthorityClientError? {
+            get { lock.withLock { _registrationError } }
+            set { lock.withLock { _registrationError = newValue } }
+        }
 
         func registerMandate(
             _ mandate: ModerationMandate
         ) async throws -> MandateRegistrationReceipt {
-            let state = lock.withLock { () -> (Bool, String?, Bool) in
+            let state = lock.withLock { () -> (Bool, String?, Bool, AuthorityClientError?) in
                 _mandates.append(mandate)
-                return (_shouldFail, _returnedReference, _accepted)
+                return (_shouldFail, _returnedReference, _accepted, _registrationError)
             }
             if state.0 { throw RegistrationFailure.unavailable }
+            if let error = state.3 { throw error }
             let mandateRef: String
             if let returnedReference = state.1 {
                 mandateRef = returnedReference
@@ -441,10 +447,7 @@ final class ModerationRepositoryTests: XCTestCase {
             XCTFail("unexpected error: \(error)")
         }
 
-        let rejected = try XCTUnwrap(store.load().first)
-        XCTAssertTrue(rejected.registrationRejected)
-        XCTAssertFalse(rejected.registrationPending)
-        XCTAssertFalse(rejected.isActive)
+        XCTAssertTrue(store.load().isEmpty)
         let activeAfterMismatch = await repository.activeMandateRecord()
         XCTAssertNil(activeAfterMismatch)
     }
@@ -473,18 +476,59 @@ final class ModerationRepositoryTests: XCTestCase {
             XCTFail("unexpected error: \(error)")
         }
 
-        let rejected = try XCTUnwrap(store.load().first)
-        XCTAssertTrue(rejected.registrationRejected)
-        XCTAssertFalse(rejected.registrationPending)
-        XCTAssertFalse(rejected.isActive)
+        XCTAssertTrue(store.load().isEmpty)
 
         authority.accepted = true
         let retried = try await repository.reviewAndConsent(to: listing(componentId, name: "A"))
         XCTAssertTrue(retried.isActive)
         XCTAssertTrue(retried.authorityRegistered)
-        XCTAssertEqual(store.load().count, 2, "the rejected signed attempt remains auditable")
-        XCTAssertTrue(try XCTUnwrap(store.load().last).registrationRejected)
+        XCTAssertEqual(store.load().count, 1)
         XCTAssertEqual(backend.countersignCount, 2, "a terminal refusal mints a fresh artifact")
+    }
+
+    func testOrdinary4xxIsTerminalButRateLimitRetainsExactRetry() async throws {
+        let componentId = "onym:component:a"
+        let selected = listing(componentId, name: "A")
+        let backend = RecordingBackend()
+        backend.countersignature = "interface-signature"
+        let authority = RecordingAuthorityClient()
+        let store = InMemoryMandateStore()
+        let repository = makeRepository(
+            listings: [selected],
+            bytesByComponent: [componentId: manifestBytes(componentId: componentId)],
+            backend: backend,
+            authorityClient: authority,
+            store: store
+        )
+        let reviewed = try await repository.manifestForReview(selected)
+
+        authority.registrationError = .rejected(
+            AuthorityRejection(statusCode: 404, rawCode: "not_found", message: "not found")
+        )
+        do {
+            _ = try await repository.consent(to: selected, reviewedManifest: reviewed)
+            XCTFail("expected terminal 404")
+        } catch AuthorityClientError.rejected {
+            // expected
+        }
+        XCTAssertTrue(store.load().isEmpty)
+
+        authority.registrationError = .rejected(
+            AuthorityRejection(statusCode: 429, rawCode: "rate_limited", message: "slow down")
+        )
+        do {
+            _ = try await repository.consent(to: selected, reviewedManifest: reviewed)
+            XCTFail("expected retryable 429")
+        } catch AuthorityClientError.rejected {
+            // expected
+        }
+        let pending = try XCTUnwrap(store.load().first)
+        XCTAssertTrue(pending.registrationPending)
+
+        authority.registrationError = nil
+        let activated = try await repository.consent(to: selected, reviewedManifest: reviewed)
+        XCTAssertTrue(activated.isActive)
+        XCTAssertEqual(Array(authority.mandates.suffix(2)), [pending.mandate, pending.mandate])
     }
 
     func testOverlappingConsentCallsShareOneArtifact() async throws {
@@ -631,7 +675,6 @@ final class ModerationRepositoryTests: XCTestCase {
             JSONSerialization.jsonObject(with: encoder.encode(record)) as? [String: Any]
         )
         json.removeValue(forKey: "authorityRegistered")
-        json.removeValue(forKey: "registrationRejected")
         let legacyBytes = try JSONSerialization.data(withJSONObject: json)
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
@@ -639,7 +682,6 @@ final class ModerationRepositoryTests: XCTestCase {
         let decoded = try decoder.decode(MandateRecord.self, from: legacyBytes)
 
         XCTAssertFalse(decoded.authorityRegistered)
-        XCTAssertFalse(decoded.registrationRejected)
         XCTAssertEqual(decoded.mandate, record.mandate)
         XCTAssertTrue(decoded.isActive)
     }

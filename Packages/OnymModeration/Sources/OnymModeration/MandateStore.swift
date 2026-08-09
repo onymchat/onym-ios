@@ -19,19 +19,10 @@ public struct MandateRecord: Codable, Sendable, Equatable {
     /// record remains persisted with this false so a retry can resend
     /// identical bytes instead of minting a second consent artifact.
     public var authorityRegistered: Bool
-    /// True after a definitive Authority refusal. The signed attempt is
-    /// retained for an honest local audit trail, but exact replay is no
-    /// longer forced because it cannot change that outcome.
-    public var registrationRejected: Bool
     /// A real countersigned mandate awaiting acknowledgement from its
     /// Authority. It is neither current consent nor historical consent
     /// and must not be presented as either one.
     public var registrationPending: Bool {
-        countersigned && !authorityRegistered && !registrationRejected
-    }
-    /// Registration attempts are internal state until acknowledged;
-    /// neither pending nor rejected attempts belong in mandate history UI.
-    public var registrationIncomplete: Bool {
         countersigned && !authorityRegistered
     }
     /// Exactly one record is active per identity–device pair.
@@ -46,7 +37,6 @@ public struct MandateRecord: Codable, Sendable, Equatable {
         authorityName: String,
         countersigned: Bool,
         authorityRegistered: Bool = false,
-        registrationRejected: Bool = false,
         isActive: Bool,
         createdAt: Date
     ) {
@@ -55,7 +45,6 @@ public struct MandateRecord: Codable, Sendable, Equatable {
         self.authorityName = authorityName
         self.countersigned = countersigned
         self.authorityRegistered = authorityRegistered
-        self.registrationRejected = registrationRejected
         self.isActive = isActive
         self.createdAt = createdAt
     }
@@ -66,7 +55,6 @@ public struct MandateRecord: Codable, Sendable, Equatable {
         case authorityName
         case countersigned
         case authorityRegistered
-        case registrationRejected
         case isActive
         case createdAt
     }
@@ -84,10 +72,6 @@ public struct MandateRecord: Codable, Sendable, Equatable {
         authorityRegistered = try container.decodeIfPresent(
             Bool.self,
             forKey: .authorityRegistered
-        ) ?? false
-        registrationRejected = try container.decodeIfPresent(
-            Bool.self,
-            forKey: .registrationRejected
         ) ?? false
         isActive = try container.decode(Bool.self, forKey: .isActive)
         createdAt = try container.decode(Date.self, forKey: .createdAt)

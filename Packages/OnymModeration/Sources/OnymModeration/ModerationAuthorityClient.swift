@@ -261,7 +261,7 @@ public struct URLSessionModerationAuthorityClientFactory: ModerationAuthorityCli
 
     public func client(for listing: AuthorityListing) -> any ModerationAuthorityClient {
         URLSessionModerationAuthorityClient(
-            baseURL: listing.resolvedAPIBaseURL,
+            baseURL: listing.apiBaseURL,
             session: session,
             signer: signer,
             clock: clock

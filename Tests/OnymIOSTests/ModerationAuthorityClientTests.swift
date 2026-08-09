@@ -75,7 +75,7 @@ final class ModerationAuthorityClientTests: XCTestCase {
         """#.utf8)
         let listing = try JSONDecoder().decode(AuthorityListing.self, from: data)
 
-        XCTAssertEqual(listing.resolvedAPIBaseURL.absoluteString, "https://api.example/moderation")
+        XCTAssertEqual(listing.apiBaseURL.absoluteString, "https://api.example/moderation")
     }
 
     func testAuthorityListingWithoutExplicitAPIBaseURLFailsClosed() throws {
