@@ -9,6 +9,29 @@ import OnymGroup
 import OnymChatsCore
 import OnymModeration
 
+private struct ChatThreadBottomAccessoryKey: EnvironmentKey {
+    static let defaultValue: AnyView?
+        = nil
+}
+
+extension EnvironmentValues {
+    var chatThreadBottomAccessory: AnyView? {
+        get { self[ChatThreadBottomAccessoryKey.self] }
+        set { self[ChatThreadBottomAccessoryKey.self] = newValue }
+    }
+}
+
+public extension View {
+    /// Adds content immediately above the chat thread's UIKit composer.
+    /// This is intentionally type-erased so the chat package can host an
+    /// app-owned accessory without depending on that accessory's package.
+    func chatThreadBottomAccessory<Accessory: View>(
+        @ViewBuilder _ accessory: () -> Accessory
+    ) -> some View {
+        environment(\.chatThreadBottomAccessory, AnyView(accessory()))
+    }
+}
+
 /// SwiftUI host for `ChatThreadViewController`. The chat screen is
 /// UIKit (per the design call on #150) but the surrounding app is
 /// SwiftUI, so this wrapper:
@@ -81,6 +104,7 @@ public struct ChatThreadView: View {
     }
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.chatThreadBottomAccessory) private var bottomAccessory
     @State private var showMembers: Bool = false
     /// One combined picker for both photos and videos (the composer now has
     /// a single paperclip attach button).
@@ -174,6 +198,11 @@ public struct ChatThreadView: View {
             onSendMedia: { handleSendPendingMedia() },
             onRemovePendingMedia: { id in pendingMedia.removeAll { $0.id == id } }
         )
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if let bottomAccessory {
+                bottomAccessory
+            }
+        }
         // One combined picker for photos + videos. Each pick is classified
         // in `onChange` by its content type.
         .photosPicker(

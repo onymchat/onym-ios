@@ -89,9 +89,9 @@ struct RootView: View {
                         setGroupName: dependencies.setGroupName,
                         makeModerationReportView: dependencies.makeModerationReportView
                     )
-                }
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    moderationCaseBanner
+                    .chatThreadBottomAccessory {
+                        moderationCaseBanner
+                    }
                 }
             }
 
@@ -144,9 +144,9 @@ struct RootView: View {
                             scrollToMessageID: result.messageID
                         )
                     }
-                }
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    moderationCaseBanner
+                    .chatThreadBottomAccessory {
+                        moderationCaseBanner
+                    }
                 }
             }
         }
