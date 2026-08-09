@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 /// The declared cadence from the DeviceCheck profile §5: gate check at
 /// launch and at least once per `interval`; a device that can't reach
@@ -102,10 +103,27 @@ public actor GateCheckRepository {
     /// Outcome of one contact attempt with the backend.
     public enum AttemptOutcome: Sendable, Equatable {
         case success(GateCheckResult)
-        /// Network failure / backend unreachable. NOT a backend
-        /// refusal — a reachable backend answers `.checkRequired`.
+        /// Network failure / backend unreachable — grace arithmetic
+        /// keeps serving the last known state within the window.
         case unreachable
+        /// The backend answered and deterministically refused the
+        /// session. NOT unreachable: cached `.clear` must not keep
+        /// serving for the grace window on the say-so of a refusal.
+        /// Carries the reason so `no_mandate` (recoverable only by
+        /// re-consenting) routes differently from a signature refusal
+        /// (recoverable by retrying / fixing the clock).
+        case refused(CheckRequiredReason)
     }
+
+    private static let logger = Logger(
+        subsystem: "app.onym.ios", category: "moderation"
+    )
+
+    /// Whether served ban verdicts run through `VerdictValidator`
+    /// before display. True everywhere except the UI-test composition,
+    /// whose scenario fixtures are stage props (sentinel signatures,
+    /// fixed refs) rather than authenticated artifacts.
+    private let validatesBanVerdicts: Bool
 
     private let attestation: any DeviceAttestationProvider
     private let backend: any EnforcementBackendClient
@@ -128,6 +146,7 @@ public actor GateCheckRepository {
         signer: any ModerationSigner,
         store: any GateStateStore,
         policy: GateCheckPolicy = .default,
+        validatesBanVerdicts: Bool = true,
         clock: @escaping @Sendable () -> Date = Date.init
     ) {
         self.attestation = attestation
@@ -136,6 +155,7 @@ public actor GateCheckRepository {
         self.signer = signer
         self.store = store
         self.policy = policy
+        self.validatesBanVerdicts = validatesBanVerdicts
         self.clock = clock
     }
 
@@ -206,6 +226,26 @@ public actor GateCheckRepository {
         publish()
     }
 
+    /// The last session timestamp actually used. Session signatures
+    /// are single-use server-side and the signed payload is
+    /// second-precision; with a nil device token, two checks in the
+    /// same second would produce byte-identical signatures and
+    /// self-inflict a replay refusal (consentCompleted + the cadence
+    /// loop, or a double-tapped retry). Bumping into the next second
+    /// stays comfortably inside the server's freshness window.
+    ///
+    /// Known limits, accepted deliberately:
+    /// - Each same-second bump sends a timestamp one second further
+    ///   into the future, so an N-call burst drifts N seconds ahead —
+    ///   fine against a symmetric freshness window (bursts are small:
+    ///   retry taps + foreground + cadence), and the drift resets the
+    ///   moment a second passes between calls.
+    /// - Not persisted: a relaunch inside the same second could still
+    ///   replay. The relaunch path takes far longer than a second in
+    ///   practice, and the cost of a collision is one refused check
+    ///   that the next retry clears.
+    private var lastSessionTimestamp = Date.distantPast
+
     private func performAttempt(for record: MandateRecord) async -> AttemptOutcome {
         // The client never fabricates a token: unavailable attestation
         // sends nil and lets the backend (or grace arithmetic) decide.
@@ -217,7 +257,8 @@ public actor GateCheckRepository {
         }
 
         do {
-            let timestamp = clock()
+            let timestamp = max(clock(), lastSessionTimestamp.addingTimeInterval(1))
+            lastSessionTimestamp = timestamp
             let mandateRef = try? record.mandate.mandateHash()
             let signature = try await signer.sign(
                 GateCheckRequest.signedPayload(
@@ -234,10 +275,100 @@ public actor GateCheckRepository {
                 timestamp: timestamp,
                 signature: signature
             )
-            return .success(try await backend.gateCheck(request))
+            let result = try await backend.gateCheck(request)
+            // `.enrollmentLost` is client-derived from the backend's
+            // `no_mandate` error envelope; a conforming backend never
+            // puts it in a 200 body. If one does anyway (the reason is
+            // plain `Codable`, so it decodes), normalize it onto the
+            // same refusal path as the envelope: it must not persist
+            // as a successful check, and downstream must see exactly
+            // one `.enrollmentLost` route.
+            if case .checkRequired(.enrollmentLost) = result {
+                return .refused(.enrollmentLost)
+            }
+            return .success(await sanitize(result))
         } catch {
+            // Only a recognizable SESSION refusal blocks: 401/403, or
+            // the backend's own session codes. A broader any-4xx rule
+            // would convert a deploy or encoding regression (404 on a
+            // renamed route, 400 from body drift) into an immediate
+            // hard block for every user with grace discarded — those
+            // fall through to `.unreachable` and the grace window.
+            if let reason = Self.sessionRefusalReason(error) {
+                return .refused(reason)
+            }
             return .unreachable
         }
+    }
+
+    /// `no_mandate` is its own state because its recovery is different
+    /// in kind: no amount of retrying fixes a backend that has lost the
+    /// enrollment — only re-consent does, and the gate flow routes
+    /// `.enrollmentLost` there.
+    private static func sessionRefusalReason(_ error: Error) -> CheckRequiredReason? {
+        guard case let AuthorityClientError.rejected(rejection) = error else {
+            return nil
+        }
+        if rejection.rawCode == "no_mandate" {
+            return .enrollmentLost
+        }
+        if rejection.statusCode == 401 || rejection.statusCode == 403
+            || rejection.rawCode == "signature_invalid" {
+            return .backendRefused
+        }
+        return nil
+    }
+
+    /// A served ban's embedded verdict is display metadata — the marks
+    /// are the enforcement. Validate it against the consented manifest
+    /// (shape, authority, mandate binding, derived dates, and — with
+    /// `ModerationTrust.enforceVerdictSignatures` — the operator
+    /// signature) before it reaches the ban screen; an unverifiable
+    /// verdict is stripped so its narrative never renders, while the
+    /// ban itself stands.
+    private func sanitize(_ result: GateCheckResult) async -> GateCheckResult {
+        guard validatesBanVerdicts,
+              case .banned(let state) = result, let verdict = state.verdict else {
+            return result
+        }
+        guard let record = await moderation.mandateRecord(forRef: verdict.mandateRef),
+              let consented = record.consentedManifest() else {
+            Self.logger.error("banned verdict names an unretained mandate; stripping display verdict")
+            return .banned(Self.stripped(state))
+        }
+        do {
+            let outcome = try VerdictValidator().validate(
+                verdict,
+                mandate: record.mandate,
+                consented: consented,
+                now: clock()
+            )
+            if case .storeUntilExecuteAfter(let date) = outcome {
+                // A conforming backend never serves `banned` before
+                // `executeAfter` — it queues. The marks remain the
+                // enforcement, so the ban still renders (refusing to
+                // would fail open on the say-so of a client clock),
+                // but the early service is worth a trace.
+                Self.logger.notice(
+                    "banned verdict served before its executeAfter (\(date, privacy: .public))"
+                )
+            }
+            return result
+        } catch {
+            Self.logger.error("banned verdict failed validation; stripping display verdict: \(error)")
+            return .banned(Self.stripped(state))
+        }
+    }
+
+    private static func stripped(_ state: BanState) -> BanState {
+        BanState(
+            verdictRef: state.verdictRef,
+            verdict: nil,
+            authorityContact: state.authorityContact,
+            banExpires: state.banExpires,
+            appealURL: state.appealURL,
+            newHolderURL: state.newHolderURL
+        )
     }
 
     // MARK: - Cadence arithmetic (pure)
@@ -264,6 +395,12 @@ public actor GateCheckRepository {
         switch attempt {
         case .success(let result):
             return (status(for: result), PersistedGateState(lastResult: result, lastSuccessAt: now))
+        case .refused(let reason):
+            // Persisted state is kept — a later successful check
+            // overwrites it — but a refusal blocks now: it is a
+            // reachable backend's answer, not a network condition the
+            // grace window exists for.
+            return (.gateCheckRequired(reason), persisted)
         case .unreachable:
             guard let persisted else {
                 return (.gateCheckRequired(.neverChecked), nil)

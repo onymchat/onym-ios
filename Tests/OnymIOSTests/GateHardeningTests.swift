@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymModeration
+import OnymModerationUI
 
 /// The enforcement-path hardening: signed session payloads a backend
 /// can actually verify, a countersignature round-trip that can't alter
@@ -184,6 +185,205 @@ final class GateHardeningTests: XCTestCase {
         }
     }
 
+    /// Throws a fixed error from every gate check.
+    private struct ThrowingBackend: EnforcementBackendClient {
+        let error: Error
+        func enrollDevice(_ request: EnrollmentRequest) async throws -> DeviceEnrollment {
+            DeviceEnrollment(deviceBinding: "enrollment-1")
+        }
+        func countersignMandate(_ mandate: ModerationMandate) async throws -> InterfaceCountersignature {
+            InterfaceCountersignature(signature: "unused")
+        }
+        func gateCheck(_ request: GateCheckRequest) async throws -> GateCheckResult {
+            throw error
+        }
+    }
+
+    private func gateStatus(afterBackendError error: Error) async -> GateStatus {
+        let backend = ThrowingBackend(error: error)
+        let moderation = ModerationRepository(
+            authoritiesFetcher: EmptyAuthoritiesFetcher(),
+            manifestFetcher: UnusedManifestFetcher(),
+            mandateStore: SeededMandateStore(records: [seededActiveRecord()]),
+            backend: backend,
+            authorityClients: StubModerationAuthorityClientFactory(),
+            attestation: FixedAttestation(),
+            signer: FixedSigner(),
+            clock: { [now] in now }
+        )
+        let gate = GateCheckRepository(
+            attestation: FixedAttestation(),
+            backend: backend,
+            moderation: moderation,
+            signer: FixedSigner(),
+            store: InMemoryGateStateStore(),
+            clock: { [now] in now }
+        )
+        await gate.checkNow()
+        return await gate.currentStatus()
+    }
+
+    func testReplayedSignature401BlocksAsBackendRefused() async {
+        let status = await gateStatus(afterBackendError: AuthorityClientError.rejected(
+            AuthorityRejection(statusCode: 401, rawCode: "signature_invalid", message: "replayed")
+        ))
+        XCTAssertEqual(status, .gateCheckRequired(.backendRefused))
+    }
+
+    func testNoMandateRoutesToEnrollmentLost() async {
+        // `no_mandate` is not user-transient — the gate flow maps
+        // `.enrollmentLost` to re-consent, which re-runs enrollment.
+        let status = await gateStatus(afterBackendError: AuthorityClientError.rejected(
+            AuthorityRejection(statusCode: 400, rawCode: "no_mandate", message: "gone")
+        ))
+        XCTAssertEqual(status, .gateCheckRequired(.enrollmentLost))
+    }
+
+    func testDeployRegression404FallsThroughToGrace() async {
+        // A renamed route / body drift is NOT a session refusal: with
+        // no history it degrades through the unreachable rules, never
+        // to backendRefused.
+        let status = await gateStatus(afterBackendError: AuthorityClientError.rejected(
+            AuthorityRejection(statusCode: 404, rawCode: "http_404", message: "no route")
+        ))
+        XCTAssertEqual(status, .gateCheckRequired(.neverChecked))
+    }
+
+    func testServerError500FallsThroughToGrace() async {
+        let status = await gateStatus(afterBackendError: AuthorityClientError.rejected(
+            AuthorityRejection(statusCode: 500, rawCode: "internal_error", message: "boom")
+        ))
+        XCTAssertEqual(status, .gateCheckRequired(.neverChecked))
+    }
+
+    /// Answers every gate check with a fixed result.
+    private struct FixedResultBackend: EnforcementBackendClient {
+        let result: GateCheckResult
+        func enrollDevice(_ request: EnrollmentRequest) async throws -> DeviceEnrollment {
+            DeviceEnrollment(deviceBinding: "enrollment-1")
+        }
+        func countersignMandate(_ mandate: ModerationMandate) async throws -> InterfaceCountersignature {
+            InterfaceCountersignature(signature: "unused")
+        }
+        func gateCheck(_ request: GateCheckRequest) async throws -> GateCheckResult {
+            result
+        }
+    }
+
+    private func seededActiveRecord() -> MandateRecord {
+        MandateRecord(
+            mandate: ModerationMandate(
+                user: "onym:key:user",
+                interface: "onym:component:onym-ios",
+                authority: "onym:component:authority",
+                manifestHash: "aa",
+                classes: ["csam"],
+                deviceBinding: "enrollment-1",
+                acceptedAt: now,
+                signatures: ["user-sig"]
+            ),
+            manifestBytes: Data("{}".utf8),
+            authorityName: "A",
+            countersigned: false,
+            isActive: true,
+            createdAt: now
+        )
+    }
+
+    private func bannedResultWithVerdict(mandateRef: String) -> GateCheckResult {
+        .banned(BanState(
+            verdictRef: "verdict-1",
+            verdict: Verdict(
+                caseId: "case-1",
+                authority: "onym:component:authority",
+                mandateRef: mandateRef,
+                accusedKeys: ["onym:key:user"],
+                deviceBinding: "enrollment-1",
+                classId: "csam",
+                disposition: .ban,
+                marks: Marks(caseOpen: false, banned: true),
+                banExpires: nil,
+                executeAfter: now,
+                reasoning: "reasoning",
+                appealDeadline: now,
+                decidedAt: now,
+                signature: "not-a-real-signature",
+                isFinal: false
+            ),
+            authorityContact: "appeals@authority.example"
+        ))
+    }
+
+    func testUnverifiableBanVerdictIsStrippedButBanStands() async throws {
+        // The served verdict names a mandateRef no local record holds —
+        // validation cannot even locate the consented terms. The ban
+        // must stand (the marks are the enforcement) with the verdict
+        // narrative stripped, never render unauthenticated content.
+        let backend = FixedResultBackend(
+            result: bannedResultWithVerdict(mandateRef: "unknown-ref")
+        )
+        let moderation = ModerationRepository(
+            authoritiesFetcher: EmptyAuthoritiesFetcher(),
+            manifestFetcher: UnusedManifestFetcher(),
+            mandateStore: SeededMandateStore(records: [seededActiveRecord()]),
+            backend: backend,
+            authorityClients: StubModerationAuthorityClientFactory(),
+            attestation: FixedAttestation(),
+            signer: FixedSigner(),
+            clock: { [now] in now }
+        )
+        let gate = GateCheckRepository(
+            attestation: FixedAttestation(),
+            backend: backend,
+            moderation: moderation,
+            signer: FixedSigner(),
+            store: InMemoryGateStateStore(),
+            clock: { [now] in now }
+        )
+
+        await gate.checkNow()
+
+        guard case .banned(let state) = await gate.currentStatus() else {
+            return XCTFail("the ban must stand")
+        }
+        XCTAssertNil(state.verdict, "an unverifiable verdict must not render")
+        XCTAssertEqual(state.verdictRef, "verdict-1")
+    }
+
+    func testStagePropVerdictSurvivesWhenValidationDisabled() async throws {
+        // The UI-test composition disables validation because scenario
+        // fixtures are stage props; the ban screen must keep its rows.
+        let backend = FixedResultBackend(
+            result: bannedResultWithVerdict(mandateRef: "unknown-ref")
+        )
+        let moderation = ModerationRepository(
+            authoritiesFetcher: EmptyAuthoritiesFetcher(),
+            manifestFetcher: UnusedManifestFetcher(),
+            mandateStore: SeededMandateStore(records: [seededActiveRecord()]),
+            backend: backend,
+            authorityClients: StubModerationAuthorityClientFactory(),
+            attestation: FixedAttestation(),
+            signer: FixedSigner(),
+            clock: { [now] in now }
+        )
+        let gate = GateCheckRepository(
+            attestation: FixedAttestation(),
+            backend: backend,
+            moderation: moderation,
+            signer: FixedSigner(),
+            store: InMemoryGateStateStore(),
+            validatesBanVerdicts: false,
+            clock: { [now] in now }
+        )
+
+        await gate.checkNow()
+
+        guard case .banned(let state) = await gate.currentStatus() else {
+            return XCTFail("the ban must stand")
+        }
+        XCTAssertNotNil(state.verdict)
+    }
+
     private struct FixedAttestation: DeviceAttestationProvider {
         var isSupported: Bool { true }
         func generateToken() async throws -> Data { Data("token".utf8) }
@@ -272,5 +472,89 @@ final class GateHardeningTests: XCTestCase {
             status,
             .banned(BanState(verdictRef: "verdict-1", authorityContact: "appeals@authority.example"))
         )
+    }
+
+    // MARK: - `.enrollmentLost` cannot fail open
+
+    func testBackendBodyEnrollmentLostIsRefusalNotSuccess() async {
+        // `.enrollmentLost` is client-derived from the `no_mandate`
+        // envelope; a 200 body carrying it anyway (the reason is plain
+        // `Codable`) must take the same refusal path — blocking now,
+        // and never persisted as a successful check.
+        let store = InMemoryGateStateStore()
+        let priorSuccess = PersistedGateState(
+            lastResult: .clear,
+            lastSuccessAt: now.addingTimeInterval(-60)
+        )
+        store.save(priorSuccess)
+
+        let backend = FixedResultBackend(result: .checkRequired(.enrollmentLost))
+        let moderation = ModerationRepository(
+            authoritiesFetcher: EmptyAuthoritiesFetcher(),
+            manifestFetcher: UnusedManifestFetcher(),
+            mandateStore: SeededMandateStore(records: [seededActiveRecord()]),
+            backend: backend,
+            authorityClients: StubModerationAuthorityClientFactory(),
+            attestation: FixedAttestation(),
+            signer: FixedSigner(),
+            clock: { [now] in now }
+        )
+        let gate = GateCheckRepository(
+            attestation: FixedAttestation(),
+            backend: backend,
+            moderation: moderation,
+            signer: FixedSigner(),
+            store: store,
+            clock: { [now] in now }
+        )
+        await gate.checkNow()
+
+        let status = await gate.currentStatus()
+        XCTAssertEqual(status, .gateCheckRequired(.enrollmentLost))
+        // A success would have overwritten the persisted state with
+        // `{checkRequired, now}`; a refusal keeps the prior success.
+        XCTAssertEqual(store.load(), priorSuccess)
+    }
+
+    @MainActor
+    func testEnrollmentLostWithoutAuthoritiesBlocksInsteadOfOperational() async throws {
+        // Device holds an active mandate, the backend answers
+        // `no_mandate`, and the authorities directory is unavailable
+        // (empty). Consent can't be offered — but a mandate proves an
+        // authority was designated, so the flow must block on the
+        // check-required screen, never run the app unmoderated.
+        let backend = ThrowingBackend(error: AuthorityClientError.rejected(
+            AuthorityRejection(statusCode: 400, rawCode: "no_mandate", message: "gone")
+        ))
+        let moderation = ModerationRepository(
+            authoritiesFetcher: EmptyAuthoritiesFetcher(),
+            manifestFetcher: UnusedManifestFetcher(),
+            mandateStore: SeededMandateStore(records: [seededActiveRecord()]),
+            backend: backend,
+            authorityClients: StubModerationAuthorityClientFactory(),
+            attestation: FixedAttestation(),
+            signer: FixedSigner(),
+            clock: { [now] in now }
+        )
+        let gate = GateCheckRepository(
+            attestation: FixedAttestation(),
+            backend: backend,
+            moderation: moderation,
+            signer: FixedSigner(),
+            store: InMemoryGateStateStore(),
+            clock: { [now] in now }
+        )
+        await gate.checkNow()
+
+        let flow = ModerationGateFlow(moderation: moderation, gateCheck: gate)
+        flow.start()
+        defer { flow.stop() }
+
+        // Both repository streams yield their current state on
+        // subscription; poll until the flow leaves `.checking`.
+        for _ in 0..<500 where flow.gate == .checking {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(flow.gate, .gateCheckRequired(.enrollmentLost))
     }
 }

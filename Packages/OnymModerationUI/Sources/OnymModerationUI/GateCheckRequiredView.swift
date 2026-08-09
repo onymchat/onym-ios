@@ -58,6 +58,14 @@ public struct GateCheckRequiredView: View {
             return String(localized: "This device needs to be re-identified. Sign in with your identity to continue.")
         case .clockRollback:
             return String(localized: "This device's clock is set earlier than its last verification. Check the date and time, then connect to continue.")
+        case .backendRefused:
+            return String(localized: "The verification service refused this device's session. Check the date and time, then try again.")
+        case .enrollmentLost:
+            // Normally unreachable: the gate flow routes this state to
+            // consent. Rendered when the authorities directory is
+            // unavailable (so the consent flow has nothing to offer)
+            // or if a host wires the view directly.
+            return String(localized: "This device's enrollment is no longer on record. Consent to your moderation authority again to re-enroll.")
         }
     }
 }

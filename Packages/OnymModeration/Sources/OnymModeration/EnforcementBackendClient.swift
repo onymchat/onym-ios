@@ -167,6 +167,25 @@ public enum CheckRequiredReason: String, Codable, Sendable, Equatable {
     case offlineGraceExpired
     /// Local policy: no successful check has ever completed.
     case neverChecked
+    /// Client-derived (never sent by the backend): the backend was
+    /// reachable and deterministically refused the session — a
+    /// replayed or invalid signature (401/403). Retrying with a fresh
+    /// session usually clears it; a persistent refusal points at the
+    /// device clock being outside the server's freshness window.
+    case backendRefused
+    /// Client-derived: the backend answered `no_mandate` — its record
+    /// of this device's enrollment/mandate is gone (state loss,
+    /// redeploy, or a mandate never countersigned). Not user-transient:
+    /// the recovery is consenting again, which re-runs enrollment,
+    /// countersignature, and registration — the gate flow routes this
+    /// state back to consent rather than to a retry that cannot succeed.
+    ///
+    /// Never accepted from a 200 body: the reason is plain `Codable`,
+    /// so a backend *could* serialize it into `checkRequired`, but
+    /// `GateCheckRepository` normalizes that onto the same refusal
+    /// path as the `no_mandate` envelope instead of treating it as a
+    /// successful check.
+    case enrollmentLost
     /// Local policy: the device clock now reads earlier than the last
     /// successful check, so elapsed time can't be trusted to bound
     /// staleness — the grace window is refused rather than extended.
@@ -226,10 +245,10 @@ public enum GateCheckResult: Codable, Sendable, Equatable {
 
 /// The interface vendor's enforcement backend — the only party
 /// holding the Apple DeviceCheck key, therefore the only possible
-/// write/read path for device marks. Not deployed yet: the app ships
-/// against `StubEnforcementBackendClient`, and a future
-/// `URLSessionEnforcementBackendClient` (SEPContractTransport-style
-/// wire client) slots in behind this protocol untouched.
+/// write/read path for device marks. Production builds ship
+/// `URLSessionEnforcementBackendClient` against the deployed service;
+/// UI-test builds keep `StubEnforcementBackendClient` for
+/// scenario-driven gates.
 ///
 /// One protocol for enrollment, countersignature, and gate check
 /// because all three are the same service sharing auth and transport.

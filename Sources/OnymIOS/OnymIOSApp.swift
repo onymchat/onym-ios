@@ -112,9 +112,9 @@ struct OnymIOSApp: App {
 
         // Moderation seat. Authorities are swappable data (a signed
         // directory + per-authority manifests); the enforcement
-        // backend seam is stubbed — `StubEnforcementBackendClient`
-        // answers the gate per `--moderation-scenario` in UI tests
-        // and `.clear` in production until a real backend exists.
+        // backend is the deployed interface service — only UI tests
+        // keep `StubEnforcementBackendClient`, answering the gate per
+        // `--moderation-scenario`.
         let moderationSigner = IdentityModerationSigner(repository: repository)
         let moderationRepository: ModerationRepository
         let gateCheckRepository: GateCheckRepository
@@ -141,10 +141,23 @@ struct OnymIOSApp: App {
                 backend: backend,
                 moderation: moderationRepository,
                 signer: moderationSigner,
-                store: UITestGateStateStore()
+                store: UITestGateStateStore(),
+                // Scenario fixtures are stage props (sentinel
+                // signatures, fixed refs), not authenticated
+                // artifacts; validating them would strip the ban
+                // screen's verdict rows in every `banned` scenario.
+                validatesBanVerdicts: false
             )
         } else {
-            let backend = StubEnforcementBackendClient()
+            // `--enforcement-base-url <https-url>` points a dev build
+            // at a local reference deployment (https only — reach a
+            // local server through an https tunnel/proxy). Without it,
+            // dev builds talk to the production service like release
+            // builds do.
+            let backend = URLSessionEnforcementBackendClient(
+                baseURL: Self.resolveEnforcementBaseURL(args: args)
+                    ?? URLSessionEnforcementBackendClient.defaultBaseURL
+            )
             moderationManifestFetcher = URLSessionAuthorityManifestFetcher()
             moderationRepository = ModerationRepository(
                 authoritiesFetcher: GitHubReleasesKnownAuthoritiesFetcher(),
@@ -166,7 +179,7 @@ struct OnymIOSApp: App {
             )
         }
         #else
-        let moderationBackend = StubEnforcementBackendClient()
+        let moderationBackend = URLSessionEnforcementBackendClient()
         moderationManifestFetcher = URLSessionAuthorityManifestFetcher()
         moderationRepository = ModerationRepository(
             authoritiesFetcher: GitHubReleasesKnownAuthoritiesFetcher(),
@@ -590,6 +603,17 @@ struct OnymIOSApp: App {
     }
 
     #if DEBUG
+    /// `--enforcement-base-url <url>` (with a DEBUG build): point the
+    /// enforcement backend client at a local deployment for driving
+    /// the full moderation loop in development. The client enforces
+    /// https in every build; a non-https URL fails every request with
+    /// `insecureBaseURL`.
+    private static func resolveEnforcementBaseURL(args: [String]) -> URL? {
+        guard let flagIndex = args.firstIndex(of: "--enforcement-base-url"),
+              args.indices.contains(flagIndex + 1) else { return nil }
+        return URL(string: args[flagIndex + 1])
+    }
+
     /// `--moderation-scenario clear|case-open|banned|check-required`
     /// (with `--ui-testing`): which canned world the stub enforcement
     /// backend answers, so UI tests can drive the ban screen, the

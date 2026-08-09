@@ -24,13 +24,10 @@ public struct URLSessionAuthorityManifestFetcher: AuthorityManifestFetcher {
         enforceSignature: Bool = ModerationTrust.enforceManifestSignatures
     ) {
         self.session = session
-        if let decoder {
-            self.decoder = decoder
-        } else {
-            let d = JSONDecoder()
-            d.dateDecodingStrategy = .iso8601
-            self.decoder = d
-        }
+        // The shared tolerant decoder: `consentedManifest()` is
+        // load-bearing for verdict display, and a manifest that
+        // decodes here must keep decoding from the pinned snapshot.
+        self.decoder = decoder ?? ModerationJSON.decoder()
         self.enforceSignature = enforceSignature
     }
 

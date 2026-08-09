@@ -8,6 +8,11 @@ import OnymFoundation
 /// guarantees, and the never-fabricate-a-token rule.
 final class ModerationRepositoryTests: XCTestCase {
 
+    /// A plausibility-passing interface countersignature (64 bytes,
+    /// base64) — consent now refuses anything shorter as garbage.
+    static let kInterfaceCountersignature =
+        Data(repeating: 0x42, count: 64).base64EncodedString()
+
     /// The instant the fixture repositories' injected clock returns.
     private let now = Date(timeIntervalSince1970: 1_700_000_000)
 
@@ -318,7 +323,7 @@ final class ModerationRepositoryTests: XCTestCase {
                 classes: ["csam"],
                 deviceBinding: "device-1",
                 acceptedAt: now,
-                signatures: ["user-signature", "interface-signature"]
+                signatures: ["user-signature", Self.kInterfaceCountersignature]
             ),
             manifestBytes: bytes,
             authorityName: "A",
@@ -463,7 +468,7 @@ final class ModerationRepositoryTests: XCTestCase {
     func testCountersignedMandateActivatesOnlyAfterAuthorityRegistration() async throws {
         let componentId = "onym:component:a"
         let backend = RecordingBackend()
-        backend.countersignature = "interface-signature"
+        backend.countersignature = Self.kInterfaceCountersignature
         let authority = RecordingAuthorityClient()
         let repository = makeRepository(
             listings: [listing(componentId, name: "A")],
@@ -485,7 +490,7 @@ final class ModerationRepositoryTests: XCTestCase {
         let componentId = "onym:component:a"
         let selected = listing(componentId, name: "A")
         let backend = RecordingBackend()
-        backend.countersignature = "interface-signature"
+        backend.countersignature = Self.kInterfaceCountersignature
         let authority = RecordingAuthorityClient()
         authority.shouldFail = true
         let store = InMemoryMandateStore()
@@ -537,7 +542,7 @@ final class ModerationRepositoryTests: XCTestCase {
                 classes: ["csam"],
                 deviceBinding: "device-1",
                 acceptedAt: now,
-                signatures: ["user-signature", "interface-signature"]
+                signatures: ["user-signature", Self.kInterfaceCountersignature]
             ),
             manifestBytes: bytes,
             authorityName: "A",
@@ -582,7 +587,7 @@ final class ModerationRepositoryTests: XCTestCase {
                 classes: ["csam"],
                 deviceBinding: "device-1",
                 acceptedAt: now,
-                signatures: ["user-signature", "interface-signature"]
+                signatures: ["user-signature", Self.kInterfaceCountersignature]
             ),
             manifestBytes: oldBytes,
             authorityName: "Old",
@@ -599,7 +604,7 @@ final class ModerationRepositoryTests: XCTestCase {
                 classes: ["csam"],
                 deviceBinding: "device-1",
                 acceptedAt: now.addingTimeInterval(1),
-                signatures: ["user-signature", "interface-signature"]
+                signatures: ["user-signature", Self.kInterfaceCountersignature]
             ),
             manifestBytes: currentBytes,
             authorityName: "Current",
@@ -646,7 +651,7 @@ final class ModerationRepositoryTests: XCTestCase {
                 classes: ["csam"],
                 deviceBinding: "device-1",
                 acceptedAt: now,
-                signatures: ["user-signature", "interface-signature"]
+                signatures: ["user-signature", Self.kInterfaceCountersignature]
             ),
             manifestBytes: bytes,
             authorityName: "A",
@@ -685,7 +690,7 @@ final class ModerationRepositoryTests: XCTestCase {
     func testMismatchedAuthorityReferenceDoesNotActivateMandate() async throws {
         let componentId = "onym:component:a"
         let backend = RecordingBackend()
-        backend.countersignature = "interface-signature"
+        backend.countersignature = Self.kInterfaceCountersignature
         let authority = RecordingAuthorityClient()
         authority.returnedReference = "wrong-reference"
         authority.accepted = false
@@ -716,7 +721,7 @@ final class ModerationRepositoryTests: XCTestCase {
     func testAuthorityRejectionDoesNotMasqueradeAsReferenceMismatch() async throws {
         let componentId = "onym:component:a"
         let backend = RecordingBackend()
-        backend.countersignature = "interface-signature"
+        backend.countersignature = Self.kInterfaceCountersignature
         let authority = RecordingAuthorityClient()
         authority.accepted = false
         let store = InMemoryMandateStore()
@@ -751,7 +756,7 @@ final class ModerationRepositoryTests: XCTestCase {
         let componentId = "onym:component:a"
         let selected = listing(componentId, name: "A")
         let backend = RecordingBackend()
-        backend.countersignature = "interface-signature"
+        backend.countersignature = Self.kInterfaceCountersignature
         let authority = RecordingAuthorityClient()
         let store = InMemoryMandateStore()
         let repository = makeRepository(
@@ -799,7 +804,7 @@ final class ModerationRepositoryTests: XCTestCase {
         let newBytes = manifestBytes(componentId: componentId, tweak: "-rotated")
         let fetcher = SwitchingManifestFetcher(first: oldBytes, second: newBytes)
         let backend = RecordingBackend()
-        backend.countersignature = "interface-signature"
+        backend.countersignature = Self.kInterfaceCountersignature
         let authority = RecordingAuthorityClient()
         authority.shouldFail = true
         let store = InMemoryMandateStore()
@@ -845,7 +850,7 @@ final class ModerationRepositoryTests: XCTestCase {
         let componentId = "onym:component:a"
         let selected = listing(componentId, name: "A")
         let backend = RecordingBackend()
-        backend.countersignature = "interface-signature"
+        backend.countersignature = Self.kInterfaceCountersignature
         backend.countersignDelayNanoseconds = 50_000_000
         let authority = RecordingAuthorityClient()
         let store = InMemoryMandateStore()
@@ -1098,6 +1103,34 @@ final class ModerationRepositoryTests: XCTestCase {
         // Exact replay of a deterministically rejected artifact can never
         // succeed; retaining it would deadlock every future attempt.
         XCTAssertTrue(reportStore.load().isEmpty)
+    }
+
+    func testGarbageCountersignatureAbortsConsent() async throws {
+        let componentId = "onym:component:a"
+        let bytes = manifestBytes(componentId: componentId)
+        let backend = RecordingBackend()
+        backend.countersignature = "not-base64-garbage"
+        let repository = makeRepository(
+            listings: [listing(componentId, name: "A")],
+            bytesByComponent: [componentId: bytes],
+            backend: backend,
+            authorityClient: RecordingAuthorityClient(),
+            store: InMemoryMandateStore(records: [])
+        )
+        try await repository.refresh()
+        let state = await repository.currentState()
+        let listing = try XCTUnwrap(state.authorities.first)
+        let reviewed = try await repository.manifestForReview(listing)
+
+        do {
+            _ = try await repository.consent(to: listing, reviewedManifest: reviewed)
+            XCTFail("a garbage countersignature must abort consent")
+        } catch ModerationError.countersignatureInvalid {
+            // expected — an empty or undecodable string must never
+            // mint an active, countersigned record.
+        }
+        let active = await repository.activeMandateRecord()
+        XCTAssertNil(active)
     }
 
     func testPurgeReportRecordsDropsReportersNoLongerPresent() async throws {
