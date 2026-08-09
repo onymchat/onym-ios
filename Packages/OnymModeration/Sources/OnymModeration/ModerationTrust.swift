@@ -7,16 +7,20 @@ import Foundation
 /// through these checks.)
 public enum ModerationTrust {
     /// Reject authority manifests whose `signature` doesn't verify
-    /// against the directory-pinned operator key.
+    /// against the directory-pinned operator key. ON: every deploy
+    /// signs the exact materialized manifest bytes inside the
+    /// authority image and publishes the detached signature at
+    /// `<manifest-url>.sig` (onym-infra#5), moved into place so the
+    /// published signature either matches the published manifest or
+    /// is absent — and the deploy's verify step proves the served
+    /// pair before finishing. The wire contract (base64 of the
+    /// 64-byte raw signature + trailing LF; `SignedAsset` trims
+    /// before decoding) is pinned in onym-infra's README.
     ///
-    /// **Still `false` for one deployment reason only**: the client
-    /// verifies the detached signature served at `<manifest-url>.sig`,
-    /// and the deployed authority answers 404 there (verified
-    /// 2026-08-09 against authority.onym.app). Flipping this on before
-    /// that asset exists would hard-fail every consent. Publish the
-    /// `.sig` (operator signature over the exact manifest bytes), then
-    /// flip.
-    public static let enforceManifestSignatures = false
+    /// Under enforcement a missing or stale signature rejects the
+    /// manifest and blocks consent outright — this flip must ship
+    /// only after the signed deploy is live (curl the `.sig` first).
+    public static let enforceManifestSignatures = true
 
     /// Reject verdicts whose `signature` doesn't verify against the
     /// consented manifest's operator key. ON: the deployed authority
