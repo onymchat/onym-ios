@@ -36,6 +36,41 @@ public struct ModerationSettingsView: View {
                     noMandateCard
                 }
 
+                if !flow.pendingRegistrations.isEmpty {
+                    SettingsSectionLabel("PENDING REGISTRATION")
+                    SettingsCard {
+                        ForEach(
+                            Array(flow.pendingRegistrations.enumerated()),
+                            id: \.element.historyRowID
+                        ) { idx, record in
+                            Button {
+                                Task { await flow.retryRegistration(record) }
+                            } label: {
+                                SettingsRow(
+                                    titleText: record.authorityName,
+                                    subtitle: pendingRegistrationSubtitle(record),
+                                    last: idx == flow.pendingRegistrations.count - 1
+                                ) {
+                                    SettingsIconTile(
+                                        symbol: "clock.arrow.circlepath",
+                                        bg: SettingsTile.indigo
+                                    )
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(flow.state.retryingRegistration != nil)
+                            .accessibilityIdentifier("moderation.settings.retry-registration")
+                        }
+                    }
+                    if let message = flow.state.registrationErrorMessage {
+                        SettingsFootnote(verbatim: message)
+                    } else {
+                        SettingsFootnote(
+                            "These signed mandates are not active. Tap one to retry delivery of the exact persisted artifact; no new consent is created."
+                        )
+                    }
+                }
+
                 if !flow.previousMandates.isEmpty {
                     SettingsSectionLabel("PREVIOUS MANDATES")
                     SettingsCard {
@@ -122,6 +157,13 @@ public struct ModerationSettingsView: View {
                 .accessibilityIdentifier("moderation.settings.choose")
             }
         }
+    }
+
+    private func pendingRegistrationSubtitle(_ record: MandateRecord) -> String {
+        if flow.state.retryingRegistration == record.historyRowID {
+            return String(localized: "Confirming with authority…")
+        }
+        return String(localized: "Not active · Tap to retry")
     }
 
     private func row(_ label: LocalizedStringKey, _ value: String, monospaced: Bool = false) -> some View {

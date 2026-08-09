@@ -243,6 +243,7 @@ final class GateHardeningTests: XCTestCase {
             manifestFetcher: UnusedManifestFetcher(),
             mandateStore: SeededMandateStore(records: [record]),
             backend: backend,
+            authorityClients: StubModerationAuthorityClientFactory(),
             attestation: FixedAttestation(),
             signer: FixedSigner(),
             clock: { [now] in now }

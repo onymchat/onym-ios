@@ -14,6 +14,17 @@ public struct MandateRecord: Codable, Sendable, Equatable {
     /// False while the interface signature is the stub sentinel — a
     /// record that can never be mistaken for a spec-valid mandate.
     public let countersigned: Bool
+    /// True only after the Authority accepted this exact countersigned
+    /// mandate and returned its matching content reference. A pending
+    /// record remains persisted with this false so a retry can resend
+    /// identical bytes instead of minting a second consent artifact.
+    public var authorityRegistered: Bool
+    /// A real countersigned mandate awaiting acknowledgement from its
+    /// Authority. It is neither current consent nor historical consent
+    /// and must not be presented as either one.
+    public var registrationPending: Bool {
+        countersigned && !authorityRegistered
+    }
     /// Exactly one record is active per identity–device pair.
     /// Switching authorities deactivates the old record without
     /// touching anything else (mandates are immutable, spec §12).
@@ -25,6 +36,7 @@ public struct MandateRecord: Codable, Sendable, Equatable {
         manifestBytes: Data,
         authorityName: String,
         countersigned: Bool,
+        authorityRegistered: Bool = false,
         isActive: Bool,
         createdAt: Date
     ) {
@@ -32,8 +44,37 @@ public struct MandateRecord: Codable, Sendable, Equatable {
         self.manifestBytes = manifestBytes
         self.authorityName = authorityName
         self.countersigned = countersigned
+        self.authorityRegistered = authorityRegistered
         self.isActive = isActive
         self.createdAt = createdAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case mandate
+        case manifestBytes
+        case authorityName
+        case countersigned
+        case authorityRegistered
+        case isActive
+        case createdAt
+    }
+
+    /// Records written before Authority registration existed decode as
+    /// unregistered instead of making the entire mandate history fail
+    /// to load. Stub-era records were never accepted by an Authority,
+    /// so `false` is also the truthful migration value.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        mandate = try container.decode(ModerationMandate.self, forKey: .mandate)
+        manifestBytes = try container.decode(Data.self, forKey: .manifestBytes)
+        authorityName = try container.decode(String.self, forKey: .authorityName)
+        countersigned = try container.decode(Bool.self, forKey: .countersigned)
+        authorityRegistered = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .authorityRegistered
+        ) ?? false
+        isActive = try container.decode(Bool.self, forKey: .isActive)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
     }
 
     /// The consented manifest, decoded from the stored snapshot.
