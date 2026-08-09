@@ -162,6 +162,10 @@ public struct MarkdownBlock: Identifiable, Equatable {
             let rows = byRow.keys.sorted().map { rowIndex -> [AttributedString] in
                 byRow[rowIndex]!.sorted { $0.column < $1.column }.map(\.text)
             }
+            // Tradeoff, accepted: this also drops a legitimate row
+            // whose cells are ALL blank, not just the `| | |` header.
+            // A fully blank data row carries nothing a policy reader
+            // loses; rows with any content survive intact.
             return rows.filter { row in
                 !row.allSatisfy { $0.characters.allSatisfy(\.isWhitespace) }
             }
@@ -189,29 +193,47 @@ public struct MarkdownDocumentView: View {
 
     public var body: some View {
         NavigationStack(path: $path) {
-            MarkdownDocumentContent(title: title, url: url)
+            MarkdownDocumentContent(title: title, url: url, onDone: { dismiss() })
                 .navigationDestination(for: URL.self) { destination in
+                    // Pushed pages carry their own Done: the sheet
+                    // must close in one tap from any depth, not by
+                    // popping back through each followed document.
                     MarkdownDocumentContent(
                         title: Self.impliedTitle(of: destination),
-                        url: destination
+                        url: destination,
+                        onDone: { dismiss() }
                     )
-                }
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Done") { dismiss() }
-                    }
                 }
         }
         .environment(\.openURL, OpenURLAction { destination in
-            // Follow web links inside the viewer; anything else
-            // (mailto:, tel:) is the system's.
-            guard destination.scheme == "https" || destination.scheme == "http" else {
+            // In-app follow is a same-host privilege. The viewer's
+            // chrome says "this is the authority's document" and shows
+            // no address, so rendering another domain inside it would
+            // borrow the authority's trust for arbitrary content. The
+            // authority's own cross-references (./evidence-rules) stay
+            // in-app; everything else goes to the system, where the
+            // address is visible.
+            guard Self.followsInApp(destination, from: url) else {
                 return .systemAction
             }
             path.append(destination)
             return .handled
         })
         .accessibilityIdentifier("moderation.document")
+    }
+
+    /// Whether a tapped link is the root document's own authority
+    /// speaking — a web URL on the same host — and may render inside
+    /// the viewer's chrome.
+    public static func followsInApp(_ destination: URL, from root: URL) -> Bool {
+        guard destination.scheme == "https" || destination.scheme == "http" else {
+            return false
+        }
+        guard let destinationHost = destination.host?.lowercased(),
+              let rootHost = root.host?.lowercased() else {
+            return false
+        }
+        return destinationHost == rootHost
     }
 
     /// A followed link has no display title of its own; the last path
@@ -236,9 +258,9 @@ struct MarkdownDocumentContent: View {
 
     let title: String
     let url: URL
+    let onDone: () -> Void
 
     @State private var phase: Phase = .loading
-    @Environment(\.openURL) private var openURL
 
     var body: some View {
         Group {
@@ -268,6 +290,11 @@ struct MarkdownDocumentContent: View {
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Done", action: onDone)
+            }
+        }
         .task { await load() }
     }
 
