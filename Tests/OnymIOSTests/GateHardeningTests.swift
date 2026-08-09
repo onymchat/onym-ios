@@ -184,6 +184,77 @@ final class GateHardeningTests: XCTestCase {
         }
     }
 
+    /// Throws a fixed error from every gate check.
+    private struct ThrowingBackend: EnforcementBackendClient {
+        let error: Error
+        func enrollDevice(_ request: EnrollmentRequest) async throws -> DeviceEnrollment {
+            DeviceEnrollment(deviceBinding: "enrollment-1")
+        }
+        func countersignMandate(_ mandate: ModerationMandate) async throws -> InterfaceCountersignature {
+            InterfaceCountersignature(signature: "unused")
+        }
+        func gateCheck(_ request: GateCheckRequest) async throws -> GateCheckResult {
+            throw error
+        }
+    }
+
+    private func gateStatus(afterBackendError error: Error) async -> GateStatus {
+        let backend = ThrowingBackend(error: error)
+        let moderation = ModerationRepository(
+            authoritiesFetcher: EmptyAuthoritiesFetcher(),
+            manifestFetcher: UnusedManifestFetcher(),
+            mandateStore: SeededMandateStore(records: [seededActiveRecord()]),
+            backend: backend,
+            authorityClients: StubModerationAuthorityClientFactory(),
+            attestation: FixedAttestation(),
+            signer: FixedSigner(),
+            clock: { [now] in now }
+        )
+        let gate = GateCheckRepository(
+            attestation: FixedAttestation(),
+            backend: backend,
+            moderation: moderation,
+            signer: FixedSigner(),
+            store: InMemoryGateStateStore(),
+            clock: { [now] in now }
+        )
+        await gate.checkNow()
+        return await gate.currentStatus()
+    }
+
+    func testReplayedSignature401BlocksAsBackendRefused() async {
+        let status = await gateStatus(afterBackendError: AuthorityClientError.rejected(
+            AuthorityRejection(statusCode: 401, rawCode: "signature_invalid", message: "replayed")
+        ))
+        XCTAssertEqual(status, .gateCheckRequired(.backendRefused))
+    }
+
+    func testNoMandateRoutesToEnrollmentLost() async {
+        // `no_mandate` is not user-transient — the gate flow maps
+        // `.enrollmentLost` to re-consent, which re-runs enrollment.
+        let status = await gateStatus(afterBackendError: AuthorityClientError.rejected(
+            AuthorityRejection(statusCode: 400, rawCode: "no_mandate", message: "gone")
+        ))
+        XCTAssertEqual(status, .gateCheckRequired(.enrollmentLost))
+    }
+
+    func testDeployRegression404FallsThroughToGrace() async {
+        // A renamed route / body drift is NOT a session refusal: with
+        // no history it degrades through the unreachable rules, never
+        // to backendRefused.
+        let status = await gateStatus(afterBackendError: AuthorityClientError.rejected(
+            AuthorityRejection(statusCode: 404, rawCode: "http_404", message: "no route")
+        ))
+        XCTAssertEqual(status, .gateCheckRequired(.neverChecked))
+    }
+
+    func testServerError500FallsThroughToGrace() async {
+        let status = await gateStatus(afterBackendError: AuthorityClientError.rejected(
+            AuthorityRejection(statusCode: 500, rawCode: "internal_error", message: "boom")
+        ))
+        XCTAssertEqual(status, .gateCheckRequired(.neverChecked))
+    }
+
     /// Answers every gate check with a fixed result.
     private struct FixedResultBackend: EnforcementBackendClient {
         let result: GateCheckResult

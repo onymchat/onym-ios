@@ -118,6 +118,12 @@ public final class ModerationGateFlow {
             gate = .operational(openCases: openCases)
         case .banned(let state):
             gate = .banned(state)
+        case .gateCheckRequired(.enrollmentLost):
+            // The backend has no record of this device's enrollment —
+            // retrying cannot succeed. Consent IS the recovery: it
+            // re-runs enrollment, countersignature, and registration,
+            // so route there instead of a dead-ended retry screen.
+            gate = authoritiesAvailable ? .needsConsent : .operational(openCases: [])
         case .gateCheckRequired(let reason):
             gate = .gateCheckRequired(reason)
         }

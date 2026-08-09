@@ -169,9 +169,17 @@ public enum CheckRequiredReason: String, Codable, Sendable, Equatable {
     case neverChecked
     /// Client-derived (never sent by the backend): the backend was
     /// reachable and deterministically refused the session — a
-    /// replayed or invalid signature, or no enrollment/mandate on
-    /// record. Retrying with a fresh session usually clears it.
+    /// replayed or invalid signature (401/403). Retrying with a fresh
+    /// session usually clears it; a persistent refusal points at the
+    /// device clock being outside the server's freshness window.
     case backendRefused
+    /// Client-derived: the backend answered `no_mandate` — its record
+    /// of this device's enrollment/mandate is gone (state loss,
+    /// redeploy, or a mandate never countersigned). Not user-transient:
+    /// the recovery is consenting again, which re-runs enrollment,
+    /// countersignature, and registration — the gate flow routes this
+    /// state back to consent rather than to a retry that cannot succeed.
+    case enrollmentLost
     /// Local policy: the device clock now reads earlier than the last
     /// successful check, so elapsed time can't be trusted to bound
     /// staleness — the grace window is refused rather than extended.

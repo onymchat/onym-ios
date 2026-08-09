@@ -79,8 +79,10 @@ public struct MandateRecord: Codable, Sendable, Equatable {
 
     /// The consented manifest, decoded from the stored snapshot.
     public func consentedManifest() -> SignedManifest? {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        // Same tolerant decoder as the fetch path — a manifest that
+        // was accepted at consent time must keep decoding from the
+        // pinned snapshot, or verdicts get silently stripped.
+        let decoder = ModerationJSON.decoder()
         guard let manifest = try? decoder.decode(AuthorityManifest.self, from: manifestBytes) else {
             return nil
         }

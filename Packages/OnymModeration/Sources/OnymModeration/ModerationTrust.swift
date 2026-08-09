@@ -22,10 +22,15 @@ public enum ModerationTrust {
     /// consented manifest's operator key. ON: the deployed authority
     /// signs verdicts with the directory-pinned operator key, and the
     /// gate check runs every served ban verdict through
-    /// `VerdictValidator` before display. Honesty note: while
-    /// `enforceManifestSignatures` is off, the operator key used here
-    /// comes from a manifest that was itself accepted unverified at
-    /// consent time — this switch cannot be stronger than that one.
-    /// Publishing the `.sig` closes the chain.
+    /// `VerdictValidator` before display.
+    ///
+    /// Precise trust bound while `enforceManifestSignatures` is off:
+    /// the verdict-signing key itself IS directory-pinned regardless —
+    /// the fetcher requires the manifest's declared operator to equal
+    /// the directory key byte-for-byte — so a substituted manifest
+    /// cannot swap the key verdicts verify against. What the missing
+    /// `.sig` leaves unverified is the REST of the manifest: the ban
+    /// terms and windows `VerdictValidator` derives its dates from.
+    /// Publishing the `.sig` (onym-infra#4) closes that.
     public static let enforceVerdictSignatures = true
 }

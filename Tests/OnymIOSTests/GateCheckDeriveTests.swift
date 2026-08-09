@@ -23,7 +23,7 @@ final class GateCheckDeriveTests: XCTestCase {
         )
         let (status, kept) = GateCheckRepository.derive(
             persisted: persisted,
-            attempt: .refused,
+            attempt: .refused(.backendRefused),
             now: now,
             policy: policy
         )
