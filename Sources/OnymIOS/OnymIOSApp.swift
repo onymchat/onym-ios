@@ -719,11 +719,15 @@ struct OnymIOSApp: App {
                         // every identity's ledger, not just the
                         // removed one's.
                         if let remaining = try? await identityRepository.currentIdentities() {
+                            let keys = Set(remaining.map { summary in
+                                "onym:key:" + summary.sendingPublicKey
+                                    .map { String(format: "%02x", $0) }.joined()
+                            })
                             await moderationRepository.purgeReportRecords(
-                                keepingReporters: Set(remaining.map { summary in
-                                    "onym:key:" + summary.sendingPublicKey
-                                        .map { String(format: "%02x", $0) }.joined()
-                                })
+                                keepingReporters: keys
+                            )
+                            await moderationRepository.purgeCaseStatusRecords(
+                                keepingUsers: keys
                             )
                         }
                     }

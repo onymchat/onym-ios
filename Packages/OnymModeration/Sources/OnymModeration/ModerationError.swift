@@ -41,6 +41,12 @@ public enum ModerationError: Error, Sendable, Equatable {
     /// The supplied evidence proof does not verify against the accused
     /// key over the exact content the user is about to disclose.
     case authenticityUnverified
+    /// An accused-side case operation was attempted without standing:
+    /// the case's mandate is retained but the active identity does not
+    /// own it. Standing follows the mandate a case was opened under,
+    /// so switching the selected identity — not switching authorities —
+    /// is what resolves this.
+    case caseAccessUnavailable(String)
     /// The Authority answered 409: it already holds this exact report.
     /// A terminal, benign outcome — the allegation is on file — but the
     /// original receipt (caseId) cannot be recovered without a lookup
