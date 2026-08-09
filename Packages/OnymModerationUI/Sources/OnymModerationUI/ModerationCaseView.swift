@@ -29,6 +29,17 @@ public struct ModerationCaseView: View {
                     SettingsLargeTitle("Moderation case")
 
                     statusSection
+                    // Receipts render OUTSIDE the composer gates: a
+                    // fresh status can close a section at exactly the
+                    // moment a filing succeeds (case decided on first
+                    // response; appeal reviewed), and the confirmation
+                    // must survive that — this screen's contract is
+                    // that every filing surfaces the Authority's
+                    // actual answer.
+                    if flow.state.responseReceipt != nil
+                        || flow.state.appealReceipt != nil {
+                        receiptsSection
+                    }
                     if let events = flow.state.status?.events, !events.isEmpty {
                         eventsSection(events)
                     }
@@ -134,6 +145,37 @@ public struct ModerationCaseView: View {
         .accessibilityIdentifier("moderation.case.retry")
     }
 
+    // MARK: - Receipts
+
+    private var receiptsSection: some View {
+        Group {
+            SettingsSectionLabel("FILED")
+            SettingsCard {
+                VStack(alignment: .leading, spacing: 10) {
+                    if let receipt = flow.state.responseReceipt {
+                        Label(
+                            receipt.late
+                                ? "Your response is on file. It arrived after the response deadline and is marked late."
+                                : "Your response is on file.",
+                            systemImage: "checkmark.circle.fill"
+                        )
+                        .font(.system(size: 13))
+                        .foregroundStyle(OnymTokens.text)
+                        .accessibilityIdentifier("moderation.case.response_receipt")
+                    }
+                    if flow.state.appealReceipt != nil {
+                        Label("Your appeal is filed. The authority reviews it; a successful appeal issues a reversal.", systemImage: "checkmark.circle.fill")
+                            .font(.system(size: 13))
+                            .foregroundStyle(OnymTokens.text)
+                            .accessibilityIdentifier("moderation.case.appeal_receipt")
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(16)
+            }
+        }
+    }
+
     // MARK: - Events
 
     private func eventsSection(_ events: [CaseEvent]) -> some View {
@@ -165,16 +207,7 @@ public struct ModerationCaseView: View {
             SettingsSectionLabel("YOUR RESPONSE")
             SettingsCard {
                 VStack(alignment: .leading, spacing: 10) {
-                    if let receipt = flow.state.responseReceipt {
-                        Label(
-                            receipt.late
-                                ? "Your response is on file. It arrived after the response deadline and is marked late."
-                                : "Your response is on file.",
-                            systemImage: "checkmark.circle.fill"
-                        )
-                        .font(.system(size: 13))
-                        .foregroundStyle(OnymTokens.text)
-                        .accessibilityIdentifier("moderation.case.response_receipt")
+                    if flow.state.responseReceipt != nil {
                         Text("You can file additional statements while the case is open; they attach to the same case.")
                             .font(.system(size: 12))
                             .foregroundStyle(OnymTokens.text3)
@@ -224,12 +257,6 @@ public struct ModerationCaseView: View {
             SettingsSectionLabel("APPEAL")
             SettingsCard {
                 VStack(alignment: .leading, spacing: 10) {
-                    if flow.state.appealReceipt != nil {
-                        Label("Your appeal is filed. The authority reviews it; a successful appeal issues a reversal.", systemImage: "checkmark.circle.fill")
-                            .font(.system(size: 13))
-                            .foregroundStyle(OnymTokens.text)
-                            .accessibilityIdentifier("moderation.case.appeal_receipt")
-                    }
                     TextEditor(text: $appealText)
                         .frame(minHeight: 80)
                         .font(.system(size: 14))
@@ -283,7 +310,16 @@ public struct ModerationCaseView: View {
                             .font(.system(size: 13))
                             .foregroundStyle(OnymTokens.text)
                             .accessibilityIdentifier("moderation.case.new_holder_receipt")
-                    } else {
+                        Text("You can file a corrected claim; it attaches to the same case.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(OnymTokens.text3)
+                    }
+                    // The editor stays after a receipt: `filed` is
+                    // deliberately non-probative (the endpoint answers
+                    // 200 unconditionally), and a corrected claim is a
+                    // legitimate new filing the repository dedupes by
+                    // statement.
+                    Group {
                         TextEditor(text: $newHolderText)
                             .frame(minHeight: 60)
                             .font(.system(size: 14))

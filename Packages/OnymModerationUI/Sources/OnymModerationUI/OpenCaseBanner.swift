@@ -103,31 +103,31 @@ public struct CaseNoticeDetailView: View {
 
                 SettingsSectionLabel("RESPONSE")
                 if let makeCaseFlow {
-                SettingsCard {
-                    NavigationLink {
-                        ModerationCaseView(flow: makeCaseFlow(notice))
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Review and respond")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(OnymTokens.text)
-                                Text("Fetch the case's current status, file your signed response, and follow the decision.")
-                                    .font(.system(size: 13))
+                    SettingsCard {
+                        NavigationLink {
+                            ModerationCaseView(flow: makeCaseFlow(notice))
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("Review and respond")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(OnymTokens.text)
+                                    Text("Fetch the case's current status, file your signed response, and follow the decision.")
+                                        .font(.system(size: 13))
+                                        .foregroundStyle(OnymTokens.text2)
+                                }
+                                Spacer(minLength: 4)
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 12, weight: .semibold))
                                     .foregroundStyle(OnymTokens.text2)
                             }
-                            Spacer(minLength: 4)
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(OnymTokens.text2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(16)
+                            .contentShape(Rectangle())
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(16)
-                        .contentShape(Rectangle())
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("moderation.case_detail.open_case")
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("moderation.case_detail.open_case")
-                }
                 } else {
                     SettingsCard {
                         Text("Responding from this surface isn't wired up. Use the authority's contact channel to respond before the deadline.")

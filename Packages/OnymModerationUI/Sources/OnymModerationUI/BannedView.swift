@@ -122,13 +122,16 @@ public struct BannedView: View {
                     // routes them to the authority directly.
                     if hasNewHolderPath {
                         Button {
-                            if let url = state.newHolderURL {
-                                openURL(url)
-                            } else if caseFlowBuilder != nil {
+                            // In-app first, matching the appeal button:
+                            // the flow retains the exact signed filing
+                            // and its receipt, which a link-out cannot.
+                            if caseFlowBuilder != nil {
                                 // The case sheet carries the
                                 // new-holder section (banContext);
                                 // open it scrolled to that section.
                                 caseSheet = .newHolder
+                            } else if let url = state.newHolderURL {
+                                openURL(url)
                             } else {
                                 onNewHolderClaim?()
                             }

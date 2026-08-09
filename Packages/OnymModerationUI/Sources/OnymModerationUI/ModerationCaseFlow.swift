@@ -76,15 +76,8 @@ public final class ModerationCaseFlow {
         state.isLoading = true
         state.statusErrorMessage = nil
         defer { state.isLoading = false }
-        // The status query needs the authorities directory; a cold
-        // launch straight into the case screen may not have fetched it
-        // yet. Best-effort — a failure surfaces below as status copy.
-        try? await repository.refresh()
         do {
-            let status = try await repository.caseStatus(
-                caseId: caseId,
-                mandateRef: mandateRef
-            )
+            let status = try await fetchStatusRecoveringDirectory()
             state.status = status
             state.snapshotFetchedAt = nil
         } catch {
@@ -97,6 +90,28 @@ public final class ModerationCaseFlow {
                 state.snapshotFetchedAt = nil
             }
             state.statusErrorMessage = Self.statusMessage(for: error)
+        }
+    }
+
+    /// One status fetch, with a single directory-recovery retry: a
+    /// cold launch straight into the case screen may not have fetched
+    /// the authorities directory yet. The refresh happens ONLY when
+    /// the fetch failed for that exact reason — refreshing the
+    /// directory unconditionally on every pull would flip the
+    /// repository-wide fetch status (which the consent surface
+    /// observes) for no benefit.
+    private func fetchStatusRecoveringDirectory() async throws -> CaseStatus {
+        do {
+            return try await repository.caseStatus(
+                caseId: caseId,
+                mandateRef: mandateRef
+            )
+        } catch ModerationError.authorityUnavailable {
+            try await repository.refresh()
+            return try await repository.caseStatus(
+                caseId: caseId,
+                mandateRef: mandateRef
+            )
         }
     }
 
