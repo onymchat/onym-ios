@@ -71,6 +71,16 @@ public struct URLSessionEnforcementBackendClient: EnforcementBackendClient {
         return try decode(data)
     }
 
+    /// Redeem a moderator-issued recovery grant. The grant travels as
+    /// its exact signed bytes (base64 via `Data`'s default coding);
+    /// the session envelope binds the grant's reference, so this
+    /// signature presents this grant and nothing else.
+    public func recover(_ request: RecoveryRequest) async throws -> RecoveryResult {
+        let body = try Self.encoder().encode(request)
+        let data = try await send(path: ["v1", "recover"], body: body)
+        return try decode(data)
+    }
+
     // MARK: - Transport
 
     private func send(path: [String], body: Data) async throws -> Data {

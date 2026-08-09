@@ -68,6 +68,9 @@ public enum ModerationError: Error, Sendable, Equatable {
     /// build). Callers degrade toward gate-check-required, never toward
     /// unmoderated operation (profile §8.5).
     case attestationUnavailable
+    /// A recovery grant that does not parse, or a recovery answer in
+    /// a shape this client does not speak.
+    case grantInvalid(String)
     /// The operation exists in the protocol surface but the concrete
     /// implementation is a stub (no enforcement backend / authority
     /// service is deployed yet).

@@ -271,4 +271,12 @@ public protocol EnforcementBackendClient: Sendable {
 
     /// The launch/interval gate check (profile §5).
     func gateCheck(_ request: GateCheckRequest) async throws -> GateCheckResult
+
+    /// Redeem a moderator-issued recovery grant (§6) — the way back
+    /// for a marked device whose enrolled identity did not survive a
+    /// reinstall or a change of hands. Declared as a requirement so
+    /// calls through `any EnforcementBackendClient` dispatch to the
+    /// real client; a refusing default in the extension keeps
+    /// conformers that never reach recovery source-compatible.
+    func recover(_ request: RecoveryRequest) async throws -> RecoveryResult
 }

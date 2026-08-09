@@ -52,7 +52,8 @@ struct RootView: View {
                     },
                     makeRecoveryCaseFlow: { caseId in
                         await dependencies.makeModerationRecoveryCaseFlow(caseId)
-                    }
+                    },
+                    makeDeviceRecoveryFlow: dependencies.makeDeviceRecoveryFlow
                 )
             case .checking, .needsConsent, .operational:
                 tabs

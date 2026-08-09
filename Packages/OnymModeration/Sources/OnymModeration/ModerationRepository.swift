@@ -472,6 +472,25 @@ public actor ModerationRepository {
     /// identity. The Authority authenticates the lookup with that identity
     /// and returns IDs only; details still require the case-status request.
     public func recoverableCaseIDs() async throws -> [String] {
+        try await recoveryAuthorityClient().queryRecoverableCases()
+    }
+
+    /// File a device-recovery claim (§6) with the active mandate's
+    /// authority: the contact a moderator can verify the holder
+    /// through, and the holder's account of how they hold the marked
+    /// device. Signed by the current (new) identity — the grantee a
+    /// grant would name. Returns the claim id to poll.
+    public func fileDeviceRecoveryClaim(contact: String, statement: String) async throws -> String {
+        try await recoveryAuthorityClient().fileRecoveryClaim(contact: contact, statement: statement)
+    }
+
+    /// Where a filed device-recovery claim stands; carries the signed
+    /// grant once a moderator issues one.
+    public func deviceRecoveryClaimStatus(claimId: String) async throws -> RecoveryClaimStatus {
+        try await recoveryAuthorityClient().recoveryClaimStatus(claimId: claimId)
+    }
+
+    private func recoveryAuthorityClient() throws -> any ModerationAuthorityClient {
         guard let record = activeMandateRecord() else {
             throw ModerationError.noMandate
         }
@@ -480,8 +499,7 @@ public actor ModerationRepository {
         }) else {
             throw ModerationError.authorityUnavailable(record.mandate.authority)
         }
-        let client = authorityClients.client(for: listing)
-        return try await client.queryRecoverableCases()
+        return authorityClients.client(for: listing)
     }
 
     /// Retry one persisted registration attempt without minting or

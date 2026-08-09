@@ -297,6 +297,15 @@ public protocol ModerationAuthorityClient: Sendable {
     func appeal(_ submission: AppealSubmission) async throws -> AppealReceipt
     func queryStatus(caseId: String) async throws -> CaseStatus
     func queryRecoverableCases() async throws -> [String]
+
+    /// File a device-recovery claim (§6): a real contact for the
+    /// moderator to verify the holder through, and the holder's own
+    /// account of how they hold the marked device. Requirements (not
+    /// extension-only) so `any ModerationAuthorityClient` dispatches
+    /// to the real client; refusing defaults keep other conformers
+    /// source-compatible.
+    func fileRecoveryClaim(contact: String, statement: String) async throws -> String
+    func recoveryClaimStatus(claimId: String) async throws -> RecoveryClaimStatus
 }
 
 /// Resolves the client for a directory-selected Authority. Keeping this
@@ -469,6 +478,89 @@ public struct URLSessionModerationAuthorityClient: ModerationAuthorityClient {
         ]
         return try await decode(
             try await send(method: "GET", path: ["v1", "cases", "mine"], headers: headers)
+        )
+    }
+
+    /// File a device-recovery claim (§6). Signed by the *new* identity
+    /// key — the grantee a moderator's grant would name; the old key
+    /// is exactly what was lost. Filing moves nothing anywhere: a
+    /// human decides the claim.
+    public func fileRecoveryClaim(contact: String, statement: String) async throws -> String {
+        struct Unsigned: Encodable {
+            let contact, grantee, statement, timestamp: String
+        }
+        struct Signed: Encodable {
+            let contact, grantee, signature, statement, timestamp: String
+        }
+        struct Receipt: Decodable {
+            let claimId: String
+        }
+        let timestamp = Self.timestamp(clock())
+        let grantee = try await signer.userKeyID()
+        // The authority verifies over the canonical bytes with the
+        // signature field removed — the same form `Unsigned` encodes,
+        // as long as `Signed` adds nothing but the signature. This is
+        // deliberately the exact field set the reference Authority's
+        // `file_recovery_claim` (`authority/src/api.rs`,
+        // onym-moderation#28) recomputes via
+        // `canonical::grant_signing_bytes(&body)`: the request body
+        // minus `signature`, keys sorted. Adding a field client-side
+        // without the authority knowing it would not break the
+        // signature (it verifies the body it received) — but renaming
+        // or dropping one of these four would.
+        let signingBytes = try ModerationCanonicalEncoder.encode(
+            Unsigned(contact: contact, grantee: grantee, statement: statement, timestamp: timestamp)
+        )
+        let signature = try await signer.sign(signingBytes).base64EncodedString()
+        let body = try ModerationCanonicalEncoder.encode(
+            Signed(
+                contact: contact,
+                grantee: grantee,
+                signature: signature,
+                statement: statement,
+                timestamp: timestamp
+            )
+        )
+        let receipt: Receipt = try await decode(
+            try await send(method: "POST", path: ["v1", "recovery-claims"], body: body)
+        )
+        return receipt.claimId
+    }
+
+    /// Where a filed claim stands. Answered only to the key the claim
+    /// names; when granted, the response carries the grant's exact
+    /// signed bytes.
+    public func recoveryClaimStatus(claimId: String) async throws -> RecoveryClaimStatus {
+        struct Wire: Decodable {
+            let state: String
+            let reasoning: String?
+            let grant: Data?
+        }
+        let timestamp = Self.timestamp(clock())
+        let key = try await signer.userKeyID()
+        // This is deliberately the exact credential message verified by
+        // the reference Authority (`authority/src/api.rs`,
+        // `recovery_claim_status`, onym-moderation#28) — as with
+        // `query-status:` above, changing it client-side would make
+        // every status poll answer 404. The response's `{state,
+        // reasoning, grant}` (grant base64) is that handler's shape too.
+        let message = Data("recovery-claim-status:\(claimId):\(timestamp)".utf8)
+        let signature = try await signer.sign(message).base64EncodedString()
+        let wire: Wire = try await decode(
+            try await send(
+                method: "GET",
+                path: ["v1", "recovery-claims", claimId],
+                headers: [
+                    "X-Onym-Key": key,
+                    "X-Onym-Timestamp": timestamp,
+                    "X-Onym-Signature": signature,
+                ]
+            )
+        )
+        return RecoveryClaimStatus(
+            state: wire.state,
+            reasoning: wire.reasoning,
+            grant: try wire.grant.map { try RecoveryGrant(raw: $0) }
         )
     }
 
