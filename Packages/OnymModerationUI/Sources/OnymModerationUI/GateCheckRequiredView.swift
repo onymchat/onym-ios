@@ -8,15 +8,17 @@ import OnymModeration
 /// toward requiring one — never toward unmoderated operation.
 public struct GateCheckRequiredView: View {
     let reason: CheckRequiredReason
-    let onRetry: () -> Void
+    let onRetry: @MainActor () async -> Void
     let lookupRecoveryCaseIDs: (@MainActor () async -> [String])?
     let makeRecoveryCaseFlow: (@MainActor (String) async -> ModerationCaseFlow?)?
 
     @State private var showRecovery = false
+    @State private var isRetrying = false
+    @State private var retryMessage: String?
 
     public init(
         reason: CheckRequiredReason,
-        onRetry: @escaping () -> Void,
+        onRetry: @escaping @MainActor () async -> Void,
         lookupRecoveryCaseIDs: (@MainActor () async -> [String])? = nil,
         makeRecoveryCaseFlow: (@MainActor (String) async -> ModerationCaseFlow?)? = nil
     ) {
@@ -41,12 +43,27 @@ public struct GateCheckRequiredView: View {
                 .multilineTextAlignment(.center)
                 .lineSpacing(3)
                 .padding(.horizontal, 32)
-            SettingsPrimaryButton(action: onRetry) {
-                Text("Try again")
+            if canRetry {
+                SettingsPrimaryButton(action: retry) {
+                    if isRetrying {
+                        ProgressView().tint(OnymTokens.onAccent)
+                    } else {
+                        Text("Retry verification")
+                    }
+                }
+                .disabled(isRetrying)
+                .padding(.horizontal, 48)
+                .padding(.top, 8)
+                .accessibilityIdentifier("moderation.gate_required.retry")
             }
-            .padding(.horizontal, 48)
-            .padding(.top, 8)
-            .accessibilityIdentifier("moderation.gate_required.retry")
+            if let retryMessage {
+                Text(retryMessage)
+                    .font(.system(size: 13))
+                    .foregroundStyle(OnymTokens.text2)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+                    .accessibilityIdentifier("moderation.gate_required.retry_result")
+            }
             if reason == .reidentificationRequired,
                lookupRecoveryCaseIDs != nil,
                makeRecoveryCaseFlow != nil {
@@ -78,21 +95,41 @@ public struct GateCheckRequiredView: View {
         case .neverChecked:
             return String(localized: "Onym needs to verify this device once before it can start. Connect to the internet to continue.")
         case .tokenInvalid:
-            return String(localized: "This device's verification token was rejected. Try again.")
+            return String(localized: "Apple rejected this device's verification token. Retry requests a fresh token; if it keeps failing, the app build and moderation service may be using different DeviceCheck environments.")
         case .attestationUnavailable:
-            return String(localized: "Device verification isn't available in this environment.")
+            return String(localized: "Device verification isn't available in this environment. This is expected on Simulator; use UI-testing mode or a physical device.")
         case .reidentificationRequired:
-            return String(localized: "This device needs to be re-identified. Sign in with your identity to continue.")
+            return String(localized: "This install has a DeviceCheck mark, but it cannot be safely attached to the retained identity. Retrying cannot change that; recover the case below and appeal it.")
         case .clockRollback:
             return String(localized: "This device's clock is set earlier than its last verification. Check the date and time, then connect to continue.")
         case .backendRefused:
-            return String(localized: "The verification service refused this device's session. Check the date and time, then try again.")
+            return String(localized: "The verification service refused this signed session. Check the date, time, and network connection, then retry to create a fresh session.")
         case .enrollmentLost:
             // Normally unreachable: the gate flow routes this state to
             // consent. Rendered when the authorities directory is
             // unavailable (so the consent flow has nothing to offer)
             // or if a host wires the view directly.
             return String(localized: "This device's enrollment is no longer on record. Consent to your moderation authority again to re-enroll.")
+        }
+    }
+
+    private var canRetry: Bool {
+        switch reason {
+        case .offlineGraceExpired, .neverChecked, .tokenInvalid, .clockRollback, .backendRefused:
+            return true
+        case .attestationUnavailable, .reidentificationRequired, .enrollmentLost:
+            return false
+        }
+    }
+
+    private func retry() {
+        guard !isRetrying else { return }
+        isRetrying = true
+        retryMessage = nil
+        Task { @MainActor in
+            await onRetry()
+            isRetrying = false
+            retryMessage = String(localized: "The verification attempt finished, but this screen did not change. The explanation above describes what this state requires.")
         }
     }
 }

@@ -46,7 +46,7 @@ struct RootView: View {
             case .gateCheckRequired(let reason):
                 GateCheckRequiredView(
                     reason: reason,
-                    onRetry: { dependencies.moderationGateFlow.tappedRetry() },
+                    onRetry: { await dependencies.moderationGateFlow.tappedRetry() },
                     lookupRecoveryCaseIDs: {
                         await dependencies.lookupModerationRecoveryCaseIDs()
                     },

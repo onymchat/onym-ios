@@ -69,8 +69,8 @@ public final class ModerationGateFlow {
     // MARK: - Intents
 
     /// Retry button on the check-required screen.
-    public func tappedRetry() {
-        Task { await gateCheck.checkNow() }
+    public func tappedRetry() async {
+        await gateCheck.checkNow()
     }
 
     /// The consent flow finished — run the first gate check for the
