@@ -30,6 +30,7 @@ final class DeviceRecoveryTests: XCTestCase {
     /// Grantee matches `CapturingSigner.userKeyID()` — the repository
     /// refuses to present a grant issued to any other key.
     private static let grantJSON = #"{"grantVersion":1,"caseId":"case-1","grantee":"onym:key:test","authority":"onym:component:authority","issuedAt":"2026-08-09T00:00:00Z","signature":"c2ln"}"#
+    private static let unbanGrantJSON = #"{"grantType":"onym-unban-grant-v1","grantVersion":1,"claimId":"claim-1","grantee":"onym:key:test","authority":"onym:component:authority","issuedAt":"2026-08-09T00:00:00Z","signature":"c2ln"}"#
 
     func testGrantParsesAndKeepsTheExactBytes() throws {
         let raw = Data(Self.grantJSON.utf8)
@@ -41,6 +42,21 @@ final class DeviceRecoveryTests: XCTestCase {
         XCTAssertEqual(grant.raw, raw, "the signed bytes travel verbatim")
     }
 
+    func testCaseFreeUnbanGrantParsesWithoutACaseId() throws {
+        let raw = Data(Self.unbanGrantJSON.utf8)
+        let grant = try RecoveryGrant(raw: raw)
+        XCTAssertEqual(grant.grantType, "onym-unban-grant-v1")
+        XCTAssertEqual(grant.caseId, "")
+        XCTAssertEqual(grant.claimId, "claim-1")
+        XCTAssertEqual(grant.grantee, "onym:key:test")
+        XCTAssertEqual(grant.raw, raw)
+
+        let canonical = #"{"authority":"onym:component:authority","claimId":"claim-1","grantType":"onym-unban-grant-v1","grantVersion":1,"grantee":"onym:key:test","issuedAt":"2026-08-09T00:00:00Z"}"#
+        let expected = SHA256.hash(data: Data(canonical.utf8))
+            .map { String(format: "%02x", $0) }.joined()
+        XCTAssertEqual(try grant.reference(), expected)
+    }
+
     /// The reference must equal SHA-256 over the server's canonical
     /// form: every field except `signature`, keys in UTF-8 byte order.
     /// The order pins the `grantVersion` < `grantee` case ('V' < 'e'
@@ -48,7 +64,7 @@ final class DeviceRecoveryTests: XCTestCase {
     /// spot where a wrong canonicalization would diverge from serde.
     func testGrantReferenceMatchesTheCanonicalBytesHash() throws {
         let grant = try RecoveryGrant(raw: Data(Self.grantJSON.utf8))
-        let canonical = #"{"authority":"onym:component:authority","caseId":"case-1","grantVersion":1,"grantee":"onym:key:test","issuedAt":"2026-08-09T00:00:00Z"}"#
+        let canonical = #"{"authority":"onym:component:authority","caseId":"case-1","grantType":"onym-recovery-grant-v1","grantVersion":1,"grantee":"onym:key:test","issuedAt":"2026-08-09T00:00:00Z"}"#
         let expected = SHA256.hash(data: Data(canonical.utf8))
             .map { String(format: "%02x", $0) }.joined()
         XCTAssertEqual(try grant.reference(), expected)
@@ -62,9 +78,13 @@ final class DeviceRecoveryTests: XCTestCase {
     /// a device would receive, and the exact `grant_ref` the authority
     /// recorded for them. If either side's canonicalization drifts,
     /// this is what fails.
-    private static let serverGrantJSON = #"{"grantVersion":1,"caseId":"case-11111111-2222-3333-4444-555555555555","grantee":"npub1granteegranteegranteegranteegranteegranteegrantee","authority":"authority.example","issuedAt":"2025-08-09T00:40:00Z","signature":"7o/U1cs4JTzVth3wT5RUgQn0aXKQC+Ry1/SmXwRFTiEM9p4wxapCFAlh6fJoZE/udLLqd5iPf/9HJNRdPdy+AA=="}"#
+    private static let serverGrantJSON = #"{"grantType":"onym-recovery-grant-v1","grantVersion":1,"caseId":"case-11111111-2222-3333-4444-555555555555","grantee":"npub1granteegranteegranteegranteegranteegranteegrantee","authority":"authority.example","issuedAt":"2025-08-09T06:13:20Z","signature":"KKfCE9ub1yVm9XpPya9R/bP4NcEmwxjpBWKYJ+mfgwboHITFuPdzGYoOpImIJBsXFROta4Zr1erxnzz9O46VBw=="}"#
     private static let serverGrantRef =
-        "1451700a69ca305002fadf747e297cd30f22c02126037d1c466b569af0c6f781"
+        "e5cabc809d33e6216cb18d9282e9f6d9ca51dea46843e431b2a28216f0dfdd72"
+
+    private static let serverUnbanGrantJSON = #"{"grantType":"onym-unban-grant-v1","grantVersion":1,"claimId":"claim-1","grantee":"onym:key:g","authority":"onym:component:a","issuedAt":"2025-12-06T05:46:40Z","signature":"JBa9BruZ1xc1ekZrJKF4qrFg06UDpqotwdYM43mPtFDEgW35BD1Q9tICt/N5V915a9iyQeI0jjX81zrORhTzDA=="}"#
+    private static let serverUnbanGrantRef =
+        "fea6391989b8a2784bed76de96faa018f910be9def5d5f50c27038f9e93202e1"
 
     func testGrantReferenceMatchesServerProducedFixture() throws {
         let grant = try RecoveryGrant(raw: Data(Self.serverGrantJSON.utf8))
@@ -74,6 +94,16 @@ final class DeviceRecoveryTests: XCTestCase {
         XCTAssertEqual(grant.authority, "authority.example")
         XCTAssertEqual(grant.issuedAt, "2025-08-09T00:40:00Z")
         XCTAssertEqual(try grant.reference(), Self.serverGrantRef)
+    }
+
+    func testUnbanGrantReferenceMatchesServerProducedFixture() throws {
+        let grant = try RecoveryGrant(raw: Data(Self.serverUnbanGrantJSON.utf8))
+        XCTAssertEqual(grant.grantType, "onym-unban-grant-v1")
+        XCTAssertEqual(grant.claimId, "claim-1")
+        XCTAssertEqual(grant.grantee, "onym:key:g")
+        XCTAssertEqual(grant.authority, "onym:component:a")
+        XCTAssertEqual(grant.issuedAt, "2025-12-06T05:46:40Z")
+        XCTAssertEqual(try grant.reference(), Self.serverUnbanGrantRef)
     }
 
     func testGrantThatDoesNotParseIsRefused() {
@@ -96,10 +126,9 @@ final class DeviceRecoveryTests: XCTestCase {
         }
     }
 
-    /// The authority's decoder defaults an absent version to 1
-    /// (`#[serde(default = "one")]`); the client must derive the same
-    /// signing bytes either way, or an older-shaped grant would fail
-    /// redemption.
+    /// A legacy grant may omit the version. The decoded property still
+    /// defaults to 1, but canonicalization follows the exact raw bytes,
+    /// just as the interface does.
     func testGrantWithAbsentVersionDefaultsToOne() throws {
         let raw = Data(
             Self.serverGrantJSON.replacingOccurrences(
@@ -109,7 +138,10 @@ final class DeviceRecoveryTests: XCTestCase {
         )
         let grant = try RecoveryGrant(raw: raw)
         XCTAssertEqual(grant.version, 1)
-        XCTAssertEqual(try grant.reference(), Self.serverGrantRef)
+        let canonical = #"{"authority":"authority.example","caseId":"case-11111111-2222-3333-4444-555555555555","grantType":"onym-recovery-grant-v1","grantee":"npub1granteegranteegranteegranteegranteegranteegrantee","issuedAt":"2025-08-09T00:40:00Z"}"#
+        let expected = SHA256.hash(data: Data(canonical.utf8))
+            .map { String(format: "%02x", $0) }.joined()
+        XCTAssertEqual(try grant.reference(), expected)
     }
 
     // MARK: - Session payload

@@ -21,7 +21,9 @@ public struct RecoveryGrant: Sendable, Equatable {
     /// to 1, and so does this decode (`RecoveryGrant` in
     /// `apple/src/types.rs`, `#[serde(default = "one")]`).
     public let version: Int
+    public let grantType: String
     public let caseId: String
+    public let claimId: String?
     /// The identity key the grant was issued to. The enforcement
     /// backend refuses a session by any other key, so a stolen grant
     /// is inert.
@@ -32,7 +34,10 @@ public struct RecoveryGrant: Sendable, Equatable {
     public init(raw: Data) throws {
         struct Wire: Decodable {
             let grantVersion: Int?
-            let caseId, grantee, authority, issuedAt, signature: String
+            let grantType: String?
+            let caseId: String?
+            let claimId: String?
+            let grantee, authority, issuedAt, signature: String
         }
         let wire: Wire
         do {
@@ -51,9 +56,24 @@ public struct RecoveryGrant: Sendable, Equatable {
                 "unsupported recovery grant version \(version); this client implements 1"
             )
         }
+        let grantType = wire.grantType ?? "onym-recovery-grant-v1"
+        guard grantType == "onym-recovery-grant-v1" || grantType == "onym-unban-grant-v1" else {
+            throw ModerationError.grantInvalid("unsupported recovery grant type \(grantType)")
+        }
+        if grantType == "onym-recovery-grant-v1" {
+            guard wire.caseId != nil else {
+                throw ModerationError.grantInvalid("case-bound recovery grant has no caseId")
+            }
+        } else {
+            guard wire.claimId != nil else {
+                throw ModerationError.grantInvalid("unban grant has no claimId")
+            }
+        }
         self.raw = raw
         self.version = version
-        self.caseId = wire.caseId
+        self.grantType = grantType
+        self.caseId = wire.caseId ?? ""
+        self.claimId = wire.claimId
         self.grantee = wire.grantee
         self.authority = wire.authority
         self.issuedAt = wire.issuedAt
@@ -63,27 +83,71 @@ public struct RecoveryGrant: Sendable, Equatable {
     /// (every field except `signature`, sorted keys). The enforcement
     /// backend derives the same value from the raw bytes to make the
     /// grant single-use, and the session signature binds it — so the
-    /// two derivations must agree. Reconstructed through a typed
-    /// mirror, like `Verdict.signingBytes()`: JSONEncoder's
-    /// `.sortedKeys` is UTF-8 byte order, matching serde's map order.
-    /// A grant carrying fields this mirror doesn't know would derive a
-    /// different reference and fail the session — acceptable, since
-    /// grants are consumed by the interface whose vocabulary this is.
+    /// two derivations must agree. Canonicalize the raw JSON itself
+    /// rather than reconstructing a typed subset: fields such as
+    /// `grantType` are part of the signature and must not be silently
+    /// omitted when the wire schema grows.
     public func reference() throws -> String {
-        struct Unsigned: Encodable {
-            let grantVersion: Int
-            let caseId, grantee, authority, issuedAt: String
+        guard var object = try JSONSerialization.jsonObject(with: raw) as? [String: Any] else {
+            throw ModerationError.grantInvalid("recovery grant is not a JSON object")
         }
-        let bytes = try ModerationCanonicalEncoder.encode(
-            Unsigned(
-                grantVersion: version,
-                caseId: caseId,
-                grantee: grantee,
-                authority: authority,
-                issuedAt: issuedAt
-            )
-        )
+        object.removeValue(forKey: "signature")
+        let bytes = try ModerationCanonicalEncoder.encode(RecoveryCanonicalJSON(object))
         return SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+/// An Encodable bridge for the raw JSON object in a grant. Using a
+/// dynamically keyed value keeps every signed field, while
+/// `ModerationCanonicalEncoder` still supplies the same sorted-key and
+/// number encoding as the Rust implementation.
+private struct RecoveryCanonicalJSON: Encodable {
+    private let value: Any
+
+    init(_ value: Any) {
+        self.value = value
+    }
+
+    private struct Key: CodingKey {
+        let stringValue: String
+        init?(stringValue: String) { self.stringValue = stringValue }
+        let intValue: Int? = nil
+        init?(intValue: Int) { return nil }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        switch value {
+        case let value as [String: Any]:
+            var container = encoder.container(keyedBy: Key.self)
+            for (key, value) in value {
+                try container.encode(RecoveryCanonicalJSON(value), forKey: Key(stringValue: key)!)
+            }
+        case let value as [Any]:
+            var container = encoder.unkeyedContainer()
+            for value in value {
+                try container.encode(RecoveryCanonicalJSON(value))
+            }
+        case let value as String:
+            var container = encoder.singleValueContainer()
+            try container.encode(value)
+        case let value as NSNumber:
+            var container = encoder.singleValueContainer()
+            if CFGetTypeID(value) == CFBooleanGetTypeID() {
+                try container.encode(value.boolValue)
+            } else if value.doubleValue.rounded() == value.doubleValue {
+                try container.encode(value.int64Value)
+            } else {
+                try container.encode(value.doubleValue)
+            }
+        case _ as NSNull:
+            var container = encoder.singleValueContainer()
+            try container.encodeNil()
+        default:
+            throw EncodingError.invalidValue(
+                value,
+                EncodingError.Context(codingPath: encoder.codingPath, debugDescription: "unsupported JSON value")
+            )
+        }
     }
 }
 
@@ -272,4 +336,3 @@ public enum RecoveryRedemption: Sendable, Equatable {
     case markInForce(authorityContact: String, newHolderURL: URL?, appealURL: URL?)
     case failed(String)
 }
-
