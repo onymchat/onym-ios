@@ -78,7 +78,7 @@ final class ModerationAuthorityClientTests: XCTestCase {
         XCTAssertEqual(listing.resolvedAPIBaseURL.absoluteString, "https://api.example/moderation")
     }
 
-    func testLegacyAuthorityListingResolvesAPIBesideManifest() throws {
+    func testAuthorityListingWithoutExplicitAPIBaseURLFailsClosed() throws {
         let data = Data(#"""
         {
           "componentId":"onym:component:authority",
@@ -87,10 +87,8 @@ final class ModerationAuthorityClientTests: XCTestCase {
           "operatorPublicKeyBase64":"key"
         }
         """#.utf8)
-        let listing = try JSONDecoder().decode(AuthorityListing.self, from: data)
 
-        XCTAssertNil(listing.apiBaseURL)
-        XCTAssertEqual(listing.resolvedAPIBaseURL.absoluteString, "https://authority.example/service/")
+        XCTAssertThrowsError(try JSONDecoder().decode(AuthorityListing.self, from: data))
     }
 
     func testRegisterMandatePostsCanonicalBodyAndChecksReference() async throws {
@@ -99,6 +97,7 @@ final class ModerationAuthorityClientTests: XCTestCase {
         StubURLProtocol.set { request in
             XCTAssertEqual(request.url?.absoluteString, "https://authority.example/service/v1/mandates")
             XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.timeoutInterval, 15)
             XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
 
             let body = try XCTUnwrap(Self.body(of: request))
@@ -147,11 +146,11 @@ final class ModerationAuthorityClientTests: XCTestCase {
             let response = Data(#"""
             {
               "reportId":"report-1",
-              "receivedAt":"2023-11-14T22:13:20Z",
+              "receivedAt":"2023-11-14T22:13:20.123456Z",
               "caseId":"case-1",
               "intakeWeight":1.5,
-              "responseDeadline":"2023-11-17T22:13:20Z",
-              "decisionDeadline":"2023-11-21T22:13:20Z"
+              "responseDeadline":"2023-11-17T22:13:20.123456Z",
+              "decisionDeadline":"2023-11-21T22:13:20.123456Z"
             }
             """#.utf8)
             return (response, Self.httpResponse(for: request, status: 200))
@@ -161,6 +160,7 @@ final class ModerationAuthorityClientTests: XCTestCase {
         XCTAssertEqual(receipt.reportId, "report-1")
         XCTAssertEqual(receipt.caseId, "case-1")
         XCTAssertEqual(receipt.intakeWeight, 1.5)
+        XCTAssertEqual(receipt.receivedAt.timeIntervalSince1970, 1_700_000_000.123456, accuracy: 0.001)
         XCTAssertNil(receipt.duplicate)
         XCTAssertNotNil(receipt.responseDeadline)
         XCTAssertNotNil(receipt.decisionDeadline)

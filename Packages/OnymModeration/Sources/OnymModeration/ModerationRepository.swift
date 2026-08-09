@@ -82,11 +82,18 @@ public actor ModerationRepository {
     private let signer: any ModerationSigner
     private let clock: @Sendable () -> Date
 
+    private struct ConsentKey: Hashable {
+        let authority: String
+        let user: String
+        let manifestHash: String
+    }
+
     private var authorities: [AuthorityListing] = []
     private var fetchStatus: AuthorityFetchStatus = .idle
     private var records: [MandateRecord]
     private var continuations: [UUID: AsyncStream<ModerationState>.Continuation] = [:]
     private var startTask: Task<Void, Never>?
+    private var consentTasks: [ConsentKey: Task<MandateRecord, Error>] = [:]
 
     public init(
         authoritiesFetcher: any KnownAuthoritiesFetcher,
@@ -171,13 +178,55 @@ public actor ModerationRepository {
                 "reviewed manifest componentId does not match the selected authority"
             )
         }
+        try manifestValidator.validateForConsent(signedManifest, now: clock())
+        let userKey = try await signer.userKeyID()
+        let key = ConsentKey(
+            authority: listing.componentId,
+            user: userKey,
+            manifestHash: signedManifest.manifestHash
+        )
+
+        // Actor methods are reentrant at every network await. Share one
+        // consent task per user/authority/manifest so overlapping taps
+        // cannot both pass the pending lookup and mint two artifacts.
+        if let task = consentTasks[key] {
+            return try await task.value
+        }
+        let task = Task {
+            try await self.performConsent(
+                to: listing,
+                reviewedManifest: reviewedManifest,
+                userKey: userKey
+            )
+        }
+        consentTasks[key] = task
+        do {
+            let record = try await task.value
+            consentTasks.removeValue(forKey: key)
+            return record
+        } catch {
+            consentTasks.removeValue(forKey: key)
+            throw error
+        }
+    }
+
+    private func performConsent(
+        to listing: AuthorityListing,
+        reviewedManifest: ReviewedManifest,
+        userKey: String
+    ) async throws -> MandateRecord {
+        let signedManifest = reviewedManifest.signedManifest
+        guard signedManifest.manifest.componentId == listing.componentId else {
+            throw ModerationError.manifestInvalid(
+                "reviewed manifest componentId does not match the selected authority"
+            )
+        }
 
         // Validity conditions (validUntil, supported profile, external
         // appellate for permanent classes) gate enrollment and signing —
         // not just the consent UI. An invalid manifest must never end up
         // pinned by a signed mandate.
         try manifestValidator.validateForConsent(signedManifest, now: clock())
-        let userKey = try await signer.userKeyID()
 
         // If registration previously failed after countersigning, retry
         // that immutable mandate byte-for-byte. Minting a replacement
@@ -187,8 +236,7 @@ public actor ModerationRepository {
             $0.mandate.authority == listing.componentId
                 && $0.mandate.user == userKey
                 && $0.mandate.manifestHash == signedManifest.manifestHash
-                && $0.countersigned
-                && !$0.authorityRegistered
+                && $0.registrationPending
         }) {
             return try await registerAndActivate(pending, with: listing)
         }
@@ -329,11 +377,29 @@ public actor ModerationRepository {
     ) async throws -> MandateRecord {
         let expectedRef = try pending.mandate.mandateHash()
         let client = authorityClients.client(for: listing)
-        let receipt = try await client.registerMandate(pending.mandate)
+        let receipt: MandateRegistrationReceipt
+        do {
+            receipt = try await client.registerMandate(pending.mandate)
+        } catch {
+            // A transport failure, malformed reply, or 5xx may happen
+            // after the Authority committed, so those retain the exact
+            // artifact for retry. A definitive artifact failure cannot
+            // become valid through exact replay and must not deadlock
+            // every future consent attempt.
+            if isDeterministicRegistrationRejection(error) {
+                markRegistrationRejected(pending)
+            }
+            throw error
+        }
+        // The concrete HTTP client validates these too. Repeating the
+        // checks here preserves the invariant for every factory-injected
+        // implementation of the protocol.
         guard receipt.accepted else {
+            markRegistrationRejected(pending)
             throw AuthorityClientError.mandateNotAccepted(mandateRef: receipt.mandateRef)
         }
         guard receipt.mandateRef == expectedRef else {
+            markRegistrationRejected(pending)
             throw AuthorityClientError.mandateReferenceMismatch(
                 expected: expectedRef,
                 received: receipt.mandateRef
@@ -344,16 +410,8 @@ public actor ModerationRepository {
         // persisted record instead, then activate only that array entry;
         // two records with the same unsigned fields must never both become
         // active merely because they share a content hash.
-        guard let pendingIndex = records.firstIndex(where: {
-            $0.mandate == pending.mandate
-                && $0.manifestBytes == pending.manifestBytes
-                && $0.authorityName == pending.authorityName
-                && $0.countersigned == pending.countersigned
-                && $0.createdAt == pending.createdAt
-        }) else {
-            throw AuthorityClientError.malformedResponse(
-                "registered mandate disappeared from the local store"
-            )
+        guard let pendingIndex = recordIndex(of: pending) else {
+            throw AuthorityClientError.localMandateRecordMissing(mandateRef: expectedRef)
         }
         for index in records.indices {
             records[index].isActive = index == pendingIndex
@@ -363,6 +421,35 @@ public actor ModerationRepository {
         mandateStore.save(records)
         publish()
         return activated
+    }
+
+    private func recordIndex(of record: MandateRecord) -> Int? {
+        records.firstIndex(where: {
+            $0.mandate == record.mandate
+                && $0.manifestBytes == record.manifestBytes
+                && $0.authorityName == record.authorityName
+                && $0.countersigned == record.countersigned
+                && $0.createdAt == record.createdAt
+        })
+    }
+
+    private func markRegistrationRejected(_ record: MandateRecord) {
+        guard let index = recordIndex(of: record) else { return }
+        records[index].registrationRejected = true
+        mandateStore.save(records)
+        publish()
+    }
+
+    private func isDeterministicRegistrationRejection(_ error: Error) -> Bool {
+        guard let error = error as? AuthorityClientError else { return false }
+        switch error {
+        case .mandateNotAccepted, .mandateReferenceMismatch:
+            return true
+        case .rejected(let rejection):
+            return rejection.code == .badRequest || rejection.code == .signatureInvalid
+        case .invalidResponse, .malformedResponse, .localMandateRecordMissing:
+            return false
+        }
     }
 
     private func publish() {

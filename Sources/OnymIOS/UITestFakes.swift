@@ -316,6 +316,7 @@ struct UITestKnownAuthoritiesFetcher: KnownAuthoritiesFetcher {
         componentId: "onym:component:uitest-authority",
         name: "UITest Authority",
         manifestURL: URL(string: "https://uitest-authority.example/manifest.json")!,
+        apiBaseURL: URL(string: "https://uitest-authority.example")!,
         operatorPublicKeyBase64: ""
     )
 

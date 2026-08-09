@@ -55,11 +55,16 @@ final class ModerationRepositoryTests: XCTestCase {
         private var _enrollRequests: [EnrollmentRequest] = []
         private var _gateRequests: [GateCheckRequest] = []
         private var _countersignCount = 0
+        private var _countersignDelayNanoseconds: UInt64 = 0
         var gateResult: GateCheckResult = .clear
         /// When set, `countersignMandate` returns this instead of the
         /// stub sentinel — lets a test assert what the client does with
         /// a backend-supplied signature.
         var countersignature: String = StubEnforcementBackendClient.countersignSentinel
+        var countersignDelayNanoseconds: UInt64 {
+            get { lock.withLock { _countersignDelayNanoseconds } }
+            set { lock.withLock { _countersignDelayNanoseconds = newValue } }
+        }
 
         func enrollDevice(_ request: EnrollmentRequest) async throws -> DeviceEnrollment {
             lock.withLock { _enrollRequests.append(request) }
@@ -67,7 +72,13 @@ final class ModerationRepositoryTests: XCTestCase {
         }
 
         func countersignMandate(_ mandate: ModerationMandate) async throws -> InterfaceCountersignature {
-            lock.withLock { _countersignCount += 1 }
+            let delay = lock.withLock { () -> UInt64 in
+                _countersignCount += 1
+                return _countersignDelayNanoseconds
+            }
+            if delay > 0 {
+                try await Task.sleep(nanoseconds: delay)
+            }
             return InterfaceCountersignature(signature: lock.withLock { countersignature })
         }
 
@@ -192,6 +203,7 @@ final class ModerationRepositoryTests: XCTestCase {
             componentId: componentId,
             name: name,
             manifestURL: URL(string: "https://example.com/\(name).json")!,
+            apiBaseURL: URL(string: "https://api.example.com/\(name)")!,
             operatorPublicKeyBase64: ""
         )
     }
@@ -429,7 +441,10 @@ final class ModerationRepositoryTests: XCTestCase {
             XCTFail("unexpected error: \(error)")
         }
 
-        XCTAssertFalse(try XCTUnwrap(store.load().first).isActive)
+        let rejected = try XCTUnwrap(store.load().first)
+        XCTAssertTrue(rejected.registrationRejected)
+        XCTAssertFalse(rejected.registrationPending)
+        XCTAssertFalse(rejected.isActive)
         let activeAfterMismatch = await repository.activeMandateRecord()
         XCTAssertNil(activeAfterMismatch)
     }
@@ -453,14 +468,51 @@ final class ModerationRepositoryTests: XCTestCase {
             _ = try await repository.reviewAndConsent(to: listing(componentId, name: "A"))
             XCTFail("expected Authority rejection")
         } catch let AuthorityClientError.mandateNotAccepted(mandateRef) {
-            XCTAssertEqual(mandateRef, try XCTUnwrap(store.load().first).mandate.mandateHash())
+            XCTAssertEqual(mandateRef, try XCTUnwrap(authority.mandates.first).mandateHash())
         } catch {
             XCTFail("unexpected error: \(error)")
         }
 
-        let pending = try XCTUnwrap(store.load().first)
-        XCTAssertTrue(pending.registrationPending)
-        XCTAssertFalse(pending.isActive)
+        let rejected = try XCTUnwrap(store.load().first)
+        XCTAssertTrue(rejected.registrationRejected)
+        XCTAssertFalse(rejected.registrationPending)
+        XCTAssertFalse(rejected.isActive)
+
+        authority.accepted = true
+        let retried = try await repository.reviewAndConsent(to: listing(componentId, name: "A"))
+        XCTAssertTrue(retried.isActive)
+        XCTAssertTrue(retried.authorityRegistered)
+        XCTAssertEqual(store.load().count, 2, "the rejected signed attempt remains auditable")
+        XCTAssertTrue(try XCTUnwrap(store.load().last).registrationRejected)
+        XCTAssertEqual(backend.countersignCount, 2, "a terminal refusal mints a fresh artifact")
+    }
+
+    func testOverlappingConsentCallsShareOneArtifact() async throws {
+        let componentId = "onym:component:a"
+        let selected = listing(componentId, name: "A")
+        let backend = RecordingBackend()
+        backend.countersignature = "interface-signature"
+        backend.countersignDelayNanoseconds = 50_000_000
+        let authority = RecordingAuthorityClient()
+        let store = InMemoryMandateStore()
+        let repository = makeRepository(
+            listings: [selected],
+            bytesByComponent: [componentId: manifestBytes(componentId: componentId)],
+            backend: backend,
+            authorityClient: authority,
+            store: store
+        )
+        let reviewed = try await repository.manifestForReview(selected)
+
+        async let first = repository.consent(to: selected, reviewedManifest: reviewed)
+        async let second = repository.consent(to: selected, reviewedManifest: reviewed)
+        let (firstRecord, secondRecord) = try await (first, second)
+
+        XCTAssertEqual(firstRecord, secondRecord)
+        XCTAssertEqual(store.load().count, 1)
+        XCTAssertEqual(backend.enrollRequests.count, 1)
+        XCTAssertEqual(backend.countersignCount, 1)
+        XCTAssertEqual(authority.mandates.count, 1)
     }
 
     func testRegistrationActivatesOnlyOneOfTwoRecordsSharingAContentHash() async throws {
@@ -579,6 +631,7 @@ final class ModerationRepositoryTests: XCTestCase {
             JSONSerialization.jsonObject(with: encoder.encode(record)) as? [String: Any]
         )
         json.removeValue(forKey: "authorityRegistered")
+        json.removeValue(forKey: "registrationRejected")
         let legacyBytes = try JSONSerialization.data(withJSONObject: json)
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
@@ -586,6 +639,7 @@ final class ModerationRepositoryTests: XCTestCase {
         let decoded = try decoder.decode(MandateRecord.self, from: legacyBytes)
 
         XCTAssertFalse(decoded.authorityRegistered)
+        XCTAssertFalse(decoded.registrationRejected)
         XCTAssertEqual(decoded.mandate, record.mandate)
         XCTAssertTrue(decoded.isActive)
     }

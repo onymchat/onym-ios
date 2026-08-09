@@ -84,6 +84,7 @@ public enum AuthorityClientError: Error, Sendable, Equatable {
     case rejected(AuthorityRejection)
     case mandateNotAccepted(mandateRef: String)
     case mandateReferenceMismatch(expected: String, received: String)
+    case localMandateRecordMissing(mandateRef: String)
 }
 
 /// The accused's signed response to a case notice: statements and
@@ -365,6 +366,7 @@ public struct URLSessionModerationAuthorityClient: ModerationAuthorityClient {
         }
         var request = URLRequest(url: url)
         request.httpMethod = method
+        request.timeoutInterval = 15
         request.httpBody = body
         if body != nil {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -405,7 +407,30 @@ public struct URLSessionModerationAuthorityClient: ModerationAuthorityClient {
 
     private static func decoder() -> JSONDecoder {
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        // RFC 3339 permits fractional seconds. Foundation's built-in
+        // `.iso8601` strategy accepts only the whole-second form, so
+        // try both shapes used by conforming Authority implementations.
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let value = try container.decode(String.self)
+
+            let fractional = ISO8601DateFormatter()
+            fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = fractional.date(from: value) {
+                return date
+            }
+
+            let wholeSeconds = ISO8601DateFormatter()
+            wholeSeconds.formatOptions = [.withInternetDateTime]
+            if let date = wholeSeconds.date(from: value) {
+                return date
+            }
+
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "expected an RFC 3339 timestamp"
+            )
+        }
         return decoder
     }
 
