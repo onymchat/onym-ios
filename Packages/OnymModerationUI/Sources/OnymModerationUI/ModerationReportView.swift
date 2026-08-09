@@ -80,9 +80,12 @@ public struct ModerationReportView: View {
                 // the options and choose — not discover them one menu
                 // tap at a time, or inherit a default.
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(flow.state.classes, id: \.classId) { item in
+                    ForEach(
+                        Array(flow.state.classes.enumerated()),
+                        id: \.element.classId
+                    ) { index, item in
                         classRow(item)
-                        if item.classId != flow.state.classes.last?.classId {
+                        if index < flow.state.classes.count - 1 {
                             Divider().padding(.leading, 48)
                         }
                     }
@@ -133,42 +136,52 @@ public struct ModerationReportView: View {
     /// statutory-reporting notice for classes that declare one.
     private func classRow(_ item: ViolationClass) -> some View {
         let isSelected = item.classId == flow.state.selectedClassId
-        return Button {
-            flow.selectClass(item.classId)
-        } label: {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 20))
-                    .foregroundStyle(isSelected ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
-                    .padding(.top, 1)
-                VStack(alignment: .leading, spacing: 6) {
+        // The expanded details live BELOW the Button, not inside its
+        // label: SwiftUI renders controls nested in a button label
+        // inert, so a `Link` in there would never receive the tap —
+        // the row would swallow it as a re-select.
+        return VStack(alignment: .leading, spacing: 0) {
+            Button {
+                flow.selectClass(item.classId)
+            } label: {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 20))
+                        .foregroundStyle(isSelected ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
+                        .padding(.top, 1)
                     Text(Self.displayName(for: item.classId))
                         .font(.body.weight(isSelected ? .semibold : .regular))
                         .foregroundStyle(.primary)
                         .multilineTextAlignment(.leading)
-                    if isSelected {
-                        definitionLine(for: item)
-                        if item.lawfulReporting != nil {
-                            Label(
-                                "The authority files legally required reports for this class.",
-                                systemImage: "building.columns"
-                            )
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .accessibilityIdentifier("moderation.report.lawful")
-                        }
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(flow.state.isSubmitting)
+            .accessibilityIdentifier("moderation.report.class.\(item.classId)")
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
+
+            if isSelected {
+                VStack(alignment: .leading, spacing: 6) {
+                    definitionLine(for: item)
+                    if item.lawfulReporting != nil {
+                        Label(
+                            "The authority files legally required reports for this class.",
+                            systemImage: "building.columns"
+                        )
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("moderation.report.lawful")
                     }
                 }
-                Spacer(minLength: 0)
+                .padding(.leading, 48)
+                .padding(.trailing, 16)
+                .padding(.bottom, 12)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .disabled(flow.state.isSubmitting)
-        .accessibilityIdentifier("moderation.report.class.\(item.classId)")
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     /// The consented definition of the class. `definition` is a
