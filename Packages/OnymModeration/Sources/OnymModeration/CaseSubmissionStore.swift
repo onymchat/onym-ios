@@ -18,8 +18,13 @@ public struct CaseSubmissionRecord: Codable, Sendable, Equatable {
 
     public let caseId: String
     public let mandateRef: String
-    /// `onym:key:` reference of the submitting user, for
-    /// identity-removal purge (same contract as the other ledgers).
+    /// `onym:key:` reference of the LOCAL identity that filed this
+    /// submission, for identity-removal purge (same contract as the
+    /// other ledgers). For a response or ordinary appeal this equals
+    /// the case mandate's user; for a new-holder claim it is the
+    /// device's current identity — the mandated user is by premise not
+    /// local, and keying the row to them would let the purge silently
+    /// drop a pending claim's retry artifact.
     public let user: String
     public let authorityName: String
     public let kind: Kind

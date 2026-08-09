@@ -723,15 +723,32 @@ public actor ModerationRepository {
         let statement = try Self.validatedStatement(statement)
         // A new-holder claim is definitionally filed by someone who is
         // not the mandated user; ownership is not required for it.
+        // Scope note: standing still resolves the former holder's
+        // mandate from local history, so this path serves the
+        // same-device case where that record is retained. A fresh
+        // holder with nothing retained files from the ban surface,
+        // which has the verdict (and its mandateRef/authority) in
+        // hand — that flow lands with the case UI.
         let (record, listing) = try await caseStanding(
             mandateRef: mandateRef,
             requireOwnership: kind == .appeal
         )
+        // The ledger row belongs to the identity that FILED it — for a
+        // new-holder claim that is the device's current identity, not
+        // the mandated (previous) holder, whose key is by premise not
+        // local and would make the identity-removal purge silently
+        // drop a pending claim's retry artifact.
+        let submittingUser: String
+        if kind == .appeal {
+            submittingUser = record.mandate.user
+        } else {
+            submittingUser = try await signer.userKeyID()
+        }
         let recordKind: CaseSubmissionRecord.Kind =
             kind == .appeal ? .appeal : .newHolderClaim
         let key = CaseSubmissionKey(
             authority: listing.componentId,
-            user: record.mandate.user,
+            user: submittingUser,
             caseId: caseId,
             kind: recordKind,
             statementHash: Self.statementHash(statement)
@@ -746,7 +763,7 @@ public actor ModerationRepository {
                 kind: kind,
                 recordKind: recordKind,
                 statement: statement,
-                record: record,
+                submittingUser: submittingUser,
                 listing: listing
             )
         }
@@ -814,13 +831,13 @@ public actor ModerationRepository {
         kind: AppealSubmission.Kind,
         recordKind: CaseSubmissionRecord.Kind,
         statement: String,
-        record: MandateRecord,
+        submittingUser: String,
         listing: AuthorityListing
     ) async throws -> AppealReceipt {
         if let existing = caseSubmissions.first(where: {
             $0.kind == recordKind
                 && $0.caseId == caseId
-                && $0.user == record.mandate.user
+                && $0.user == submittingUser
                 && $0.mandateRef == mandateRef
                 && $0.appeal?.statement == statement
         }) {
@@ -841,7 +858,7 @@ public actor ModerationRepository {
         let submission = CaseSubmissionRecord(
             caseId: caseId,
             mandateRef: mandateRef,
-            user: record.mandate.user,
+            user: submittingUser,
             authorityName: listing.name,
             kind: recordKind,
             appeal: appeal,
@@ -872,7 +889,7 @@ public actor ModerationRepository {
         to listing: AuthorityListing
     ) async throws -> CaseResponseReceipt {
         guard let response = submission.response else {
-            throw ModerationError.statementInvalid("submission holds no response")
+            throw ModerationError.ledgerInconsistent("submission holds no response")
         }
         let client = authorityClients.client(for: listing)
         let receipt: CaseResponseReceipt
@@ -897,7 +914,7 @@ public actor ModerationRepository {
         to listing: AuthorityListing
     ) async throws -> AppealReceipt {
         guard let appeal = submission.appeal else {
-            throw ModerationError.statementInvalid("submission holds no appeal")
+            throw ModerationError.ledgerInconsistent("submission holds no appeal")
         }
         let client = authorityClients.client(for: listing)
         let receipt: AppealReceipt
@@ -936,15 +953,18 @@ public actor ModerationRepository {
 
     /// Persist the ledger, pruning acknowledged rows past the bound.
     /// The array is newest-first, so counting down the list keeps the
-    /// newest resolved rows and drops the oldest.
+    /// newest resolved rows and drops the oldest. The prune commits to
+    /// memory only after the store write succeeds — a failed save must
+    /// not leave rows dropped in memory while still on disk.
     private func saveCaseSubmissions() throws {
         var resolvedKept = 0
-        caseSubmissions = caseSubmissions.filter { record in
+        let pruned = caseSubmissions.filter { record in
             guard record.isResolved else { return true }
             resolvedKept += 1
             return resolvedKept <= Self.maxResolvedCaseSubmissions
         }
-        try caseSubmissionStore.save(caseSubmissions)
+        try caseSubmissionStore.save(pruned)
+        caseSubmissions = pruned
     }
 
     private func submissionIndex(of submission: CaseSubmissionRecord) -> Int? {

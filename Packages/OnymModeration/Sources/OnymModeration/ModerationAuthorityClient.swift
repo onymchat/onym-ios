@@ -413,6 +413,13 @@ public struct URLSessionModerationAuthorityClient: ModerationAuthorityClient {
                 received: receipt.caseId
             )
         }
+        // The reference echoes the filed kind; an acknowledgment for a
+        // different kind must not be attributed to this submission.
+        guard receipt.kind == submission.kind.rawValue else {
+            throw AuthorityClientError.malformedResponse(
+                "appeal receipt kind '\(receipt.kind)' does not match submitted '\(submission.kind.rawValue)'"
+            )
+        }
         return receipt
     }
 
