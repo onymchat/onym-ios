@@ -39,7 +39,11 @@ public final class ModerationReportFlow {
         do {
             let classes = try await repository.availableReportClasses()
             state.classes = classes
-            state.selectedClassId = classes.first?.classId
+            // Deliberately no preselection: the class is the substance
+            // of the report, and the first class in a manifest is often
+            // the gravest (the live manifest leads with CSAM). Filing
+            // must require an explicit choice, never survive a reflex
+            // double-tap.
             if classes.isEmpty {
                 state.errorMessage = String(
                     localized: "Your current authority offers no reportable classes."

@@ -72,47 +72,23 @@ public struct ModerationReportView: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("VIOLATION CLASS")
+                Text("WHAT DOES IT VIOLATE?")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                Picker(
-                    "Violation class",
-                    selection: Binding(
-                        get: { flow.state.selectedClassId ?? "" },
-                        set: { flow.selectClass($0) }
-                    )
-                ) {
+                // All classes visible at once, none preselected: the
+                // class IS the report, so the reporter should compare
+                // the options and choose — not discover them one menu
+                // tap at a time, or inherit a default.
+                VStack(alignment: .leading, spacing: 0) {
                     ForEach(flow.state.classes, id: \.classId) { item in
-                        Text(item.classId).tag(item.classId)
-                    }
-                }
-                .pickerStyle(.menu)
-                .disabled(flow.state.classes.isEmpty || flow.state.isSubmitting)
-                .accessibilityIdentifier("moderation.report.class")
-
-                // The consented definition of the selected class.
-                // `definition` is a content address (hash-or-url,
-                // AuthorityManifest): a URL opens the consented
-                // prohibited-content definition; a bare hash can only
-                // be shown as the address the user consented to.
-                if let selected = flow.state.classes.first(where: {
-                    $0.classId == flow.state.selectedClassId
-                }) {
-                    if let url = URL(string: selected.definition),
-                       url.scheme == "https" || url.scheme == "http" {
-                        Link(destination: url) {
-                            Label("Read the consented definition of this class", systemImage: "arrow.up.right.square")
-                                .font(.footnote)
+                        classRow(item)
+                        if item.classId != flow.state.classes.last?.classId {
+                            Divider().padding(.leading, 48)
                         }
-                        .accessibilityIdentifier("moderation.report.definition")
-                    } else {
-                        Text("Consented definition (content address): \(selected.definition)")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                            .accessibilityIdentifier("moderation.report.definition")
                     }
                 }
+                .background(.background, in: RoundedRectangle(cornerRadius: 14))
+                .accessibilityIdentifier("moderation.report.class")
             }
 
             Label(
@@ -147,6 +123,89 @@ public struct ModerationReportView: View {
             )
             .accessibilityIdentifier("moderation.report.submit")
         }
+    }
+
+    /// One selectable class. The name shown is the consented
+    /// `classId` with typography only — hyphens to spaces, known
+    /// acronyms uppercased — never a renaming: the id is the exact
+    /// vocabulary the mandate consented to. The selected row expands
+    /// with what choosing it means: the consented definition, and the
+    /// statutory-reporting notice for classes that declare one.
+    private func classRow(_ item: ViolationClass) -> some View {
+        let isSelected = item.classId == flow.state.selectedClassId
+        return Button {
+            flow.selectClass(item.classId)
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 20))
+                    .foregroundStyle(isSelected ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
+                    .padding(.top, 1)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(Self.displayName(for: item.classId))
+                        .font(.body.weight(isSelected ? .semibold : .regular))
+                        .foregroundStyle(.primary)
+                        .multilineTextAlignment(.leading)
+                    if isSelected {
+                        definitionLine(for: item)
+                        if item.lawfulReporting != nil {
+                            Label(
+                                "The authority files legally required reports for this class.",
+                                systemImage: "building.columns"
+                            )
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("moderation.report.lawful")
+                        }
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(flow.state.isSubmitting)
+        .accessibilityIdentifier("moderation.report.class.\(item.classId)")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    /// The consented definition of the class. `definition` is a
+    /// content address (hash-or-url, AuthorityManifest): a URL opens
+    /// the consented prohibited-content definition; a bare hash can
+    /// only be shown as the address the user consented to.
+    @ViewBuilder
+    private func definitionLine(for item: ViolationClass) -> some View {
+        if let url = URL(string: item.definition),
+           url.scheme == "https" || url.scheme == "http" {
+            Link(destination: url) {
+                Label("What counts as this?", systemImage: "arrow.up.right.square")
+                    .font(.footnote)
+            }
+            .accessibilityIdentifier("moderation.report.definition")
+        } else {
+            Text("Definition pinned to content address \(item.definition)")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .accessibilityIdentifier("moderation.report.definition")
+        }
+    }
+
+    /// Typography-only rendering of a consented class id: hyphens
+    /// become spaces, the leading word is capitalized, and short ids
+    /// known to be acronyms are uppercased. No translation, no
+    /// paraphrase — the words stay the manifest's words.
+    static func displayName(for classId: String) -> String {
+        let acronyms: Set<Substring> = ["csam", "ncii"]
+        let words = classId.split(separator: "-")
+        return words.enumerated().map { index, word in
+            if acronyms.contains(word) {
+                return word.uppercased()
+            }
+            return index == 0 ? word.prefix(1).uppercased() + word.dropFirst() : String(word)
+        }.joined(separator: " ")
     }
 
     private func success(_ receipt: ReportReceipt) -> some View {
