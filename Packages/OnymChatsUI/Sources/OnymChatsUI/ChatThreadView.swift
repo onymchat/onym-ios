@@ -7,6 +7,7 @@ import OnymDesign
 import OnymIdentity
 import OnymGroup
 import OnymChatsCore
+import OnymModeration
 
 /// SwiftUI host for `ChatThreadViewController`. The chat screen is
 /// UIKit (per the design call on #150) but the surrounding app is
@@ -39,6 +40,10 @@ public struct ChatThreadView: View {
     let videoLoader: ChatVideoLoader
     /// Fetches + decrypts voice blobs for inline playback.
     let voiceLoader: ChatVoiceLoader
+    /// Builds the report sheet for a disclosable message. Injected as
+    /// an opaque view factory so the chats layer stays moderation-UI-
+    /// agnostic (OnymChatsUI does not depend on OnymModerationUI).
+    let makeModerationReportView: @MainActor (ReportableMessage) -> AnyView
     /// When non-nil (opened from Search), the thread cold-opens scrolled
     /// to this message and flashes it, instead of opening at the bottom.
     var scrollToMessageID: UUID? = nil
@@ -56,6 +61,7 @@ public struct ChatThreadView: View {
         imageLoader: ChatImageLoader,
         videoLoader: ChatVideoLoader,
         voiceLoader: ChatVoiceLoader,
+        makeModerationReportView: @escaping @MainActor (ReportableMessage) -> AnyView,
         scrollToMessageID: UUID? = nil
     ) {
         self.groupID = groupID
@@ -70,6 +76,7 @@ public struct ChatThreadView: View {
         self.imageLoader = imageLoader
         self.videoLoader = videoLoader
         self.voiceLoader = voiceLoader
+        self.makeModerationReportView = makeModerationReportView
         self.scrollToMessageID = scrollToMessageID
     }
 
@@ -98,6 +105,7 @@ public struct ChatThreadView: View {
     /// `sentAt`. SwiftUI re-renders on every push so the bridge
     /// hands the controller fresh data via `updateUIViewController`.
     @State private var messages: [ChatMessage] = []
+    @State private var reportableMessage: ReportableMessage?
 
     public var body: some View {
         ChatThreadControllerBridge(
@@ -138,6 +146,10 @@ public struct ChatThreadView: View {
                 Task {
                     await interactor.retry(groupID: groupID, messageID: messageID)
                 }
+            },
+            canReportMessage: { makeReportableMessage(from: $0) != nil },
+            onReportRequested: { message in
+                reportableMessage = makeReportableMessage(from: message)
             },
             imageLoader: imageLoader,
             scrollToMessageID: scrollToMessageID,
@@ -234,6 +246,9 @@ public struct ChatThreadView: View {
                 Task { await interactor.delete(groupID: groupID, messageID: id) }
             }
             Button("Cancel", role: .cancel) {}
+        }
+        .sheet(item: $reportableMessage) { message in
+            makeModerationReportView(message)
         }
         // The chat screen uses the standard SwiftUI navigation bar (its
         // system back button is the only "back" affordance — the UIKit
@@ -417,6 +432,17 @@ public struct ChatThreadView: View {
     private var currentInvitationMessage: String? {
         chatsFlow.groups.first { $0.id == groupID }?.invitationMessage
     }
+
+    private func makeReportableMessage(from message: ChatMessage) -> ReportableMessage? {
+        guard let group = chatsFlow.groups.first(where: { $0.id == groupID }) else {
+            return nil
+        }
+        return ReportableMessageFactory.make(
+            from: message,
+            memberProfiles: currentMemberProfiles,
+            groupSecret: group.groupSecret
+        )
+    }
 }
 
 private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
@@ -425,6 +451,8 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
     let messages: [ChatMessage]
     let onSendTapped: (String, UUID?) -> Void
     let onRetryRequested: (UUID) -> Void
+    let canReportMessage: (ChatMessage) -> Bool
+    let onReportRequested: (ChatMessage) -> Void
     let imageLoader: ChatImageLoader
     let scrollToMessageID: UUID?
     let onImageTapped: (ChatMessage) -> Void
@@ -447,6 +475,8 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         vc.openAtMessageID = scrollToMessageID
         vc.onSendTapped = onSendTapped
         vc.onRetryRequested = onRetryRequested
+        vc.canReportMessage = canReportMessage
+        vc.onReportRequested = onReportRequested
         vc.imageLoader = imageLoader
         vc.onImageTapped = onImageTapped
         vc.onVideoTapped = onVideoTapped
@@ -474,6 +504,8 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         // group-info now live in the SwiftUI nav bar, not the controller.)
         vc.onSendTapped = onSendTapped
         vc.onRetryRequested = onRetryRequested
+        vc.canReportMessage = canReportMessage
+        vc.onReportRequested = onReportRequested
         vc.imageLoader = imageLoader
         vc.onImageTapped = onImageTapped
         vc.onVideoTapped = onVideoTapped

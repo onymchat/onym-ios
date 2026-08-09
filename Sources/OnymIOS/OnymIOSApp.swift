@@ -564,6 +564,12 @@ struct OnymIOSApp: App {
                     repository: moderationRepository,
                     gateCheck: gateCheckRepository
                 )
+            },
+            makeModerationReportView: { @MainActor message in
+                AnyView(ModerationReportView(flow: ModerationReportFlow(
+                    message: message,
+                    repository: moderationRepository
+                )))
             }
         )
     }
@@ -703,6 +709,23 @@ struct OnymIOSApp: App {
                         // backup post-removal can't decrypt
                         // outstanding intro requests.
                         await introKeyStore.deleteForOwner(removed)
+                        // Filed-report ledger rows are keyed by the
+                        // reporter's `onym:key:` reference, not by
+                        // IdentityID (and the removed identity's keys
+                        // are already gone) — so purge by keeping only
+                        // the reporters that still exist locally.
+                        // Skip the purge entirely if the identity list
+                        // can't be read: an empty keep-set would wipe
+                        // every identity's ledger, not just the
+                        // removed one's.
+                        if let remaining = try? await identityRepository.currentIdentities() {
+                            await moderationRepository.purgeReportRecords(
+                                keepingReporters: Set(remaining.map { summary in
+                                    "onym:key:" + summary.sendingPublicKey
+                                        .map { String(format: "%02x", $0) }.joined()
+                                })
+                            )
+                        }
                     }
                 }
                 .task {

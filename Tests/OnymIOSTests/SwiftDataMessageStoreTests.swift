@@ -36,7 +36,8 @@ final class SwiftDataMessageStoreTests: XCTestCase {
             body: "hello",
             sentAt: Date(timeIntervalSince1970: 1_700_000_000),
             direction: .outgoing,
-            status: .pending
+            status: .pending,
+            moderationAuthenticityProof: "c2lnbmF0dXJl"
         )
 
         let outcome = await store.insertOrUpdate(msg)
@@ -54,6 +55,7 @@ final class SwiftDataMessageStoreTests: XCTestCase {
         XCTAssertEqual(first.direction, .outgoing)
         XCTAssertEqual(first.status, .pending)
         XCTAssertEqual(first.groupType, .tyranny)
+        XCTAssertEqual(first.moderationAuthenticityProof, "c2lnbmF0dXJl")
         XCTAssertNil(first.replyToMessageID,
                      "a non-reply message round-trips with no reply target")
     }
@@ -426,6 +428,134 @@ final class SwiftDataMessageStoreTests: XCTestCase {
                        "deleting one identity's thread leaves the other's copy of the group")
     }
 
+    func test_insertOrUpdate_replayWithoutProof_preservesStoredEvidence() async {
+        let id = UUID()
+        let original = makeMessage(
+            id: id,
+            body: "prohibited content",
+            direction: .incoming,
+            status: .received,
+            moderationAuthenticityProof: "c2lnbmF0dXJl"
+        )
+        _ = await store.insertOrUpdate(original)
+
+        // An abuser re-sends the same messageID with the proof omitted,
+        // a laundered body, a shifted timestamp, AND a bolted-on
+        // attachment (media messages aren't reportable, so a surviving
+        // attachment would remove Report from the menu even with the
+        // pair intact). Incoming rows are immutable once received, so
+        // nothing about the stored row may change.
+        let replay = makeMessage(
+            id: id,
+            body: "innocent content",
+            sentAt: original.sentAt.addingTimeInterval(3600),
+            direction: .incoming,
+            status: .received,
+            moderationAuthenticityProof: nil,
+            imageAttachment: ChatImageAttachment(
+                sha256: "cd".repeated(32), mimeType: "image/jpeg",
+                byteSize: 1, width: 1, height: 1,
+                encKey: Data(repeating: 7, count: 32),
+                blurhash: "LEHV6nWB2yk8", server: "https://blossom.test"
+            )
+        )
+        let outcome = await store.insertOrUpdate(replay)
+        XCTAssertEqual(outcome, .updated)
+
+        let listed = await store.list(
+            groupID: original.groupID, ownerIDString: kOwner.rawValue.uuidString
+        )
+        XCTAssertEqual(listed.count, 1)
+        XCTAssertEqual(listed[0].body, "prohibited content")
+        XCTAssertEqual(listed[0].sentAt, original.sentAt)
+        XCTAssertEqual(listed[0].senderBlsPubkeyHex, original.senderBlsPubkeyHex)
+        XCTAssertEqual(listed[0].moderationAuthenticityProof, "c2lnbmF0dXJl")
+        XCTAssertNil(listed[0].imageAttachment,
+                     "a proof-less replay must not bolt on an attachment")
+    }
+
+    func test_insertOrUpdate_incomingReplayWithFreshProof_neverMutatesSignedTuple() async {
+        // The strongest laundering attempt: same messageID, laundered
+        // body, shifted timestamp, and a *fresh* proof over the new
+        // preimage (the sender holds the signing key, so it verifies).
+        // An incoming row is immutable once received — a legitimate
+        // replay is byte-identical, so divergence is hostile.
+        let id = UUID()
+        let original = makeMessage(
+            id: id,
+            body: "prohibited content",
+            direction: .incoming,
+            status: .received,
+            moderationAuthenticityProof: "c2lnbmF0dXJl"
+        )
+        _ = await store.insertOrUpdate(original)
+
+        let replay = makeMessage(
+            id: id,
+            body: "innocent content",
+            sentAt: original.sentAt.addingTimeInterval(-3600),
+            direction: .incoming,
+            status: .received,
+            moderationAuthenticityProof: "ZnJlc2gtdmFsaWQtcHJvb2Y="
+        )
+        let outcome = await store.insertOrUpdate(replay)
+        XCTAssertEqual(outcome, .updated)
+
+        let listed = await store.list(
+            groupID: original.groupID, ownerIDString: kOwner.rawValue.uuidString
+        )
+        XCTAssertEqual(listed[0].body, "prohibited content")
+        XCTAssertEqual(listed[0].sentAt, original.sentAt)
+        XCTAssertEqual(listed[0].moderationAuthenticityProof, "c2lnbmF0dXJl")
+    }
+
+    func test_insertOrUpdate_incomingEcho_neverRewritesOutgoingRow() async {
+        // A group member replays the recipient's own messageID as an
+        // incoming payload. Cross-direction overwrites are refused —
+        // the sender's own row must survive untouched.
+        let id = UUID()
+        let mine = makeMessage(
+            id: id,
+            body: "my message",
+            direction: .outgoing,
+            status: .sent,
+            moderationAuthenticityProof: "bXktcHJvb2Y="
+        )
+        _ = await store.insertOrUpdate(mine)
+
+        let echo = makeMessage(
+            id: id,
+            body: "forged echo",
+            direction: .incoming,
+            status: .received
+        )
+        _ = await store.insertOrUpdate(echo)
+
+        let listed = await store.list(
+            groupID: mine.groupID, ownerIDString: kOwner.rawValue.uuidString
+        )
+        XCTAssertEqual(listed[0].body, "my message")
+        XCTAssertEqual(listed[0].direction, .outgoing)
+        XCTAssertEqual(listed[0].moderationAuthenticityProof, "bXktcHJvb2Y=")
+    }
+
+    func test_insertOrUpdate_outgoingRow_stillAcceptsOverwrites() async {
+        // Outgoing rows keep the full update path — the pending → sent
+        // flip and retry re-inserts depend on it.
+        let id = UUID()
+        _ = await store.insertOrUpdate(makeMessage(
+            id: id, body: "draft", status: .pending
+        ))
+        _ = await store.insertOrUpdate(makeMessage(
+            id: id, body: "draft", status: .sent
+        ))
+
+        let listed = await store.list(
+            groupID: "aa".repeated(32), ownerIDString: kOwner.rawValue.uuidString
+        )
+        XCTAssertEqual(listed[0].status, .sent)
+    }
+
     func test_deleteOwner_removesAllMessagesForIdentity() async {
         let aliceID = IdentityID()
         let bobID = IdentityID()
@@ -456,7 +586,9 @@ final class SwiftDataMessageStoreTests: XCTestCase {
         sentAt: Date = Date(timeIntervalSince1970: 1_700_000_000),
         direction: MessageDirection = .outgoing,
         status: MessageStatus = .sent,
-        replyToMessageID: UUID? = nil
+        replyToMessageID: UUID? = nil,
+        moderationAuthenticityProof: String? = nil,
+        imageAttachment: ChatImageAttachment? = nil
     ) -> ChatMessage {
         ChatMessage(
             id: id,
@@ -468,7 +600,9 @@ final class SwiftDataMessageStoreTests: XCTestCase {
             direction: direction,
             status: status,
             replyToMessageID: replyToMessageID,
-            groupType: .tyranny
+            groupType: .tyranny,
+            moderationAuthenticityProof: moderationAuthenticityProof,
+            imageAttachment: imageAttachment
         )
     }
 }

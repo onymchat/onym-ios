@@ -479,6 +479,36 @@ final class SendMessageInteractorTests: XCTestCase {
         XCTAssertEqual(stored[0].status, .sent)
     }
 
+    func test_send_signsCanonicalPreimageForModerationEvidence() async throws {
+        let groupID = await seedGroupWithTwoPeers()
+        let body = "exact UTF-8 evidence — こんにちは"
+
+        // Deliberately sub-millisecond: the interactor truncates the
+        // wire millis it signs, and persists `sentAt` re-derived from
+        // that truncated value — so the stored row reconstructs the
+        // signed preimage exactly, whatever `now` was.
+        let now = Date(timeIntervalSince1970: 1_700_000_000.7777)
+        let result = try await interactor.send(groupID: groupID, body: body, now: now)
+
+        let encodedProof = try XCTUnwrap(result.moderationAuthenticityProof)
+        let proof = try XCTUnwrap(Data(base64Encoded: encodedProof))
+        let publicKey = try Curve25519.Signing.PublicKey(rawRepresentation: mySendingPubkey)
+        // The proof binds the body to this exact message, group, and
+        // send time — a signature over the bare body must NOT verify.
+        let preimage = try ChatModerationProof.signedContent(
+            messageID: result.id,
+            groupID: groupID,
+            groupSecret: Data(repeating: 0x55, count: 32),  // seedGroup's secret
+            sentAtMillis: ChatModerationProof.sentAtMillis(from: result.sentAt),
+            body: body
+        )
+        XCTAssertTrue(publicKey.isValidSignature(proof, for: Data(preimage.utf8)))
+        XCTAssertFalse(publicKey.isValidSignature(proof, for: Data(body.utf8)))
+
+        let stored = await messages.currentMessages(groupID: groupID, owner: currentIdentityID)
+        XCTAssertEqual(stored.first?.moderationAuthenticityProof, encodedProof)
+    }
+
     func test_send_skipsSelfRecipient() async throws {
         // Even though our profile is in memberProfiles, we must not
         // send a copy to our own inbox.

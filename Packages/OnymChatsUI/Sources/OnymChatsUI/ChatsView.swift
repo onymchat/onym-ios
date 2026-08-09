@@ -6,6 +6,7 @@ import OnymIdentityUI
 import OnymGroup
 import OnymChatsCore
 import OnymInbox
+import OnymModeration
 
 /// Chats tab — root list of groups the user has created. PR-C only
 /// supports Tyranny groups; this list is whatever
@@ -28,6 +29,7 @@ public struct ChatsView: View {
     let makeJoinFlow: @MainActor (IntroCapability) -> JoinFlow
     let setGroupAvatar: @MainActor (String, Data?) async -> Void
     let setGroupName: @MainActor (String, String) async -> Void
+    let makeModerationReportView: @MainActor (ReportableMessage) -> AnyView
 
     public init(
         flow: ChatsFlow,
@@ -44,7 +46,8 @@ public struct ChatsView: View {
         makeShareInviteFlow: @escaping @MainActor () -> ShareInviteFlow,
         makeJoinFlow: @escaping @MainActor (IntroCapability) -> JoinFlow,
         setGroupAvatar: @escaping @MainActor (String, Data?) async -> Void,
-        setGroupName: @escaping @MainActor (String, String) async -> Void
+        setGroupName: @escaping @MainActor (String, String) async -> Void,
+        makeModerationReportView: @escaping @MainActor (ReportableMessage) -> AnyView
     ) {
         self.flow = flow
         self.identitiesFlow = identitiesFlow
@@ -61,6 +64,7 @@ public struct ChatsView: View {
         self.makeJoinFlow = makeJoinFlow
         self.setGroupAvatar = setGroupAvatar
         self.setGroupName = setGroupName
+        self.makeModerationReportView = makeModerationReportView
     }
 
     @State private var showCreateGroup = false
@@ -344,7 +348,8 @@ public struct ChatsView: View {
                 setGroupName: setGroupName,
                 imageLoader: imageLoader,
                 videoLoader: videoLoader,
-                voiceLoader: voiceLoader
+                voiceLoader: voiceLoader,
+                makeModerationReportView: makeModerationReportView
             )
         }
     }

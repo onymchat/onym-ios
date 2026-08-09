@@ -39,6 +39,32 @@ final class ChatMessagePayloadTests: XCTestCase {
         XCTAssertEqual(decoded.variant.body, "héllo 🌍 こんにちは")
     }
 
+    func test_roundtrip_moderationAuthenticityProof_preservesProof() throws {
+        let original = makePayload(body: "reportable", moderationAuthenticityProof: "c2lnbmF0dXJl")
+        let encoded = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(ChatMessagePayload.self, from: encoded)
+
+        XCTAssertEqual(decoded.moderationAuthenticityProof, "c2lnbmF0dXJl")
+        let object = try JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        XCTAssertEqual(object?["moderation_authenticity_proof"] as? String, "c2lnbmF0dXJl")
+    }
+
+    func test_decode_legacyPayloadWithoutModerationProof_isNil() throws {
+        let json = #"""
+        {
+          "version": 1,
+          "message_id": "11111111-1111-1111-1111-111111111111",
+          "group_id": "QkJC",
+          "sender_bls_pubkey_hex": "ab",
+          "sent_at_millis": 0,
+          "variant": { "kind": "tyranny", "body": "hi" }
+        }
+        """#.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(ChatMessagePayload.self, from: json)
+        XCTAssertNil(decoded.moderationAuthenticityProof)
+    }
+
     // MARK: - Reply reference
 
     func test_roundtrip_replyRef_preservesTargetID() throws {
@@ -177,7 +203,8 @@ final class ChatMessagePayloadTests: XCTestCase {
 
     private func makePayload(
         body: String,
-        replyToMessageID: UUID? = nil
+        replyToMessageID: UUID? = nil,
+        moderationAuthenticityProof: String? = nil
     ) -> ChatMessagePayload {
         ChatMessagePayload(
             version: 1,
@@ -186,7 +213,8 @@ final class ChatMessagePayloadTests: XCTestCase {
             senderBlsPubkeyHex: String(repeating: "ab", count: 48),
             sentAtMillis: 1_700_000_000_000,
             replyToMessageID: replyToMessageID,
-            variant: .tyranny(body: body)
+            variant: .tyranny(body: body),
+            moderationAuthenticityProof: moderationAuthenticityProof
         )
     }
 }

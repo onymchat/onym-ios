@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import OSLog
 import OnymTransport
 import OnymIdentity
 import OnymTransportBlossom
@@ -39,6 +40,10 @@ public actor SendMessageInteractor {
     /// sender sees the media immediately — the optimistic bubble is now
     /// inserted *before* the upload, so the blob isn't on Blossom yet.
     private let imageLoader: ChatImageLoader?
+
+    private static let logger = Logger(
+        subsystem: "app.onym.ios", category: "moderation"
+    )
 
     /// Hard ceiling on an encrypted blob we'll attempt to upload. Sits
     /// under Blossom's ~100MB cap so a long clip fails fast client-side
@@ -146,6 +151,30 @@ public actor SendMessageInteractor {
 
         let messageID = UUID()
         let sentAtMillis = Int64(now.timeIntervalSince1970 * 1000)
+        // The proof signs the canonical preimage — body bound to this
+        // exact (messageID, groupID, sentAtMillis) — so a disclosed
+        // (content, signature) pair can't be replayed against another
+        // message. Best-effort by design: a signing failure ships the
+        // message without a proof (recipients just can't report it)
+        // rather than adding a crypto dependency to every text send.
+        let moderationAuthenticityProof: String?
+        do {
+            moderationAuthenticityProof = try await identity.signWithStellarKey(
+                Data(ChatModerationProof.signedContent(
+                    messageID: messageID,
+                    groupID: groupID,
+                    groupSecret: group.groupSecret,
+                    sentAtMillis: sentAtMillis,
+                    body: body
+                ).utf8)
+            ).base64EncodedString()
+        } catch {
+            // A systematic failure (e.g. keychain) must be visible in
+            // diagnostics. Error only — no message/group identifiers,
+            // per the no-activity-logging policy.
+            Self.logger.error("moderation proof signing failed: \(error, privacy: .private)")
+            moderationAuthenticityProof = nil
+        }
         let payload = ChatMessagePayload(
             version: 1,
             messageID: messageID,
@@ -153,24 +182,32 @@ public actor SendMessageInteractor {
             senderBlsPubkeyHex: myBlsHex,
             sentAtMillis: sentAtMillis,
             replyToMessageID: replyToMessageID,
-            variant: variant
+            variant: variant,
+            moderationAuthenticityProof: moderationAuthenticityProof
         )
 
         // Optimistic insert — chat UI sees the bubble immediately.
         // Status flips later after the fan-out completes; the bubble
         // never disappears (re-tries flip pending → sent again, not
         // back to a different id).
+        //
+        // Persist `sentAt` from the wire millis (not the raw `now`):
+        // the proof signs the truncated millisecond value, so the
+        // stored date must reconstruct exactly that value — the same
+        // derivation every recipient makes — or the sender's own row
+        // could never re-derive the preimage it signed.
         let pending = ChatMessage(
             id: messageID,
             groupID: groupID,
             ownerIdentityID: group.ownerIdentityID,
             senderBlsPubkeyHex: myBlsHex,
             body: body,
-            sentAt: now,
+            sentAt: Date(timeIntervalSince1970: TimeInterval(sentAtMillis) / 1000.0),
             direction: .outgoing,
             status: .pending,
             replyToMessageID: replyToMessageID,
-            groupType: group.groupType
+            groupType: group.groupType,
+            moderationAuthenticityProof: moderationAuthenticityProof
         )
         await messageRepository.insert(pending)
 
@@ -204,7 +241,8 @@ public actor SendMessageInteractor {
             status: finalStatus,
             replyToMessageID: pending.replyToMessageID,
             groupType: pending.groupType,
-            failureReason: failureReason
+            failureReason: failureReason,
+            moderationAuthenticityProof: pending.moderationAuthenticityProof
         )
     }
 
@@ -757,7 +795,8 @@ public actor SendMessageInteractor {
             attachment: message.imageAttachment,
             videoAttachment: message.videoAttachment,
             attachments: message.albumAttachments,
-            voiceAttachment: message.voiceAttachment
+            voiceAttachment: message.voiceAttachment,
+            moderationAuthenticityProof: message.moderationAuthenticityProof
         )
 
         // Re-upload the persisted ciphertext for any attachment so the
@@ -1006,6 +1045,7 @@ private extension ChatMessage {
             replyToMessageID: replyToMessageID,
             groupType: groupType,
             failureReason: status == .failed ? failureReason : nil,
+            moderationAuthenticityProof: moderationAuthenticityProof,
             imageAttachment: imageAttachment,
             videoAttachment: videoAttachment,
             albumAttachments: albumAttachments,

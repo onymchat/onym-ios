@@ -144,17 +144,31 @@ public actor SwiftDataMessageStore: MessageStore {
             predicate: #Predicate { $0.id == id && $0.ownerIdentityIDString == owner }
         )
         if let existing = try? context.fetch(descriptor).first {
-            // Receive-side replays land here as no-op overwrites; the
-            // outgoing pending → sent / failed flip uses the same path.
+            // An incoming row is immutable once received: a legitimate
+            // inbox replay is byte-identical, so there is nothing to
+            // update, and divergent content — laundered body, shifted
+            // timestamp, a *fresh* proof over the replacement, bolted-on
+            // attachments — is a sender trying to rewrite what the
+            // recipient already holds (and can report). Cross-direction
+            // overwrites are refused for the same reason: an echoed
+            // outgoing id must not rewrite the sender's own row.
+            let incoming = MessageDirection.incoming.rawValue
+            if existing.directionRaw == incoming
+                || existing.directionRaw != encoded.directionRaw {
+                return .updated
+            }
+            // Outgoing → outgoing: full overwrite (the pending → sent /
+            // failed flip and retry re-inserts use this path).
             existing.groupID = encoded.groupID
             existing.sentAt = encoded.sentAt
-            existing.directionRaw = encoded.directionRaw
             existing.statusRaw = encoded.statusRaw
             existing.groupTypeRaw = encoded.groupTypeRaw
             existing.replyToMessageIDString = encoded.replyToMessageIDString
             existing.failureReasonRaw = encoded.failureReasonRaw
             existing.encryptedSenderBlsPubkeyHex = encoded.encryptedSenderBlsPubkeyHex
             existing.encryptedBody = encoded.encryptedBody
+            existing.encryptedModerationAuthenticityProof =
+                encoded.encryptedModerationAuthenticityProof
             existing.encryptedAttachmentJSON = encoded.encryptedAttachmentJSON
             existing.encryptedVideoAttachmentJSON = encoded.encryptedVideoAttachmentJSON
             existing.encryptedAlbumJSON = encoded.encryptedAlbumJSON
@@ -286,6 +300,9 @@ public actor SwiftDataMessageStore: MessageStore {
             failureReasonRaw: message.failureReason?.rawValue,
             encryptedSenderBlsPubkeyHex: try StorageEncryption.encrypt(message.senderBlsPubkeyHex),
             encryptedBody: try StorageEncryption.encrypt(message.body),
+            encryptedModerationAuthenticityProof: try message.moderationAuthenticityProof.map {
+                try StorageEncryption.encrypt($0)
+            },
             encryptedAttachmentJSON: encryptedAttachment,
             encryptedVideoAttachmentJSON: encryptedVideoAttachment,
             encryptedAlbumJSON: encryptedAlbum,
@@ -319,6 +336,8 @@ public actor SwiftDataMessageStore: MessageStore {
         let voiceAttachment: ChatVoiceAttachment? = row.encryptedVoiceAttachmentJSON
             .flatMap { try? StorageEncryption.decrypt($0) }
             .flatMap { try? JSONDecoder().decode(ChatVoiceAttachment.self, from: $0) }
+        let moderationAuthenticityProof = row.encryptedModerationAuthenticityProof
+            .flatMap { try? StorageEncryption.decryptString($0) }
         return ChatMessage(
             id: id,
             groupID: row.groupID,
@@ -331,6 +350,7 @@ public actor SwiftDataMessageStore: MessageStore {
             replyToMessageID: row.replyToMessageIDString.flatMap(UUID.init(uuidString:)),
             groupType: groupType,
             failureReason: row.failureReasonRaw.flatMap(SendFailureReason.init(rawValue:)),
+            moderationAuthenticityProof: moderationAuthenticityProof,
             imageAttachment: imageAttachment,
             videoAttachment: videoAttachment,
             albumAttachments: albumAttachments,

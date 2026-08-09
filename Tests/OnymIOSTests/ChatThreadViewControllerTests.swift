@@ -135,6 +135,40 @@ final class ChatThreadViewControllerTests: XCTestCase {
         XCTAssertEqual(tableView(in: vc)?.numberOfRows(inSection: 0), 1)
     }
 
+    // MARK: - Moderation report menu
+
+    func test_longPress_reportableMessageOffersContextMenu() {
+        let vc = ChatThreadViewController()
+        vc.loadViewIfNeeded()
+        vc.canReportMessage = { $0.direction == .incoming }
+        vc.update(messages: [makeMessage(body: "report me", direction: .incoming)])
+        let table = tableView(in: vc)!
+
+        let configuration = vc.tableView(
+            table,
+            contextMenuConfigurationForRowAt: IndexPath(row: 0, section: 0),
+            point: .zero
+        )
+
+        XCTAssertNotNil(configuration)
+    }
+
+    func test_longPress_unreportableMessageHasNoContextMenu() {
+        let vc = ChatThreadViewController()
+        vc.loadViewIfNeeded()
+        vc.canReportMessage = { $0.direction == .incoming }
+        vc.update(messages: [makeMessage(body: "mine", direction: .outgoing)])
+        let table = tableView(in: vc)!
+
+        let configuration = vc.tableView(
+            table,
+            contextMenuConfigurationForRowAt: IndexPath(row: 0, section: 0),
+            point: .zero
+        )
+
+        XCTAssertNil(configuration)
+    }
+
     // MARK: - Input panel wiring (PR 7 / PR 8)
 
     func test_inputPanel_isHosted_andClearsTextOnSendTap() {

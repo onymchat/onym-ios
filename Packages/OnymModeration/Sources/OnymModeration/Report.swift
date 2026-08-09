@@ -21,9 +21,7 @@ public struct EvidenceItem: Codable, Sendable, Equatable {
 }
 
 /// A signed report of prohibited content (Moderation.md §5.4), filed
-/// voluntarily by a recipient of the content. Reporting UI is not
-/// built yet; the type exists so the `ModerationAuthorityClient` seam
-/// is complete.
+/// voluntarily by a recipient of the content.
 public struct Report: Codable, Sendable, Equatable {
     public let reportVersion: Int
     public let reportId: String

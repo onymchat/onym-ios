@@ -1,4 +1,6 @@
 import Foundation
+import CryptoKit
+import OSLog
 
 /// Outcome of the most recent authorities-directory fetch. Same
 /// shape as `RelayerFetchStatus` so the picker copy stays consistent.
@@ -73,10 +75,22 @@ public actor ModerationRepository {
     /// This interface's component id, carried in every mandate.
     public static let interfaceComponentId = "onym:component:onym-ios"
 
+    private static let logger = Logger(
+        subsystem: "app.onym.ios", category: "moderation"
+    )
+
+    /// Retention bound on the report ledger. Rows whose delivery is
+    /// still ambiguous (no receipt) are always kept — they are the
+    /// idempotency keys for exact retry — but resolved rows beyond this
+    /// count are pruned oldest-first so disclosed content doesn't
+    /// accumulate indefinitely.
+    public static let maxResolvedReportRecords = 128
+
     private let authoritiesFetcher: any KnownAuthoritiesFetcher
     private let manifestFetcher: any AuthorityManifestFetcher
     private let manifestValidator: AuthorityManifestValidator
     private let mandateStore: any MandateStore
+    private let reportStore: any ReportFilingStore
     private let backend: any EnforcementBackendClient
     private let authorityClients: any ModerationAuthorityClientFactory
     private let attestation: any DeviceAttestationProvider
@@ -102,18 +116,29 @@ public actor ModerationRepository {
         var waiters: Int
     }
 
+    private struct ReportKey: Hashable {
+        let authority: String
+        let reporter: String
+        let accused: String
+        let classId: String
+        let messageId: String
+    }
+
     private var authorities: [AuthorityListing] = []
     private var fetchStatus: AuthorityFetchStatus = .idle
     private var records: [MandateRecord]
+    private var reportRecords: [ReportFilingRecord]
     private var continuations: [UUID: AsyncStream<ModerationState>.Continuation] = [:]
     private var startTask: Task<Void, Never>?
     private var consentTasks: [ConsentKey: Task<MandateRecord, Error>] = [:]
     private var registrationFlights: [RegistrationKey: RegistrationFlight] = [:]
+    private var reportTasks: [ReportKey: Task<ReportReceipt, Error>] = [:]
 
     public init(
         authoritiesFetcher: any KnownAuthoritiesFetcher,
         manifestFetcher: any AuthorityManifestFetcher,
         mandateStore: any MandateStore,
+        reportStore: any ReportFilingStore = UserDefaultsReportFilingStore(),
         backend: any EnforcementBackendClient,
         authorityClients: any ModerationAuthorityClientFactory,
         attestation: any DeviceAttestationProvider,
@@ -125,12 +150,14 @@ public actor ModerationRepository {
         self.manifestFetcher = manifestFetcher
         self.manifestValidator = manifestValidator
         self.mandateStore = mandateStore
+        self.reportStore = reportStore
         self.backend = backend
         self.authorityClients = authorityClients
         self.attestation = attestation
         self.signer = signer
         self.clock = clock
         self.records = mandateStore.load()
+        self.reportRecords = reportStore.load()
     }
 
     // MARK: - Directory refresh
@@ -397,6 +424,58 @@ public actor ModerationRepository {
         )
     }
 
+    // MARK: - Reporting
+
+    /// Violation classes the current Authority declared and the user
+    /// consented to. The report UI presents these exact class IDs; the
+    /// Authority still independently checks the accused mandate.
+    public func availableReportClasses() throws -> [ViolationClass] {
+        let record = try activeReportingMandate()
+        guard let manifest = record.consentedManifest()?.manifest else {
+            throw ModerationError.reportingUnavailable("consented manifest is unavailable")
+        }
+        return manifest.violationClasses.filter {
+            record.mandate.classes.contains($0.classId)
+        }
+    }
+
+    /// File one recipient-held text message with the currently selected
+    /// Authority. The report is signed and persisted before delivery;
+    /// ambiguous retries reuse byte-identical JSON and the same reportId.
+    @discardableResult
+    public func fileReport(
+        message: ReportableMessage,
+        classId: String
+    ) async throws -> ReportReceipt {
+        let mandate = try activeReportingMandate()
+        let key = ReportKey(
+            authority: mandate.mandate.authority,
+            reporter: mandate.mandate.user,
+            accused: message.accused,
+            classId: classId,
+            messageId: message.id
+        )
+        if let task = reportTasks[key] {
+            return try await task.value
+        }
+        let task = Task {
+            try await self.performFileReport(
+                message: message,
+                classId: classId,
+                reporterMandate: mandate
+            )
+        }
+        reportTasks[key] = task
+        do {
+            let receipt = try await task.value
+            reportTasks.removeValue(forKey: key)
+            return receipt
+        } catch {
+            reportTasks.removeValue(forKey: key)
+            throw error
+        }
+    }
+
     // MARK: - AsyncStream
 
     public nonisolated var snapshots: AsyncStream<ModerationState> {
@@ -418,6 +497,231 @@ public actor ModerationRepository {
 
     private func unsubscribe(id: UUID) {
         continuations.removeValue(forKey: id)
+    }
+
+    private func activeReportingMandate() throws -> MandateRecord {
+        guard let record = activeMandateRecord(),
+              record.countersigned,
+              record.authorityRegistered
+        else {
+            throw ModerationError.reportingUnavailable(
+                "no active Authority-registered mandate"
+            )
+        }
+        return record
+    }
+
+    private func performFileReport(
+        message: ReportableMessage,
+        classId: String,
+        reporterMandate: MandateRecord
+    ) async throws -> ReportReceipt {
+        let reporter = try await signer.userKeyID()
+        guard reporter == reporterMandate.mandate.user else {
+            throw ModerationError.reportingUnavailable(
+                "active identity does not own the reporting mandate"
+            )
+        }
+        guard let manifest = reporterMandate.consentedManifest()?.manifest,
+              reporterMandate.mandate.classes.contains(classId),
+              manifest.violationClasses.contains(where: { $0.classId == classId })
+        else {
+            throw ModerationError.classOutsideMandate(classId)
+        }
+        guard !message.disclosedContent.isEmpty,
+              let signature = Data(base64Encoded: message.authenticityProof),
+              let accusedKey = try? AuthorityKey.publicKey(fromReference: message.accused),
+              accusedKey.isValidSignature(
+                signature,
+                for: Data(message.disclosedContent.utf8)
+              )
+        else {
+            throw ModerationError.authenticityUnverified
+        }
+        guard let listing = authorities.first(where: {
+            $0.componentId == reporterMandate.mandate.authority
+        }) else {
+            throw ModerationError.authorityUnavailable(
+                reporterMandate.mandate.authority
+            )
+        }
+        let reporterMandateRef = try reporterMandate.mandate.mandateHash()
+
+        // The idempotency identity deliberately includes `classId` and
+        // `reporterMandate`: re-reporting the same message under a
+        // different violation class is a distinct allegation, and a
+        // report's standing follows the mandate it was filed under
+        // (spec §5.4 constraint 5) — re-consenting mints new standing,
+        // with the Authority's own intake dedup as the backstop against
+        // duplicate allegations over identical evidence.
+        if let existing = reportRecords.first(where: {
+            $0.sourceMessageId == message.id
+                && $0.report.reporter == reporter
+                && $0.report.reporterMandate == reporterMandateRef
+                && $0.report.accused == message.accused
+                && $0.report.classId == classId
+                && $0.report.evidence == [EvidenceItem(
+                    disclosedContent: message.disclosedContent,
+                    authenticityProof: message.authenticityProof
+                )]
+        }) {
+            if let receipt = existing.receipt { return receipt }
+            if existing.resolvedWithoutReceipt == true {
+                // Confirmed on file (409). Re-delivery can only 409
+                // again; short-circuit to the same terminal outcome.
+                throw ModerationError.reportAlreadyFiled(
+                    reportId: existing.report.reportId
+                )
+            }
+            return try await submitReport(existing, to: listing)
+        }
+
+        var report = Report(
+            reportId: "report-\(UUID().uuidString.lowercased())",
+            reporter: reporter,
+            reporterMandate: reporterMandateRef,
+            accused: message.accused,
+            classId: classId,
+            evidence: [EvidenceItem(
+                disclosedContent: message.disclosedContent,
+                authenticityProof: message.authenticityProof
+            )],
+            filedAt: clock()
+        )
+        report.signature = try await signer.sign(report.signingBytes()).base64EncodedString()
+        let record = ReportFilingRecord(
+            sourceMessageId: message.id,
+            report: report,
+            authorityName: listing.name
+        )
+        reportRecords.insert(record, at: 0)
+        // Delivery must not begin unless the exact signed artifact is
+        // durably retained. A transport timeout may happen after intake
+        // committed; without this write, a retry would mint a second report.
+        do {
+            try saveReportRecords()
+        } catch {
+            // Do not leave an unpersisted artifact eligible for the
+            // in-memory exact-retry path on the next tap.
+            if let index = reportIndex(of: record) {
+                reportRecords.remove(at: index)
+            }
+            throw error
+        }
+        return try await submitReport(record, to: listing)
+    }
+
+    private func submitReport(
+        _ record: ReportFilingRecord,
+        to listing: AuthorityListing
+    ) async throws -> ReportReceipt {
+        let client = authorityClients.client(for: listing)
+        let receipt: ReportReceipt
+        do {
+            receipt = try await client.fileReport(record.report)
+        } catch {
+            // 409: the Authority already holds these exact bytes — a
+            // terminal, benign state, not a rejection. Keep the ledger
+            // row (it is the idempotency key) and surface it as its own
+            // error so the UI can present "already on file" rather than
+            // retry advice. The original receipt is unrecoverable until
+            // the Authority protocol grows a report-lookup endpoint.
+            if case let AuthorityClientError.rejected(rejection) = error,
+               rejection.statusCode == 409 {
+                if let index = reportIndex(of: record) {
+                    reportRecords[index].resolvedWithoutReceipt = true
+                    try? saveReportRecords()
+                }
+                throw ModerationError.reportAlreadyFiled(
+                    reportId: record.report.reportId
+                )
+            }
+            if isDeterministicReportRejection(error) {
+                discardReport(record)
+            }
+            throw error
+        }
+        // The concrete HTTP client correlates this too; repeating the
+        // check here preserves the invariant for every factory-injected
+        // implementation of the protocol.
+        guard receipt.reportId == record.report.reportId else {
+            throw AuthorityClientError.reportIdentifierMismatch(
+                expected: record.report.reportId,
+                received: receipt.reportId
+            )
+        }
+        if let index = reportIndex(of: record) {
+            reportRecords[index].receipt = receipt
+        } else {
+            var recovered = record
+            recovered.receipt = receipt
+            reportRecords.insert(recovered, at: 0)
+        }
+        do {
+            try saveReportRecords()
+        } catch {
+            // The Authority has accepted — that outcome is authoritative
+            // and must reach the user. Losing the receipt's persistence
+            // is recoverable (a post-relaunch retry hits the terminal
+            // already-filed path); reporting success as failure is not.
+            // Error only — no report content — per no-activity-logging.
+            Self.logger.error("report receipt persistence failed: \(error)")
+        }
+        return receipt
+    }
+
+    /// Persist the ledger, pruning resolved rows past the retention
+    /// bound. Records are newest-first, so dropping from the back of
+    /// the receipted subset removes the oldest disclosures first.
+    private func saveReportRecords() throws {
+        let resolved = reportRecords.filter(\.isResolved)
+        if resolved.count > Self.maxResolvedReportRecords {
+            let cutoff = Set(
+                resolved.prefix(Self.maxResolvedReportRecords).map(\.report.reportId)
+            )
+            reportRecords.removeAll {
+                $0.isResolved && !cutoff.contains($0.report.reportId)
+            }
+        }
+        try reportStore.save(reportRecords)
+    }
+
+    /// Drop every report record not filed by one of `reporters`
+    /// (`onym:key:<hex>` references). Called when an identity is
+    /// removed so retained disclosures don't outlive the identity that
+    /// filed them.
+    public func purgeReportRecords(keepingReporters reporters: Set<String>) {
+        let before = reportRecords.count
+        reportRecords.removeAll { !reporters.contains($0.report.reporter) }
+        guard reportRecords.count != before else { return }
+        try? reportStore.save(reportRecords)
+    }
+
+    private func reportIndex(of record: ReportFilingRecord) -> Int? {
+        reportRecords.firstIndex { $0.report.reportId == record.report.reportId }
+    }
+
+    private func discardReport(_ record: ReportFilingRecord) {
+        guard let index = reportIndex(of: record) else { return }
+        reportRecords.remove(at: index)
+        try? saveReportRecords()
+    }
+
+    private func isDeterministicReportRejection(_ error: Error) -> Bool {
+        guard case let AuthorityClientError.rejected(rejection) = error else {
+            return false
+        }
+        // 409 never reaches here — `submitReport` converts it to
+        // `.reportAlreadyFiled` (terminal; keeps the ledger row).
+        return Self.isDeterministicStatusCode(rejection.statusCode)
+    }
+
+    /// A 4xx that exact replay can never turn into an acceptance —
+    /// excluding the transient pair (408 timeout, 429 rate limit).
+    private static func isDeterministicStatusCode(_ statusCode: Int) -> Bool {
+        (400..<500).contains(statusCode)
+            && statusCode != 408
+            && statusCode != 429
     }
 
     /// Resume the newest interrupted consent after the directory is
@@ -579,10 +883,9 @@ public actor ModerationRepository {
         case .mandateNotAccepted, .mandateReferenceMismatch:
             return true
         case .rejected(let rejection):
-            return (400..<500).contains(rejection.statusCode)
-                && rejection.statusCode != 408
-                && rejection.statusCode != 429
-        case .invalidResponse, .malformedResponse, .invalidPathComponent, .insecureBaseURL:
+            return Self.isDeterministicStatusCode(rejection.statusCode)
+        case .invalidResponse, .malformedResponse, .invalidPathComponent, .insecureBaseURL,
+             .reportIdentifierMismatch:
             return false
         }
     }

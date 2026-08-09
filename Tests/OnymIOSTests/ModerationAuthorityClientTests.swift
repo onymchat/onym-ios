@@ -240,6 +240,39 @@ final class ModerationAuthorityClientTests: XCTestCase {
         XCTAssertNotNil(receipt.decisionDeadline)
     }
 
+    func testFileReportRejectsReceiptForDifferentReport() async throws {
+        StubURLProtocol.set { request in
+            let response = Data(#"""
+            {
+              "reportId":"report-other",
+              "receivedAt":"2023-11-14T22:13:20Z",
+              "caseId":"case-1"
+            }
+            """#.utf8)
+            return (response, Self.httpResponse(for: request, status: 200))
+        }
+        let report = Report(
+            reportId: "report-1",
+            reporter: "onym:key:0102",
+            reporterMandate: "mandate-1",
+            accused: "onym:key:0304",
+            classId: "csam",
+            evidence: [],
+            filedAt: now,
+            signature: "signature"
+        )
+
+        do {
+            _ = try await makeClient().fileReport(report)
+            XCTFail("expected receipt correlation failure")
+        } catch let AuthorityClientError.reportIdentifierMismatch(expected, received) {
+            XCTAssertEqual(expected, "report-1")
+            XCTAssertEqual(received, "report-other")
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+    }
+
     func testAuthorityErrorVocabularyIsPreserved() async throws {
         StubURLProtocol.set { request in
             let body = Data(#"{"error":"no_jurisdiction","message":"no_jurisdiction"}"#.utf8)
