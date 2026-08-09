@@ -73,6 +73,31 @@ public struct BannedView: View {
                 .padding(.horizontal, 24)
                 .padding(.bottom, 20)
 
+                // Keep the primary escape hatch in the first viewport. The
+                // verdict details can be long, but a banned user must not
+                // have to discover the appeal action by scrolling.
+                if let builder = caseFlowBuilder {
+                    SettingsPrimaryButton(action: { caseSheet = .appeal }) {
+                        Text("Review case and appeal")
+                    }
+                    .accessibilityIdentifier("moderation.banned.appeal")
+                    .padding(.horizontal, 16)
+                    .sheet(item: $caseSheet) { sheet in
+                        NavigationStack {
+                            ModerationCaseView(
+                                flow: builder(),
+                                focusNewHolder: sheet == .newHolder
+                            )
+                        }
+                    }
+                } else if let appealURL = state.appealURL {
+                    SettingsPrimaryButton(action: { openURL(appealURL) }) {
+                        Text("Appeal this ban")
+                    }
+                    .accessibilityIdentifier("moderation.banned.appeal")
+                    .padding(.horizontal, 16)
+                }
+
                 SettingsSectionLabel("VERDICT")
                 SettingsCard {
                     VStack(alignment: .leading, spacing: 8) {
@@ -101,19 +126,7 @@ public struct BannedView: View {
                     // from the directory, anti-oracle 404), and a
                     // permanent ban's header explicitly promises the
                     // external appellate remains available.
-                    if let builder = caseFlowBuilder {
-                        SettingsPrimaryButton(action: { caseSheet = .appeal }) {
-                            Text("Review case and appeal")
-                        }
-                        .accessibilityIdentifier("moderation.banned.appeal")
-                        .sheet(item: $caseSheet) { sheet in
-                            NavigationStack {
-                                ModerationCaseView(
-                                    flow: builder(),
-                                    focusNewHolder: sheet == .newHolder
-                                )
-                            }
-                        }
+                    if caseFlowBuilder != nil {
                         if let appealURL = state.appealURL {
                             Button {
                                 openURL(appealURL)
@@ -128,11 +141,6 @@ public struct BannedView: View {
                             .buttonStyle(.plain)
                             .accessibilityIdentifier("moderation.banned.appeal_external")
                         }
-                    } else if let appealURL = state.appealURL {
-                        SettingsPrimaryButton(action: { openURL(appealURL) }) {
-                            Text("Appeal this ban")
-                        }
-                        .accessibilityIdentifier("moderation.banned.appeal")
                     }
                     // The new-holder path is its own affordance, not a
                     // footnote: DeviceCheck bits survive resale, and the
