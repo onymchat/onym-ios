@@ -765,9 +765,14 @@ extension ChatThreadViewController: UITableViewDelegate {
         contextMenuConfigurationForRowAt indexPath: IndexPath,
         point: CGPoint
     ) -> UIContextMenuConfiguration? {
-        guard indexPath.row < orderedMessages.count else { return nil }
-        let message = orderedMessages[indexPath.row]
-        guard canReportMessage?(message) == true else { return nil }
+        // Resolve through the diffable data source, not `orderedMessages`:
+        // `update(messages:)` swaps the model array before the animated
+        // `apply` commits, so during an in-flight insert the committed
+        // rows and the array can disagree and a positional index would
+        // attach Report to the wrong message.
+        guard let id = dataSource.itemIdentifier(for: indexPath),
+              let message = messagesByID[id],
+              canReportMessage?(message) == true else { return nil }
         return UIContextMenuConfiguration(
             identifier: message.id as NSUUID,
             previewProvider: nil

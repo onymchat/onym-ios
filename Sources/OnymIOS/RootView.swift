@@ -90,7 +90,7 @@ struct RootView: View {
                         makeJoinFlow: dependencies.makeJoinFlow,
                         setGroupAvatar: dependencies.setGroupAvatar,
                         setGroupName: dependencies.setGroupName,
-                        makeModerationReportFlow: dependencies.makeModerationReportFlow
+                        makeModerationReportView: dependencies.makeModerationReportView
                     )
                 }
             }
@@ -136,7 +136,7 @@ struct RootView: View {
                             imageLoader: dependencies.imageLoader,
                             videoLoader: dependencies.videoLoader,
                             voiceLoader: dependencies.voiceLoader,
-                            makeModerationReportFlow: dependencies.makeModerationReportFlow,
+                            makeModerationReportView: dependencies.makeModerationReportView,
                             scrollToMessageID: result.messageID
                         )
                     }

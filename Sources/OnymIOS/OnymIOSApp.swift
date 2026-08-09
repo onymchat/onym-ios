@@ -565,11 +565,11 @@ struct OnymIOSApp: App {
                     gateCheck: gateCheckRepository
                 )
             },
-            makeModerationReportFlow: { @MainActor message in
-                ModerationReportFlow(
+            makeModerationReportView: { @MainActor message in
+                AnyView(ModerationReportView(flow: ModerationReportFlow(
                     message: message,
                     repository: moderationRepository
-                )
+                )))
             }
         )
     }

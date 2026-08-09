@@ -428,6 +428,60 @@ final class SwiftDataMessageStoreTests: XCTestCase {
                        "deleting one identity's thread leaves the other's copy of the group")
     }
 
+    func test_insertOrUpdate_replayWithoutProof_preservesStoredEvidence() async {
+        let id = UUID()
+        let original = makeMessage(
+            id: id,
+            body: "prohibited content",
+            direction: .incoming,
+            status: .received,
+            moderationAuthenticityProof: "c2lnbmF0dXJl"
+        )
+        _ = await store.insertOrUpdate(original)
+
+        // An abuser re-sends the same messageID with the proof omitted
+        // (and a laundered body). The stored body + proof pair must
+        // survive so Report doesn't silently vanish from the menu.
+        let replay = makeMessage(
+            id: id,
+            body: "innocent content",
+            direction: .incoming,
+            status: .received,
+            moderationAuthenticityProof: nil
+        )
+        let outcome = await store.insertOrUpdate(replay)
+        XCTAssertEqual(outcome, .updated)
+
+        let listed = await store.list(
+            groupID: original.groupID, ownerIDString: kOwner.rawValue.uuidString
+        )
+        XCTAssertEqual(listed.count, 1)
+        XCTAssertEqual(listed[0].body, "prohibited content")
+        XCTAssertEqual(listed[0].moderationAuthenticityProof, "c2lnbmF0dXJl")
+    }
+
+    func test_insertOrUpdate_replayWithProof_overwritesBodyAndProofTogether() async {
+        let id = UUID()
+        _ = await store.insertOrUpdate(makeMessage(
+            id: id,
+            body: "first",
+            moderationAuthenticityProof: nil
+        ))
+
+        let replay = makeMessage(
+            id: id,
+            body: "second",
+            moderationAuthenticityProof: "bmV3LXByb29m"
+        )
+        _ = await store.insertOrUpdate(replay)
+
+        let listed = await store.list(
+            groupID: replay.groupID, ownerIDString: kOwner.rawValue.uuidString
+        )
+        XCTAssertEqual(listed[0].body, "second")
+        XCTAssertEqual(listed[0].moderationAuthenticityProof, "bmV3LXByb29m")
+    }
+
     func test_deleteOwner_removesAllMessagesForIdentity() async {
         let aliceID = IdentityID()
         let bobID = IdentityID()

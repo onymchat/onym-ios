@@ -125,6 +125,7 @@ final class ModerationRepositoryTests: XCTestCase {
         private var _registrationDelayNanoseconds: UInt64 = 0
         private var _reports: [Report] = []
         private var _reportShouldFail = false
+        private var _reportError: AuthorityClientError?
         private var _reportReceiptId: String?
 
         var mandates: [ModerationMandate] { lock.withLock { _mandates } }
@@ -132,6 +133,10 @@ final class ModerationRepositoryTests: XCTestCase {
         var reportShouldFail: Bool {
             get { lock.withLock { _reportShouldFail } }
             set { lock.withLock { _reportShouldFail = newValue } }
+        }
+        var reportError: AuthorityClientError? {
+            get { lock.withLock { _reportError } }
+            set { lock.withLock { _reportError = newValue } }
         }
         var reportReceiptId: String? {
             get { lock.withLock { _reportReceiptId } }
@@ -204,13 +209,15 @@ final class ModerationRepositoryTests: XCTestCase {
         }
 
         func fileReport(_ report: Report) async throws -> ReportReceipt {
-            let state = lock.withLock { () -> (Bool, String?) in
+            let state = lock.withLock { () -> (Bool, AuthorityClientError?, String?) in
                 _reports.append(report)
-                return (_reportShouldFail, _reportReceiptId)
+                return (_reportShouldFail, _reportError, _reportReceiptId)
             }
             if state.0 { throw RegistrationFailure.unavailable }
+            if let error = state.1 { throw error }
+            let receiptId = state.2
             return ReportReceipt(
-                reportId: state.1 ?? report.reportId,
+                reportId: receiptId ?? report.reportId,
                 receivedAt: Date(timeIntervalSince1970: 1_700_000_000),
                 caseId: "case-1"
             )
@@ -330,7 +337,8 @@ final class ModerationRepositoryTests: XCTestCase {
             id: "message-1",
             accused: "onym:key:\(keyHex)",
             disclosedContent: body,
-            authenticityProof: proof
+            authenticityProof: proof,
+            displayBody: body
         )
     }
 
@@ -970,7 +978,8 @@ final class ModerationRepositoryTests: XCTestCase {
             id: valid.id,
             accused: valid.accused,
             disclosedContent: "modified",
-            authenticityProof: valid.authenticityProof
+            authenticityProof: valid.authenticityProof,
+            displayBody: "modified"
         )
 
         do {
@@ -1012,6 +1021,76 @@ final class ModerationRepositoryTests: XCTestCase {
 
         XCTAssertEqual(authority.reports, [retained, retained])
         XCTAssertNotNil(reportStore.load().first?.receipt)
+    }
+
+    func testAlreadyFiledConflictKeepsLedgerRowSoRetryReusesTheSameReportId() async throws {
+        let componentId = "onym:component:a"
+        let bytes = manifestBytes(componentId: componentId)
+        let authority = RecordingAuthorityClient()
+        authority.reportError = .rejected(AuthorityRejection(
+            statusCode: 409,
+            rawCode: "already_filed",
+            message: "report already on file"
+        ))
+        let reportStore = InMemoryReportFilingStore()
+        let repository = makeRepository(
+            listings: [listing(componentId, name: "A")],
+            bytesByComponent: [componentId: bytes],
+            backend: RecordingBackend(),
+            authorityClient: authority,
+            store: InMemoryMandateStore(records: [activeRecord(componentId: componentId, bytes: bytes)]),
+            reportStore: reportStore
+        )
+        try await repository.refresh()
+        let message = try reportableMessage()
+
+        do {
+            _ = try await repository.fileReport(message: message, classId: "csam")
+            XCTFail("expected the 409 to surface")
+        } catch AuthorityClientError.rejected {
+            // expected
+        }
+        // The signed artifact must survive the conflict: a retry has to
+        // replay the same reportId, not mint a fresh allegation.
+        let retained = try XCTUnwrap(reportStore.load().first?.report)
+        authority.reportError = nil
+
+        let receipt = try await repository.fileReport(message: message, classId: "csam")
+
+        XCTAssertEqual(receipt.reportId, retained.reportId)
+        XCTAssertEqual(authority.reports, [retained, retained])
+    }
+
+    func testDeterministicReportRejectionDiscardsLedgerRow() async throws {
+        let componentId = "onym:component:a"
+        let bytes = manifestBytes(componentId: componentId)
+        let authority = RecordingAuthorityClient()
+        authority.reportError = .rejected(AuthorityRejection(
+            statusCode: 422,
+            rawCode: "invalid_report",
+            message: "malformed"
+        ))
+        let reportStore = InMemoryReportFilingStore()
+        let repository = makeRepository(
+            listings: [listing(componentId, name: "A")],
+            bytesByComponent: [componentId: bytes],
+            backend: RecordingBackend(),
+            authorityClient: authority,
+            store: InMemoryMandateStore(records: [activeRecord(componentId: componentId, bytes: bytes)]),
+            reportStore: reportStore
+        )
+        try await repository.refresh()
+        let message = try reportableMessage()
+
+        do {
+            _ = try await repository.fileReport(message: message, classId: "csam")
+            XCTFail("expected the 422 to surface")
+        } catch AuthorityClientError.rejected {
+            // expected
+        }
+        // Exact replay of a deterministically rejected artifact can never
+        // succeed; retaining it would deadlock every future attempt.
+        XCTAssertTrue(reportStore.load().isEmpty)
     }
 
     func testUserDefaultsReportStoreEncryptsDisclosedEvidenceAtRest() throws {

@@ -630,9 +630,19 @@ public actor ModerationRepository {
         guard case let AuthorityClientError.rejected(rejection) = error else {
             return false
         }
-        return (400..<500).contains(rejection.statusCode)
-            && rejection.statusCode != 408
-            && rejection.statusCode != 429
+        // 409 means the Authority already holds this report. Keep the
+        // ledger row so a retry replays the same reportId instead of
+        // discarding it and minting a fresh one.
+        return rejection.statusCode != 409
+            && Self.isDeterministicStatusCode(rejection.statusCode)
+    }
+
+    /// A 4xx that exact replay can never turn into an acceptance —
+    /// excluding the transient pair (408 timeout, 429 rate limit).
+    private static func isDeterministicStatusCode(_ statusCode: Int) -> Bool {
+        (400..<500).contains(statusCode)
+            && statusCode != 408
+            && statusCode != 429
     }
 
     /// Resume the newest interrupted consent after the directory is
@@ -794,9 +804,7 @@ public actor ModerationRepository {
         case .mandateNotAccepted, .mandateReferenceMismatch:
             return true
         case .rejected(let rejection):
-            return (400..<500).contains(rejection.statusCode)
-                && rejection.statusCode != 408
-                && rejection.statusCode != 429
+            return Self.isDeterministicStatusCode(rejection.statusCode)
         case .invalidResponse, .malformedResponse, .invalidPathComponent, .insecureBaseURL,
              .reportIdentifierMismatch:
             return false

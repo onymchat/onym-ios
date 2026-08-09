@@ -90,12 +90,15 @@ public struct ChatMessagePayload: Codable, Equatable, Sendable {
     /// `ChatVoiceAttachment`.
     public let voiceAttachment: ChatVoiceAttachment?
 
-    /// Detached Ed25519 signature by the sender over the exact UTF-8
-    /// bytes of `variant.body`. A recipient retains this so a voluntary
-    /// disclosure can satisfy the Authority contract's authenticity
-    /// rule without exposing an envelope or any recipient secrets.
-    /// Optional for wire compatibility with messages sent before
-    /// reporting existed.
+    /// Detached Ed25519 signature by the sender over the canonical
+    /// preimage `ChatModerationProof.signedContent` — `variant.body`
+    /// bound to this payload's `messageID`, `groupID`, and
+    /// `sentAtMillis`, so the proof attests one concrete send rather
+    /// than a transferable (body, signature) pair. A recipient retains
+    /// this so a voluntary disclosure can satisfy the Authority
+    /// contract's authenticity rule without exposing an envelope or
+    /// any recipient secrets. Optional for wire compatibility with
+    /// messages sent before reporting existed.
     public let moderationAuthenticityProof: String?
 
     public init(

@@ -8,7 +8,6 @@ import OnymIdentity
 import OnymGroup
 import OnymChatsCore
 import OnymModeration
-import OnymModerationUI
 
 /// SwiftUI host for `ChatThreadViewController`. The chat screen is
 /// UIKit (per the design call on #150) but the surrounding app is
@@ -41,7 +40,10 @@ public struct ChatThreadView: View {
     let videoLoader: ChatVideoLoader
     /// Fetches + decrypts voice blobs for inline playback.
     let voiceLoader: ChatVoiceLoader
-    let makeModerationReportFlow: @MainActor (ReportableMessage) -> ModerationReportFlow
+    /// Builds the report sheet for a disclosable message. Injected as
+    /// an opaque view factory so the chats layer stays moderation-UI-
+    /// agnostic (OnymChatsUI does not depend on OnymModerationUI).
+    let makeModerationReportView: @MainActor (ReportableMessage) -> AnyView
     /// When non-nil (opened from Search), the thread cold-opens scrolled
     /// to this message and flashes it, instead of opening at the bottom.
     var scrollToMessageID: UUID? = nil
@@ -59,7 +61,7 @@ public struct ChatThreadView: View {
         imageLoader: ChatImageLoader,
         videoLoader: ChatVideoLoader,
         voiceLoader: ChatVoiceLoader,
-        makeModerationReportFlow: @escaping @MainActor (ReportableMessage) -> ModerationReportFlow,
+        makeModerationReportView: @escaping @MainActor (ReportableMessage) -> AnyView,
         scrollToMessageID: UUID? = nil
     ) {
         self.groupID = groupID
@@ -74,7 +76,7 @@ public struct ChatThreadView: View {
         self.imageLoader = imageLoader
         self.videoLoader = videoLoader
         self.voiceLoader = voiceLoader
-        self.makeModerationReportFlow = makeModerationReportFlow
+        self.makeModerationReportView = makeModerationReportView
         self.scrollToMessageID = scrollToMessageID
     }
 
@@ -246,7 +248,7 @@ public struct ChatThreadView: View {
             Button("Cancel", role: .cancel) {}
         }
         .sheet(item: $reportableMessage) { message in
-            ModerationReportView(flow: makeModerationReportFlow(message))
+            makeModerationReportView(message)
         }
         // The chat screen uses the standard SwiftUI navigation bar (its
         // system back button is the only "back" affordance — the UIKit
@@ -432,22 +434,7 @@ public struct ChatThreadView: View {
     }
 
     private func makeReportableMessage(from message: ChatMessage) -> ReportableMessage? {
-        guard message.direction == .incoming,
-              message.media.isEmpty,
-              message.voiceAttachment == nil,
-              !message.body.isEmpty,
-              let proof = message.moderationAuthenticityProof,
-              let profile = currentMemberProfiles[message.senderBlsPubkeyHex]
-        else { return nil }
-        let accused = "onym:key:" + profile.sendingPubkey
-            .map { String(format: "%02x", $0) }
-            .joined()
-        return ReportableMessage(
-            id: message.id.uuidString.lowercased(),
-            accused: accused,
-            disclosedContent: message.body,
-            authenticityProof: proof
-        )
+        ReportableMessageFactory.make(from: message, memberProfiles: currentMemberProfiles)
     }
 }
 

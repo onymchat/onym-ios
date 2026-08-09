@@ -154,9 +154,17 @@ public actor SwiftDataMessageStore: MessageStore {
             existing.replyToMessageIDString = encoded.replyToMessageIDString
             existing.failureReasonRaw = encoded.failureReasonRaw
             existing.encryptedSenderBlsPubkeyHex = encoded.encryptedSenderBlsPubkeyHex
-            existing.encryptedBody = encoded.encryptedBody
-            existing.encryptedModerationAuthenticityProof =
-                encoded.encryptedModerationAuthenticityProof
+            if existing.encryptedModerationAuthenticityProof == nil
+                || encoded.encryptedModerationAuthenticityProof != nil {
+                existing.encryptedBody = encoded.encryptedBody
+                existing.encryptedModerationAuthenticityProof =
+                    encoded.encryptedModerationAuthenticityProof
+            }
+            // else: a replay of a known id without a proof must not
+            // erase retained evidence. The body and its proof travel as
+            // a signed pair, so both are kept — otherwise a re-sent
+            // proof-less body would orphan the signature it no longer
+            // matches (and silently remove Report from the menu).
             existing.encryptedAttachmentJSON = encoded.encryptedAttachmentJSON
             existing.encryptedVideoAttachmentJSON = encoded.encryptedVideoAttachmentJSON
             existing.encryptedAlbumJSON = encoded.encryptedAlbumJSON

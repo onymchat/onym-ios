@@ -40,7 +40,7 @@ public struct ModerationReportView: View {
                 Text("MESSAGE TO DISCLOSE")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                Text(flow.message.disclosedContent)
+                Text(flow.message.displayBody)
                     .font(.body)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(16)
@@ -66,10 +66,23 @@ public struct ModerationReportView: View {
                 .pickerStyle(.menu)
                 .disabled(flow.state.classes.isEmpty || flow.state.isSubmitting)
                 .accessibilityIdentifier("moderation.report.class")
+
+                // The consented definition of the selected class — the
+                // reporter must see what they are alleging, not just a
+                // raw class id.
+                if let selected = flow.state.classes.first(where: {
+                    $0.classId == flow.state.selectedClassId
+                }) {
+                    Text("Definition: \(selected.definition)")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .accessibilityIdentifier("moderation.report.definition")
+                }
             }
 
             Label(
-                "Submitting discloses this exact message and its sender proof to your moderation authority. No surrounding conversation is included.",
+                "Submitting discloses this exact message — its text, identifiers, and timestamp — and its sender proof to your moderation authority. No surrounding conversation is included.",
                 systemImage: "lock.shield"
             )
             .font(.footnote)

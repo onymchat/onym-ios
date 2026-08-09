@@ -479,16 +479,31 @@ final class SendMessageInteractorTests: XCTestCase {
         XCTAssertEqual(stored[0].status, .sent)
     }
 
-    func test_send_signsExactBodyForModerationEvidence() async throws {
+    func test_send_signsCanonicalPreimageForModerationEvidence() async throws {
         let groupID = await seedGroupWithTwoPeers()
         let body = "exact UTF-8 evidence — こんにちは"
 
-        let result = try await interactor.send(groupID: groupID, body: body)
+        // Whole-second send time: the interactor truncates fractional
+        // millis into the wire value it signs, so a sub-millisecond
+        // `now` would make any local reconstruction ambiguous.
+        // (Receivers are unaffected — they recover the exact wire
+        // millis from the payload.)
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let result = try await interactor.send(groupID: groupID, body: body, now: now)
 
         let encodedProof = try XCTUnwrap(result.moderationAuthenticityProof)
         let proof = try XCTUnwrap(Data(base64Encoded: encodedProof))
         let publicKey = try Curve25519.Signing.PublicKey(rawRepresentation: mySendingPubkey)
-        XCTAssertTrue(publicKey.isValidSignature(proof, for: Data(body.utf8)))
+        // The proof binds the body to this exact message, group, and
+        // send time — a signature over the bare body must NOT verify.
+        let preimage = try ChatModerationProof.signedContent(
+            messageID: result.id,
+            groupID: groupID,
+            sentAtMillis: ChatModerationProof.sentAtMillis(from: result.sentAt),
+            body: body
+        )
+        XCTAssertTrue(publicKey.isValidSignature(proof, for: Data(preimage.utf8)))
+        XCTAssertFalse(publicKey.isValidSignature(proof, for: Data(body.utf8)))
 
         let stored = await messages.currentMessages(groupID: groupID, owner: currentIdentityID)
         XCTAssertEqual(stored.first?.moderationAuthenticityProof, encodedProof)

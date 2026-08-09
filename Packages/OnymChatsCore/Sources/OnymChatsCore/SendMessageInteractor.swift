@@ -146,9 +146,20 @@ public actor SendMessageInteractor {
 
         let messageID = UUID()
         let sentAtMillis = Int64(now.timeIntervalSince1970 * 1000)
-        let moderationAuthenticityProof = try await identity
-            .signWithStellarKey(Data(body.utf8))
-            .base64EncodedString()
+        // The proof signs the canonical preimage — body bound to this
+        // exact (messageID, groupID, sentAtMillis) — so a disclosed
+        // (content, signature) pair can't be replayed against another
+        // message. Best-effort by design: a signing failure ships the
+        // message without a proof (recipients just can't report it)
+        // rather than adding a crypto dependency to every text send.
+        let moderationAuthenticityProof = (try? await identity.signWithStellarKey(
+            Data(ChatModerationProof.signedContent(
+                messageID: messageID,
+                groupID: groupID,
+                sentAtMillis: sentAtMillis,
+                body: body
+            ).utf8)
+        ))?.base64EncodedString()
         let payload = ChatMessagePayload(
             version: 1,
             messageID: messageID,

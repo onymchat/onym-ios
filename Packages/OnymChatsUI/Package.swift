@@ -15,8 +15,7 @@ let package = Package(
         .package(path: "../OnymIdentityUI"),
         .package(path: "../OnymDesign"),
         .package(path: "../OnymChain"),
-        .package(path: "../OnymModeration"),
-        .package(path: "../OnymModerationUI")
+        .package(path: "../OnymModeration")
     ],
     targets: [
         .target(
@@ -29,8 +28,7 @@ let package = Package(
                 "OnymIdentityUI",
                 "OnymDesign",
                 "OnymChain",
-                "OnymModeration",
-                "OnymModerationUI"
+                "OnymModeration"
             ]
         )
     ]

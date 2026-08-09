@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import OnymIdentity
 import OnymGroup
 import OnymChatsCore
@@ -76,5 +77,8 @@ struct AppDependencies {
     let moderationGateFlow: ModerationGateFlow
     let makeModerationConsentFlow: @MainActor (ModerationConsentFlow.Mode) -> ModerationConsentFlow
     let makeModerationSettingsFlow: @MainActor () -> ModerationSettingsFlow
-    let makeModerationReportFlow: @MainActor (ReportableMessage) -> ModerationReportFlow
+    /// Opaque report-sheet factory: the chats layer presents whatever
+    /// view this returns, keeping OnymChatsUI free of any
+    /// OnymModerationUI dependency.
+    let makeModerationReportView: @MainActor (ReportableMessage) -> AnyView
 }

@@ -64,7 +64,9 @@ public final class ModerationReportFlow {
                 localized: "This message has no valid sender proof and cannot be filed as evidence."
             )
         } catch let AuthorityClientError.rejected(rejection) {
-            state.errorMessage = rejection.message
+            // Authority-controlled text; bound it so a hostile or buggy
+            // authority can't flood the sheet with an arbitrary payload.
+            state.errorMessage = String(rejection.message.prefix(280))
         } catch {
             state.errorMessage = String(
                 localized: "The report could not be delivered. Try again to resend the exact signed report."
