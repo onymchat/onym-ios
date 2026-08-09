@@ -16,7 +16,7 @@ import Foundation
 /// // ... use session
 /// ```
 final class StubURLProtocol: URLProtocol, @unchecked Sendable {
-    typealias Handler = @Sendable (URLRequest) throws -> (Data, HTTPURLResponse)
+    typealias Handler = @Sendable (URLRequest) throws -> (Data, URLResponse)
 
     nonisolated(unsafe) private static var handler: Handler?
     private static let lock = NSLock()

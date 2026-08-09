@@ -19,6 +19,12 @@ public struct MandateRecord: Codable, Sendable, Equatable {
     /// record remains persisted with this false so a retry can resend
     /// identical bytes instead of minting a second consent artifact.
     public var authorityRegistered: Bool
+    /// A real countersigned mandate awaiting acknowledgement from its
+    /// Authority. It is neither current consent nor historical consent
+    /// and must not be presented as either one.
+    public var registrationPending: Bool {
+        countersigned && !authorityRegistered
+    }
     /// Exactly one record is active per identity–device pair.
     /// Switching authorities deactivates the old record without
     /// touching anything else (mandates are immutable, spec §12).

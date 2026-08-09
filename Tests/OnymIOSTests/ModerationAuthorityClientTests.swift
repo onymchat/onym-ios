@@ -111,6 +111,24 @@ final class ModerationAuthorityClientTests: XCTestCase {
         XCTAssertEqual(receipt, MandateRegistrationReceipt(mandateRef: expectedRef, accepted: true))
     }
 
+    func testRegisterMandateReportsExplicitRejectionSeparatelyFromReferenceMismatch() async throws {
+        let mandate = mandate()
+        let expectedRef = try mandate.mandateHash()
+        StubURLProtocol.set { request in
+            let response = Data(#"{"accepted":false,"mandateRef":"\#(expectedRef)"}"#.utf8)
+            return (response, Self.httpResponse(for: request, status: 200))
+        }
+
+        do {
+            _ = try await makeClient().registerMandate(mandate)
+            XCTFail("expected the Authority not to accept the mandate")
+        } catch let AuthorityClientError.mandateNotAccepted(mandateRef) {
+            XCTAssertEqual(mandateRef, expectedRef)
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+    }
+
     func testFileReportDecodesFullReferenceReceipt() async throws {
         let report = Report(
             reportId: "report-1",
@@ -175,6 +193,103 @@ final class ModerationAuthorityClientTests: XCTestCase {
         } catch {
             XCTFail("unexpected error: \(error)")
         }
+    }
+
+    func testNonJSONProxyErrorUsesHTTPStatusFallback() async throws {
+        StubURLProtocol.set { request in
+            (Data("bad gateway".utf8), Self.httpResponse(for: request, status: 502))
+        }
+
+        do {
+            _ = try await makeClient().fileReport(
+                Report(
+                    reportId: "report-1",
+                    reporter: "onym:key:0102",
+                    reporterMandate: "mandate-1",
+                    accused: "onym:key:0304",
+                    classId: "csam",
+                    evidence: [],
+                    filedAt: now,
+                    signature: "signature"
+                )
+            )
+            XCTFail("expected proxy rejection")
+        } catch let AuthorityClientError.rejected(rejection) {
+            XCTAssertEqual(rejection.statusCode, 502)
+            XCTAssertEqual(rejection.rawCode, "http_502")
+            XCTAssertEqual(rejection.message, "Authority returned HTTP 502")
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+    }
+
+    func testNonHTTPResponseIsRejected() async throws {
+        StubURLProtocol.set { request in
+            let response = URLResponse(
+                url: request.url!,
+                mimeType: "application/json",
+                expectedContentLength: 2,
+                textEncodingName: nil
+            )
+            return (Data("{}".utf8), response)
+        }
+
+        do {
+            _ = try await makeClient().registerMandate(mandate())
+            XCTFail("expected a non-HTTP response to be rejected")
+        } catch AuthorityClientError.invalidResponse {
+            // expected
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+    }
+
+    func testMalformedSuccessBodyIsRejected() async throws {
+        StubURLProtocol.set { request in
+            (Data("{}".utf8), Self.httpResponse(for: request, status: 200))
+        }
+
+        do {
+            _ = try await makeClient().registerMandate(mandate())
+            XCTFail("expected malformed success response")
+        } catch AuthorityClientError.malformedResponse {
+            // expected
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+    }
+
+    func testDuplicateReportReceiptDecodesReplayFields() async throws {
+        StubURLProtocol.set { request in
+            let response = Data(#"""
+            {
+              "reportId":"report-1",
+              "receivedAt":"2023-11-14T22:13:20Z",
+              "caseId":"case-1",
+              "duplicate":true,
+              "responseDeadline":"2023-11-17T22:13:20Z",
+              "decisionDeadline":"2023-11-21T22:13:20Z"
+            }
+            """#.utf8)
+            return (response, Self.httpResponse(for: request, status: 200))
+        }
+
+        let receipt = try await makeClient().fileReport(
+            Report(
+                reportId: "report-1",
+                reporter: "onym:key:0102",
+                reporterMandate: "mandate-1",
+                accused: "onym:key:0304",
+                classId: "csam",
+                evidence: [],
+                filedAt: now,
+                signature: "signature"
+            )
+        )
+
+        XCTAssertEqual(receipt.duplicate, true)
+        XCTAssertNil(receipt.intakeWeight)
+        XCTAssertEqual(receipt.caseId, "case-1")
     }
 
     func testStatusQueryUsesSignedHeaders() async throws {

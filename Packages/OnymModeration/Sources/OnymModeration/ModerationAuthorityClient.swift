@@ -82,15 +82,22 @@ public enum AuthorityClientError: Error, Sendable, Equatable {
     case invalidResponse
     case malformedResponse(String)
     case rejected(AuthorityRejection)
+    case mandateNotAccepted(mandateRef: String)
     case mandateReferenceMismatch(expected: String, received: String)
 }
 
 /// The accused's signed response to a case notice: statements and
-/// counter-evidence. Additional evidence within the window travels
-/// through the same object.
+/// counter-evidence (Moderation.md §5.5 — "the response mirrors the
+/// report's shape"). Additional evidence within the window travels
+/// through the same object, so `submit-evidence` needs no separate
+/// operation client-side.
 public struct CaseResponse: Codable, Sendable, Equatable {
-    /// The case being answered. It is carried in the signed body as well
-    /// as the request path to prevent cross-case replay.
+    /// The case being answered. Carried in the object — and therefore
+    /// inside the signed bytes — rather than alongside it: a signed
+    /// statement that names no case can be lifted from the case it was
+    /// written for and replayed onto another, so an innocuous "that
+    /// wasn't me" would register as an answer to an accusation its
+    /// signer never saw.
     public let caseId: String
     public let statement: String
     public let evidence: [EvidenceItem]
@@ -109,6 +116,7 @@ public struct CaseResponse: Codable, Sendable, Equatable {
     }
 
     /// The bytes the accused signs: every field except `signature`.
+    /// See `ModerationCanonicalEncoder` for why the ordering matters.
     public func signingBytes() throws -> Data {
         struct Unsigned: Encodable {
             let caseId: String
@@ -121,14 +129,17 @@ public struct CaseResponse: Codable, Sendable, Equatable {
     }
 }
 
-/// An appeal filed within the declared window, or an unauthenticated
-/// new-holder claim handled by the Authority's dedicated remedy.
+/// An appeal filed within the declared window — or a new-holder claim,
+/// which the spec treats as a mandatory appeal class with expedited
+/// review (§5.7, error `new_holder_claim`).
 public struct AppealSubmission: Codable, Sendable, Equatable {
     public enum Kind: String, Codable, Sendable {
         case appeal
         case newHolderClaim = "new-holder-claim"
     }
 
+    /// The case appealed. Signed, for the same replay reason as
+    /// `CaseResponse.caseId`.
     public let caseId: String
     public let kind: Kind
     public let statement: String
@@ -142,6 +153,11 @@ public struct AppealSubmission: Codable, Sendable, Equatable {
     }
 
     /// The bytes the accused signs: every field except `signature`.
+    ///
+    /// A `newHolderClaim` is signed too where the holder still has the
+    /// mandated identity, but an authority cannot require it — the
+    /// whole premise of that path is a device whose new owner is *not*
+    /// the mandated user (§5.7).
     public func signingBytes() throws -> Data {
         struct Unsigned: Encodable {
             let caseId: String
@@ -203,7 +219,15 @@ public struct CaseStatus: Codable, Sendable, Equatable {
     }
 }
 
-/// User-initiated operations exposed by one moderation Authority.
+/// The client-visible operations of a moderation Authority. Notices
+/// and verdicts travel the other way via the Interface's gate check.
+/// `submit-evidence` is folded into `respond` because it has the same
+/// signed shape and window.
+///
+/// HTTP implementations put `CaseResponse.caseId` and
+/// `AppealSubmission.caseId` in both the path and signed body. A
+/// conforming Authority must reject a path/body mismatch; trusting
+/// either value alone would reopen cross-case replay.
 public protocol ModerationAuthorityClient: Sendable {
     func registerMandate(_ mandate: ModerationMandate) async throws -> MandateRegistrationReceipt
     func fileReport(_ report: Report) async throws -> ReportReceipt
@@ -272,7 +296,10 @@ public struct URLSessionModerationAuthorityClient: ModerationAuthorityClient {
         let data = try await send(method: "POST", path: ["v1", "mandates"], body: body)
         let receipt: MandateRegistrationReceipt = try decode(data)
         let expected = try mandate.mandateHash()
-        guard receipt.accepted, receipt.mandateRef == expected else {
+        guard receipt.accepted else {
+            throw AuthorityClientError.mandateNotAccepted(mandateRef: receipt.mandateRef)
+        }
+        guard receipt.mandateRef == expected else {
             throw AuthorityClientError.mandateReferenceMismatch(
                 expected: expected,
                 received: receipt.mandateRef
@@ -307,6 +334,10 @@ public struct URLSessionModerationAuthorityClient: ModerationAuthorityClient {
 
     public func queryStatus(caseId: String) async throws -> CaseStatus {
         let timestamp = Self.timestamp(clock())
+        // This is deliberately the exact credential message verified by
+        // the merged reference Authority (`authority/src/api.rs`,
+        // `authorize_case_party`). Changing it client-side to include a
+        // request line or host would make status queries incompatible.
         let signedBytes = Data("query-status:\(caseId):\(timestamp)".utf8)
         let key = try await signer.userKeyID()
         let signature = try await signer.sign(signedBytes).base64EncodedString()

@@ -63,8 +63,9 @@ public final class ModerationSettingsFlow {
     }
 
     /// Deactivated records, newest first — each still pinned to the
-    /// manifest hash it consented to.
+    /// manifest hash it consented to. A persisted registration attempt
+    /// is retry state, not a mandate the user previously held.
     public var previousMandates: [MandateRecord] {
-        state.snapshot.history.filter { !$0.isActive }
+        state.snapshot.history.filter { !$0.isActive && !$0.registrationPending }
     }
 }

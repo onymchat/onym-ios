@@ -93,7 +93,7 @@ public actor ModerationRepository {
         manifestFetcher: any AuthorityManifestFetcher,
         mandateStore: any MandateStore,
         backend: any EnforcementBackendClient,
-        authorityClients: any ModerationAuthorityClientFactory = StubModerationAuthorityClientFactory(),
+        authorityClients: any ModerationAuthorityClientFactory,
         attestation: any DeviceAttestationProvider,
         signer: any ModerationSigner,
         manifestValidator: AuthorityManifestValidator = AuthorityManifestValidator(),
@@ -330,30 +330,36 @@ public actor ModerationRepository {
         let expectedRef = try pending.mandate.mandateHash()
         let client = authorityClients.client(for: listing)
         let receipt = try await client.registerMandate(pending.mandate)
-        guard receipt.accepted, receipt.mandateRef == expectedRef else {
+        guard receipt.accepted else {
+            throw AuthorityClientError.mandateNotAccepted(mandateRef: receipt.mandateRef)
+        }
+        guard receipt.mandateRef == expectedRef else {
             throw AuthorityClientError.mandateReferenceMismatch(
                 expected: expectedRef,
                 received: receipt.mandateRef
             )
         }
 
-        var activated: MandateRecord?
-        records = records.map { existing in
-            var existing = existing
-            if (try? existing.mandate.mandateHash()) == expectedRef {
-                existing.authorityRegistered = true
-                existing.isActive = true
-                activated = existing
-            } else {
-                existing.isActive = false
-            }
-            return existing
-        }
-        guard let activated else {
+        // The content reference excludes signatures. Locate the exact
+        // persisted record instead, then activate only that array entry;
+        // two records with the same unsigned fields must never both become
+        // active merely because they share a content hash.
+        guard let pendingIndex = records.firstIndex(where: {
+            $0.mandate == pending.mandate
+                && $0.manifestBytes == pending.manifestBytes
+                && $0.authorityName == pending.authorityName
+                && $0.countersigned == pending.countersigned
+                && $0.createdAt == pending.createdAt
+        }) else {
             throw AuthorityClientError.malformedResponse(
                 "registered mandate disappeared from the local store"
             )
         }
+        for index in records.indices {
+            records[index].isActive = index == pendingIndex
+        }
+        records[pendingIndex].authorityRegistered = true
+        let activated = records[pendingIndex]
         mandateStore.save(records)
         publish()
         return activated

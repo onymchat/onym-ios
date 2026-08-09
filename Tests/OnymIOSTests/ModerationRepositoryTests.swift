@@ -34,7 +34,12 @@ final class ModerationRepositoryTests: XCTestCase {
 
     private final class InMemoryMandateStore: MandateStore, @unchecked Sendable {
         private let lock = NSLock()
-        private var records: [MandateRecord] = []
+        private var records: [MandateRecord]
+
+        init(records: [MandateRecord] = []) {
+            self.records = records
+        }
+
         func load() -> [MandateRecord] { lock.withLock { records } }
         func save(_ records: [MandateRecord]) { lock.withLock { self.records = records } }
     }
@@ -95,6 +100,7 @@ final class ModerationRepositoryTests: XCTestCase {
         private var _mandates: [ModerationMandate] = []
         private var _shouldFail = false
         private var _returnedReference: String?
+        private var _accepted = true
 
         var mandates: [ModerationMandate] { lock.withLock { _mandates } }
         var shouldFail: Bool {
@@ -105,13 +111,17 @@ final class ModerationRepositoryTests: XCTestCase {
             get { lock.withLock { _returnedReference } }
             set { lock.withLock { _returnedReference = newValue } }
         }
+        var accepted: Bool {
+            get { lock.withLock { _accepted } }
+            set { lock.withLock { _accepted = newValue } }
+        }
 
         func registerMandate(
             _ mandate: ModerationMandate
         ) async throws -> MandateRegistrationReceipt {
-            let state = lock.withLock { () -> (Bool, String?) in
+            let state = lock.withLock { () -> (Bool, String?, Bool) in
                 _mandates.append(mandate)
-                return (_shouldFail, _returnedReference)
+                return (_shouldFail, _returnedReference, _accepted)
             }
             if state.0 { throw RegistrationFailure.unavailable }
             let mandateRef: String
@@ -122,7 +132,7 @@ final class ModerationRepositoryTests: XCTestCase {
             }
             return MandateRegistrationReceipt(
                 mandateRef: mandateRef,
-                accepted: true
+                accepted: state.2
             )
         }
 
@@ -259,6 +269,7 @@ final class ModerationRepositoryTests: XCTestCase {
             manifestFetcher: fetcher,
             mandateStore: InMemoryMandateStore(),
             backend: RecordingBackend(),
+            authorityClients: StubModerationAuthorityClientFactory(),
             attestation: FakeAttestation(supported: true),
             signer: FakeSigner(),
             clock: { Date(timeIntervalSince1970: 1_700_000_000) }
@@ -377,6 +388,7 @@ final class ModerationRepositoryTests: XCTestCase {
         let pending = try XCTUnwrap(store.load().first)
         XCTAssertTrue(pending.countersigned)
         XCTAssertFalse(pending.authorityRegistered)
+        XCTAssertTrue(pending.registrationPending)
         XCTAssertFalse(pending.isActive)
         let activeAfterFailure = await repository.activeMandateRecord()
         XCTAssertNil(activeAfterFailure)
@@ -420,6 +432,90 @@ final class ModerationRepositoryTests: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(store.load().first).isActive)
         let activeAfterMismatch = await repository.activeMandateRecord()
         XCTAssertNil(activeAfterMismatch)
+    }
+
+    func testAuthorityRejectionDoesNotMasqueradeAsReferenceMismatch() async throws {
+        let componentId = "onym:component:a"
+        let backend = RecordingBackend()
+        backend.countersignature = "interface-signature"
+        let authority = RecordingAuthorityClient()
+        authority.accepted = false
+        let store = InMemoryMandateStore()
+        let repository = makeRepository(
+            listings: [listing(componentId, name: "A")],
+            bytesByComponent: [componentId: manifestBytes(componentId: componentId)],
+            backend: backend,
+            authorityClient: authority,
+            store: store
+        )
+
+        do {
+            _ = try await repository.reviewAndConsent(to: listing(componentId, name: "A"))
+            XCTFail("expected Authority rejection")
+        } catch let AuthorityClientError.mandateNotAccepted(mandateRef) {
+            XCTAssertEqual(mandateRef, try XCTUnwrap(store.load().first).mandate.mandateHash())
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+
+        let pending = try XCTUnwrap(store.load().first)
+        XCTAssertTrue(pending.registrationPending)
+        XCTAssertFalse(pending.isActive)
+    }
+
+    func testRegistrationActivatesOnlyOneOfTwoRecordsSharingAContentHash() async throws {
+        let componentId = "onym:component:a"
+        let selected = listing(componentId, name: "A")
+        let bytes = manifestBytes(componentId: componentId)
+        let mandate = ModerationMandate(
+            user: "onym:key:test-user",
+            interface: ModerationRepository.interfaceComponentId,
+            authority: componentId,
+            manifestHash: SignedManifest.hash(of: bytes),
+            classes: ["csam"],
+            deviceBinding: "same-binding",
+            acceptedAt: now,
+            signatures: ["user-signature", "interface-signature-a"]
+        )
+        var otherMandate = mandate
+        otherMandate.signatures = ["user-signature", "interface-signature-b"]
+        XCTAssertEqual(try mandate.mandateHash(), try otherMandate.mandateHash())
+
+        let first = MandateRecord(
+            mandate: mandate,
+            manifestBytes: bytes,
+            authorityName: "A",
+            countersigned: true,
+            isActive: false,
+            createdAt: now
+        )
+        let second = MandateRecord(
+            mandate: otherMandate,
+            manifestBytes: bytes,
+            authorityName: "A",
+            countersigned: true,
+            isActive: false,
+            createdAt: now
+        )
+        let store = InMemoryMandateStore(records: [first, second])
+        let authority = RecordingAuthorityClient()
+        let repository = makeRepository(
+            listings: [selected],
+            bytesByComponent: [componentId: bytes],
+            backend: RecordingBackend(),
+            authorityClient: authority,
+            store: store
+        )
+        let reviewed = try await repository.manifestForReview(selected)
+
+        _ = try await repository.consent(to: selected, reviewedManifest: reviewed)
+
+        let records = store.load()
+        XCTAssertEqual(records.filter(\.isActive).count, 1)
+        XCTAssertEqual(records.filter(\.authorityRegistered).count, 1)
+        XCTAssertEqual(records.first?.mandate.signatures.last, "interface-signature-a")
+        XCTAssertTrue(try XCTUnwrap(records.first).isActive)
+        XCTAssertFalse(try XCTUnwrap(records.last).isActive)
     }
 
     // MARK: - Switching immutability

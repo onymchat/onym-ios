@@ -132,6 +132,7 @@ struct OnymIOSApp: App {
                     seeded: !args.contains("--moderation-needs-consent")
                 ),
                 backend: backend,
+                authorityClients: StubModerationAuthorityClientFactory(),
                 attestation: UITestDeviceAttestationProvider(),
                 signer: moderationSigner
             )
