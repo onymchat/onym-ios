@@ -3,7 +3,15 @@ import OnymDesign
 import OnymModeration
 
 public struct ModerationReportView: View {
+    /// A definition document being read in-app.
+    private struct DefinitionDocument: Identifiable {
+        let title: String
+        let url: URL
+        var id: String { url.absoluteString }
+    }
+
     @State private var flow: ModerationReportFlow
+    @State private var definitionDocument: DefinitionDocument?
     @Environment(\.dismiss) private var dismiss
 
     public init(flow: ModerationReportFlow) {
@@ -34,6 +42,9 @@ public struct ModerationReportView: View {
             }
         }
         .task { await flow.start() }
+        .sheet(item: $definitionDocument) { document in
+            MarkdownDocumentView(title: document.title, url: document.url)
+        }
     }
 
     /// Both terminal outcomes: accepted with a receipt, or confirmed
@@ -192,8 +203,17 @@ public struct ModerationReportView: View {
     private func definitionLine(for item: ViolationClass) -> some View {
         if let url = URL(string: item.definition),
            url.scheme == "https" || url.scheme == "http" {
-            Link(destination: url) {
-                Label("What counts as this?", systemImage: "arrow.up.right.square")
+            // Read in-app: the reporter shouldn't have to leave a
+            // half-written report to learn what the class means. The
+            // viewer hands off to the browser itself when the address
+            // answers with a web page instead of a document.
+            Button {
+                definitionDocument = DefinitionDocument(
+                    title: Self.displayName(for: item.classId),
+                    url: url
+                )
+            } label: {
+                Label("What counts as this?", systemImage: "text.magnifyingglass")
                     .font(.footnote)
             }
             .accessibilityIdentifier("moderation.report.definition")
