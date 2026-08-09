@@ -16,6 +16,9 @@ public struct CaseSubmissionRecord: Codable, Sendable, Equatable {
         case newHolderClaim
     }
 
+    /// Stable row identity, so ledger mutations can never alias two
+    /// rows that happen to share content and a (test-fixed) clock.
+    public let id: UUID
     public let caseId: String
     public let mandateRef: String
     /// `onym:key:` reference of the LOCAL identity that filed this
@@ -38,6 +41,7 @@ public struct CaseSubmissionRecord: Codable, Sendable, Equatable {
     public let createdAt: Date
 
     public init(
+        id: UUID = UUID(),
         caseId: String,
         mandateRef: String,
         user: String,
@@ -49,6 +53,7 @@ public struct CaseSubmissionRecord: Codable, Sendable, Equatable {
         appealReceipt: AppealReceipt? = nil,
         createdAt: Date
     ) {
+        self.id = id
         self.caseId = caseId
         self.mandateRef = mandateRef
         self.user = user

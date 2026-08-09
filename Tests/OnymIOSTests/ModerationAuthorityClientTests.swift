@@ -479,6 +479,46 @@ final class ModerationAuthorityClientTests: XCTestCase {
         XCTAssertTrue(appealReceipt.filed)
     }
 
+    func testNewHolderClaimKindCorrelatesAgainstTheHyphenatedWireValue() async throws {
+        // The reference echoes the submitted `kind` verbatim
+        // (`authority/src/api.rs`, the new-holder branch), and the wire
+        // value is the hyphenated "new-holder-claim" — the spec's error
+        // identifier `new_holder_claim` never appears in a receipt.
+        StubURLProtocol.set { request in
+            (
+                Data(#"{"caseId":"case-1","filed":true,"kind":"new-holder-claim","note":"expedited"}"#.utf8),
+                Self.httpResponse(for: request, status: 200)
+            )
+        }
+        let receipt = try await makeClient().appeal(AppealSubmission(
+            caseId: "case-1",
+            kind: .newHolderClaim,
+            statement: "the device changed hands",
+            signature: "sig"
+        ))
+        XCTAssertEqual(receipt.kind, AppealSubmission.Kind.newHolderClaim.rawValue)
+    }
+
+    func testAppealReceiptWithMismatchedKindIsRejected() async throws {
+        StubURLProtocol.set { request in
+            (
+                Data(#"{"caseId":"case-1","filed":true,"kind":"new-holder-claim","note":"n"}"#.utf8),
+                Self.httpResponse(for: request, status: 200)
+            )
+        }
+        do {
+            _ = try await makeClient().appeal(AppealSubmission(
+                caseId: "case-1",
+                kind: .appeal,
+                statement: "review",
+                signature: "sig"
+            ))
+            XCTFail("expected the mismatched kind to be rejected")
+        } catch AuthorityClientError.malformedResponse {
+            // expected
+        }
+    }
+
     func testCaseIDCannotEscapeItsPathSegment() async throws {
         StubURLProtocol.set { _ in
             XCTFail("invalid case id must be rejected before a request is sent")

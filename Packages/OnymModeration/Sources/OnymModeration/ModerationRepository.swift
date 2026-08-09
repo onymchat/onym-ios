@@ -93,9 +93,15 @@ public actor ModerationRepository {
 
     /// Retention bound on resolved case-submission ledger rows, same
     /// scheme as `maxResolvedReportRecords`: acknowledged rows prune
-    /// oldest-first; rows whose delivery is still ambiguous are always
-    /// kept — they are the byte-identical-retry artifacts.
+    /// oldest-first.
     public static let maxResolvedCaseSubmissions = 128
+
+    /// Bound on pending (unacknowledged) submission rows. Unlike report
+    /// rows, dropping one cannot mint a duplicate allegation — the
+    /// reference doesn't deduplicate submissions anyway — so a
+    /// generous cap beats unbounded statement text accumulating from
+    /// edited retries while the Authority is unreachable.
+    public static let maxPendingCaseSubmissions = 128
 
     /// Retention bound on cached case-status snapshots. Snapshots
     /// upsert by caseId, so the set grows only with distinct cases
@@ -153,6 +159,7 @@ public actor ModerationRepository {
         let authority: String
         let user: String
         let caseId: String
+        let mandateRef: String
         let kind: CaseSubmissionRecord.Kind
         let statementHash: String
     }
@@ -687,6 +694,7 @@ public actor ModerationRepository {
             authority: listing.componentId,
             user: record.mandate.user,
             caseId: caseId,
+            mandateRef: mandateRef,
             kind: .response,
             statementHash: Self.statementHash(statement)
         )
@@ -703,7 +711,17 @@ public actor ModerationRepository {
             )
         }
         caseResponseTasks[key] = task
-        defer { caseResponseTasks.removeValue(forKey: key) }
+        // The flight key is released by a janitor task AFTER delivery
+        // completes — not by a caller-side defer, which a cancelled
+        // awaiting caller would run while the unstructured delivery
+        // task keeps going, letting a second call start a concurrent
+        // duplicate delivery against a server with no idempotency
+        // token. (A completed task lingering briefly in the dictionary
+        // is harmless: new callers receive its settled result.)
+        Task {
+            _ = try? await task.value
+            self.caseResponseTasks.removeValue(forKey: key)
+        }
         return try await task.value
     }
 
@@ -750,6 +768,7 @@ public actor ModerationRepository {
             authority: listing.componentId,
             user: submittingUser,
             caseId: caseId,
+            mandateRef: mandateRef,
             kind: recordKind,
             statementHash: Self.statementHash(statement)
         )
@@ -768,7 +787,11 @@ public actor ModerationRepository {
             )
         }
         caseAppealTasks[key] = task
-        defer { caseAppealTasks.removeValue(forKey: key) }
+        // Same janitor-cleanup rationale as `respond`.
+        Task {
+            _ = try? await task.value
+            self.caseAppealTasks.removeValue(forKey: key)
+        }
         return try await task.value
     }
 
@@ -900,7 +923,11 @@ public actor ModerationRepository {
             // anti-oracle 404) cannot become an acceptance through
             // exact replay; retaining the artifact would deadlock the
             // key. Ambiguous outcomes keep it for byte-identical retry.
-            if isDeterministicReportRejection(error) {
+            // A post-200 correlation/decoding failure is terminal too:
+            // the server accepted and does not deduplicate, so a
+            // "retry" would file a second row, not resolve the first.
+            if isDeterministicReportRejection(error)
+                || Self.isPostAcceptanceFailure(error) {
                 discardSubmission(submission)
             }
             throw error
@@ -921,7 +948,8 @@ public actor ModerationRepository {
         do {
             receipt = try await client.appeal(appeal)
         } catch {
-            if isDeterministicReportRejection(error) {
+            if isDeterministicReportRejection(error)
+                || Self.isPostAcceptanceFailure(error) {
                 discardSubmission(submission)
             }
             throw error
@@ -933,17 +961,18 @@ public actor ModerationRepository {
     /// Record the acknowledgment. The Authority's answer is
     /// authoritative and must reach the caller; a persistence failure
     /// is logged (error only), not surfaced as a delivery failure.
+    ///
+    /// A row absent from the ledger stays absent: the only removal
+    /// paths are deterministic discard and the identity-removal purge,
+    /// and resurrecting a purged row would re-persist a removed
+    /// identity's statement, defeating the purge contract. The receipt
+    /// still returns to the caller.
     private func finishSubmission(
         _ submission: CaseSubmissionRecord,
         apply: (inout CaseSubmissionRecord) -> Void
     ) {
-        if let index = submissionIndex(of: submission) {
-            apply(&caseSubmissions[index])
-        } else {
-            var recovered = submission
-            apply(&recovered)
-            caseSubmissions.insert(recovered, at: 0)
-        }
+        guard let index = submissionIndex(of: submission) else { return }
+        apply(&caseSubmissions[index])
         do {
             try saveCaseSubmissions()
         } catch {
@@ -951,31 +980,43 @@ public actor ModerationRepository {
         }
     }
 
-    /// Persist the ledger, pruning acknowledged rows past the bound.
-    /// The array is newest-first, so counting down the list keeps the
-    /// newest resolved rows and drops the oldest. The prune commits to
-    /// memory only after the store write succeeds — a failed save must
-    /// not leave rows dropped in memory while still on disk.
+    /// Persist the ledger, pruning acknowledged rows past the bound —
+    /// and, unlike the report ledger, pending rows past their own
+    /// bound: the reference does not deduplicate submissions, so a
+    /// dropped pending row costs at worst a re-file the user performs
+    /// knowingly, whereas unbounded pending statements (each up to
+    /// 16 KB, one per edited retry while the Authority is unreachable)
+    /// would grow without limit. The array is newest-first; the prune
+    /// commits to memory only after the store write succeeds.
     private func saveCaseSubmissions() throws {
         var resolvedKept = 0
+        var pendingKept = 0
+        var droppedPending = 0
         let pruned = caseSubmissions.filter { record in
-            guard record.isResolved else { return true }
-            resolvedKept += 1
-            return resolvedKept <= Self.maxResolvedCaseSubmissions
+            if record.isResolved {
+                resolvedKept += 1
+                return resolvedKept <= Self.maxResolvedCaseSubmissions
+            }
+            pendingKept += 1
+            if pendingKept > Self.maxPendingCaseSubmissions {
+                droppedPending += 1
+                return false
+            }
+            return true
         }
         try caseSubmissionStore.save(pruned)
         caseSubmissions = pruned
+        if droppedPending > 0 {
+            // Never silent: a dropped pending row means that retry
+            // artifact is gone and re-filing is a fresh submission.
+            Self.logger.notice(
+                "case submission ledger dropped \(droppedPending) oldest pending rows past the bound"
+            )
+        }
     }
 
     private func submissionIndex(of submission: CaseSubmissionRecord) -> Int? {
-        caseSubmissions.firstIndex {
-            $0.caseId == submission.caseId
-                && $0.kind == submission.kind
-                && $0.user == submission.user
-                && $0.response?.statement == submission.response?.statement
-                && $0.appeal?.statement == submission.appeal?.statement
-                && $0.createdAt == submission.createdAt
-        }
+        caseSubmissions.firstIndex { $0.id == submission.id }
     }
 
     private func discardSubmission(_ submission: CaseSubmissionRecord) {
@@ -995,6 +1036,20 @@ public actor ModerationRepository {
             )
         }
         return trimmed
+    }
+
+    /// Failures that can only occur AFTER the Authority answered 200:
+    /// a receipt that fails caseId/kind correlation or cannot be
+    /// decoded. The submission was accepted server-side, so the
+    /// artifact must not be retained as retryable.
+    private static func isPostAcceptanceFailure(_ error: Error) -> Bool {
+        switch error {
+        case AuthorityClientError.caseIdentifierMismatch,
+             AuthorityClientError.malformedResponse:
+            return true
+        default:
+            return false
+        }
     }
 
     private static func statementHash(_ statement: String) -> String {
@@ -1176,12 +1231,14 @@ public actor ModerationRepository {
                 received: receipt.reportId
             )
         }
+        // A row absent from the ledger stays absent — the only removal
+        // paths are deterministic discard and the identity-removal
+        // purge, and resurrecting a purged row would re-persist a
+        // removed identity's disclosure. The receipt still returns.
         if let index = reportIndex(of: record) {
             reportRecords[index].receipt = receipt
         } else {
-            var recovered = record
-            recovered.receipt = receipt
-            reportRecords.insert(recovered, at: 0)
+            return receipt
         }
         do {
             try saveReportRecords()

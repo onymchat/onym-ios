@@ -135,7 +135,10 @@ public struct CaseResponse: Codable, Sendable, Equatable {
 
 /// An appeal filed within the declared window — or a new-holder claim,
 /// which the spec treats as a mandatory appeal class with expedited
-/// review (§5.7, error `new_holder_claim`).
+/// review (§5.7; the spec's error identifier is `new_holder_claim`,
+/// but the reference wire value for `kind` — request and echoed
+/// receipt alike — is the hyphenated `new-holder-claim`, and the
+/// reference echoes the submitted string verbatim).
 public struct AppealSubmission: Codable, Sendable, Equatable {
     public enum Kind: String, Codable, Sendable {
         case appeal
