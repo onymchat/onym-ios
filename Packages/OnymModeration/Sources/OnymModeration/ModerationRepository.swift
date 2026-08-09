@@ -86,11 +86,18 @@ public actor ModerationRepository {
     /// accumulate indefinitely.
     public static let maxResolvedReportRecords = 128
 
+    /// Retention bound on cached case-status snapshots. Snapshots
+    /// upsert by caseId, so the set grows only with distinct cases
+    /// against this device's identities; the bound is a backstop, and
+    /// the oldest fetch falls off first.
+    public static let maxCaseStatusRecords = 64
+
     private let authoritiesFetcher: any KnownAuthoritiesFetcher
     private let manifestFetcher: any AuthorityManifestFetcher
     private let manifestValidator: AuthorityManifestValidator
     private let mandateStore: any MandateStore
     private let reportStore: any ReportFilingStore
+    private let caseStore: any CaseStatusStore
     private let backend: any EnforcementBackendClient
     private let authorityClients: any ModerationAuthorityClientFactory
     private let attestation: any DeviceAttestationProvider
@@ -124,21 +131,30 @@ public actor ModerationRepository {
         let messageId: String
     }
 
+    private struct CaseStatusKey: Hashable {
+        let authority: String
+        let user: String
+        let caseId: String
+    }
+
     private var authorities: [AuthorityListing] = []
     private var fetchStatus: AuthorityFetchStatus = .idle
     private var records: [MandateRecord]
     private var reportRecords: [ReportFilingRecord]
+    private var caseRecords: [CaseStatusRecord]
     private var continuations: [UUID: AsyncStream<ModerationState>.Continuation] = [:]
     private var startTask: Task<Void, Never>?
     private var consentTasks: [ConsentKey: Task<MandateRecord, Error>] = [:]
     private var registrationFlights: [RegistrationKey: RegistrationFlight] = [:]
     private var reportTasks: [ReportKey: Task<ReportReceipt, Error>] = [:]
+    private var caseStatusTasks: [CaseStatusKey: Task<CaseStatus, Error>] = [:]
 
     public init(
         authoritiesFetcher: any KnownAuthoritiesFetcher,
         manifestFetcher: any AuthorityManifestFetcher,
         mandateStore: any MandateStore,
         reportStore: any ReportFilingStore = UserDefaultsReportFilingStore(),
+        caseStore: any CaseStatusStore = UserDefaultsCaseStatusStore(),
         backend: any EnforcementBackendClient,
         authorityClients: any ModerationAuthorityClientFactory,
         attestation: any DeviceAttestationProvider,
@@ -151,6 +167,7 @@ public actor ModerationRepository {
         self.manifestValidator = manifestValidator
         self.mandateStore = mandateStore
         self.reportStore = reportStore
+        self.caseStore = caseStore
         self.backend = backend
         self.authorityClients = authorityClients
         self.attestation = attestation
@@ -158,6 +175,7 @@ public actor ModerationRepository {
         self.clock = clock
         self.records = mandateStore.load()
         self.reportRecords = reportStore.load()
+        self.caseRecords = caseStore.load()
     }
 
     // MARK: - Directory refresh
@@ -474,6 +492,139 @@ public actor ModerationRepository {
             reportTasks.removeValue(forKey: key)
             throw error
         }
+    }
+
+    // MARK: - Case status (accused side)
+
+    /// The retained mandate a case references, resolved from history by
+    /// content hash. Standing in a case follows the mandate it was
+    /// opened under — NOT the currently active record: switching
+    /// authorities deactivates the old mandate but must not strand the
+    /// user out of a case that mandate still governs (mandates are
+    /// immutable, spec §12).
+    public func mandateRecord(forRef ref: String) -> MandateRecord? {
+        records.first { (try? $0.mandate.mandateHash()) == ref }
+    }
+
+    /// Fetch the authenticated status document for one case, persist it
+    /// as the offline snapshot, and return it. Fails closed when the
+    /// referenced mandate is not retained, the active identity does not
+    /// own it, or its Authority is absent from the directory.
+    ///
+    /// The reference Authority deliberately answers 404 for unknown
+    /// case, bad signature, and non-party alike (a case id must not be
+    /// an existence oracle), so callers cannot distinguish those —
+    /// surface 404 as "case unavailable", never as proof of anything.
+    public func caseStatus(caseId: String, mandateRef: String) async throws -> CaseStatus {
+        let (record, listing) = try await caseStanding(mandateRef: mandateRef)
+        let key = CaseStatusKey(
+            authority: listing.componentId,
+            user: record.mandate.user,
+            caseId: caseId
+        )
+        if let task = caseStatusTasks[key] {
+            return try await task.value
+        }
+        let task = Task {
+            try await self.performCaseStatus(
+                caseId: caseId,
+                mandateRef: mandateRef,
+                record: record,
+                listing: listing
+            )
+        }
+        caseStatusTasks[key] = task
+        do {
+            let status = try await task.value
+            caseStatusTasks.removeValue(forKey: key)
+            return status
+        } catch {
+            caseStatusTasks.removeValue(forKey: key)
+            throw error
+        }
+    }
+
+    /// The last fetched snapshot for a case, if any — for rendering
+    /// offline or before the first fetch of a session completes.
+    public func storedCaseStatus(caseId: String) -> CaseStatusRecord? {
+        caseRecords.first { $0.caseId == caseId }
+    }
+
+    /// Drop every case snapshot not owned by one of `users`
+    /// (`onym:key:<hex>` references). Called on identity removal, same
+    /// contract as `purgeReportRecords(keepingReporters:)`.
+    public func purgeCaseStatusRecords(keepingUsers users: Set<String>) {
+        let before = caseRecords.count
+        caseRecords.removeAll { !users.contains($0.user) }
+        guard caseRecords.count != before else { return }
+        try? caseStore.save(caseRecords)
+    }
+
+    /// Standing for any accused-side case operation: the case's mandate
+    /// must be retained, owned by the active identity, and its
+    /// Authority resolvable in the current directory.
+    private func caseStanding(
+        mandateRef: String
+    ) async throws -> (MandateRecord, AuthorityListing) {
+        guard let record = mandateRecord(forRef: mandateRef) else {
+            throw ModerationError.noMandate
+        }
+        let userKey = try await signer.userKeyID()
+        guard userKey == record.mandate.user else {
+            throw ModerationError.caseAccessUnavailable(
+                "active identity does not own the case's mandate"
+            )
+        }
+        guard let listing = authorities.first(where: {
+            $0.componentId == record.mandate.authority
+        }) else {
+            throw ModerationError.authorityUnavailable(record.mandate.authority)
+        }
+        return (record, listing)
+    }
+
+    private func performCaseStatus(
+        caseId: String,
+        mandateRef: String,
+        record: MandateRecord,
+        listing: AuthorityListing
+    ) async throws -> CaseStatus {
+        let client = authorityClients.client(for: listing)
+        let status = try await client.queryStatus(caseId: caseId)
+        // The concrete HTTP client correlates this too; repeating the
+        // check here preserves the invariant for every factory-injected
+        // implementation of the protocol.
+        guard status.caseId == caseId else {
+            throw AuthorityClientError.caseIdentifierMismatch(
+                expected: caseId,
+                received: status.caseId
+            )
+        }
+        let snapshot = CaseStatusRecord(
+            caseId: caseId,
+            mandateRef: mandateRef,
+            user: record.mandate.user,
+            status: status,
+            fetchedAt: clock()
+        )
+        if let index = caseRecords.firstIndex(where: { $0.caseId == caseId }) {
+            caseRecords[index] = snapshot
+        } else {
+            caseRecords.insert(snapshot, at: 0)
+        }
+        if caseRecords.count > Self.maxCaseStatusRecords {
+            caseRecords.sort { $0.fetchedAt > $1.fetchedAt }
+            caseRecords.removeLast(caseRecords.count - Self.maxCaseStatusRecords)
+        }
+        do {
+            try caseStore.save(caseRecords)
+        } catch {
+            // The snapshot is a cache; the Authority's answer is
+            // authoritative and must reach the caller. Error only —
+            // no case content — per no-activity-logging.
+            Self.logger.error("case snapshot persistence failed: \(error)")
+        }
+        return status
     }
 
     // MARK: - AsyncStream
@@ -885,7 +1036,7 @@ public actor ModerationRepository {
         case .rejected(let rejection):
             return Self.isDeterministicStatusCode(rejection.statusCode)
         case .invalidResponse, .malformedResponse, .invalidPathComponent, .insecureBaseURL,
-             .reportIdentifierMismatch:
+             .reportIdentifierMismatch, .caseIdentifierMismatch:
             return false
         }
     }

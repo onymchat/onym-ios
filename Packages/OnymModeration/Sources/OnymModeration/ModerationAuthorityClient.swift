@@ -85,6 +85,7 @@ public enum AuthorityClientError: Error, Sendable, Equatable {
     case mandateNotAccepted(mandateRef: String)
     case mandateReferenceMismatch(expected: String, received: String)
     case reportIdentifierMismatch(expected: String, received: String)
+    case caseIdentifierMismatch(expected: String, received: String)
     case invalidPathComponent(String)
     case insecureBaseURL(String)
 }
@@ -173,9 +174,22 @@ public struct AppealSubmission: Codable, Sendable, Equatable {
     }
 }
 
+/// One entry of the Authority's case event log. The reference exposes
+/// timestamps and kinds only ("case_opened", "response", "decided",
+/// "appeal_filed", ...) — details are never served to a party.
+public struct CaseEvent: Codable, Sendable, Equatable {
+    public let at: Date
+    public let kind: String
+
+    public init(at: Date, kind: String) {
+        self.at = at
+        self.kind = kind
+    }
+}
+
 /// Party-visible subset of the Authority's case status document.
-/// Additional assessment and event fields are deliberately ignored by
-/// this first client surface and can be modeled when their UI lands.
+/// The `assessment` field is deliberately ignored by this client
+/// surface and can be modeled when its UI lands.
 public struct CaseStatus: Codable, Sendable, Equatable {
     public let caseId: String
     public let stage: String
@@ -190,6 +204,9 @@ public struct CaseStatus: Codable, Sendable, Equatable {
     public let appealState: String?
     public let newHolderState: String?
     public let claimRevision: Int?
+    /// Oldest-first event log. Optional for compatibility with an
+    /// authority that omits it; the reference always serves it.
+    public let events: [CaseEvent]?
 
     public init(
         caseId: String,
@@ -204,7 +221,8 @@ public struct CaseStatus: Codable, Sendable, Equatable {
         appealDeadline: Date? = nil,
         appealState: String? = nil,
         newHolderState: String? = nil,
-        claimRevision: Int? = nil
+        claimRevision: Int? = nil,
+        events: [CaseEvent]? = nil
     ) {
         self.caseId = caseId
         self.stage = stage
@@ -219,6 +237,7 @@ public struct CaseStatus: Codable, Sendable, Equatable {
         self.appealState = appealState
         self.newHolderState = newHolderState
         self.claimRevision = claimRevision
+        self.events = events
     }
 }
 
@@ -361,7 +380,16 @@ public struct URLSessionModerationAuthorityClient: ModerationAuthorityClient {
             path: ["v1", "cases", caseId, "status"],
             headers: headers
         )
-        return try decode(data)
+        let status: CaseStatus = try decode(data)
+        // A status document for a different case must never be
+        // attributed to the one the caller asked about.
+        guard status.caseId == caseId else {
+            throw AuthorityClientError.caseIdentifierMismatch(
+                expected: caseId,
+                received: status.caseId
+            )
+        }
+        return status
     }
 
     private func send(
