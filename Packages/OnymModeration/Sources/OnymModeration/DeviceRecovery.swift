@@ -21,7 +21,9 @@ public struct RecoveryGrant: Sendable, Equatable {
     /// to 1, and so does this decode (`RecoveryGrant` in
     /// `apple/src/types.rs`, `#[serde(default = "one")]`).
     public let version: Int
+    public let grantType: String
     public let caseId: String
+    public let claimId: String?
     /// The identity key the grant was issued to. The enforcement
     /// backend refuses a session by any other key, so a stolen grant
     /// is inert.
@@ -32,7 +34,10 @@ public struct RecoveryGrant: Sendable, Equatable {
     public init(raw: Data) throws {
         struct Wire: Decodable {
             let grantVersion: Int?
-            let caseId, grantee, authority, issuedAt, signature: String
+            let grantType: String?
+            let caseId: String?
+            let claimId: String?
+            let grantee, authority, issuedAt, signature: String
         }
         let wire: Wire
         do {
@@ -51,9 +56,24 @@ public struct RecoveryGrant: Sendable, Equatable {
                 "unsupported recovery grant version \(version); this client implements 1"
             )
         }
+        let grantType = wire.grantType ?? "onym-recovery-grant-v1"
+        guard grantType == "onym-recovery-grant-v1" || grantType == "onym-unban-grant-v1" else {
+            throw ModerationError.grantInvalid("unsupported recovery grant type \(grantType)")
+        }
+        if grantType == "onym-recovery-grant-v1" {
+            guard wire.caseId != nil else {
+                throw ModerationError.grantInvalid("case-bound recovery grant has no caseId")
+            }
+        } else {
+            guard wire.claimId != nil else {
+                throw ModerationError.grantInvalid("unban grant has no claimId")
+            }
+        }
         self.raw = raw
         self.version = version
-        self.caseId = wire.caseId
+        self.grantType = grantType
+        self.caseId = wire.caseId ?? ""
+        self.claimId = wire.claimId
         self.grantee = wire.grantee
         self.authority = wire.authority
         self.issuedAt = wire.issuedAt
@@ -70,19 +90,38 @@ public struct RecoveryGrant: Sendable, Equatable {
     /// different reference and fail the session — acceptable, since
     /// grants are consumed by the interface whose vocabulary this is.
     public func reference() throws -> String {
-        struct Unsigned: Encodable {
+        struct CaseUnsigned: Encodable {
             let grantVersion: Int
             let caseId, grantee, authority, issuedAt: String
         }
-        let bytes = try ModerationCanonicalEncoder.encode(
-            Unsigned(
-                grantVersion: version,
-                caseId: caseId,
-                grantee: grantee,
-                authority: authority,
-                issuedAt: issuedAt
+        struct UnbanUnsigned: Encodable {
+            let grantVersion: Int
+            let claimId, grantee, authority, issuedAt: String
+        }
+        let bytes: Data
+        if grantType == "onym-recovery-grant-v1", !caseId.isEmpty {
+            bytes = try ModerationCanonicalEncoder.encode(
+                CaseUnsigned(
+                    grantVersion: version,
+                    caseId: caseId,
+                    grantee: grantee,
+                    authority: authority,
+                    issuedAt: issuedAt
+                )
             )
-        )
+        } else if grantType == "onym-unban-grant-v1", let claimId {
+            bytes = try ModerationCanonicalEncoder.encode(
+                UnbanUnsigned(
+                    grantVersion: version,
+                    claimId: claimId,
+                    grantee: grantee,
+                    authority: authority,
+                    issuedAt: issuedAt
+                )
+            )
+        } else {
+            throw ModerationError.grantInvalid("grant has neither caseId nor claimId")
+        }
         return SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
     }
 }
@@ -272,4 +311,3 @@ public enum RecoveryRedemption: Sendable, Equatable {
     case markInForce(authorityContact: String, newHolderURL: URL?, appealURL: URL?)
     case failed(String)
 }
-

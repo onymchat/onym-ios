@@ -30,6 +30,7 @@ final class DeviceRecoveryTests: XCTestCase {
     /// Grantee matches `CapturingSigner.userKeyID()` — the repository
     /// refuses to present a grant issued to any other key.
     private static let grantJSON = #"{"grantVersion":1,"caseId":"case-1","grantee":"onym:key:test","authority":"onym:component:authority","issuedAt":"2026-08-09T00:00:00Z","signature":"c2ln"}"#
+    private static let unbanGrantJSON = #"{"grantType":"onym-unban-grant-v1","grantVersion":1,"claimId":"claim-1","grantee":"onym:key:test","authority":"onym:component:authority","issuedAt":"2026-08-09T00:00:00Z","signature":"c2ln"}"#
 
     func testGrantParsesAndKeepsTheExactBytes() throws {
         let raw = Data(Self.grantJSON.utf8)
@@ -39,6 +40,21 @@ final class DeviceRecoveryTests: XCTestCase {
         XCTAssertEqual(grant.grantee, "onym:key:test")
         XCTAssertEqual(grant.authority, "onym:component:authority")
         XCTAssertEqual(grant.raw, raw, "the signed bytes travel verbatim")
+    }
+
+    func testCaseFreeUnbanGrantParsesWithoutACaseId() throws {
+        let raw = Data(Self.unbanGrantJSON.utf8)
+        let grant = try RecoveryGrant(raw: raw)
+        XCTAssertEqual(grant.grantType, "onym-unban-grant-v1")
+        XCTAssertEqual(grant.caseId, "")
+        XCTAssertEqual(grant.claimId, "claim-1")
+        XCTAssertEqual(grant.grantee, "onym:key:test")
+        XCTAssertEqual(grant.raw, raw)
+
+        let canonical = #"{"authority":"onym:component:authority","claimId":"claim-1","grantVersion":1,"grantee":"onym:key:test","issuedAt":"2026-08-09T00:00:00Z"}"#
+        let expected = SHA256.hash(data: Data(canonical.utf8))
+            .map { String(format: "%02x", $0) }.joined()
+        XCTAssertEqual(try grant.reference(), expected)
     }
 
     /// The reference must equal SHA-256 over the server's canonical
