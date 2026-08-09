@@ -49,19 +49,6 @@ struct RootView: View {
                 }
             case .checking, .needsConsent, .operational:
                 tabs
-                    // Reserve space above the tab bar so the banner never
-                    // covers its actionable buttons.
-                    .safeAreaInset(edge: .bottom, spacing: 0) {
-                        if case .operational(let openCases) = dependencies.moderationGateFlow.gate,
-                           !openCases.isEmpty {
-                            OpenCaseBanner(
-                                notices: openCases,
-                                makeCaseFlow: dependencies.makeModerationCaseFlow
-                            )
-                            .padding(.top, 4)
-                            .padding(.bottom, 8)
-                        }
-                    }
             }
         }
         .task { dependencies.moderationGateFlow.start() }
@@ -103,6 +90,9 @@ struct RootView: View {
                         makeModerationReportView: dependencies.makeModerationReportView
                     )
                 }
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    moderationCaseBanner
+                }
             }
 
             Tab("Settings", systemImage: "gearshape", value: .settings) {
@@ -119,6 +109,9 @@ struct RootView: View {
                         makeModerationConsentFlow: dependencies.makeModerationConsentFlow,
                         makeModerationCaseFlow: dependencies.makeModerationCaseFlow
                     )
+                }
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    moderationCaseBanner
                 }
             }
 
@@ -152,7 +145,23 @@ struct RootView: View {
                         )
                     }
                 }
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    moderationCaseBanner
+                }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var moderationCaseBanner: some View {
+        if case .operational(let openCases) = dependencies.moderationGateFlow.gate,
+           !openCases.isEmpty {
+            OpenCaseBanner(
+                notices: openCases,
+                makeCaseFlow: dependencies.makeModerationCaseFlow
+            )
+            .padding(.top, 4)
+            .padding(.bottom, 8)
         }
     }
 }
