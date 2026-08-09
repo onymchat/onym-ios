@@ -222,10 +222,10 @@ final class ModerationRepositoryTests: XCTestCase {
                 caseId: "case-1"
             )
         }
-        func respond(_ response: CaseResponse) async throws {
+        func respond(_ response: CaseResponse) async throws -> CaseResponseReceipt {
             throw ModerationError.notImplemented("unused")
         }
-        func appeal(_ submission: AppealSubmission) async throws {
+        func appeal(_ submission: AppealSubmission) async throws -> AppealReceipt {
             throw ModerationError.notImplemented("unused")
         }
         func queryStatus(caseId: String) async throws -> CaseStatus {

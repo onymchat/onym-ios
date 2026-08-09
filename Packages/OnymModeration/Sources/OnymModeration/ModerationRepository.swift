@@ -86,6 +86,23 @@ public actor ModerationRepository {
     /// accumulate indefinitely.
     public static let maxResolvedReportRecords = 128
 
+    /// Reference Authority's cap on a statement body
+    /// (`MAX_STATEMENT_BYTES`). Checked client-side so an oversize
+    /// statement fails fast with a usable message instead of a 400.
+    public static let maxStatementBytes = 16_384
+
+    /// Retention bound on resolved case-submission ledger rows, same
+    /// scheme as `maxResolvedReportRecords`: acknowledged rows prune
+    /// oldest-first.
+    public static let maxResolvedCaseSubmissions = 128
+
+    /// Bound on pending (unacknowledged) submission rows. Unlike report
+    /// rows, dropping one cannot mint a duplicate allegation — the
+    /// reference doesn't deduplicate submissions anyway — so a
+    /// generous cap beats unbounded statement text accumulating from
+    /// edited retries while the Authority is unreachable.
+    public static let maxPendingCaseSubmissions = 128
+
     /// Retention bound on cached case-status snapshots. Snapshots
     /// upsert by caseId, so the set grows only with distinct cases
     /// against this device's identities; the bound is a backstop, and
@@ -98,6 +115,7 @@ public actor ModerationRepository {
     private let mandateStore: any MandateStore
     private let reportStore: any ReportFilingStore
     private let caseStore: any CaseStatusStore
+    private let caseSubmissionStore: any CaseSubmissionStore
     private let backend: any EnforcementBackendClient
     private let authorityClients: any ModerationAuthorityClientFactory
     private let attestation: any DeviceAttestationProvider
@@ -137,17 +155,29 @@ public actor ModerationRepository {
         let caseId: String
     }
 
+    private struct CaseSubmissionKey: Hashable {
+        let authority: String
+        let user: String
+        let caseId: String
+        let mandateRef: String
+        let kind: CaseSubmissionRecord.Kind
+        let statementHash: String
+    }
+
     private var authorities: [AuthorityListing] = []
     private var fetchStatus: AuthorityFetchStatus = .idle
     private var records: [MandateRecord]
     private var reportRecords: [ReportFilingRecord]
     private var caseRecords: [CaseStatusRecord]
+    private var caseSubmissions: [CaseSubmissionRecord]
     private var continuations: [UUID: AsyncStream<ModerationState>.Continuation] = [:]
     private var startTask: Task<Void, Never>?
     private var consentTasks: [ConsentKey: Task<MandateRecord, Error>] = [:]
     private var registrationFlights: [RegistrationKey: RegistrationFlight] = [:]
     private var reportTasks: [ReportKey: Task<ReportReceipt, Error>] = [:]
     private var caseStatusTasks: [CaseStatusKey: Task<CaseStatus, Error>] = [:]
+    private var caseResponseTasks: [CaseSubmissionKey: Task<CaseResponseReceipt, Error>] = [:]
+    private var caseAppealTasks: [CaseSubmissionKey: Task<AppealReceipt, Error>] = [:]
 
     public init(
         authoritiesFetcher: any KnownAuthoritiesFetcher,
@@ -155,6 +185,7 @@ public actor ModerationRepository {
         mandateStore: any MandateStore,
         reportStore: any ReportFilingStore = UserDefaultsReportFilingStore(),
         caseStore: any CaseStatusStore = UserDefaultsCaseStatusStore(),
+        caseSubmissionStore: any CaseSubmissionStore = UserDefaultsCaseSubmissionStore(),
         backend: any EnforcementBackendClient,
         authorityClients: any ModerationAuthorityClientFactory,
         attestation: any DeviceAttestationProvider,
@@ -168,6 +199,7 @@ public actor ModerationRepository {
         self.mandateStore = mandateStore
         self.reportStore = reportStore
         self.caseStore = caseStore
+        self.caseSubmissionStore = caseSubmissionStore
         self.backend = backend
         self.authorityClients = authorityClients
         self.attestation = attestation
@@ -176,6 +208,7 @@ public actor ModerationRepository {
         self.records = mandateStore.load()
         self.reportRecords = reportStore.load()
         self.caseRecords = caseStore.load()
+        self.caseSubmissions = caseSubmissionStore.load()
     }
 
     // MARK: - Directory refresh
@@ -563,17 +596,24 @@ public actor ModerationRepository {
     /// Standing for any accused-side case operation: the case's mandate
     /// must be retained, owned by the active identity, and its
     /// Authority resolvable in the current directory.
+    /// `requireOwnership: false` exists for one caller: a new-holder
+    /// claim, whose premise is that the device's current holder is NOT
+    /// the mandated user (the reference accepts it unsigned for the
+    /// same reason). Everything else must own the mandate it acts under.
     private func caseStanding(
-        mandateRef: String
+        mandateRef: String,
+        requireOwnership: Bool = true
     ) async throws -> (MandateRecord, AuthorityListing) {
         guard let record = mandateRecord(forRef: mandateRef) else {
             throw ModerationError.noMandate
         }
-        let userKey = try await signer.userKeyID()
-        guard userKey == record.mandate.user else {
-            throw ModerationError.caseAccessUnavailable(
-                "active identity does not own the case's mandate"
-            )
+        if requireOwnership {
+            let userKey = try await signer.userKeyID()
+            guard userKey == record.mandate.user else {
+                throw ModerationError.caseAccessUnavailable(
+                    "active identity does not own the case's mandate"
+                )
+            }
         }
         guard let listing = authorities.first(where: {
             $0.componentId == record.mandate.authority
@@ -625,6 +665,396 @@ public actor ModerationRepository {
             Self.logger.error("case snapshot persistence failed: \(error)")
         }
         return status
+    }
+
+    // MARK: - Case submissions (accused side)
+
+    /// File the accused's signed statement on an open case. Standing
+    /// follows the case's mandate (resolved by reference, owned by the
+    /// active identity). The signed artifact is persisted before
+    /// delivery and ambiguous outcomes retry byte-identically; an
+    /// identical statement re-submitted after an acknowledgment returns
+    /// the stored receipt instead of re-delivering — the reference
+    /// Authority does NOT deduplicate responses (every delivery files
+    /// a new row, bounded at 32 per case), so this client-side ledger
+    /// is the only double-file protection.
+    ///
+    /// The reference enforces no response deadline: a late statement
+    /// is accepted and flagged (`receipt.late`), never refused. Client
+    /// deadline gating is therefore advisory UI, not enforcement.
+    @discardableResult
+    public func respond(
+        caseId: String,
+        mandateRef: String,
+        statement: String
+    ) async throws -> CaseResponseReceipt {
+        let statement = try Self.validatedStatement(statement)
+        let (record, listing) = try await caseStanding(mandateRef: mandateRef)
+        let key = CaseSubmissionKey(
+            authority: listing.componentId,
+            user: record.mandate.user,
+            caseId: caseId,
+            mandateRef: mandateRef,
+            kind: .response,
+            statementHash: Self.statementHash(statement)
+        )
+        if let task = caseResponseTasks[key] {
+            return try await task.value
+        }
+        let task = Task {
+            try await self.performRespond(
+                caseId: caseId,
+                mandateRef: mandateRef,
+                statement: statement,
+                record: record,
+                listing: listing
+            )
+        }
+        caseResponseTasks[key] = task
+        // The flight key is released by a janitor task AFTER delivery
+        // completes — not by a caller-side defer, which a cancelled
+        // awaiting caller would run while the unstructured delivery
+        // task keeps going, letting a second call start a concurrent
+        // duplicate delivery against a server with no idempotency
+        // token. (A completed task lingering briefly in the dictionary
+        // is harmless: new callers receive its settled result.)
+        Task {
+            _ = try? await task.value
+            self.caseResponseTasks.removeValue(forKey: key)
+        }
+        return try await task.value
+    }
+
+    /// File an appeal (`.appeal`, signed, gated server-side on a ban
+    /// with an open appeal window) or a new-holder claim
+    /// (`.newHolderClaim`, which the reference accepts unsigned and
+    /// answers 200 unconditionally — `receipt.filed` never proves the
+    /// claim was recorded). Same persist-before-deliver / exact-retry /
+    /// single-flight discipline as `respond`.
+    @discardableResult
+    public func appeal(
+        caseId: String,
+        mandateRef: String,
+        kind: AppealSubmission.Kind,
+        statement: String
+    ) async throws -> AppealReceipt {
+        let statement = try Self.validatedStatement(statement)
+        // A new-holder claim is definitionally filed by someone who is
+        // not the mandated user; ownership is not required for it.
+        // Scope note: standing still resolves the former holder's
+        // mandate from local history, so this path serves the
+        // same-device case where that record is retained. A fresh
+        // holder with nothing retained files from the ban surface,
+        // which has the verdict (and its mandateRef/authority) in
+        // hand — that flow lands with the case UI.
+        let (record, listing) = try await caseStanding(
+            mandateRef: mandateRef,
+            requireOwnership: kind == .appeal
+        )
+        // The ledger row belongs to the identity that FILED it — for a
+        // new-holder claim that is the device's current identity, not
+        // the mandated (previous) holder, whose key is by premise not
+        // local and would make the identity-removal purge silently
+        // drop a pending claim's retry artifact.
+        let submittingUser: String
+        if kind == .appeal {
+            submittingUser = record.mandate.user
+        } else {
+            submittingUser = try await signer.userKeyID()
+        }
+        let recordKind: CaseSubmissionRecord.Kind =
+            kind == .appeal ? .appeal : .newHolderClaim
+        let key = CaseSubmissionKey(
+            authority: listing.componentId,
+            user: submittingUser,
+            caseId: caseId,
+            mandateRef: mandateRef,
+            kind: recordKind,
+            statementHash: Self.statementHash(statement)
+        )
+        if let task = caseAppealTasks[key] {
+            return try await task.value
+        }
+        let task = Task {
+            try await self.performAppeal(
+                caseId: caseId,
+                mandateRef: mandateRef,
+                kind: kind,
+                recordKind: recordKind,
+                statement: statement,
+                submittingUser: submittingUser,
+                listing: listing
+            )
+        }
+        caseAppealTasks[key] = task
+        // Same janitor-cleanup rationale as `respond`.
+        Task {
+            _ = try? await task.value
+            self.caseAppealTasks.removeValue(forKey: key)
+        }
+        return try await task.value
+    }
+
+    /// Ledger rows for one case, newest first — pending rows are the
+    /// retry artifacts, acknowledged rows the filing history.
+    public func caseSubmissions(caseId: String) -> [CaseSubmissionRecord] {
+        caseSubmissions.filter { $0.caseId == caseId }
+    }
+
+    /// Same contract as the other ledgers: drop every submission not
+    /// owned by one of `users` when an identity is removed.
+    public func purgeCaseSubmissionRecords(keepingUsers users: Set<String>) {
+        let before = caseSubmissions.count
+        caseSubmissions.removeAll { !users.contains($0.user) }
+        guard caseSubmissions.count != before else { return }
+        try? caseSubmissionStore.save(caseSubmissions)
+    }
+
+    private func performRespond(
+        caseId: String,
+        mandateRef: String,
+        statement: String,
+        record: MandateRecord,
+        listing: AuthorityListing
+    ) async throws -> CaseResponseReceipt {
+        if let existing = caseSubmissions.first(where: {
+            $0.kind == .response
+                && $0.caseId == caseId
+                && $0.user == record.mandate.user
+                && $0.mandateRef == mandateRef
+                && $0.response?.statement == statement
+        }) {
+            if let receipt = existing.responseReceipt { return receipt }
+            return try await deliverResponse(existing, to: listing)
+        }
+
+        var response = CaseResponse(
+            caseId: caseId,
+            statement: statement,
+            evidence: []
+        )
+        response.signature = try await signer.sign(response.signingBytes())
+            .base64EncodedString()
+        let submission = CaseSubmissionRecord(
+            caseId: caseId,
+            mandateRef: mandateRef,
+            user: record.mandate.user,
+            authorityName: listing.name,
+            kind: .response,
+            response: response,
+            createdAt: clock()
+        )
+        try persistNewSubmission(submission)
+        return try await deliverResponse(submission, to: listing)
+    }
+
+    private func performAppeal(
+        caseId: String,
+        mandateRef: String,
+        kind: AppealSubmission.Kind,
+        recordKind: CaseSubmissionRecord.Kind,
+        statement: String,
+        submittingUser: String,
+        listing: AuthorityListing
+    ) async throws -> AppealReceipt {
+        if let existing = caseSubmissions.first(where: {
+            $0.kind == recordKind
+                && $0.caseId == caseId
+                && $0.user == submittingUser
+                && $0.mandateRef == mandateRef
+                && $0.appeal?.statement == statement
+        }) {
+            if let receipt = existing.appealReceipt { return receipt }
+            return try await deliverAppeal(existing, to: listing)
+        }
+
+        var appeal = AppealSubmission(
+            caseId: caseId,
+            kind: kind,
+            statement: statement
+        )
+        // A new-holder claim is signed too — the reference ignores the
+        // signature by design, but signing costs nothing and keeps the
+        // artifact self-describing if the endpoint ever authenticates.
+        appeal.signature = try await signer.sign(appeal.signingBytes())
+            .base64EncodedString()
+        let submission = CaseSubmissionRecord(
+            caseId: caseId,
+            mandateRef: mandateRef,
+            user: submittingUser,
+            authorityName: listing.name,
+            kind: recordKind,
+            appeal: appeal,
+            createdAt: clock()
+        )
+        try persistNewSubmission(submission)
+        return try await deliverAppeal(submission, to: listing)
+    }
+
+    /// Delivery must not begin unless the exact signed artifact is
+    /// durably retained — a transport timeout may happen after the
+    /// Authority committed, and only the persisted artifact lets the
+    /// retry re-deliver byte-identical content.
+    private func persistNewSubmission(_ submission: CaseSubmissionRecord) throws {
+        caseSubmissions.insert(submission, at: 0)
+        do {
+            try saveCaseSubmissions()
+        } catch {
+            if let index = submissionIndex(of: submission) {
+                caseSubmissions.remove(at: index)
+            }
+            throw error
+        }
+    }
+
+    private func deliverResponse(
+        _ submission: CaseSubmissionRecord,
+        to listing: AuthorityListing
+    ) async throws -> CaseResponseReceipt {
+        guard let response = submission.response else {
+            throw ModerationError.ledgerInconsistent("submission holds no response")
+        }
+        let client = authorityClients.client(for: listing)
+        let receipt: CaseResponseReceipt
+        do {
+            receipt = try await client.respond(response)
+        } catch {
+            // Deterministic refusal (case already decided, filing cap,
+            // anti-oracle 404) cannot become an acceptance through
+            // exact replay; retaining the artifact would deadlock the
+            // key. Ambiguous outcomes keep it for byte-identical retry.
+            // A post-200 correlation/decoding failure is terminal too:
+            // the server accepted and does not deduplicate, so a
+            // "retry" would file a second row, not resolve the first.
+            if isDeterministicReportRejection(error)
+                || Self.isPostAcceptanceFailure(error) {
+                discardSubmission(submission)
+            }
+            throw error
+        }
+        finishSubmission(submission) { $0.responseReceipt = receipt }
+        return receipt
+    }
+
+    private func deliverAppeal(
+        _ submission: CaseSubmissionRecord,
+        to listing: AuthorityListing
+    ) async throws -> AppealReceipt {
+        guard let appeal = submission.appeal else {
+            throw ModerationError.ledgerInconsistent("submission holds no appeal")
+        }
+        let client = authorityClients.client(for: listing)
+        let receipt: AppealReceipt
+        do {
+            receipt = try await client.appeal(appeal)
+        } catch {
+            if isDeterministicReportRejection(error)
+                || Self.isPostAcceptanceFailure(error) {
+                discardSubmission(submission)
+            }
+            throw error
+        }
+        finishSubmission(submission) { $0.appealReceipt = receipt }
+        return receipt
+    }
+
+    /// Record the acknowledgment. The Authority's answer is
+    /// authoritative and must reach the caller; a persistence failure
+    /// is logged (error only), not surfaced as a delivery failure.
+    ///
+    /// A row absent from the ledger stays absent: the only removal
+    /// paths are deterministic discard and the identity-removal purge,
+    /// and resurrecting a purged row would re-persist a removed
+    /// identity's statement, defeating the purge contract. The receipt
+    /// still returns to the caller.
+    private func finishSubmission(
+        _ submission: CaseSubmissionRecord,
+        apply: (inout CaseSubmissionRecord) -> Void
+    ) {
+        guard let index = submissionIndex(of: submission) else { return }
+        apply(&caseSubmissions[index])
+        do {
+            try saveCaseSubmissions()
+        } catch {
+            Self.logger.error("case submission persistence failed: \(error)")
+        }
+    }
+
+    /// Persist the ledger, pruning acknowledged rows past the bound —
+    /// and, unlike the report ledger, pending rows past their own
+    /// bound: the reference does not deduplicate submissions, so a
+    /// dropped pending row costs at worst a re-file the user performs
+    /// knowingly, whereas unbounded pending statements (each up to
+    /// 16 KB, one per edited retry while the Authority is unreachable)
+    /// would grow without limit. The array is newest-first; the prune
+    /// commits to memory only after the store write succeeds.
+    private func saveCaseSubmissions() throws {
+        var resolvedKept = 0
+        var pendingKept = 0
+        var droppedPending = 0
+        let pruned = caseSubmissions.filter { record in
+            if record.isResolved {
+                resolvedKept += 1
+                return resolvedKept <= Self.maxResolvedCaseSubmissions
+            }
+            pendingKept += 1
+            if pendingKept > Self.maxPendingCaseSubmissions {
+                droppedPending += 1
+                return false
+            }
+            return true
+        }
+        try caseSubmissionStore.save(pruned)
+        caseSubmissions = pruned
+        if droppedPending > 0 {
+            // Never silent: a dropped pending row means that retry
+            // artifact is gone and re-filing is a fresh submission.
+            Self.logger.notice(
+                "case submission ledger dropped \(droppedPending) oldest pending rows past the bound"
+            )
+        }
+    }
+
+    private func submissionIndex(of submission: CaseSubmissionRecord) -> Int? {
+        caseSubmissions.firstIndex { $0.id == submission.id }
+    }
+
+    private func discardSubmission(_ submission: CaseSubmissionRecord) {
+        guard let index = submissionIndex(of: submission) else { return }
+        caseSubmissions.remove(at: index)
+        try? saveCaseSubmissions()
+    }
+
+    private static func validatedStatement(_ statement: String) throws -> String {
+        let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw ModerationError.statementInvalid("statement is empty")
+        }
+        guard trimmed.utf8.count <= Self.maxStatementBytes else {
+            throw ModerationError.statementInvalid(
+                "statement exceeds \(Self.maxStatementBytes) bytes"
+            )
+        }
+        return trimmed
+    }
+
+    /// Failures that can only occur AFTER the Authority answered 200:
+    /// a receipt that fails caseId/kind correlation or cannot be
+    /// decoded. The submission was accepted server-side, so the
+    /// artifact must not be retained as retryable.
+    private static func isPostAcceptanceFailure(_ error: Error) -> Bool {
+        switch error {
+        case AuthorityClientError.caseIdentifierMismatch,
+             AuthorityClientError.malformedResponse:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func statementHash(_ statement: String) -> String {
+        SHA256.hash(data: Data(statement.utf8))
+            .map { String(format: "%02x", $0) }.joined()
     }
 
     // MARK: - AsyncStream
@@ -801,12 +1231,14 @@ public actor ModerationRepository {
                 received: receipt.reportId
             )
         }
+        // A row absent from the ledger stays absent — the only removal
+        // paths are deterministic discard and the identity-removal
+        // purge, and resurrecting a purged row would re-persist a
+        // removed identity's disclosure. The receipt still returns.
         if let index = reportIndex(of: record) {
             reportRecords[index].receipt = receipt
         } else {
-            var recovered = record
-            recovered.receipt = receipt
-            reportRecords.insert(recovered, at: 0)
+            return receipt
         }
         do {
             try saveReportRecords()
