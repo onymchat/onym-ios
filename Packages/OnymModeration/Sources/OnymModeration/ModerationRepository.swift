@@ -77,6 +77,7 @@ public actor ModerationRepository {
     private let manifestValidator: AuthorityManifestValidator
     private let mandateStore: any MandateStore
     private let backend: any EnforcementBackendClient
+    private let authorityClients: any ModerationAuthorityClientFactory
     private let attestation: any DeviceAttestationProvider
     private let signer: any ModerationSigner
     private let clock: @Sendable () -> Date
@@ -92,6 +93,7 @@ public actor ModerationRepository {
         manifestFetcher: any AuthorityManifestFetcher,
         mandateStore: any MandateStore,
         backend: any EnforcementBackendClient,
+        authorityClients: any ModerationAuthorityClientFactory = StubModerationAuthorityClientFactory(),
         attestation: any DeviceAttestationProvider,
         signer: any ModerationSigner,
         manifestValidator: AuthorityManifestValidator = AuthorityManifestValidator(),
@@ -102,6 +104,7 @@ public actor ModerationRepository {
         self.manifestValidator = manifestValidator
         self.mandateStore = mandateStore
         self.backend = backend
+        self.authorityClients = authorityClients
         self.attestation = attestation
         self.signer = signer
         self.clock = clock
@@ -150,7 +153,8 @@ public actor ModerationRepository {
     /// Consent to the exact manifest the user reviewed: validate it again
     /// at signing time, pin its already-computed hash and raw bytes, enroll
     /// this device, sign the mandate, obtain the interface countersignature,
-    /// and persist. This method deliberately never refetches the manifest;
+    /// register those exact bytes with the Authority, and only then activate
+    /// the local record. This method deliberately never refetches the manifest;
     /// an authority changing its hosted terms between review and agreement
     /// therefore cannot replace the artifact that gets signed.
     ///
@@ -173,6 +177,21 @@ public actor ModerationRepository {
         // not just the consent UI. An invalid manifest must never end up
         // pinned by a signed mandate.
         try manifestValidator.validateForConsent(signedManifest, now: clock())
+        let userKey = try await signer.userKeyID()
+
+        // If registration previously failed after countersigning, retry
+        // that immutable mandate byte-for-byte. Minting a replacement
+        // would leave two consent artifacts at an Authority that may
+        // have accepted the first request before its response was lost.
+        if let pending = records.first(where: {
+            $0.mandate.authority == listing.componentId
+                && $0.mandate.user == userKey
+                && $0.mandate.manifestHash == signedManifest.manifestHash
+                && $0.countersigned
+                && !$0.authorityRegistered
+        }) {
+            return try await registerAndActivate(pending, with: listing)
+        }
 
         // Enrollment: (identity signature, device token) presented
         // together is the only token↔enrollment linkage. A nil token
@@ -184,7 +203,6 @@ public actor ModerationRepository {
         } else {
             token = nil
         }
-        let userKey = try await signer.userKeyID()
         // The signed bytes are built from exactly the fields the
         // request transmits, so the backend can recompute and verify
         // them — the timestamp travels with the signature it covers.
@@ -233,9 +251,23 @@ public actor ModerationRepository {
             manifestBytes: signedManifest.rawBytes,
             authorityName: listing.name,
             countersigned: isCountersigned,
-            isActive: true,
+            authorityRegistered: false,
+            // The sentinel exists only for UI/dev scenarios with no
+            // deployed Interface or Authority. Preserve that explicit
+            // nonconforming scaffold, but never send it to an Authority.
+            isActive: !isCountersigned,
             createdAt: clock()
         )
+
+        if isCountersigned {
+            // Persist before the network hop. If the Authority commits
+            // and its response is lost, the next attempt resends this
+            // exact mandate rather than signing another one.
+            records.insert(record, at: 0)
+            mandateStore.save(records)
+            publish()
+            return try await registerAndActivate(record, with: listing)
+        }
 
         // Deactivate the previous active record without touching
         // anything else in it (mandates are immutable, spec §12).
@@ -286,6 +318,45 @@ public actor ModerationRepository {
 
     private func unsubscribe(id: UUID) {
         continuations.removeValue(forKey: id)
+    }
+
+    /// Register a pending countersigned mandate, verify that the
+    /// Authority derived the same content reference, then atomically
+    /// make it the locally active record.
+    private func registerAndActivate(
+        _ pending: MandateRecord,
+        with listing: AuthorityListing
+    ) async throws -> MandateRecord {
+        let expectedRef = try pending.mandate.mandateHash()
+        let client = authorityClients.client(for: listing)
+        let receipt = try await client.registerMandate(pending.mandate)
+        guard receipt.accepted, receipt.mandateRef == expectedRef else {
+            throw AuthorityClientError.mandateReferenceMismatch(
+                expected: expectedRef,
+                received: receipt.mandateRef
+            )
+        }
+
+        var activated: MandateRecord?
+        records = records.map { existing in
+            var existing = existing
+            if (try? existing.mandate.mandateHash()) == expectedRef {
+                existing.authorityRegistered = true
+                existing.isActive = true
+                activated = existing
+            } else {
+                existing.isActive = false
+            }
+            return existing
+        }
+        guard let activated else {
+            throw AuthorityClientError.malformedResponse(
+                "registered mandate disappeared from the local store"
+            )
+        }
+        mandateStore.save(records)
+        publish()
+        return activated
     }
 
     private func publish() {

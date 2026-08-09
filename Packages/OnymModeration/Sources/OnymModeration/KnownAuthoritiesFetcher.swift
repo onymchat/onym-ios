@@ -11,14 +11,32 @@ public struct AuthorityListing: Codable, Sendable, Equatable {
     /// Human-readable name shown in the picker.
     public let name: String
     public let manifestURL: URL
+    /// Base URL of the Authority HTTP API. Optional for compatibility
+    /// with directories published before the operation surface existed;
+    /// those entries resolve the API beside `manifestURL`.
+    public let apiBaseURL: URL?
     /// The authority's Ed25519 operator public key, base64 raw bytes.
     public let operatorPublicKeyBase64: String
 
-    public init(componentId: String, name: String, manifestURL: URL, operatorPublicKeyBase64: String) {
+    public init(
+        componentId: String,
+        name: String,
+        manifestURL: URL,
+        apiBaseURL: URL? = nil,
+        operatorPublicKeyBase64: String
+    ) {
         self.componentId = componentId
         self.name = name
         self.manifestURL = manifestURL
+        self.apiBaseURL = apiBaseURL
         self.operatorPublicKeyBase64 = operatorPublicKeyBase64
+    }
+
+    /// The reference implementation serves `/manifest.json` and `/v1/*`
+    /// from one base. New directory entries should publish `apiBaseURL`
+    /// explicitly; the fallback keeps already-published entries usable.
+    public var resolvedAPIBaseURL: URL {
+        apiBaseURL ?? manifestURL.deletingLastPathComponent()
     }
 }
 

@@ -150,6 +150,9 @@ struct OnymIOSApp: App {
                 manifestFetcher: moderationManifestFetcher,
                 mandateStore: UserDefaultsMandateStore(),
                 backend: backend,
+                authorityClients: URLSessionModerationAuthorityClientFactory(
+                    signer: moderationSigner
+                ),
                 attestation: DCDeviceAttestationProvider(),
                 signer: moderationSigner
             )
@@ -169,6 +172,9 @@ struct OnymIOSApp: App {
             manifestFetcher: moderationManifestFetcher,
             mandateStore: UserDefaultsMandateStore(),
             backend: moderationBackend,
+            authorityClients: URLSessionModerationAuthorityClientFactory(
+                signer: moderationSigner
+            ),
             attestation: DCDeviceAttestationProvider(),
             signer: moderationSigner
         )
