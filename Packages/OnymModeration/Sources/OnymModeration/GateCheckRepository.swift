@@ -117,6 +117,12 @@ public actor GateCheckRepository {
         subsystem: "app.onym.ios", category: "moderation"
     )
 
+    /// Whether served ban verdicts run through `VerdictValidator`
+    /// before display. True everywhere except the UI-test composition,
+    /// whose scenario fixtures are stage props (sentinel signatures,
+    /// fixed refs) rather than authenticated artifacts.
+    private let validatesBanVerdicts: Bool
+
     private let attestation: any DeviceAttestationProvider
     private let backend: any EnforcementBackendClient
     private let moderation: ModerationRepository
@@ -138,6 +144,7 @@ public actor GateCheckRepository {
         signer: any ModerationSigner,
         store: any GateStateStore,
         policy: GateCheckPolicy = .default,
+        validatesBanVerdicts: Bool = true,
         clock: @escaping @Sendable () -> Date = Date.init
     ) {
         self.attestation = attestation
@@ -146,6 +153,7 @@ public actor GateCheckRepository {
         self.signer = signer
         self.store = store
         self.policy = policy
+        self.validatesBanVerdicts = validatesBanVerdicts
         self.clock = clock
     }
 
@@ -246,17 +254,27 @@ public actor GateCheckRepository {
             )
             return .success(await sanitize(try await backend.gateCheck(request)))
         } catch {
-            // Same deterministic/ambiguous split as everywhere else in
-            // the seat: a 4xx (minus the transient 408/429) can't
-            // become a success by retrying and must not be mistaken
-            // for being offline.
-            if case let AuthorityClientError.rejected(rejection) = error,
-               (400..<500).contains(rejection.statusCode),
-               rejection.statusCode != 408, rejection.statusCode != 429 {
+            // Only a recognizable SESSION refusal blocks: 401/403, or
+            // the backend's own session codes. A broader any-4xx rule
+            // would convert a deploy or encoding regression (404 on a
+            // renamed route, 400 from body drift) into an immediate
+            // hard block for every user with grace discarded — those
+            // fall through to `.unreachable` and the grace window.
+            if Self.isSessionRefusal(error) {
                 return .refused
             }
             return .unreachable
         }
+    }
+
+    private static func isSessionRefusal(_ error: Error) -> Bool {
+        guard case let AuthorityClientError.rejected(rejection) = error else {
+            return false
+        }
+        if rejection.statusCode == 401 || rejection.statusCode == 403 {
+            return true
+        }
+        return ["no_mandate", "signature_invalid"].contains(rejection.rawCode)
     }
 
     /// A served ban's embedded verdict is display metadata — the marks
@@ -267,7 +285,8 @@ public actor GateCheckRepository {
     /// verdict is stripped so its narrative never renders, while the
     /// ban itself stands.
     private func sanitize(_ result: GateCheckResult) async -> GateCheckResult {
-        guard case .banned(let state) = result, let verdict = state.verdict else {
+        guard validatesBanVerdicts,
+              case .banned(let state) = result, let verdict = state.verdict else {
             return result
         }
         guard let record = await moderation.mandateRecord(forRef: verdict.mandateRef),

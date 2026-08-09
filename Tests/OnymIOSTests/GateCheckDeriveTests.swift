@@ -14,6 +14,26 @@ final class GateCheckDeriveTests: XCTestCase {
         BanState(verdictRef: "verdict-1", authorityContact: "appeals@authority.example")
     }
 
+    // MARK: - Refused
+
+    func testRefusedBlocksNowButKeepsPersistedState() {
+        let persisted = PersistedGateState(
+            lastResult: .clear,
+            lastSuccessAt: now.addingTimeInterval(-60)
+        )
+        let (status, kept) = GateCheckRepository.derive(
+            persisted: persisted,
+            attempt: .refused,
+            now: now,
+            policy: policy
+        )
+        // A reachable backend's refusal blocks immediately — the grace
+        // window is for network conditions, not for a 401 — but the
+        // persisted state is kept so a later good check overwrites.
+        XCTAssertEqual(status, .gateCheckRequired(.backendRefused))
+        XCTAssertEqual(kept, persisted)
+    }
+
     // MARK: - Success
 
     func testSuccessClearIsOperationalAndPersists() {

@@ -1104,6 +1104,34 @@ final class ModerationRepositoryTests: XCTestCase {
         XCTAssertTrue(reportStore.load().isEmpty)
     }
 
+    func testGarbageCountersignatureAbortsConsent() async throws {
+        let componentId = "onym:component:a"
+        let bytes = manifestBytes(componentId: componentId)
+        let backend = RecordingBackend()
+        backend.countersignature = "not-base64-garbage"
+        let repository = makeRepository(
+            listings: [listing(componentId, name: "A")],
+            bytesByComponent: [componentId: bytes],
+            backend: backend,
+            authorityClient: RecordingAuthorityClient(),
+            store: InMemoryMandateStore(records: [])
+        )
+        try await repository.refresh()
+        let state = await repository.currentState()
+        let listing = try XCTUnwrap(state.authorities.first)
+        let reviewed = try await repository.manifestForReview(listing)
+
+        do {
+            _ = try await repository.consent(to: listing, reviewedManifest: reviewed)
+            XCTFail("a garbage countersignature must abort consent")
+        } catch ModerationError.countersignatureInvalid {
+            // expected — an empty or undecodable string must never
+            // mint an active, countersigned record.
+        }
+        let active = await repository.activeMandateRecord()
+        XCTAssertNil(active)
+    }
+
     func testPurgeReportRecordsDropsReportersNoLongerPresent() async throws {
         let mine = filedRecord(reportId: "report-mine", reporter: "onym:key:test-user")
         let removed = filedRecord(reportId: "report-gone", reporter: "onym:key:removed-user")

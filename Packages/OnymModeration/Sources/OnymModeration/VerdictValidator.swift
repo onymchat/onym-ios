@@ -31,8 +31,9 @@ public struct VerdictValidator: Sendable {
     ///     pins — validating against any other manifest would validate
     ///     against terms the user never consented to.
     ///   - enforceSignature: signature failures throw only under
-    ///     enforcement (soft mode logs and continues — no real authority
-    ///     signs verdicts yet; see `ModerationTrust`).
+    ///     enforcement (the shipped default — the deployed authority
+    ///     signs verdicts; see `ModerationTrust`). Soft mode logs and
+    ///     continues, for callers validating stage-prop fixtures.
     /// - Returns: whether the verdict is executable now or stored until
     ///   its `executeAfter`.
     /// - Throws: `ModerationError` on any shape violation.

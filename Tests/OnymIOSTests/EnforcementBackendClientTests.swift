@@ -97,6 +97,53 @@ final class EnforcementBackendClientTests: XCTestCase {
         XCTAssertEqual(json["signature"] as? String, Data("sig".utf8).base64EncodedString())
     }
 
+    func testEnrollWithNilTokenOmitsTheKeyEntirely() async throws {
+        // The apple service's serde `Option<String>` treats an absent
+        // key as None; the signed payload hashes a nil token as empty.
+        // The simulator / no-attestation path ships exactly this shape.
+        let recorded = RecordedRequest()
+        StubURLProtocol.set { request in
+            recorded.record(url: request.url, body: Self.body(of: request))
+            return Self.ok(request, #"{"deviceBinding":"binding-1"}"#)
+        }
+
+        _ = try await makeClient().enrollDevice(EnrollmentRequest(
+            deviceToken: nil,
+            userKey: "onym:key:0102",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            signature: Data("sig".utf8)
+        ))
+
+        let json = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: XCTUnwrap(recorded.body)) as? [String: Any]
+        )
+        XCTAssertNil(json["deviceToken"], "nil token must be an absent key, not null")
+        XCTAssertFalse(json.keys.contains("deviceToken"))
+    }
+
+    func testGateCheckWithNilTokenAndMandateRefOmitsBothKeys() async throws {
+        let recorded = RecordedRequest()
+        StubURLProtocol.set { request in
+            recorded.record(url: request.url, body: Self.body(of: request))
+            return Self.ok(request, #"{"clear":{}}"#)
+        }
+
+        _ = try await makeClient().gateCheck(GateCheckRequest(
+            deviceToken: nil,
+            userKey: "onym:key:0102",
+            mandateRef: nil,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            signature: Data("sig".utf8)
+        ))
+
+        let json = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: XCTUnwrap(recorded.body)) as? [String: Any]
+        )
+        XCTAssertFalse(json.keys.contains("deviceToken"))
+        XCTAssertFalse(json.keys.contains("mandateRef"))
+        XCTAssertEqual(json["userKey"] as? String, "onym:key:0102")
+    }
+
     // MARK: - Countersign
 
     func testCountersignSendsCanonicalMandateAndDecodesSignature() async throws {

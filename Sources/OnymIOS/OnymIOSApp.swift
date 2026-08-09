@@ -141,7 +141,12 @@ struct OnymIOSApp: App {
                 backend: backend,
                 moderation: moderationRepository,
                 signer: moderationSigner,
-                store: UITestGateStateStore()
+                store: UITestGateStateStore(),
+                // Scenario fixtures are stage props (sentinel
+                // signatures, fixed refs), not authenticated
+                // artifacts; validating them would strip the ban
+                // screen's verdict rows in every `banned` scenario.
+                validatesBanVerdicts: false
             )
         } else {
             // `--enforcement-base-url http://localhost:8080` points a

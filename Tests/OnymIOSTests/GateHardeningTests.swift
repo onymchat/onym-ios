@@ -184,6 +184,134 @@ final class GateHardeningTests: XCTestCase {
         }
     }
 
+    /// Answers every gate check with a fixed result.
+    private struct FixedResultBackend: EnforcementBackendClient {
+        let result: GateCheckResult
+        func enrollDevice(_ request: EnrollmentRequest) async throws -> DeviceEnrollment {
+            DeviceEnrollment(deviceBinding: "enrollment-1")
+        }
+        func countersignMandate(_ mandate: ModerationMandate) async throws -> InterfaceCountersignature {
+            InterfaceCountersignature(signature: "unused")
+        }
+        func gateCheck(_ request: GateCheckRequest) async throws -> GateCheckResult {
+            result
+        }
+    }
+
+    private func seededActiveRecord() -> MandateRecord {
+        MandateRecord(
+            mandate: ModerationMandate(
+                user: "onym:key:user",
+                interface: "onym:component:onym-ios",
+                authority: "onym:component:authority",
+                manifestHash: "aa",
+                classes: ["csam"],
+                deviceBinding: "enrollment-1",
+                acceptedAt: now,
+                signatures: ["user-sig"]
+            ),
+            manifestBytes: Data("{}".utf8),
+            authorityName: "A",
+            countersigned: false,
+            isActive: true,
+            createdAt: now
+        )
+    }
+
+    private func bannedResultWithVerdict(mandateRef: String) -> GateCheckResult {
+        .banned(BanState(
+            verdictRef: "verdict-1",
+            verdict: Verdict(
+                caseId: "case-1",
+                authority: "onym:component:authority",
+                mandateRef: mandateRef,
+                accusedKeys: ["onym:key:user"],
+                deviceBinding: "enrollment-1",
+                classId: "csam",
+                disposition: .ban,
+                marks: Marks(caseOpen: false, banned: true),
+                banExpires: nil,
+                executeAfter: now,
+                reasoning: "reasoning",
+                appealDeadline: now,
+                decidedAt: now,
+                signature: "not-a-real-signature",
+                isFinal: false
+            ),
+            authorityContact: "appeals@authority.example"
+        ))
+    }
+
+    func testUnverifiableBanVerdictIsStrippedButBanStands() async throws {
+        // The served verdict names a mandateRef no local record holds —
+        // validation cannot even locate the consented terms. The ban
+        // must stand (the marks are the enforcement) with the verdict
+        // narrative stripped, never render unauthenticated content.
+        let backend = FixedResultBackend(
+            result: bannedResultWithVerdict(mandateRef: "unknown-ref")
+        )
+        let moderation = ModerationRepository(
+            authoritiesFetcher: EmptyAuthoritiesFetcher(),
+            manifestFetcher: UnusedManifestFetcher(),
+            mandateStore: SeededMandateStore(records: [seededActiveRecord()]),
+            backend: backend,
+            authorityClients: StubModerationAuthorityClientFactory(),
+            attestation: FixedAttestation(),
+            signer: FixedSigner(),
+            clock: { [now] in now }
+        )
+        let gate = GateCheckRepository(
+            attestation: FixedAttestation(),
+            backend: backend,
+            moderation: moderation,
+            signer: FixedSigner(),
+            store: InMemoryGateStateStore(),
+            clock: { [now] in now }
+        )
+
+        await gate.checkNow()
+
+        guard case .banned(let state) = await gate.currentStatus() else {
+            return XCTFail("the ban must stand")
+        }
+        XCTAssertNil(state.verdict, "an unverifiable verdict must not render")
+        XCTAssertEqual(state.verdictRef, "verdict-1")
+    }
+
+    func testStagePropVerdictSurvivesWhenValidationDisabled() async throws {
+        // The UI-test composition disables validation because scenario
+        // fixtures are stage props; the ban screen must keep its rows.
+        let backend = FixedResultBackend(
+            result: bannedResultWithVerdict(mandateRef: "unknown-ref")
+        )
+        let moderation = ModerationRepository(
+            authoritiesFetcher: EmptyAuthoritiesFetcher(),
+            manifestFetcher: UnusedManifestFetcher(),
+            mandateStore: SeededMandateStore(records: [seededActiveRecord()]),
+            backend: backend,
+            authorityClients: StubModerationAuthorityClientFactory(),
+            attestation: FixedAttestation(),
+            signer: FixedSigner(),
+            clock: { [now] in now }
+        )
+        let gate = GateCheckRepository(
+            attestation: FixedAttestation(),
+            backend: backend,
+            moderation: moderation,
+            signer: FixedSigner(),
+            store: InMemoryGateStateStore(),
+            validatesBanVerdicts: false,
+            clock: { [now] in now }
+        )
+
+        await gate.checkNow()
+
+        guard case .banned(let state) = await gate.currentStatus() else {
+            return XCTFail("the ban must stand")
+        }
+        XCTAssertNotNil(state.verdict)
+    }
+
     private struct FixedAttestation: DeviceAttestationProvider {
         var isSupported: Bool { true }
         func generateToken() async throws -> Data { Data("token".utf8) }
