@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// One block of a parsed markdown document. Foundation's markdown
 /// parser (`AttributedString(markdown:)` with `.full` syntax) styles
@@ -15,23 +16,45 @@ public struct MarkdownBlock: Identifiable, Equatable {
         case codeBlock
         case quote
         case divider
+        /// Rows of cells; the first row is the header (dropped when
+        /// its cells are all empty — `| | |` header syntax).
+        case table(rows: [[AttributedString]])
     }
 
     public let id: Int
     public let kind: Kind
     public let text: AttributedString
 
-    public static func blocks(from markdown: String) -> [MarkdownBlock] {
+    /// `baseURL` resolves relative links (`./evidence-rules`,
+    /// `#anchor`) against the document's own address — policy
+    /// documents cross-reference each other relatively, and a link
+    /// with no base is parsed but dead: rendered tappable-looking,
+    /// going nowhere.
+    public static func blocks(from markdown: String, baseURL: URL? = nil) -> [MarkdownBlock] {
         let options = AttributedString.MarkdownParsingOptions(
             allowsExtendedAttributes: false,
             interpretedSyntax: .full,
             failurePolicy: .returnPartiallyParsedIfPossible
         )
-        guard let parsed = try? AttributedString(markdown: markdown, options: options) else {
+        guard var parsed = try? AttributedString(markdown: markdown, options: options) else {
             // Unparseable input is still readable input.
             return [MarkdownBlock(id: 0, kind: .paragraph, text: AttributedString(markdown))]
         }
+        if let baseURL {
+            let relative = parsed.runs.compactMap { run -> (Range<AttributedString.Index>, URL)? in
+                guard let link = run.link, link.scheme == nil,
+                      let resolved = URL(string: link.relativeString, relativeTo: baseURL)
+                else { return nil }
+                return (run.range, resolved.absoluteURL)
+            }
+            for (range, resolved) in relative {
+                parsed[range].link = resolved
+            }
+        }
+
         var blocks: [MarkdownBlock] = []
+        var table = TableAccumulator()
+
         for (intent, range) in parsed.runs[\.presentationIntent] {
             let slice = AttributedString(parsed[range])
             var kind = Kind.paragraph
@@ -39,6 +62,7 @@ public struct MarkdownBlock: Identifiable, Equatable {
             var ordered = false
             var listDepth = 0
             var isDivider = false
+            var cell: TableAccumulator.Cell?
             for component in intent?.components ?? [] {
                 switch component.kind {
                 case .header(let level):
@@ -56,9 +80,28 @@ public struct MarkdownBlock: Identifiable, Equatable {
                     listDepth += 1
                 case .thematicBreak:
                     isDivider = true
+                case .table:
+                    cell = (cell ?? TableAccumulator.Cell()).with(tableIdentity: component.identity)
+                case .tableHeaderRow:
+                    cell = (cell ?? TableAccumulator.Cell()).with(row: -1)
+                case .tableRow(let rowIndex):
+                    cell = (cell ?? TableAccumulator.Cell()).with(row: rowIndex)
+                case .tableCell(let columnIndex):
+                    cell = (cell ?? TableAccumulator.Cell()).with(column: columnIndex)
                 default:
                     break
                 }
+            }
+            if let cell {
+                // Flush a finished table when a different one starts
+                // back to back.
+                if let rows = table.addIfNewTable(cell: cell, text: slice) {
+                    blocks.append(MarkdownBlock(id: blocks.count, kind: .table(rows: rows), text: AttributedString()))
+                }
+                continue
+            }
+            if let rows = table.flush() {
+                blocks.append(MarkdownBlock(id: blocks.count, kind: .table(rows: rows), text: AttributedString()))
             }
             if isDivider {
                 blocks.append(MarkdownBlock(id: blocks.count, kind: .divider, text: AttributedString()))
@@ -70,28 +113,78 @@ public struct MarkdownBlock: Identifiable, Equatable {
             guard !slice.characters.allSatisfy(\.isWhitespace) else { continue }
             blocks.append(MarkdownBlock(id: blocks.count, kind: kind, text: slice))
         }
+        if let rows = table.flush() {
+            blocks.append(MarkdownBlock(id: blocks.count, kind: .table(rows: rows), text: AttributedString()))
+        }
         return blocks
+    }
+
+    /// Collects table cells (which arrive as one run per cell) back
+    /// into rows. Header row is index -1; a header of empty cells —
+    /// the `| | |` key-value-table idiom — is dropped.
+    private struct TableAccumulator {
+        struct Cell {
+            var tableIdentity: Int?
+            var row: Int?
+            var column: Int?
+
+            func with(tableIdentity: Int? = nil, row: Int? = nil, column: Int? = nil) -> Cell {
+                var copy = self
+                if let tableIdentity { copy.tableIdentity = tableIdentity }
+                if let row { copy.row = row }
+                if let column { copy.column = column }
+                return copy
+            }
+        }
+
+        private var identity: Int?
+        private var cells: [(row: Int, column: Int, text: AttributedString)] = []
+
+        /// Adds the cell; returns finished rows when the cell opens a
+        /// *different* table than the one being collected.
+        mutating func addIfNewTable(cell: Cell, text: AttributedString) -> [[AttributedString]]? {
+            var flushed: [[AttributedString]]?
+            if let identity, identity != cell.tableIdentity {
+                flushed = flush()
+            }
+            identity = cell.tableIdentity
+            cells.append((row: cell.row ?? 0, column: cell.column ?? 0, text: text))
+            return flushed
+        }
+
+        mutating func flush() -> [[AttributedString]]? {
+            guard !cells.isEmpty else { return nil }
+            defer {
+                identity = nil
+                cells = []
+            }
+            let byRow = Dictionary(grouping: cells, by: \.row)
+            let rows = byRow.keys.sorted().map { rowIndex -> [AttributedString] in
+                byRow[rowIndex]!.sorted { $0.column < $1.column }.map(\.text)
+            }
+            // Tradeoff, accepted: this also drops a legitimate row
+            // whose cells are ALL blank, not just the `| | |` header.
+            // A fully blank data row carries nothing a policy reader
+            // loses; rows with any content survive intact.
+            return rows.filter { row in
+                !row.allSatisfy { $0.characters.allSatisfy(\.isWhitespace) }
+            }
+        }
     }
 }
 
 /// In-app viewer for a fetched markdown document — the system parser
-/// only, no rendering dependency. An HTML answer (the address turned
-/// out to be a web page, not a document) hands off to the browser
-/// instead of pretending to render it.
+/// only, no rendering dependency. Links between documents stay
+/// in-app: policy documents cross-reference each other, and bouncing
+/// to Safari per hop would defeat the viewer. An HTML answer (the
+/// address turned out to be a web page, not a document) hands off to
+/// the browser instead of pretending to render it.
 public struct MarkdownDocumentView: View {
-    private enum Phase {
-        case loading
-        case document([MarkdownBlock])
-        case webPage
-        case failed
-    }
-
     private let title: String
     private let url: URL
 
-    @State private var phase: Phase = .loading
+    @State private var path: [URL] = []
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.openURL) private var openURL
 
     public init(title: String, url: URL) {
         self.title = title
@@ -99,42 +192,110 @@ public struct MarkdownDocumentView: View {
     }
 
     public var body: some View {
-        NavigationStack {
-            Group {
-                switch phase {
-                case .loading:
-                    ProgressView()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                case .document(let blocks):
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 12) {
-                            ForEach(blocks) { block in
-                                blockView(block)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(20)
-                    }
-                case .webPage:
-                    handOff(
-                        message: String(localized: "This document is a web page.")
-                    )
-                case .failed:
-                    handOff(
-                        message: String(localized: "The document could not be fetched.")
+        NavigationStack(path: $path) {
+            MarkdownDocumentContent(title: title, url: url, onDone: { dismiss() })
+                .navigationDestination(for: URL.self) { destination in
+                    // Pushed pages carry their own Done: the sheet
+                    // must close in one tap from any depth, not by
+                    // popping back through each followed document.
+                    MarkdownDocumentContent(
+                        title: Self.impliedTitle(of: destination),
+                        url: destination,
+                        onDone: { dismiss() }
                     )
                 }
+        }
+        .environment(\.openURL, OpenURLAction { destination in
+            // In-app follow is a same-host privilege. The viewer's
+            // chrome says "this is the authority's document" and shows
+            // no address, so rendering another domain inside it would
+            // borrow the authority's trust for arbitrary content. The
+            // authority's own cross-references (./evidence-rules) stay
+            // in-app; everything else goes to the system, where the
+            // address is visible.
+            guard Self.followsInApp(destination, from: url) else {
+                return .systemAction
             }
-            .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
+            path.append(destination)
+            return .handled
+        })
+        .accessibilityIdentifier("moderation.document")
+    }
+
+    /// Whether a tapped link is the root document's own authority
+    /// speaking — a web URL on the same host — and may render inside
+    /// the viewer's chrome.
+    public static func followsInApp(_ destination: URL, from root: URL) -> Bool {
+        guard destination.scheme == "https" || destination.scheme == "http" else {
+            return false
+        }
+        guard let destinationHost = destination.host?.lowercased(),
+              let rootHost = root.host?.lowercased() else {
+            return false
+        }
+        return destinationHost == rootHost
+    }
+
+    /// A followed link has no display title of its own; the last path
+    /// component's words are the best available.
+    private static func impliedTitle(of url: URL) -> String {
+        let slug = url.deletingPathExtension().lastPathComponent
+            .replacingOccurrences(of: "-", with: " ")
+        guard let first = slug.first else { return slug }
+        return first.uppercased() + slug.dropFirst()
+    }
+}
+
+/// One document: fetch, parse, lay out. No navigation chrome of its
+/// own so the stack can push it for links followed within a document.
+struct MarkdownDocumentContent: View {
+    private enum Phase {
+        case loading
+        case document([MarkdownBlock])
+        case webPage
+        case failed
+    }
+
+    let title: String
+    let url: URL
+    let onDone: () -> Void
+
+    @State private var phase: Phase = .loading
+
+    var body: some View {
+        Group {
+            switch phase {
+            case .loading:
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            case .document(let blocks):
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(blocks) { block in
+                            blockView(block)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(20)
                 }
+            case .webPage:
+                handOff(
+                    message: String(localized: "This document is a web page.")
+                )
+            case .failed:
+                handOff(
+                    message: String(localized: "The document could not be fetched.")
+                )
+            }
+        }
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Done", action: onDone)
             }
         }
         .task { await load() }
-        .accessibilityIdentifier("moderation.document")
     }
 
     private func handOff(message: String) -> some View {
@@ -143,7 +304,10 @@ public struct MarkdownDocumentView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
             Button {
-                openURL(url)
+                // Deliberately around the viewer's own link handling:
+                // this is the one place a web destination must reach
+                // the browser.
+                UIApplication.shared.open(url)
             } label: {
                 Label("Open in browser", systemImage: "safari")
             }
@@ -191,6 +355,19 @@ public struct MarkdownDocumentView: View {
             }
         case .divider:
             Divider()
+        case .table(let rows):
+            Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 8) {
+                ForEach(rows.indices, id: \.self) { rowIndex in
+                    GridRow {
+                        ForEach(rows[rowIndex].indices, id: \.self) { columnIndex in
+                            Text(rows[rowIndex][columnIndex])
+                                .font(.callout)
+                        }
+                    }
+                }
+            }
+            .padding(12)
+            .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
         }
     }
 
@@ -221,7 +398,7 @@ public struct MarkdownDocumentView: View {
             if looksLikeHTML {
                 phase = .webPage
             } else {
-                phase = .document(MarkdownBlock.blocks(from: text))
+                phase = .document(MarkdownBlock.blocks(from: text, baseURL: url))
             }
         } catch {
             phase = .failed

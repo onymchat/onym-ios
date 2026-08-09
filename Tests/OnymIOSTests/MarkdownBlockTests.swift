@@ -62,6 +62,73 @@ final class MarkdownBlockTests: XCTestCase {
         )
     }
 
+    /// The live policy documents cross-reference each other with
+    /// relative links (`./evidence-rules#anchor`); unresolved they
+    /// render tappable-looking but dead.
+    func testRelativeLinksResolveAgainstTheDocumentURL() throws {
+        let blocks = MarkdownBlock.blocks(
+            from: "[What these windows mean](./evidence-rules#what-the-windows-mean).",
+            baseURL: URL(string: "https://authority.example/policy/csam")!
+        )
+        let link = try XCTUnwrap(blocks[0].text.runs.compactMap(\.link).first)
+        XCTAssertEqual(
+            link.absoluteString,
+            "https://authority.example/policy/evidence-rules#what-the-windows-mean"
+        )
+
+        // Absolute links stay untouched.
+        let absolute = MarkdownBlock.blocks(
+            from: "[elsewhere](https://other.example/doc)",
+            baseURL: URL(string: "https://authority.example/policy/csam")!
+        )
+        XCTAssertEqual(
+            absolute[0].text.runs.compactMap(\.link).first?.absoluteString,
+            "https://other.example/doc"
+        )
+    }
+
+    /// The policy docs' "Terms" table uses the empty-header key-value
+    /// idiom (`| | |`); the empty header row must not render.
+    func testTablesBecomeRowsAndEmptyHeadersAreDropped() {
+        let blocks = MarkdownBlock.blocks(from: """
+        | | |
+        |---|---|
+        | Response window | 3 days |
+        | Ban term | 365 days |
+        """)
+
+        XCTAssertEqual(blocks.count, 1)
+        guard case .table(let rows) = blocks[0].kind else {
+            return XCTFail("expected a table, got \(blocks[0].kind)")
+        }
+        XCTAssertEqual(
+            rows.map { $0.map { String($0.characters) } },
+            [["Response window", "3 days"], ["Ban term", "365 days"]]
+        )
+    }
+
+    /// In-app follow is a same-host privilege: the viewer's chrome
+    /// shows no address, so another domain rendered inside it would
+    /// borrow the authority's trust.
+    func testOnlySameHostWebLinksFollowInApp() {
+        let root = URL(string: "https://authority.example/policy/csam")!
+        XCTAssertTrue(MarkdownDocumentView.followsInApp(
+            URL(string: "https://authority.example/policy/evidence-rules")!, from: root
+        ))
+        XCTAssertTrue(MarkdownDocumentView.followsInApp(
+            URL(string: "https://AUTHORITY.example/other")!, from: root
+        ), "host comparison is case-insensitive")
+        XCTAssertFalse(MarkdownDocumentView.followsInApp(
+            URL(string: "https://other.example/policy/csam")!, from: root
+        ), "a foreign domain must not render inside the trusted chrome")
+        XCTAssertFalse(MarkdownDocumentView.followsInApp(
+            URL(string: "https://evil.authority.example/policy")!, from: root
+        ), "subdomains are foreign too")
+        XCTAssertFalse(MarkdownDocumentView.followsInApp(
+            URL(string: "mailto:someone@authority.example")!, from: root
+        ), "non-web schemes are the system's")
+    }
+
     func testUnparseableInputFallsBackToPlainParagraph() {
         // Nothing markdown can't represent as *something*; the
         // guarantee is no crash and no dropped content.
