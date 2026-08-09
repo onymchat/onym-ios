@@ -49,18 +49,17 @@ struct RootView: View {
                 }
             case .checking, .needsConsent, .operational:
                 tabs
-                    // Reserve space for the banner inside the safe area so
-                    // it sits below each navigation bar instead of covering
-                    // its actionable buttons.
-                    .safeAreaInset(edge: .top, spacing: 0) {
+                    // Reserve space above the tab bar so the banner never
+                    // covers its actionable buttons.
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
                         if case .operational(let openCases) = dependencies.moderationGateFlow.gate,
                            !openCases.isEmpty {
                             OpenCaseBanner(
                                 notices: openCases,
                                 makeCaseFlow: dependencies.makeModerationCaseFlow
                             )
-                            .padding(.top, 8)
-                            .padding(.bottom, 4)
+                            .padding(.top, 4)
+                            .padding(.bottom, 8)
                         }
                     }
             }
