@@ -107,6 +107,13 @@ final class ModerationAuthorityClientTests: XCTestCase {
               "name":"Missing API endpoint",
               "manifestURL":"https://cdn.example/invalid/manifest.json",
               "operatorPublicKeyBase64":"key"
+            },
+            {
+              "componentId":"onym:component:insecure",
+              "name":"Insecure API endpoint",
+              "manifestURL":"https://cdn.example/insecure/manifest.json",
+              "apiBaseURL":"http://api.example/insecure",
+              "operatorPublicKeyBase64":"key"
             }
           ]
         }
@@ -115,6 +122,29 @@ final class ModerationAuthorityClientTests: XCTestCase {
         let document = try JSONDecoder().decode(KnownAuthoritiesDocument.self, from: data)
 
         XCTAssertEqual(document.authorities.map(\.componentId), ["onym:component:valid"])
+    }
+
+    func testAuthorityClientRejectsInsecureBaseURLBeforeSendingSignedBytes() async throws {
+        StubURLProtocol.set { _ in
+            XCTFail("an insecure Authority endpoint must be rejected before sending a request")
+            throw URLError(.badURL)
+        }
+        let insecureURL = URL(string: "http://authority.example/service")!
+        let client = URLSessionModerationAuthorityClient(
+            baseURL: insecureURL,
+            session: session,
+            signer: FakeSigner(),
+            clock: { Date(timeIntervalSince1970: 1_700_000_000) }
+        )
+
+        do {
+            _ = try await client.registerMandate(mandate())
+            XCTFail("expected insecure transport rejection")
+        } catch let AuthorityClientError.insecureBaseURL(url) {
+            XCTAssertEqual(url, insecureURL.absoluteString)
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
     }
 
     func testRegisterMandatePostsCanonicalBodyAndChecksReference() async throws {

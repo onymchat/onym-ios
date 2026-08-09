@@ -85,6 +85,7 @@ public enum AuthorityClientError: Error, Sendable, Equatable {
     case mandateNotAccepted(mandateRef: String)
     case mandateReferenceMismatch(expected: String, received: String)
     case invalidPathComponent(String)
+    case insecureBaseURL(String)
 }
 
 /// The accused's signed response to a case notice: statements and
@@ -361,6 +362,9 @@ public struct URLSessionModerationAuthorityClient: ModerationAuthorityClient {
         body: Data? = nil,
         headers: [String: String] = [:]
     ) async throws -> Data {
+        guard baseURL.scheme?.lowercased() == "https", baseURL.host != nil else {
+            throw AuthorityClientError.insecureBaseURL(baseURL.absoluteString)
+        }
         let allowed = CharacterSet(
             charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
         )

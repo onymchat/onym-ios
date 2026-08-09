@@ -1,5 +1,6 @@
 import Foundation
 import OnymFoundation
+import os.log
 
 /// One entry in the interface's published authority directory. The
 /// directory pins each authority's operator public key out-of-band
@@ -35,10 +36,40 @@ public struct AuthorityListing: Codable, Sendable, Equatable {
 }
 
 private struct LossyAuthorityListing: Decodable {
+    private static let log = Logger(
+        subsystem: "app.onym.ios",
+        category: "ModerationDirectory"
+    )
+
     let value: AuthorityListing?
 
     init(from decoder: Decoder) throws {
-        value = try? AuthorityListing(from: decoder)
+        do {
+            let listing = try AuthorityListing(from: decoder)
+            guard listing.apiBaseURL.scheme?.lowercased() == "https",
+                  listing.apiBaseURL.host != nil
+            else {
+                throw DecodingError.dataCorrupted(
+                    .init(
+                        codingPath: decoder.codingPath,
+                        debugDescription: "Authority apiBaseURL must use HTTPS"
+                    )
+                )
+            }
+            value = listing
+        } catch {
+            let componentId = (try? decoder.container(keyedBy: DiagnosticKeys.self))
+                .flatMap { try? $0.decodeIfPresent(String.self, forKey: .componentId) }
+                ?? "<unknown>"
+            Self.log.error(
+                "Skipping malformed Authority \(componentId, privacy: .public): \(String(describing: error), privacy: .public)"
+            )
+            value = nil
+        }
+    }
+
+    private enum DiagnosticKeys: String, CodingKey {
+        case componentId
     }
 }
 

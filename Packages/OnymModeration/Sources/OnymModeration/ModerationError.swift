@@ -29,6 +29,12 @@ public enum ModerationError: Error, Sendable, Equatable {
     /// be parsed — absent prefix, or an empty/blank identifier naming
     /// no component. See `ComponentReference`.
     case componentReferenceInvalid(String)
+    /// A persisted registration cannot be retried because its Authority
+    /// is not present in the Interface's current designated directory.
+    case authorityUnavailable(String)
+    /// The requested artifact has already resolved (or was never a
+    /// persisted registration attempt).
+    case registrationNotPending
     /// DeviceCheck is unsupported here (simulator, enterprise-signed
     /// build). Callers degrade toward gate-check-required, never toward
     /// unmoderated operation (profile §8.5).

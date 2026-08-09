@@ -114,6 +114,7 @@ final class ModerationRepositoryTests: XCTestCase {
         private var _accepted = true
         private var _registrationError: AuthorityClientError?
         private var _rejectedManifestHash: String?
+        private var _registrationDelayNanoseconds: UInt64 = 0
 
         var mandates: [ModerationMandate] { lock.withLock { _mandates } }
         var shouldFail: Bool {
@@ -136,20 +137,28 @@ final class ModerationRepositoryTests: XCTestCase {
             get { lock.withLock { _rejectedManifestHash } }
             set { lock.withLock { _rejectedManifestHash = newValue } }
         }
+        var registrationDelayNanoseconds: UInt64 {
+            get { lock.withLock { _registrationDelayNanoseconds } }
+            set { lock.withLock { _registrationDelayNanoseconds = newValue } }
+        }
 
         func registerMandate(
             _ mandate: ModerationMandate
         ) async throws -> MandateRegistrationReceipt {
             let state = lock.withLock {
-                () -> (Bool, String?, Bool, AuthorityClientError?, String?) in
+                () -> (Bool, String?, Bool, AuthorityClientError?, String?, UInt64) in
                 _mandates.append(mandate)
                 return (
                     _shouldFail,
                     _returnedReference,
                     _accepted,
                     _registrationError,
-                    _rejectedManifestHash
+                    _rejectedManifestHash,
+                    _registrationDelayNanoseconds
                 )
+            }
+            if state.5 > 0 {
+                try await Task.sleep(nanoseconds: state.5)
             }
             if state.0 { throw RegistrationFailure.unavailable }
             if let error = state.3 { throw error }
@@ -485,6 +494,120 @@ final class ModerationRepositoryTests: XCTestCase {
         XCTAssertTrue(active.authorityRegistered)
         XCTAssertEqual(active.mandate, pending.mandate)
         XCTAssertEqual(authority.mandates, [pending.mandate])
+    }
+
+    func testStartRetryDoesNotReplaceANewerActiveAuthority() async throws {
+        let oldID = "onym:component:old"
+        let currentID = "onym:component:current"
+        let oldBytes = manifestBytes(componentId: oldID)
+        let currentBytes = manifestBytes(componentId: currentID)
+        let pending = MandateRecord(
+            mandate: ModerationMandate(
+                user: "onym:key:test-user",
+                interface: ModerationRepository.interfaceComponentId,
+                authority: oldID,
+                manifestHash: SignedManifest.hash(of: oldBytes),
+                classes: ["csam"],
+                deviceBinding: "device-1",
+                acceptedAt: now,
+                signatures: ["user-signature", "interface-signature"]
+            ),
+            manifestBytes: oldBytes,
+            authorityName: "Old",
+            countersigned: true,
+            isActive: false,
+            createdAt: now
+        )
+        let current = MandateRecord(
+            mandate: ModerationMandate(
+                user: "onym:key:test-user",
+                interface: ModerationRepository.interfaceComponentId,
+                authority: currentID,
+                manifestHash: SignedManifest.hash(of: currentBytes),
+                classes: ["csam"],
+                deviceBinding: "device-1",
+                acceptedAt: now.addingTimeInterval(1),
+                signatures: ["user-signature", "interface-signature"]
+            ),
+            manifestBytes: currentBytes,
+            authorityName: "Current",
+            countersigned: true,
+            authorityRegistered: true,
+            isActive: true,
+            createdAt: now.addingTimeInterval(1)
+        )
+        let store = InMemoryMandateStore(records: [current, pending])
+        let authority = RecordingAuthorityClient()
+        let repository = makeRepository(
+            listings: [listing(oldID, name: "Old"), listing(currentID, name: "Current")],
+            bytesByComponent: [oldID: oldBytes, currentID: currentBytes],
+            backend: RecordingBackend(),
+            authorityClient: authority,
+            store: store
+        )
+
+        await repository.start()
+        for _ in 0..<100 {
+            if store.load().first(where: { $0.mandate.authority == oldID })?.authorityRegistered
+                == true { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        let records = store.load()
+        let resolvedOld = try XCTUnwrap(records.first(where: { $0.mandate.authority == oldID }))
+        XCTAssertTrue(resolvedOld.authorityRegistered)
+        XCTAssertFalse(resolvedOld.isActive)
+        XCTAssertEqual(records.first(where: \.isActive)?.mandate.authority, currentID)
+        XCTAssertEqual(authority.mandates, [pending.mandate])
+    }
+
+    func testStartRetryAndExplicitConsentShareOneRegistrationFlight() async throws {
+        let componentId = "onym:component:a"
+        let selected = listing(componentId, name: "A")
+        let bytes = manifestBytes(componentId: componentId)
+        let pending = MandateRecord(
+            mandate: ModerationMandate(
+                user: "onym:key:test-user",
+                interface: ModerationRepository.interfaceComponentId,
+                authority: componentId,
+                manifestHash: SignedManifest.hash(of: bytes),
+                classes: ["csam"],
+                deviceBinding: "device-1",
+                acceptedAt: now,
+                signatures: ["user-signature", "interface-signature"]
+            ),
+            manifestBytes: bytes,
+            authorityName: "A",
+            countersigned: true,
+            isActive: false,
+            createdAt: now
+        )
+        let store = InMemoryMandateStore(records: [pending])
+        let authority = RecordingAuthorityClient()
+        authority.registrationDelayNanoseconds = 100_000_000
+        let repository = makeRepository(
+            listings: [selected],
+            bytesByComponent: [componentId: bytes],
+            backend: RecordingBackend(),
+            authorityClient: authority,
+            store: store
+        )
+
+        await repository.start()
+        for _ in 0..<100 {
+            if authority.mandates.count == 1 { break }
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        let reviewed = try await repository.manifestForReview(selected)
+        let activated = try await repository.consent(
+            to: selected,
+            reviewedManifest: reviewed
+        )
+
+        XCTAssertTrue(activated.authorityRegistered)
+        XCTAssertTrue(activated.isActive)
+        XCTAssertEqual(authority.mandates, [pending.mandate])
+        XCTAssertEqual(store.load().count, 1)
     }
 
     func testMismatchedAuthorityReferenceDoesNotActivateMandate() async throws {

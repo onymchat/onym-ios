@@ -89,12 +89,26 @@ public actor ModerationRepository {
         let manifestHash: String
     }
 
+    /// Exact persisted registration artifact. `mandateBytes` includes
+    /// both signatures; `createdAt` distinguishes two locally retained
+    /// records whose signed bytes happen to be identical.
+    private struct RegistrationKey: Hashable {
+        let mandateBytes: Data
+        let createdAt: Date
+    }
+
+    private struct RegistrationFlight {
+        let task: Task<MandateRegistrationReceipt, Error>
+        var waiters: Int
+    }
+
     private var authorities: [AuthorityListing] = []
     private var fetchStatus: AuthorityFetchStatus = .idle
     private var records: [MandateRecord]
     private var continuations: [UUID: AsyncStream<ModerationState>.Continuation] = [:]
     private var startTask: Task<Void, Never>?
     private var consentTasks: [ConsentKey: Task<MandateRecord, Error>] = [:]
+    private var registrationFlights: [RegistrationKey: RegistrationFlight] = [:]
 
     public init(
         authoritiesFetcher: any KnownAuthoritiesFetcher,
@@ -359,6 +373,30 @@ public actor ModerationRepository {
         )
     }
 
+    /// Retry one persisted registration attempt without minting or
+    /// signing anything new. A later consent always wins: resolving an
+    /// older artifact records it as history rather than silently making
+    /// its Authority current again.
+    @discardableResult
+    public func retryRegistration(_ pending: MandateRecord) async throws -> MandateRecord {
+        guard let storedIndex = recordIndex(of: pending) else {
+            throw ModerationError.registrationNotPending
+        }
+        guard records[storedIndex].registrationPending else {
+            return records[storedIndex]
+        }
+        guard let listing = authorities.first(where: {
+            $0.componentId == pending.mandate.authority
+        }) else {
+            throw ModerationError.authorityUnavailable(pending.mandate.authority)
+        }
+        return try await registerPending(
+            pending,
+            with: listing,
+            activate: shouldActivateResolvedPending(pending)
+        )
+    }
+
     // MARK: - AsyncStream
 
     public nonisolated var snapshots: AsyncStream<ModerationState> {
@@ -390,11 +428,9 @@ public actor ModerationRepository {
         let userKey = try await signer.userKeyID()
         guard let pending = records.first(where: {
             $0.mandate.user == userKey && $0.registrationPending
-        }), let listing = authorities.first(where: {
-            $0.componentId == pending.mandate.authority
         }) else { return }
 
-        _ = try await registerPending(pending, with: listing, activate: true)
+        _ = try await retryRegistration(pending)
     }
 
     /// Register a pending countersigned mandate and verify that the
@@ -407,11 +443,30 @@ public actor ModerationRepository {
         activate: Bool
     ) async throws -> MandateRecord {
         let expectedRef = try pending.mandate.mandateHash()
-        let client = authorityClients.client(for: listing)
+        let registrationKey = RegistrationKey(
+            mandateBytes: try ModerationCanonicalEncoder.encode(pending.mandate),
+            createdAt: pending.createdAt
+        )
+        let registrationTask: Task<MandateRegistrationReceipt, Error>
+        if var flight = registrationFlights[registrationKey] {
+            flight.waiters += 1
+            registrationFlights[registrationKey] = flight
+            registrationTask = flight.task
+        } else {
+            let client = authorityClients.client(for: listing)
+            let task = Task {
+                try await client.registerMandate(pending.mandate)
+            }
+            registrationFlights[registrationKey] = RegistrationFlight(task: task, waiters: 1)
+            registrationTask = task
+        }
+
         let receipt: MandateRegistrationReceipt
         do {
-            receipt = try await client.registerMandate(pending.mandate)
+            receipt = try await registrationTask.value
+            releaseRegistrationFlight(registrationKey)
         } catch {
+            releaseRegistrationFlight(registrationKey)
             // A transport failure, malformed reply, or 5xx may happen
             // after the Authority committed, so those retain the exact
             // artifact for retry. A definitive artifact failure cannot
@@ -458,11 +513,15 @@ public actor ModerationRepository {
             publish()
             return recovered
         }
+        let wasPending = records[pendingIndex].registrationPending
         if activate {
             for index in records.indices {
                 records[index].isActive = index == pendingIndex
             }
-        } else {
+        } else if wasPending {
+            // Do not let a second waiter with `activate == false`
+            // deactivate a record an explicit-consent waiter has just
+            // activated from the same shared registration response.
             records[pendingIndex].isActive = false
         }
         records[pendingIndex].authorityRegistered = true
@@ -470,6 +529,31 @@ public actor ModerationRepository {
         mandateStore.save(records)
         publish()
         return activated
+    }
+
+    private func releaseRegistrationFlight(_ key: RegistrationKey) {
+        guard var flight = registrationFlights[key] else { return }
+        flight.waiters -= 1
+        if flight.waiters == 0 {
+            registrationFlights.removeValue(forKey: key)
+        } else {
+            registrationFlights[key] = flight
+        }
+    }
+
+    /// Records are newest-first. Dates make the ordering explicit; the
+    /// array position breaks ties for stores written under a fixed or
+    /// low-resolution clock. Any later completed consent prevents this
+    /// background retry from rolling the user's selection backward.
+    private func shouldActivateResolvedPending(_ pending: MandateRecord) -> Bool {
+        guard let pendingIndex = recordIndex(of: pending) else { return false }
+        return !records.enumerated().contains { index, record in
+            guard record.mandate.user == pending.mandate.user,
+                  !record.registrationPending
+            else { return false }
+            return record.createdAt > pending.createdAt
+                || (record.createdAt == pending.createdAt && index < pendingIndex)
+        }
     }
 
     private func recordIndex(of record: MandateRecord) -> Int? {
@@ -498,7 +582,7 @@ public actor ModerationRepository {
             return (400..<500).contains(rejection.statusCode)
                 && rejection.statusCode != 408
                 && rejection.statusCode != 429
-        case .invalidResponse, .malformedResponse, .invalidPathComponent:
+        case .invalidResponse, .malformedResponse, .invalidPathComponent, .insecureBaseURL:
             return false
         }
     }

@@ -11,6 +11,8 @@ public final class ModerationSettingsFlow {
     public struct State: Equatable {
         public var snapshot: ModerationState = .empty
         public var openCases: [CaseNotice] = []
+        public var retryingRegistration: String?
+        public var registrationErrorMessage: String?
     }
 
     public private(set) var state = State()
@@ -67,5 +69,33 @@ public final class ModerationSettingsFlow {
     /// is retry state, not a mandate the user previously held.
     public var previousMandates: [MandateRecord] {
         state.snapshot.history.filter { !$0.isActive && !$0.registrationPending }
+    }
+
+    /// Signed, countersigned artifacts whose Authority acknowledgement
+    /// is still ambiguous. They are deliberately shown separately from
+    /// both current consent and immutable history.
+    public var pendingRegistrations: [MandateRecord] {
+        state.snapshot.history.filter(\.registrationPending)
+    }
+
+    public func retryRegistration(_ record: MandateRecord) async {
+        let id = record.registrationRowID
+        guard state.retryingRegistration == nil else { return }
+        state.retryingRegistration = id
+        state.registrationErrorMessage = nil
+        defer { state.retryingRegistration = nil }
+        do {
+            try await repository.retryRegistration(record)
+        } catch {
+            state.registrationErrorMessage = String(
+                localized: "Couldn't confirm this mandate with its authority. Try again."
+            )
+        }
+    }
+}
+
+private extension MandateRecord {
+    var registrationRowID: String {
+        "\(mandate.authority)|\(mandate.manifestHash)|\(mandate.acceptedAt.timeIntervalSince1970)"
     }
 }
