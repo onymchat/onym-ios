@@ -9,17 +9,32 @@ public struct ReportFilingRecord: Codable, Sendable, Equatable {
     public let report: Report
     public let authorityName: String
     public var receipt: ReportReceipt?
+    /// The Authority answered 409 for these exact bytes: the report is
+    /// on file but the original receipt is unrecoverable. Terminal like
+    /// `receipt` — the row prunes under the resolved bound and a later
+    /// Submit short-circuits instead of re-delivering. Optional so
+    /// records persisted before this field decode as nil.
+    public var resolvedWithoutReceipt: Bool?
 
     public init(
         sourceMessageId: String,
         report: Report,
         authorityName: String,
-        receipt: ReportReceipt? = nil
+        receipt: ReportReceipt? = nil,
+        resolvedWithoutReceipt: Bool? = nil
     ) {
         self.sourceMessageId = sourceMessageId
         self.report = report
         self.authorityName = authorityName
         self.receipt = receipt
+        self.resolvedWithoutReceipt = resolvedWithoutReceipt
+    }
+
+    /// A row that reached a terminal outcome (accepted with a receipt,
+    /// or confirmed already-on-file) — retained only as history, so it
+    /// is eligible for retention pruning.
+    public var isResolved: Bool {
+        receipt != nil || resolvedWithoutReceipt == true
     }
 }
 

@@ -1023,7 +1023,7 @@ final class ModerationRepositoryTests: XCTestCase {
         XCTAssertNotNil(reportStore.load().first?.receipt)
     }
 
-    func testAlreadyFiledConflictKeepsLedgerRowSoRetryReusesTheSameReportId() async throws {
+    func testAlreadyFiledConflictIsTerminalAndShortCircuitsRetries() async throws {
         let componentId = "onym:component:a"
         let bytes = manifestBytes(componentId: componentId)
         let authority = RecordingAuthorityClient()
@@ -1048,19 +1048,24 @@ final class ModerationRepositoryTests: XCTestCase {
             _ = try await repository.fileReport(message: message, classId: "csam")
             XCTFail("expected the conflict to surface as already-filed")
         } catch let ModerationError.reportAlreadyFiled(reportId) {
-            // Terminal, benign — the UI shows "already on file", not
-            // retry advice.
             XCTAssertEqual(reportId, reportStore.load().first?.report.reportId)
         }
-        // The signed artifact must survive the conflict: any replay has
-        // to reuse the same reportId, never mint a fresh allegation.
-        let retained = try XCTUnwrap(reportStore.load().first?.report)
+        // The row is retained but terminal: it prunes like a receipted
+        // row and never re-delivers.
+        let retained = try XCTUnwrap(reportStore.load().first)
+        XCTAssertEqual(retained.resolvedWithoutReceipt, true)
+        XCTAssertTrue(retained.isResolved)
+
+        // A later Submit short-circuits locally — no second POST, same
+        // reportId in the terminal error.
         authority.reportError = nil
-
-        let receipt = try await repository.fileReport(message: message, classId: "csam")
-
-        XCTAssertEqual(receipt.reportId, retained.reportId)
-        XCTAssertEqual(authority.reports, [retained, retained])
+        do {
+            _ = try await repository.fileReport(message: message, classId: "csam")
+            XCTFail("expected the terminal state to short-circuit")
+        } catch let ModerationError.reportAlreadyFiled(reportId) {
+            XCTAssertEqual(reportId, retained.report.reportId)
+        }
+        XCTAssertEqual(authority.reports.count, 1)
     }
 
     func testDeterministicReportRejectionDiscardsLedgerRow() async throws {

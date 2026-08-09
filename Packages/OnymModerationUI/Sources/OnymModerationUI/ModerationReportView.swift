@@ -16,6 +16,8 @@ public struct ModerationReportView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     if let receipt = flow.state.receipt {
                         success(receipt)
+                    } else if flow.state.alreadyFiled {
+                        alreadyFiled
                     } else {
                         reportForm
                     }
@@ -23,15 +25,36 @@ public struct ModerationReportView: View {
                 .padding(20)
             }
             .background(OnymTokens.surface.ignoresSafeArea())
-            .navigationTitle(flow.state.receipt == nil ? "Report message" : "Report filed")
+            .navigationTitle(isTerminal ? "Report filed" : "Report message")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(flow.state.receipt == nil ? "Cancel" : "Done") { dismiss() }
+                    Button(isTerminal ? "Done" : "Cancel") { dismiss() }
                 }
             }
         }
         .task { await flow.start() }
+    }
+
+    /// Both terminal outcomes: accepted with a receipt, or confirmed
+    /// already on file (409, no receipt to show).
+    private var isTerminal: Bool {
+        flow.state.receipt != nil || flow.state.alreadyFiled
+    }
+
+    private var alreadyFiled: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Image(systemName: "checkmark.shield.fill")
+                .font(.system(size: 44))
+                .foregroundStyle(.green)
+            Text("Your authority already has this report on file.")
+                .font(.title3.weight(.semibold))
+            Text("Nothing further is needed. The reported user receives notice through their interface and can respond before a decision.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityIdentifier("moderation.report.alreadyFiled")
     }
 
     private var reportForm: some View {

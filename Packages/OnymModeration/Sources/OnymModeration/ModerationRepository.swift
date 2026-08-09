@@ -557,6 +557,13 @@ public actor ModerationRepository {
                 )]
         }) {
             if let receipt = existing.receipt { return receipt }
+            if existing.resolvedWithoutReceipt == true {
+                // Confirmed on file (409). Re-delivery can only 409
+                // again; short-circuit to the same terminal outcome.
+                throw ModerationError.reportAlreadyFiled(
+                    reportId: existing.report.reportId
+                )
+            }
             return try await submitReport(existing, to: listing)
         }
 
@@ -612,6 +619,10 @@ public actor ModerationRepository {
             // the Authority protocol grows a report-lookup endpoint.
             if case let AuthorityClientError.rejected(rejection) = error,
                rejection.statusCode == 409 {
+                if let index = reportIndex(of: record) {
+                    reportRecords[index].resolvedWithoutReceipt = true
+                    try? saveReportRecords()
+                }
                 throw ModerationError.reportAlreadyFiled(
                     reportId: record.report.reportId
                 )
@@ -621,6 +632,9 @@ public actor ModerationRepository {
             }
             throw error
         }
+        // The concrete HTTP client correlates this too; repeating the
+        // check here preserves the invariant for every factory-injected
+        // implementation of the protocol.
         guard receipt.reportId == record.report.reportId else {
             throw AuthorityClientError.reportIdentifierMismatch(
                 expected: record.report.reportId,
@@ -642,13 +656,13 @@ public actor ModerationRepository {
     /// bound. Records are newest-first, so dropping from the back of
     /// the receipted subset removes the oldest disclosures first.
     private func saveReportRecords() throws {
-        let resolved = reportRecords.filter { $0.receipt != nil }
+        let resolved = reportRecords.filter(\.isResolved)
         if resolved.count > Self.maxResolvedReportRecords {
             let cutoff = Set(
                 resolved.prefix(Self.maxResolvedReportRecords).map(\.report.reportId)
             )
             reportRecords.removeAll {
-                $0.receipt != nil && !cutoff.contains($0.report.reportId)
+                $0.isResolved && !cutoff.contains($0.report.reportId)
             }
         }
         try reportStore.save(reportRecords)

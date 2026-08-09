@@ -10,6 +10,9 @@ public final class ModerationReportFlow {
         public var isLoading = false
         public var isSubmitting = false
         public var receipt: ReportReceipt?
+        /// Terminal like `receipt`: the Authority confirmed it already
+        /// holds this exact report (409), but no receipt exists to show.
+        public var alreadyFiled = false
         public var errorMessage: String?
     }
 
@@ -70,11 +73,9 @@ public final class ModerationReportFlow {
             )
         } catch ModerationError.reportAlreadyFiled {
             // Terminal and benign: the Authority already holds this
-            // exact report. Retry advice would be wrong — nothing is
-            // left to deliver.
-            state.errorMessage = String(
-                localized: "Your authority already has this report on file."
-            )
+            // exact report. Rendered like success, not as an error —
+            // a Submit retry could only 409 again.
+            state.alreadyFiled = true
         } catch ModerationError.reportingUnavailable,
                 ModerationError.classOutsideMandate {
             // Permanent for this message/mandate; "try again" is wrong.
