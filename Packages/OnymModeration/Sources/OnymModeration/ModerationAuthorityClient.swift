@@ -296,6 +296,7 @@ public protocol ModerationAuthorityClient: Sendable {
     @discardableResult
     func appeal(_ submission: AppealSubmission) async throws -> AppealReceipt
     func queryStatus(caseId: String) async throws -> CaseStatus
+    func queryRecoverableCases() async throws -> [String]
 }
 
 /// Resolves the client for a directory-selected Authority. Keeping this
@@ -457,6 +458,20 @@ public struct URLSessionModerationAuthorityClient: ModerationAuthorityClient {
         return status
     }
 
+    public func queryRecoverableCases() async throws -> [String] {
+        let timestamp = Self.timestamp(clock())
+        let key = try await signer.userKeyID()
+        let signature = try await signer.sign(Data("list-cases:\(timestamp)".utf8)).base64EncodedString()
+        let headers = [
+            "X-Onym-Key": key,
+            "X-Onym-Timestamp": timestamp,
+            "X-Onym-Signature": signature,
+        ]
+        return try await decode(
+            try await send(method: "GET", path: ["v1", "cases", "mine"], headers: headers)
+        )
+    }
+
     private func send(
         method: String,
         path: [String],
@@ -569,6 +584,10 @@ public struct StubModerationAuthorityClient: ModerationAuthorityClient {
 
     public func queryStatus(caseId: String) async throws -> CaseStatus {
         throw ModerationError.notImplemented("query-status")
+    }
+
+    public func queryRecoverableCases() async throws -> [String] {
+        throw ModerationError.notImplemented("list-cases")
     }
 }
 

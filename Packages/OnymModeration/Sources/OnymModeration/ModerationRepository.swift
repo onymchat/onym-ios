@@ -468,6 +468,22 @@ public actor ModerationRepository {
         )
     }
 
+    /// Recover the banned case IDs belonging to the retained active
+    /// identity. The Authority authenticates the lookup with that identity
+    /// and returns IDs only; details still require the case-status request.
+    public func recoverableCaseIDs() async throws -> [String] {
+        guard let record = activeMandateRecord() else {
+            throw ModerationError.noMandate
+        }
+        guard let listing = authorities.first(where: {
+            $0.componentId == record.mandate.authority
+        }) else {
+            throw ModerationError.authorityUnavailable(record.mandate.authority)
+        }
+        let client = authorityClients.client(for: listing)
+        return try await client.queryRecoverableCases()
+    }
+
     /// Retry one persisted registration attempt without minting or
     /// signing anything new. A later consent always wins: resolving an
     /// older artifact records it as history rather than silently making

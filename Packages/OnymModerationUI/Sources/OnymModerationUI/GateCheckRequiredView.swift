@@ -9,6 +9,7 @@ import OnymModeration
 public struct GateCheckRequiredView: View {
     let reason: CheckRequiredReason
     let onRetry: () -> Void
+    let lookupRecoveryCaseIDs: (@MainActor () async -> [String])?
     let makeRecoveryCaseFlow: (@MainActor (String) async -> ModerationCaseFlow?)?
 
     @State private var showRecovery = false
@@ -16,10 +17,12 @@ public struct GateCheckRequiredView: View {
     public init(
         reason: CheckRequiredReason,
         onRetry: @escaping () -> Void,
+        lookupRecoveryCaseIDs: (@MainActor () async -> [String])? = nil,
         makeRecoveryCaseFlow: (@MainActor (String) async -> ModerationCaseFlow?)? = nil
     ) {
         self.reason = reason
         self.onRetry = onRetry
+        self.lookupRecoveryCaseIDs = lookupRecoveryCaseIDs
         self.makeRecoveryCaseFlow = makeRecoveryCaseFlow
     }
 
@@ -44,7 +47,9 @@ public struct GateCheckRequiredView: View {
             .padding(.horizontal, 48)
             .padding(.top, 8)
             .accessibilityIdentifier("moderation.gate_required.retry")
-            if reason == .reidentificationRequired, makeRecoveryCaseFlow != nil {
+            if reason == .reidentificationRequired,
+               lookupRecoveryCaseIDs != nil,
+               makeRecoveryCaseFlow != nil {
                 Button("Appeal by case ID") { showRecovery = true }
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(OnymTokens.text)
@@ -57,8 +62,11 @@ public struct GateCheckRequiredView: View {
         .background(OnymTokens.surface.ignoresSafeArea())
         .accessibilityIdentifier("moderation.gate_required")
         .sheet(isPresented: $showRecovery) {
-            if let makeRecoveryCaseFlow {
-                RecoveryAppealView(makeCaseFlow: makeRecoveryCaseFlow)
+            if let lookupRecoveryCaseIDs, let makeRecoveryCaseFlow {
+                RecoveryAppealView(
+                    lookupCaseIDs: lookupRecoveryCaseIDs,
+                    makeCaseFlow: makeRecoveryCaseFlow
+                )
             }
         }
     }
@@ -93,13 +101,15 @@ public struct GateCheckRequiredView: View {
 /// from the original notice/verdict, then the existing case flow signs the
 /// appeal with the identity retained in Keychain and sends it to Authority.
 private struct RecoveryAppealView: View {
+    let lookupCaseIDs: @MainActor () async -> [String]
     let makeCaseFlow: @MainActor (String) async -> ModerationCaseFlow?
 
     @Environment(\.dismiss) private var dismiss
-    @State private var caseID = ""
+    @State private var caseIDs: [String] = []
     @State private var flow: ModerationCaseFlow?
     @State private var errorMessage: String?
-    @State private var isOpening = false
+    @State private var isLoading = true
+    @State private var openingCaseID: String?
 
     var body: some View {
         NavigationStack {
@@ -107,7 +117,7 @@ private struct RecoveryAppealView: View {
                 if let flow {
                     ModerationCaseView(flow: flow, focusNewHolder: false)
                 } else {
-                    form
+                    casePicker
                 }
             }
             .navigationTitle("Appeal a moderation case")
@@ -115,25 +125,55 @@ private struct RecoveryAppealView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Cancel") { dismiss() }
-                        .disabled(isOpening)
+                        .disabled(openingCaseID != nil)
                 }
             }
         }
     }
 
-    private var form: some View {
+    private var casePicker: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Text("Share your retained Onym identity with the Authority and open the case appeal form. The Authority verifies the signed appeal against the accused identity; it does not receive your private key.")
+                Text("Share your retained Onym identity with the Authority to recover your cases and open an appeal. Only case IDs are returned; your private key never leaves this device.")
                     .font(.system(size: 14))
                     .foregroundStyle(OnymTokens.text2)
                     .lineSpacing(3)
 
-                TextField("Case ID", text: $caseID)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .textFieldStyle(.roundedBorder)
-                    .accessibilityIdentifier("moderation.recovery.case_id")
+                if isLoading {
+                    ProgressView("Finding your cases…")
+                } else if caseIDs.isEmpty {
+                    Text("No appealable cases were found for this identity.")
+                        .font(.system(size: 14))
+                        .foregroundStyle(OnymTokens.text2)
+                } else {
+                    SettingsCard {
+                        VStack(spacing: 0) {
+                            ForEach(caseIDs, id: \.self) { caseID in
+                                Button { openCase(caseID) } label: {
+                                    HStack {
+                                        Text(caseID)
+                                            .font(.system(size: 13, design: .monospaced))
+                                            .foregroundStyle(OnymTokens.text)
+                                            .lineLimit(1)
+                                        Spacer()
+                                        if openingCaseID == caseID {
+                                            ProgressView()
+                                        } else {
+                                            Image(systemName: "chevron.right")
+                                                .foregroundStyle(OnymTokens.text3)
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.vertical, 14)
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(openingCaseID != nil)
+                                .accessibilityIdentifier("moderation.recovery.case.\(caseID)")
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                    }
+                }
 
                 if let errorMessage {
                     Text(errorMessage)
@@ -142,29 +182,32 @@ private struct RecoveryAppealView: View {
                         .accessibilityIdentifier("moderation.recovery.error")
                 }
 
-                SettingsPrimaryButton(action: openCase) {
-                    Text(isOpening ? "Opening…" : "Continue to appeal")
-                }
-                .disabled(caseID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isOpening)
-                .accessibilityIdentifier("moderation.recovery.continue")
             }
             .padding(20)
         }
         .background(OnymTokens.surface.ignoresSafeArea())
+        .task { await loadCases() }
     }
 
-    private func openCase() {
-        let caseID = caseID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !caseID.isEmpty else { return }
-        isOpening = true
+    private func loadCases() async {
+        errorMessage = nil
+        caseIDs = await lookupCaseIDs()
+        isLoading = false
+        if caseIDs.isEmpty {
+            errorMessage = "The Authority could not find a recoverable case for this identity."
+        }
+    }
+
+    private func openCase(_ caseID: String) {
+        openingCaseID = caseID
         errorMessage = nil
         Task { @MainActor in
             if let resolved = await makeCaseFlow(caseID) {
                 flow = resolved
             } else {
                 errorMessage = "No active moderation identity is available. Consent to the authority again, then retry."
+                openingCaseID = nil
             }
-            isOpening = false
         }
     }
 }

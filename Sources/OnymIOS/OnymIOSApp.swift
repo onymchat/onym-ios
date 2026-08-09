@@ -607,6 +607,9 @@ struct OnymIOSApp: App {
                     repository: moderationRepository,
                     banContext: true
                 )
+            },
+            lookupModerationRecoveryCaseIDs: { @MainActor in
+                (try? await moderationRepository.recoverableCaseIDs()) ?? []
             }
         )
     }

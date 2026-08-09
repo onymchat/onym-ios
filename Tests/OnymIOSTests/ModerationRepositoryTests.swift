@@ -236,6 +236,9 @@ final class ModerationRepositoryTests: XCTestCase {
         func queryStatus(caseId: String) async throws -> CaseStatus {
             throw ModerationError.notImplemented("unused")
         }
+        func queryRecoverableCases() async throws -> [String] {
+            throw ModerationError.notImplemented("unused")
+        }
     }
 
     private struct RecordingAuthorityClientFactory: ModerationAuthorityClientFactory {

@@ -94,4 +94,6 @@ struct AppDependencies {
     /// Recovery case screen after a reinstall: resolves the retained
     /// identity's active mandate before opening the signed appeal flow.
     let makeModerationRecoveryCaseFlow: @MainActor (_ caseId: String) async -> ModerationCaseFlow?
+    /// Authenticated recovery lookup; the Authority returns case IDs only.
+    let lookupModerationRecoveryCaseIDs: @MainActor () async -> [String]
 }
