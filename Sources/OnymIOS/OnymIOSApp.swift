@@ -112,9 +112,9 @@ struct OnymIOSApp: App {
 
         // Moderation seat. Authorities are swappable data (a signed
         // directory + per-authority manifests); the enforcement
-        // backend seam is stubbed — `StubEnforcementBackendClient`
-        // answers the gate per `--moderation-scenario` in UI tests
-        // and `.clear` in production until a real backend exists.
+        // backend is the deployed interface service — only UI tests
+        // keep `StubEnforcementBackendClient`, answering the gate per
+        // `--moderation-scenario`.
         let moderationSigner = IdentityModerationSigner(repository: repository)
         let moderationRepository: ModerationRepository
         let gateCheckRepository: GateCheckRepository
@@ -144,7 +144,7 @@ struct OnymIOSApp: App {
                 store: UITestGateStateStore()
             )
         } else {
-            let backend = StubEnforcementBackendClient()
+            let backend = URLSessionEnforcementBackendClient()
             moderationManifestFetcher = URLSessionAuthorityManifestFetcher()
             moderationRepository = ModerationRepository(
                 authoritiesFetcher: GitHubReleasesKnownAuthoritiesFetcher(),
@@ -166,7 +166,7 @@ struct OnymIOSApp: App {
             )
         }
         #else
-        let moderationBackend = StubEnforcementBackendClient()
+        let moderationBackend = URLSessionEnforcementBackendClient()
         moderationManifestFetcher = URLSessionAuthorityManifestFetcher()
         moderationRepository = ModerationRepository(
             authoritiesFetcher: GitHubReleasesKnownAuthoritiesFetcher(),

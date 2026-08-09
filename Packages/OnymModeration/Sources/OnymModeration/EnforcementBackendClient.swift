@@ -226,10 +226,10 @@ public enum GateCheckResult: Codable, Sendable, Equatable {
 
 /// The interface vendor's enforcement backend — the only party
 /// holding the Apple DeviceCheck key, therefore the only possible
-/// write/read path for device marks. Not deployed yet: the app ships
-/// against `StubEnforcementBackendClient`, and a future
-/// `URLSessionEnforcementBackendClient` (SEPContractTransport-style
-/// wire client) slots in behind this protocol untouched.
+/// write/read path for device marks. Production builds ship
+/// `URLSessionEnforcementBackendClient` against the deployed service;
+/// UI-test builds keep `StubEnforcementBackendClient` for
+/// scenario-driven gates.
 ///
 /// One protocol for enrollment, countersignature, and gate check
 /// because all three are the same service sharing auth and transport.
