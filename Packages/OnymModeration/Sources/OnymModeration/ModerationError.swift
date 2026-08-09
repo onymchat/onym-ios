@@ -47,6 +47,9 @@ public enum ModerationError: Error, Sendable, Equatable {
     /// so switching the selected identity — not switching authorities —
     /// is what resolves this.
     case caseAccessUnavailable(String)
+    /// A case statement failed local validation (empty, or beyond the
+    /// reference Authority's byte cap) before any signing or delivery.
+    case statementInvalid(String)
     /// The Authority answered 409: it already holds this exact report.
     /// A terminal, benign outcome — the allegation is on file — but the
     /// original receipt (caseId) cannot be recovered without a lookup

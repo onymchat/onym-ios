@@ -729,6 +729,9 @@ struct OnymIOSApp: App {
                             await moderationRepository.purgeCaseStatusRecords(
                                 keepingUsers: keys
                             )
+                            await moderationRepository.purgeCaseSubmissionRecords(
+                                keepingUsers: keys
+                            )
                         }
                     }
                 }

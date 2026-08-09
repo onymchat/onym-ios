@@ -86,6 +86,17 @@ public actor ModerationRepository {
     /// accumulate indefinitely.
     public static let maxResolvedReportRecords = 128
 
+    /// Reference Authority's cap on a statement body
+    /// (`MAX_STATEMENT_BYTES`). Checked client-side so an oversize
+    /// statement fails fast with a usable message instead of a 400.
+    public static let maxStatementBytes = 16_384
+
+    /// Retention bound on resolved case-submission ledger rows, same
+    /// scheme as `maxResolvedReportRecords`: acknowledged rows prune
+    /// oldest-first; rows whose delivery is still ambiguous are always
+    /// kept — they are the byte-identical-retry artifacts.
+    public static let maxResolvedCaseSubmissions = 128
+
     /// Retention bound on cached case-status snapshots. Snapshots
     /// upsert by caseId, so the set grows only with distinct cases
     /// against this device's identities; the bound is a backstop, and
@@ -98,6 +109,7 @@ public actor ModerationRepository {
     private let mandateStore: any MandateStore
     private let reportStore: any ReportFilingStore
     private let caseStore: any CaseStatusStore
+    private let caseSubmissionStore: any CaseSubmissionStore
     private let backend: any EnforcementBackendClient
     private let authorityClients: any ModerationAuthorityClientFactory
     private let attestation: any DeviceAttestationProvider
@@ -137,17 +149,28 @@ public actor ModerationRepository {
         let caseId: String
     }
 
+    private struct CaseSubmissionKey: Hashable {
+        let authority: String
+        let user: String
+        let caseId: String
+        let kind: CaseSubmissionRecord.Kind
+        let statementHash: String
+    }
+
     private var authorities: [AuthorityListing] = []
     private var fetchStatus: AuthorityFetchStatus = .idle
     private var records: [MandateRecord]
     private var reportRecords: [ReportFilingRecord]
     private var caseRecords: [CaseStatusRecord]
+    private var caseSubmissions: [CaseSubmissionRecord]
     private var continuations: [UUID: AsyncStream<ModerationState>.Continuation] = [:]
     private var startTask: Task<Void, Never>?
     private var consentTasks: [ConsentKey: Task<MandateRecord, Error>] = [:]
     private var registrationFlights: [RegistrationKey: RegistrationFlight] = [:]
     private var reportTasks: [ReportKey: Task<ReportReceipt, Error>] = [:]
     private var caseStatusTasks: [CaseStatusKey: Task<CaseStatus, Error>] = [:]
+    private var caseResponseTasks: [CaseSubmissionKey: Task<CaseResponseReceipt, Error>] = [:]
+    private var caseAppealTasks: [CaseSubmissionKey: Task<AppealReceipt, Error>] = [:]
 
     public init(
         authoritiesFetcher: any KnownAuthoritiesFetcher,
@@ -155,6 +178,7 @@ public actor ModerationRepository {
         mandateStore: any MandateStore,
         reportStore: any ReportFilingStore = UserDefaultsReportFilingStore(),
         caseStore: any CaseStatusStore = UserDefaultsCaseStatusStore(),
+        caseSubmissionStore: any CaseSubmissionStore = UserDefaultsCaseSubmissionStore(),
         backend: any EnforcementBackendClient,
         authorityClients: any ModerationAuthorityClientFactory,
         attestation: any DeviceAttestationProvider,
@@ -168,6 +192,7 @@ public actor ModerationRepository {
         self.mandateStore = mandateStore
         self.reportStore = reportStore
         self.caseStore = caseStore
+        self.caseSubmissionStore = caseSubmissionStore
         self.backend = backend
         self.authorityClients = authorityClients
         self.attestation = attestation
@@ -176,6 +201,7 @@ public actor ModerationRepository {
         self.records = mandateStore.load()
         self.reportRecords = reportStore.load()
         self.caseRecords = caseStore.load()
+        self.caseSubmissions = caseSubmissionStore.load()
     }
 
     // MARK: - Directory refresh
@@ -563,17 +589,24 @@ public actor ModerationRepository {
     /// Standing for any accused-side case operation: the case's mandate
     /// must be retained, owned by the active identity, and its
     /// Authority resolvable in the current directory.
+    /// `requireOwnership: false` exists for one caller: a new-holder
+    /// claim, whose premise is that the device's current holder is NOT
+    /// the mandated user (the reference accepts it unsigned for the
+    /// same reason). Everything else must own the mandate it acts under.
     private func caseStanding(
-        mandateRef: String
+        mandateRef: String,
+        requireOwnership: Bool = true
     ) async throws -> (MandateRecord, AuthorityListing) {
         guard let record = mandateRecord(forRef: mandateRef) else {
             throw ModerationError.noMandate
         }
-        let userKey = try await signer.userKeyID()
-        guard userKey == record.mandate.user else {
-            throw ModerationError.caseAccessUnavailable(
-                "active identity does not own the case's mandate"
-            )
+        if requireOwnership {
+            let userKey = try await signer.userKeyID()
+            guard userKey == record.mandate.user else {
+                throw ModerationError.caseAccessUnavailable(
+                    "active identity does not own the case's mandate"
+                )
+            }
         }
         guard let listing = authorities.first(where: {
             $0.componentId == record.mandate.authority
@@ -625,6 +658,328 @@ public actor ModerationRepository {
             Self.logger.error("case snapshot persistence failed: \(error)")
         }
         return status
+    }
+
+    // MARK: - Case submissions (accused side)
+
+    /// File the accused's signed statement on an open case. Standing
+    /// follows the case's mandate (resolved by reference, owned by the
+    /// active identity). The signed artifact is persisted before
+    /// delivery and ambiguous outcomes retry byte-identically; an
+    /// identical statement re-submitted after an acknowledgment returns
+    /// the stored receipt instead of re-delivering — the reference
+    /// Authority does NOT deduplicate responses (every delivery files
+    /// a new row, bounded at 32 per case), so this client-side ledger
+    /// is the only double-file protection.
+    ///
+    /// The reference enforces no response deadline: a late statement
+    /// is accepted and flagged (`receipt.late`), never refused. Client
+    /// deadline gating is therefore advisory UI, not enforcement.
+    @discardableResult
+    public func respond(
+        caseId: String,
+        mandateRef: String,
+        statement: String
+    ) async throws -> CaseResponseReceipt {
+        let statement = try Self.validatedStatement(statement)
+        let (record, listing) = try await caseStanding(mandateRef: mandateRef)
+        let key = CaseSubmissionKey(
+            authority: listing.componentId,
+            user: record.mandate.user,
+            caseId: caseId,
+            kind: .response,
+            statementHash: Self.statementHash(statement)
+        )
+        if let task = caseResponseTasks[key] {
+            return try await task.value
+        }
+        let task = Task {
+            try await self.performRespond(
+                caseId: caseId,
+                mandateRef: mandateRef,
+                statement: statement,
+                record: record,
+                listing: listing
+            )
+        }
+        caseResponseTasks[key] = task
+        defer { caseResponseTasks.removeValue(forKey: key) }
+        return try await task.value
+    }
+
+    /// File an appeal (`.appeal`, signed, gated server-side on a ban
+    /// with an open appeal window) or a new-holder claim
+    /// (`.newHolderClaim`, which the reference accepts unsigned and
+    /// answers 200 unconditionally — `receipt.filed` never proves the
+    /// claim was recorded). Same persist-before-deliver / exact-retry /
+    /// single-flight discipline as `respond`.
+    @discardableResult
+    public func appeal(
+        caseId: String,
+        mandateRef: String,
+        kind: AppealSubmission.Kind,
+        statement: String
+    ) async throws -> AppealReceipt {
+        let statement = try Self.validatedStatement(statement)
+        // A new-holder claim is definitionally filed by someone who is
+        // not the mandated user; ownership is not required for it.
+        let (record, listing) = try await caseStanding(
+            mandateRef: mandateRef,
+            requireOwnership: kind == .appeal
+        )
+        let recordKind: CaseSubmissionRecord.Kind =
+            kind == .appeal ? .appeal : .newHolderClaim
+        let key = CaseSubmissionKey(
+            authority: listing.componentId,
+            user: record.mandate.user,
+            caseId: caseId,
+            kind: recordKind,
+            statementHash: Self.statementHash(statement)
+        )
+        if let task = caseAppealTasks[key] {
+            return try await task.value
+        }
+        let task = Task {
+            try await self.performAppeal(
+                caseId: caseId,
+                mandateRef: mandateRef,
+                kind: kind,
+                recordKind: recordKind,
+                statement: statement,
+                record: record,
+                listing: listing
+            )
+        }
+        caseAppealTasks[key] = task
+        defer { caseAppealTasks.removeValue(forKey: key) }
+        return try await task.value
+    }
+
+    /// Ledger rows for one case, newest first — pending rows are the
+    /// retry artifacts, acknowledged rows the filing history.
+    public func caseSubmissions(caseId: String) -> [CaseSubmissionRecord] {
+        caseSubmissions.filter { $0.caseId == caseId }
+    }
+
+    /// Same contract as the other ledgers: drop every submission not
+    /// owned by one of `users` when an identity is removed.
+    public func purgeCaseSubmissionRecords(keepingUsers users: Set<String>) {
+        let before = caseSubmissions.count
+        caseSubmissions.removeAll { !users.contains($0.user) }
+        guard caseSubmissions.count != before else { return }
+        try? caseSubmissionStore.save(caseSubmissions)
+    }
+
+    private func performRespond(
+        caseId: String,
+        mandateRef: String,
+        statement: String,
+        record: MandateRecord,
+        listing: AuthorityListing
+    ) async throws -> CaseResponseReceipt {
+        if let existing = caseSubmissions.first(where: {
+            $0.kind == .response
+                && $0.caseId == caseId
+                && $0.user == record.mandate.user
+                && $0.mandateRef == mandateRef
+                && $0.response?.statement == statement
+        }) {
+            if let receipt = existing.responseReceipt { return receipt }
+            return try await deliverResponse(existing, to: listing)
+        }
+
+        var response = CaseResponse(
+            caseId: caseId,
+            statement: statement,
+            evidence: []
+        )
+        response.signature = try await signer.sign(response.signingBytes())
+            .base64EncodedString()
+        let submission = CaseSubmissionRecord(
+            caseId: caseId,
+            mandateRef: mandateRef,
+            user: record.mandate.user,
+            authorityName: listing.name,
+            kind: .response,
+            response: response,
+            createdAt: clock()
+        )
+        try persistNewSubmission(submission)
+        return try await deliverResponse(submission, to: listing)
+    }
+
+    private func performAppeal(
+        caseId: String,
+        mandateRef: String,
+        kind: AppealSubmission.Kind,
+        recordKind: CaseSubmissionRecord.Kind,
+        statement: String,
+        record: MandateRecord,
+        listing: AuthorityListing
+    ) async throws -> AppealReceipt {
+        if let existing = caseSubmissions.first(where: {
+            $0.kind == recordKind
+                && $0.caseId == caseId
+                && $0.user == record.mandate.user
+                && $0.mandateRef == mandateRef
+                && $0.appeal?.statement == statement
+        }) {
+            if let receipt = existing.appealReceipt { return receipt }
+            return try await deliverAppeal(existing, to: listing)
+        }
+
+        var appeal = AppealSubmission(
+            caseId: caseId,
+            kind: kind,
+            statement: statement
+        )
+        // A new-holder claim is signed too — the reference ignores the
+        // signature by design, but signing costs nothing and keeps the
+        // artifact self-describing if the endpoint ever authenticates.
+        appeal.signature = try await signer.sign(appeal.signingBytes())
+            .base64EncodedString()
+        let submission = CaseSubmissionRecord(
+            caseId: caseId,
+            mandateRef: mandateRef,
+            user: record.mandate.user,
+            authorityName: listing.name,
+            kind: recordKind,
+            appeal: appeal,
+            createdAt: clock()
+        )
+        try persistNewSubmission(submission)
+        return try await deliverAppeal(submission, to: listing)
+    }
+
+    /// Delivery must not begin unless the exact signed artifact is
+    /// durably retained — a transport timeout may happen after the
+    /// Authority committed, and only the persisted artifact lets the
+    /// retry re-deliver byte-identical content.
+    private func persistNewSubmission(_ submission: CaseSubmissionRecord) throws {
+        caseSubmissions.insert(submission, at: 0)
+        do {
+            try saveCaseSubmissions()
+        } catch {
+            if let index = submissionIndex(of: submission) {
+                caseSubmissions.remove(at: index)
+            }
+            throw error
+        }
+    }
+
+    private func deliverResponse(
+        _ submission: CaseSubmissionRecord,
+        to listing: AuthorityListing
+    ) async throws -> CaseResponseReceipt {
+        guard let response = submission.response else {
+            throw ModerationError.statementInvalid("submission holds no response")
+        }
+        let client = authorityClients.client(for: listing)
+        let receipt: CaseResponseReceipt
+        do {
+            receipt = try await client.respond(response)
+        } catch {
+            // Deterministic refusal (case already decided, filing cap,
+            // anti-oracle 404) cannot become an acceptance through
+            // exact replay; retaining the artifact would deadlock the
+            // key. Ambiguous outcomes keep it for byte-identical retry.
+            if isDeterministicReportRejection(error) {
+                discardSubmission(submission)
+            }
+            throw error
+        }
+        finishSubmission(submission) { $0.responseReceipt = receipt }
+        return receipt
+    }
+
+    private func deliverAppeal(
+        _ submission: CaseSubmissionRecord,
+        to listing: AuthorityListing
+    ) async throws -> AppealReceipt {
+        guard let appeal = submission.appeal else {
+            throw ModerationError.statementInvalid("submission holds no appeal")
+        }
+        let client = authorityClients.client(for: listing)
+        let receipt: AppealReceipt
+        do {
+            receipt = try await client.appeal(appeal)
+        } catch {
+            if isDeterministicReportRejection(error) {
+                discardSubmission(submission)
+            }
+            throw error
+        }
+        finishSubmission(submission) { $0.appealReceipt = receipt }
+        return receipt
+    }
+
+    /// Record the acknowledgment. The Authority's answer is
+    /// authoritative and must reach the caller; a persistence failure
+    /// is logged (error only), not surfaced as a delivery failure.
+    private func finishSubmission(
+        _ submission: CaseSubmissionRecord,
+        apply: (inout CaseSubmissionRecord) -> Void
+    ) {
+        if let index = submissionIndex(of: submission) {
+            apply(&caseSubmissions[index])
+        } else {
+            var recovered = submission
+            apply(&recovered)
+            caseSubmissions.insert(recovered, at: 0)
+        }
+        do {
+            try saveCaseSubmissions()
+        } catch {
+            Self.logger.error("case submission persistence failed: \(error)")
+        }
+    }
+
+    /// Persist the ledger, pruning acknowledged rows past the bound.
+    /// The array is newest-first, so counting down the list keeps the
+    /// newest resolved rows and drops the oldest.
+    private func saveCaseSubmissions() throws {
+        var resolvedKept = 0
+        caseSubmissions = caseSubmissions.filter { record in
+            guard record.isResolved else { return true }
+            resolvedKept += 1
+            return resolvedKept <= Self.maxResolvedCaseSubmissions
+        }
+        try caseSubmissionStore.save(caseSubmissions)
+    }
+
+    private func submissionIndex(of submission: CaseSubmissionRecord) -> Int? {
+        caseSubmissions.firstIndex {
+            $0.caseId == submission.caseId
+                && $0.kind == submission.kind
+                && $0.user == submission.user
+                && $0.response?.statement == submission.response?.statement
+                && $0.appeal?.statement == submission.appeal?.statement
+                && $0.createdAt == submission.createdAt
+        }
+    }
+
+    private func discardSubmission(_ submission: CaseSubmissionRecord) {
+        guard let index = submissionIndex(of: submission) else { return }
+        caseSubmissions.remove(at: index)
+        try? saveCaseSubmissions()
+    }
+
+    private static func validatedStatement(_ statement: String) throws -> String {
+        let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw ModerationError.statementInvalid("statement is empty")
+        }
+        guard trimmed.utf8.count <= Self.maxStatementBytes else {
+            throw ModerationError.statementInvalid(
+                "statement exceeds \(Self.maxStatementBytes) bytes"
+            )
+        }
+        return trimmed
+    }
+
+    private static func statementHash(_ statement: String) -> String {
+        SHA256.hash(data: Data(statement.utf8))
+            .map { String(format: "%02x", $0) }.joined()
     }
 
     // MARK: - AsyncStream

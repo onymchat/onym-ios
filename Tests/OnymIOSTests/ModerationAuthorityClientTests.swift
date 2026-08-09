@@ -446,8 +446,12 @@ final class ModerationAuthorityClientTests: XCTestCase {
         let recorded = RecordedBodies()
         StubURLProtocol.set { request in
             recorded.set(Self.body(of: request), for: request.url!.lastPathComponent)
+            // The reference success shapes (`authority/src/api.rs`).
+            let payload = request.url!.lastPathComponent == "respond"
+                ? #"{"caseId":"case-1","recorded":true,"late":false}"#
+                : #"{"caseId":"case-1","filed":true,"kind":"appeal","note":"reviewed by the authority"}"#
             return (
-                Data(#"{"recorded":true}"#.utf8),
+                Data(payload.utf8),
                 Self.httpResponse(for: request, status: 200)
             )
         }
@@ -460,12 +464,19 @@ final class ModerationAuthorityClientTests: XCTestCase {
             signature: "sig"
         )
 
-        try await client.respond(response)
-        try await client.appeal(appeal)
+        let responseReceipt = try await client.respond(response)
+        let appealReceipt = try await client.appeal(appeal)
 
         let bodies = recorded.snapshot()
         XCTAssertEqual(bodies["respond"], try ModerationCanonicalEncoder.encode(response))
         XCTAssertEqual(bodies["appeal"], try ModerationCanonicalEncoder.encode(appeal))
+        XCTAssertEqual(
+            responseReceipt,
+            CaseResponseReceipt(caseId: "case-1", recorded: true, late: false)
+        )
+        XCTAssertEqual(appealReceipt.caseId, "case-1")
+        XCTAssertEqual(appealReceipt.kind, "appeal")
+        XCTAssertTrue(appealReceipt.filed)
     }
 
     func testCaseIDCannotEscapeItsPathSegment() async throws {

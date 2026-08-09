@@ -174,6 +174,41 @@ public struct AppealSubmission: Codable, Sendable, Equatable {
     }
 }
 
+/// The Authority's acknowledgment of a filed case response
+/// (`POST /v1/cases/{id}/respond`). The reference enforces no response
+/// deadline — a late filing is accepted and flagged, never refused —
+/// so `late` is information for the user, not an error.
+public struct CaseResponseReceipt: Codable, Sendable, Equatable {
+    public let caseId: String
+    public let recorded: Bool
+    public let late: Bool
+
+    public init(caseId: String, recorded: Bool, late: Bool) {
+        self.caseId = caseId
+        self.recorded = recorded
+        self.late = late
+    }
+}
+
+/// The Authority's acknowledgment of an appeal or new-holder filing.
+/// For a new-holder claim the reference answers 200 with `filed: true`
+/// unconditionally — deliberately non-oracular — so `filed` never
+/// proves the claim was recorded; only the authenticated status
+/// endpoint's `newHolderState` can show that.
+public struct AppealReceipt: Codable, Sendable, Equatable {
+    public let caseId: String
+    public let filed: Bool
+    public let kind: String
+    public let note: String?
+
+    public init(caseId: String, filed: Bool, kind: String, note: String? = nil) {
+        self.caseId = caseId
+        self.filed = filed
+        self.kind = kind
+        self.note = note
+    }
+}
+
 /// One entry of the Authority's case event log. The reference exposes
 /// timestamps and kinds only ("case_opened", "response", "decided",
 /// "appeal_filed", ...) — details are never served to a party.
@@ -253,8 +288,10 @@ public struct CaseStatus: Codable, Sendable, Equatable {
 public protocol ModerationAuthorityClient: Sendable {
     func registerMandate(_ mandate: ModerationMandate) async throws -> MandateRegistrationReceipt
     func fileReport(_ report: Report) async throws -> ReportReceipt
-    func respond(_ response: CaseResponse) async throws
-    func appeal(_ submission: AppealSubmission) async throws
+    @discardableResult
+    func respond(_ response: CaseResponse) async throws -> CaseResponseReceipt
+    @discardableResult
+    func appeal(_ submission: AppealSubmission) async throws -> AppealReceipt
     func queryStatus(caseId: String) async throws -> CaseStatus
 }
 
@@ -343,22 +380,40 @@ public struct URLSessionModerationAuthorityClient: ModerationAuthorityClient {
         return receipt
     }
 
-    public func respond(_ response: CaseResponse) async throws {
+    @discardableResult
+    public func respond(_ response: CaseResponse) async throws -> CaseResponseReceipt {
         let body = try ModerationCanonicalEncoder.encode(response)
-        _ = try await send(
+        let data = try await send(
             method: "POST",
             path: ["v1", "cases", response.caseId, "respond"],
             body: body
         )
+        let receipt: CaseResponseReceipt = try decode(data)
+        guard receipt.caseId == response.caseId else {
+            throw AuthorityClientError.caseIdentifierMismatch(
+                expected: response.caseId,
+                received: receipt.caseId
+            )
+        }
+        return receipt
     }
 
-    public func appeal(_ submission: AppealSubmission) async throws {
+    @discardableResult
+    public func appeal(_ submission: AppealSubmission) async throws -> AppealReceipt {
         let body = try ModerationCanonicalEncoder.encode(submission)
-        _ = try await send(
+        let data = try await send(
             method: "POST",
             path: ["v1", "cases", submission.caseId, "appeal"],
             body: body
         )
+        let receipt: AppealReceipt = try decode(data)
+        guard receipt.caseId == submission.caseId else {
+            throw AuthorityClientError.caseIdentifierMismatch(
+                expected: submission.caseId,
+                received: receipt.caseId
+            )
+        }
+        return receipt
     }
 
     public func queryStatus(caseId: String) async throws -> CaseStatus {
@@ -519,11 +574,11 @@ public struct StubModerationAuthorityClient: ModerationAuthorityClient {
         throw ModerationError.notImplemented("file-report")
     }
 
-    public func respond(_ response: CaseResponse) async throws {
+    public func respond(_ response: CaseResponse) async throws -> CaseResponseReceipt {
         throw ModerationError.notImplemented("respond")
     }
 
-    public func appeal(_ submission: AppealSubmission) async throws {
+    public func appeal(_ submission: AppealSubmission) async throws -> AppealReceipt {
         throw ModerationError.notImplemented("appeal")
     }
 
