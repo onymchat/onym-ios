@@ -135,7 +135,7 @@ public struct GateCheckRequiredView: View {
         case .tokenInvalid:
             return String(localized: "Apple rejected this device's verification token. Retry requests a fresh token; if it keeps failing, the app build and moderation service may be using different DeviceCheck environments.")
         case .attestationUnavailable:
-            return String(localized: "Device verification isn't available in this environment. This is expected on Simulator; use UI-testing mode or a physical device.")
+            return String(localized: "Device verification isn't available in this environment. Plain Simulator runs answer the gate with a stub, so this appears only when pointed at a real enforcement deployment; use a physical device for the full verification loop.")
         case .reidentificationRequired:
             return String(localized: "This device carries a moderation mark, but this install cannot verify its original identity. Reinstalling or retrying will not fix this. Ask a moderator to recover the device below — a person reviews your claim and decides.")
         case .clockRollback:

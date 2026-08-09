@@ -120,7 +120,24 @@ struct OnymIOSApp: App {
         let gateCheckRepository: GateCheckRepository
         let moderationManifestFetcher: any AuthorityManifestFetcher
         #if DEBUG
-        if args.contains("--ui-testing") {
+        // Simulator has no DeviceCheck (`DCDevice.isSupported` is
+        // false there), and the deployed interface answers a
+        // token-less session `check_required(attestationUnavailable)`
+        // — so a Simulator run against the production service can
+        // only ever show the blocking screen. Simulator builds
+        // therefore default the moderation seat to the same stubs as
+        // UI-testing mode (gate clear, seeded mandate); the
+        // UI-testing flags that shape those stubs still apply, and
+        // `--enforcement-base-url` still opts into the real loop
+        // against a local deployment. Compile-time-gated: a simulator
+        // binary cannot run on a device, so this can't ship.
+        #if targetEnvironment(simulator)
+        let stubModerationSeat = args.contains("--ui-testing")
+            || Self.resolveEnforcementBaseURL(args: args) == nil
+        #else
+        let stubModerationSeat = args.contains("--ui-testing")
+        #endif
+        if stubModerationSeat {
             let backend = StubEnforcementBackendClient(
                 scenario: Self.resolveModerationScenario(args: args)
             )
