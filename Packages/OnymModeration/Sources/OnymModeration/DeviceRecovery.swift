@@ -83,46 +83,71 @@ public struct RecoveryGrant: Sendable, Equatable {
     /// (every field except `signature`, sorted keys). The enforcement
     /// backend derives the same value from the raw bytes to make the
     /// grant single-use, and the session signature binds it — so the
-    /// two derivations must agree. Reconstructed through a typed
-    /// mirror, like `Verdict.signingBytes()`: JSONEncoder's
-    /// `.sortedKeys` is UTF-8 byte order, matching serde's map order.
-    /// A grant carrying fields this mirror doesn't know would derive a
-    /// different reference and fail the session — acceptable, since
-    /// grants are consumed by the interface whose vocabulary this is.
+    /// two derivations must agree. Canonicalize the raw JSON itself
+    /// rather than reconstructing a typed subset: fields such as
+    /// `grantType` are part of the signature and must not be silently
+    /// omitted when the wire schema grows.
     public func reference() throws -> String {
-        struct CaseUnsigned: Encodable {
-            let grantVersion: Int
-            let caseId, grantee, authority, issuedAt: String
+        guard var object = try JSONSerialization.jsonObject(with: raw) as? [String: Any] else {
+            throw ModerationError.grantInvalid("recovery grant is not a JSON object")
         }
-        struct UnbanUnsigned: Encodable {
-            let grantVersion: Int
-            let claimId, grantee, authority, issuedAt: String
-        }
-        let bytes: Data
-        if grantType == "onym-recovery-grant-v1", !caseId.isEmpty {
-            bytes = try ModerationCanonicalEncoder.encode(
-                CaseUnsigned(
-                    grantVersion: version,
-                    caseId: caseId,
-                    grantee: grantee,
-                    authority: authority,
-                    issuedAt: issuedAt
-                )
-            )
-        } else if grantType == "onym-unban-grant-v1", let claimId {
-            bytes = try ModerationCanonicalEncoder.encode(
-                UnbanUnsigned(
-                    grantVersion: version,
-                    claimId: claimId,
-                    grantee: grantee,
-                    authority: authority,
-                    issuedAt: issuedAt
-                )
-            )
-        } else {
-            throw ModerationError.grantInvalid("grant has neither caseId nor claimId")
-        }
+        object.removeValue(forKey: "signature")
+        let bytes = try ModerationCanonicalEncoder.encode(RecoveryCanonicalJSON(object))
         return SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+/// An Encodable bridge for the raw JSON object in a grant. Using a
+/// dynamically keyed value keeps every signed field, while
+/// `ModerationCanonicalEncoder` still supplies the same sorted-key and
+/// number encoding as the Rust implementation.
+private struct RecoveryCanonicalJSON: Encodable {
+    private let value: Any
+
+    init(_ value: Any) {
+        self.value = value
+    }
+
+    private struct Key: CodingKey {
+        let stringValue: String
+        init?(stringValue: String) { self.stringValue = stringValue }
+        let intValue: Int? = nil
+        init?(intValue: Int) { return nil }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        switch value {
+        case let value as [String: Any]:
+            var container = encoder.container(keyedBy: Key.self)
+            for (key, value) in value {
+                try container.encode(RecoveryCanonicalJSON(value), forKey: Key(stringValue: key)!)
+            }
+        case let value as [Any]:
+            var container = encoder.unkeyedContainer()
+            for value in value {
+                try container.encode(RecoveryCanonicalJSON(value))
+            }
+        case let value as String:
+            var container = encoder.singleValueContainer()
+            try container.encode(value)
+        case let value as NSNumber:
+            var container = encoder.singleValueContainer()
+            if CFGetTypeID(value) == CFBooleanGetTypeID() {
+                try container.encode(value.boolValue)
+            } else if value.doubleValue.rounded() == value.doubleValue {
+                try container.encode(value.int64Value)
+            } else {
+                try container.encode(value.doubleValue)
+            }
+        case _ as NSNull:
+            var container = encoder.singleValueContainer()
+            try container.encodeNil()
+        default:
+            throw EncodingError.invalidValue(
+                value,
+                EncodingError.Context(codingPath: encoder.codingPath, debugDescription: "unsupported JSON value")
+            )
+        }
     }
 }
 
