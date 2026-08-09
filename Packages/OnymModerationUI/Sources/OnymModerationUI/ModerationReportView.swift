@@ -67,17 +67,28 @@ public struct ModerationReportView: View {
                 .disabled(flow.state.classes.isEmpty || flow.state.isSubmitting)
                 .accessibilityIdentifier("moderation.report.class")
 
-                // The consented definition of the selected class — the
-                // reporter must see what they are alleging, not just a
-                // raw class id.
+                // The consented definition of the selected class.
+                // `definition` is a content address (hash-or-url,
+                // AuthorityManifest): a URL opens the consented
+                // prohibited-content definition; a bare hash can only
+                // be shown as the address the user consented to.
                 if let selected = flow.state.classes.first(where: {
                     $0.classId == flow.state.selectedClassId
                 }) {
-                    Text("Definition: \(selected.definition)")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
+                    if let url = URL(string: selected.definition),
+                       url.scheme == "https" || url.scheme == "http" {
+                        Link(destination: url) {
+                            Label("Read the consented definition of this class", systemImage: "arrow.up.right.square")
+                                .font(.footnote)
+                        }
                         .accessibilityIdentifier("moderation.report.definition")
+                    } else {
+                        Text("Consented definition (content address): \(selected.definition)")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .accessibilityIdentifier("moderation.report.definition")
+                    }
                 }
             }
 

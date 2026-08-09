@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// Canonical preimage of the moderation authenticity proof — the exact
@@ -20,6 +21,15 @@ import Foundation
 /// so the only implementations that must agree byte-for-byte are the
 /// signing sender and the verifying recipient, both of which are this
 /// function.
+///
+/// The group is bound through `group_binding` —
+/// `SHA-256("onym-moderation-proof-v1|" + groupID + "|" + messageID)` —
+/// rather than the raw group id. The recipient recomputes it from the
+/// same locals, so the binding is just as tight, but the disclosed
+/// content carries no cross-report-linkable identifier: two reports
+/// from the same group hash to unrelated values (the message id salts
+/// them), so an Authority cannot correlate independent reports to one
+/// group or join them against on-chain data.
 public enum ChatModerationProof {
     /// Version discriminator inside the preimage so a future shape
     /// change can't be confused with this one.
@@ -33,25 +43,29 @@ public enum ChatModerationProof {
     ) throws -> String {
         struct Preimage: Encodable {
             let body: String
-            let groupID: String
+            let groupBinding: String
             let messageID: String
             let proofVersion: Int
             let sentAtMillis: Int64
 
             enum CodingKeys: String, CodingKey {
                 case body
-                case groupID = "group_id"
+                case groupBinding = "group_binding"
                 case messageID = "message_id"
                 case proofVersion = "proof_version"
                 case sentAtMillis = "sent_at_millis"
             }
         }
+        let messageIDString = messageID.uuidString.lowercased()
+        let binding = SHA256.hash(data: Data(
+            "onym-moderation-proof-v1|\(groupID)|\(messageIDString)".utf8
+        )).map { String(format: "%02x", $0) }.joined()
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         let data = try encoder.encode(Preimage(
             body: body,
-            groupID: groupID,
-            messageID: messageID.uuidString.lowercased(),
+            groupBinding: binding,
+            messageID: messageIDString,
             proofVersion: version,
             sentAtMillis: sentAtMillis
         ))

@@ -28,6 +28,11 @@ public final class ModerationReportFlow {
         state.isLoading = true
         state.errorMessage = nil
         defer { state.isLoading = false }
+        // Delivery needs the authorities directory; on a cold launch
+        // straight into Report it may not have been fetched yet, and
+        // `fileReport` would throw `authorityUnavailable`. Best-effort —
+        // a failure here surfaces at submit with directory copy.
+        try? await repository.refresh()
         do {
             let classes = try await repository.availableReportClasses()
             state.classes = classes
@@ -62,6 +67,23 @@ public final class ModerationReportFlow {
         } catch ModerationError.authenticityUnverified {
             state.errorMessage = String(
                 localized: "This message has no valid sender proof and cannot be filed as evidence."
+            )
+        } catch ModerationError.reportAlreadyFiled {
+            // Terminal and benign: the Authority already holds this
+            // exact report. Retry advice would be wrong — nothing is
+            // left to deliver.
+            state.errorMessage = String(
+                localized: "Your authority already has this report on file."
+            )
+        } catch ModerationError.reportingUnavailable,
+                ModerationError.classOutsideMandate {
+            // Permanent for this message/mandate; "try again" is wrong.
+            state.errorMessage = String(
+                localized: "Reporting requires an active mandate registered with this authority."
+            )
+        } catch ModerationError.authorityUnavailable {
+            state.errorMessage = String(
+                localized: "Your authority isn't in the directory right now. Check your connection and try again."
             )
         } catch let AuthorityClientError.rejected(rejection) {
             // Authority-controlled text; bound it so a hostile or buggy

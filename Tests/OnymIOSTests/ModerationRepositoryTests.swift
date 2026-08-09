@@ -1046,12 +1046,14 @@ final class ModerationRepositoryTests: XCTestCase {
 
         do {
             _ = try await repository.fileReport(message: message, classId: "csam")
-            XCTFail("expected the 409 to surface")
-        } catch AuthorityClientError.rejected {
-            // expected
+            XCTFail("expected the conflict to surface as already-filed")
+        } catch let ModerationError.reportAlreadyFiled(reportId) {
+            // Terminal, benign — the UI shows "already on file", not
+            // retry advice.
+            XCTAssertEqual(reportId, reportStore.load().first?.report.reportId)
         }
-        // The signed artifact must survive the conflict: a retry has to
-        // replay the same reportId, not mint a fresh allegation.
+        // The signed artifact must survive the conflict: any replay has
+        // to reuse the same reportId, never mint a fresh allegation.
         let retained = try XCTUnwrap(reportStore.load().first?.report)
         authority.reportError = nil
 
@@ -1091,6 +1093,81 @@ final class ModerationRepositoryTests: XCTestCase {
         // Exact replay of a deterministically rejected artifact can never
         // succeed; retaining it would deadlock every future attempt.
         XCTAssertTrue(reportStore.load().isEmpty)
+    }
+
+    func testPurgeReportRecordsDropsReportersNoLongerPresent() async throws {
+        let mine = filedRecord(reportId: "report-mine", reporter: "onym:key:test-user")
+        let removed = filedRecord(reportId: "report-gone", reporter: "onym:key:removed-user")
+        let reportStore = InMemoryReportFilingStore(records: [mine, removed])
+        let repository = makeRepository(
+            listings: [],
+            bytesByComponent: [:],
+            backend: RecordingBackend(),
+            authorityClient: RecordingAuthorityClient(),
+            store: InMemoryMandateStore(records: []),
+            reportStore: reportStore
+        )
+
+        await repository.purgeReportRecords(keepingReporters: ["onym:key:test-user"])
+
+        XCTAssertEqual(reportStore.load().map(\.report.reportId), ["report-mine"])
+    }
+
+    func testResolvedReportLedgerIsBoundedOldestFirst() async throws {
+        let componentId = "onym:component:a"
+        let bytes = manifestBytes(componentId: componentId)
+        let authority = RecordingAuthorityClient()
+        // Preload the ledger to the cap with resolved rows (newest
+        // first, as the repository maintains it).
+        let preloaded = (0..<ModerationRepository.maxResolvedReportRecords).map {
+            filedRecord(reportId: "report-\($0)", reporter: "onym:key:test-user")
+        }
+        let reportStore = InMemoryReportFilingStore(records: preloaded)
+        let repository = makeRepository(
+            listings: [listing(componentId, name: "A")],
+            bytesByComponent: [componentId: bytes],
+            backend: RecordingBackend(),
+            authorityClient: authority,
+            store: InMemoryMandateStore(records: [activeRecord(componentId: componentId, bytes: bytes)]),
+            reportStore: reportStore
+        )
+        try await repository.refresh()
+        let message = try reportableMessage()
+
+        _ = try await repository.fileReport(message: message, classId: "csam")
+
+        let stored = reportStore.load()
+        XCTAssertEqual(stored.count, ModerationRepository.maxResolvedReportRecords)
+        // The new row is retained; the oldest resolved disclosure fell off.
+        XCTAssertEqual(stored.first?.sourceMessageId, message.id)
+        XCTAssertFalse(stored.contains {
+            $0.report.reportId == "report-\(ModerationRepository.maxResolvedReportRecords - 1)"
+        })
+    }
+
+    private func filedRecord(reportId: String, reporter: String) -> ReportFilingRecord {
+        ReportFilingRecord(
+            sourceMessageId: "message-\(reportId)",
+            report: Report(
+                reportId: reportId,
+                reporter: reporter,
+                reporterMandate: "mandate-1",
+                accused: "onym:key:accused",
+                classId: "csam",
+                evidence: [EvidenceItem(
+                    disclosedContent: "disclosed",
+                    authenticityProof: "proof"
+                )],
+                filedAt: now,
+                signature: "signature"
+            ),
+            authorityName: "A",
+            receipt: ReportReceipt(
+                reportId: reportId,
+                receivedAt: now,
+                caseId: "case-\(reportId)"
+            )
+        )
     }
 
     func testUserDefaultsReportStoreEncryptsDisclosedEvidenceAtRest() throws {

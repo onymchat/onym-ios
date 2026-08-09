@@ -709,6 +709,18 @@ struct OnymIOSApp: App {
                         // backup post-removal can't decrypt
                         // outstanding intro requests.
                         await introKeyStore.deleteForOwner(removed)
+                        // Filed-report ledger rows are keyed by the
+                        // reporter's `onym:key:` reference, not by
+                        // IdentityID (and the removed identity's keys
+                        // are already gone) — so purge by keeping only
+                        // the reporters that still exist locally.
+                        let remaining = (try? await identityRepository.currentIdentities()) ?? []
+                        await moderationRepository.purgeReportRecords(
+                            keepingReporters: Set(remaining.map { summary in
+                                "onym:key:" + summary.sendingPublicKey
+                                    .map { String(format: "%02x", $0) }.joined()
+                            })
+                        )
                     }
                 }
                 .task {

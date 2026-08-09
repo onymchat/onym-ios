@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import OSLog
 import OnymTransport
 import OnymIdentity
 import OnymTransportBlossom
@@ -39,6 +40,10 @@ public actor SendMessageInteractor {
     /// sender sees the media immediately — the optimistic bubble is now
     /// inserted *before* the upload, so the blob isn't on Blossom yet.
     private let imageLoader: ChatImageLoader?
+
+    private static let logger = Logger(
+        subsystem: "app.onym.ios", category: "moderation"
+    )
 
     /// Hard ceiling on an encrypted blob we'll attempt to upload. Sits
     /// under Blossom's ~100MB cap so a long clip fails fast client-side
@@ -152,14 +157,23 @@ public actor SendMessageInteractor {
         // message. Best-effort by design: a signing failure ships the
         // message without a proof (recipients just can't report it)
         // rather than adding a crypto dependency to every text send.
-        let moderationAuthenticityProof = (try? await identity.signWithStellarKey(
-            Data(ChatModerationProof.signedContent(
-                messageID: messageID,
-                groupID: groupID,
-                sentAtMillis: sentAtMillis,
-                body: body
-            ).utf8)
-        ))?.base64EncodedString()
+        let moderationAuthenticityProof: String?
+        do {
+            moderationAuthenticityProof = try await identity.signWithStellarKey(
+                Data(ChatModerationProof.signedContent(
+                    messageID: messageID,
+                    groupID: groupID,
+                    sentAtMillis: sentAtMillis,
+                    body: body
+                ).utf8)
+            ).base64EncodedString()
+        } catch {
+            // A systematic failure (e.g. keychain) must be visible in
+            // diagnostics. Error only — no message/group identifiers,
+            // per the no-activity-logging policy.
+            Self.logger.error("moderation proof signing failed: \(error, privacy: .private)")
+            moderationAuthenticityProof = nil
+        }
         let payload = ChatMessagePayload(
             version: 1,
             messageID: messageID,

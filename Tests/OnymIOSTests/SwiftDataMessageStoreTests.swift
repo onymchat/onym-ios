@@ -439,12 +439,15 @@ final class SwiftDataMessageStoreTests: XCTestCase {
         )
         _ = await store.insertOrUpdate(original)
 
-        // An abuser re-sends the same messageID with the proof omitted
-        // (and a laundered body). The stored body + proof pair must
-        // survive so Report doesn't silently vanish from the menu.
+        // An abuser re-sends the same messageID with the proof omitted,
+        // a laundered body, AND a shifted timestamp. The proof signs the
+        // (body, group, id, sentAt) tuple, so the whole tuple must
+        // survive — a preserved proof over a replaced sentAt would no
+        // longer verify, and Report would silently vanish from the menu.
         let replay = makeMessage(
             id: id,
             body: "innocent content",
+            sentAt: original.sentAt.addingTimeInterval(3600),
             direction: .incoming,
             status: .received,
             moderationAuthenticityProof: nil
@@ -457,6 +460,8 @@ final class SwiftDataMessageStoreTests: XCTestCase {
         )
         XCTAssertEqual(listed.count, 1)
         XCTAssertEqual(listed[0].body, "prohibited content")
+        XCTAssertEqual(listed[0].sentAt, original.sentAt)
+        XCTAssertEqual(listed[0].senderBlsPubkeyHex, original.senderBlsPubkeyHex)
         XCTAssertEqual(listed[0].moderationAuthenticityProof, "c2lnbmF0dXJl")
     }
 

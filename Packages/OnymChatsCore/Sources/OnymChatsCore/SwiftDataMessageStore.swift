@@ -146,25 +146,30 @@ public actor SwiftDataMessageStore: MessageStore {
         if let existing = try? context.fetch(descriptor).first {
             // Receive-side replays land here as no-op overwrites; the
             // outgoing pending → sent / failed flip uses the same path.
-            existing.groupID = encoded.groupID
-            existing.sentAt = encoded.sentAt
+            //
+            // A replay of a known id without a proof must not erase
+            // retained evidence. The proof signs the canonical preimage
+            // over (body, groupID, messageID, sentAt), so the entire
+            // signed tuple is kept together with it — overwriting any
+            // element (a shifted `sentAt` is the cheap one for a sender
+            // to forge) would leave a stored proof whose recomputed
+            // preimage no longer verifies, silently removing Report
+            // from the menu.
+            let preservesEvidence = existing.encryptedModerationAuthenticityProof != nil
+                && encoded.encryptedModerationAuthenticityProof == nil
+            if !preservesEvidence {
+                existing.groupID = encoded.groupID
+                existing.sentAt = encoded.sentAt
+                existing.encryptedSenderBlsPubkeyHex = encoded.encryptedSenderBlsPubkeyHex
+                existing.encryptedBody = encoded.encryptedBody
+                existing.encryptedModerationAuthenticityProof =
+                    encoded.encryptedModerationAuthenticityProof
+            }
             existing.directionRaw = encoded.directionRaw
             existing.statusRaw = encoded.statusRaw
             existing.groupTypeRaw = encoded.groupTypeRaw
             existing.replyToMessageIDString = encoded.replyToMessageIDString
             existing.failureReasonRaw = encoded.failureReasonRaw
-            existing.encryptedSenderBlsPubkeyHex = encoded.encryptedSenderBlsPubkeyHex
-            if existing.encryptedModerationAuthenticityProof == nil
-                || encoded.encryptedModerationAuthenticityProof != nil {
-                existing.encryptedBody = encoded.encryptedBody
-                existing.encryptedModerationAuthenticityProof =
-                    encoded.encryptedModerationAuthenticityProof
-            }
-            // else: a replay of a known id without a proof must not
-            // erase retained evidence. The body and its proof travel as
-            // a signed pair, so both are kept — otherwise a re-sent
-            // proof-less body would orphan the signature it no longer
-            // matches (and silently remove Report from the menu).
             existing.encryptedAttachmentJSON = encoded.encryptedAttachmentJSON
             existing.encryptedVideoAttachmentJSON = encoded.encryptedVideoAttachmentJSON
             existing.encryptedAlbumJSON = encoded.encryptedAlbumJSON

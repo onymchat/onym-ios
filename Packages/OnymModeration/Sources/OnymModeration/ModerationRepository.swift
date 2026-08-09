@@ -74,6 +74,13 @@ public actor ModerationRepository {
     /// This interface's component id, carried in every mandate.
     public static let interfaceComponentId = "onym:component:onym-ios"
 
+    /// Retention bound on the report ledger. Rows whose delivery is
+    /// still ambiguous (no receipt) are always kept — they are the
+    /// idempotency keys for exact retry — but resolved rows beyond this
+    /// count are pruned oldest-first so disclosed content doesn't
+    /// accumulate indefinitely.
+    public static let maxResolvedReportRecords = 128
+
     private let authoritiesFetcher: any KnownAuthoritiesFetcher
     private let manifestFetcher: any AuthorityManifestFetcher
     private let manifestValidator: AuthorityManifestValidator
@@ -535,6 +542,9 @@ public actor ModerationRepository {
         }
         let reporterMandateRef = try reporterMandate.mandate.mandateHash()
 
+        // The idempotency identity deliberately includes `classId`:
+        // re-reporting the same message under a different violation
+        // class is a distinct allegation and mints its own report.
         if let existing = reportRecords.first(where: {
             $0.sourceMessageId == message.id
                 && $0.report.reporter == reporter
@@ -573,7 +583,7 @@ public actor ModerationRepository {
         // durably retained. A transport timeout may happen after intake
         // committed; without this write, a retry would mint a second report.
         do {
-            try reportStore.save(reportRecords)
+            try saveReportRecords()
         } catch {
             // Do not leave an unpersisted artifact eligible for the
             // in-memory exact-retry path on the next tap.
@@ -594,6 +604,18 @@ public actor ModerationRepository {
         do {
             receipt = try await client.fileReport(record.report)
         } catch {
+            // 409: the Authority already holds these exact bytes — a
+            // terminal, benign state, not a rejection. Keep the ledger
+            // row (it is the idempotency key) and surface it as its own
+            // error so the UI can present "already on file" rather than
+            // retry advice. The original receipt is unrecoverable until
+            // the Authority protocol grows a report-lookup endpoint.
+            if case let AuthorityClientError.rejected(rejection) = error,
+               rejection.statusCode == 409 {
+                throw ModerationError.reportAlreadyFiled(
+                    reportId: record.report.reportId
+                )
+            }
             if isDeterministicReportRejection(error) {
                 discardReport(record)
             }
@@ -612,8 +634,35 @@ public actor ModerationRepository {
             recovered.receipt = receipt
             reportRecords.insert(recovered, at: 0)
         }
-        try reportStore.save(reportRecords)
+        try saveReportRecords()
         return receipt
+    }
+
+    /// Persist the ledger, pruning resolved rows past the retention
+    /// bound. Records are newest-first, so dropping from the back of
+    /// the receipted subset removes the oldest disclosures first.
+    private func saveReportRecords() throws {
+        let resolved = reportRecords.filter { $0.receipt != nil }
+        if resolved.count > Self.maxResolvedReportRecords {
+            let cutoff = Set(
+                resolved.prefix(Self.maxResolvedReportRecords).map(\.report.reportId)
+            )
+            reportRecords.removeAll {
+                $0.receipt != nil && !cutoff.contains($0.report.reportId)
+            }
+        }
+        try reportStore.save(reportRecords)
+    }
+
+    /// Drop every report record not filed by one of `reporters`
+    /// (`onym:key:<hex>` references). Called when an identity is
+    /// removed so retained disclosures don't outlive the identity that
+    /// filed them.
+    public func purgeReportRecords(keepingReporters reporters: Set<String>) {
+        let before = reportRecords.count
+        reportRecords.removeAll { !reporters.contains($0.report.reporter) }
+        guard reportRecords.count != before else { return }
+        try? reportStore.save(reportRecords)
     }
 
     private func reportIndex(of record: ReportFilingRecord) -> Int? {
@@ -623,18 +672,16 @@ public actor ModerationRepository {
     private func discardReport(_ record: ReportFilingRecord) {
         guard let index = reportIndex(of: record) else { return }
         reportRecords.remove(at: index)
-        try? reportStore.save(reportRecords)
+        try? saveReportRecords()
     }
 
     private func isDeterministicReportRejection(_ error: Error) -> Bool {
         guard case let AuthorityClientError.rejected(rejection) = error else {
             return false
         }
-        // 409 means the Authority already holds this report. Keep the
-        // ledger row so a retry replays the same reportId instead of
-        // discarding it and minting a fresh one.
-        return rejection.statusCode != 409
-            && Self.isDeterministicStatusCode(rejection.statusCode)
+        // 409 never reaches here — `submitReport` converts it to
+        // `.reportAlreadyFiled` (terminal; keeps the ledger row).
+        return Self.isDeterministicStatusCode(rejection.statusCode)
     }
 
     /// A 4xx that exact replay can never turn into an acceptance —
