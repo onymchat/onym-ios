@@ -175,8 +175,8 @@ targets:
         # sources `scripts/resolve-release-version.sh` first so these
         # env vars are guaranteed to be set (with a `0.0.0-dev` /
         # `git describe` fallback for local builds between tags).
-        MARKETING_VERSION: ${MARKETING_VERSION}
-        CURRENT_PROJECT_VERSION: ${CURRENT_PROJECT_VERSION}
+        MARKETING_VERSION: 0.0.67
+        CURRENT_PROJECT_VERSION: 67
         SWIFT_VERSION: "5.0"
         # Asset catalog name for the AppIcon set. `AppIcon` is the
         # default — explicit so renaming the .appiconset folder fails
