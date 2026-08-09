@@ -17,17 +17,34 @@ public struct BannedView: View {
     /// in-app path pass `nil`, and the screen falls back to the
     /// authority's contact instead of offering a button that lies.
     let onNewHolderClaim: (() -> Void)?
+    /// Builds the in-app case flow for the banning verdict's case.
+    /// When present and the verdict is attached, appeal and new-holder
+    /// filings happen in-app; URLs (if the authority serves them) and
+    /// the contact fallback remain for verdicts without a case path.
+    let makeCaseFlow: (@MainActor (_ caseId: String, _ mandateRef: String) -> ModerationCaseFlow)?
 
     @Environment(\.openURL) private var openURL
+    @State private var showsCase = false
 
-    public init(state: BanState, onNewHolderClaim: (() -> Void)? = nil) {
+    public init(
+        state: BanState,
+        onNewHolderClaim: (() -> Void)? = nil,
+        makeCaseFlow: (@MainActor (_ caseId: String, _ mandateRef: String) -> ModerationCaseFlow)? = nil
+    ) {
         self.state = state
         self.onNewHolderClaim = onNewHolderClaim
+        self.makeCaseFlow = makeCaseFlow
+    }
+
+    /// In-app path into the banning case, when the verdict is attached.
+    private var caseFlowBuilder: (@MainActor () -> ModerationCaseFlow)? {
+        guard let makeCaseFlow, let verdict = state.verdict else { return nil }
+        return { makeCaseFlow(verdict.caseId, verdict.mandateRef) }
     }
 
     /// Whether the new-holder path can actually be reached from here.
     private var hasNewHolderPath: Bool {
-        state.newHolderURL != nil || onNewHolderClaim != nil
+        state.newHolderURL != nil || onNewHolderClaim != nil || caseFlowBuilder != nil
     }
 
     public var body: some View {
@@ -71,7 +88,19 @@ public struct BannedView: View {
                 SettingsFootnote("The ban covers this device on this app only. The Onym protocol itself remains open.")
 
                 VStack(spacing: 10) {
-                    if let appealURL = state.appealURL {
+                    // In-app appeal outranks a link-out: the flow
+                    // retains the exact signed filing and its receipt.
+                    if let builder = caseFlowBuilder {
+                        SettingsPrimaryButton(action: { showsCase = true }) {
+                            Text("Review case and appeal")
+                        }
+                        .accessibilityIdentifier("moderation.banned.appeal")
+                        .sheet(isPresented: $showsCase) {
+                            NavigationStack {
+                                ModerationCaseView(flow: builder())
+                            }
+                        }
+                    } else if let appealURL = state.appealURL {
                         SettingsPrimaryButton(action: { openURL(appealURL) }) {
                             Text("Appeal this ban")
                         }
@@ -87,6 +116,10 @@ public struct BannedView: View {
                         Button {
                             if let url = state.newHolderURL {
                                 openURL(url)
+                            } else if caseFlowBuilder != nil {
+                                // The case sheet carries the
+                                // new-holder section (banContext).
+                                showsCase = true
                             } else {
                                 onNewHolderClaim?()
                             }

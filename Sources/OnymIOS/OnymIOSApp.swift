@@ -570,6 +570,21 @@ struct OnymIOSApp: App {
                     message: message,
                     repository: moderationRepository
                 )))
+            },
+            makeModerationCaseFlow: { @MainActor notice in
+                ModerationCaseFlow(
+                    caseId: notice.caseId,
+                    mandateRef: notice.mandateRef,
+                    repository: moderationRepository
+                )
+            },
+            makeModerationBanCaseFlow: { @MainActor caseId, mandateRef in
+                ModerationCaseFlow(
+                    caseId: caseId,
+                    mandateRef: mandateRef,
+                    repository: moderationRepository,
+                    banContext: true
+                )
             }
         )
     }

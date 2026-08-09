@@ -81,4 +81,9 @@ struct AppDependencies {
     /// view this returns, keeping OnymChatsUI free of any
     /// OnymModerationUI dependency.
     let makeModerationReportView: @MainActor (ReportableMessage) -> AnyView
+    /// Case screen for a served notice — carries both the caseId and
+    /// the mandateRef the repository resolves standing by.
+    let makeModerationCaseFlow: @MainActor (CaseNotice) -> ModerationCaseFlow
+    /// Case screen from the ban surface: appeal + new-holder filings.
+    let makeModerationBanCaseFlow: @MainActor (_ caseId: String, _ mandateRef: String) -> ModerationCaseFlow
 }
