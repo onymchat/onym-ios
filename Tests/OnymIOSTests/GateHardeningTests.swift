@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymModeration
+import OnymModerationUI
 
 /// The enforcement-path hardening: signed session payloads a backend
 /// can actually verify, a countersignature round-trip that can't alter
@@ -471,5 +472,89 @@ final class GateHardeningTests: XCTestCase {
             status,
             .banned(BanState(verdictRef: "verdict-1", authorityContact: "appeals@authority.example"))
         )
+    }
+
+    // MARK: - `.enrollmentLost` cannot fail open
+
+    func testBackendBodyEnrollmentLostIsRefusalNotSuccess() async {
+        // `.enrollmentLost` is client-derived from the `no_mandate`
+        // envelope; a 200 body carrying it anyway (the reason is plain
+        // `Codable`) must take the same refusal path — blocking now,
+        // and never persisted as a successful check.
+        let store = InMemoryGateStateStore()
+        let priorSuccess = PersistedGateState(
+            lastResult: .clear,
+            lastSuccessAt: now.addingTimeInterval(-60)
+        )
+        store.save(priorSuccess)
+
+        let backend = FixedResultBackend(result: .checkRequired(.enrollmentLost))
+        let moderation = ModerationRepository(
+            authoritiesFetcher: EmptyAuthoritiesFetcher(),
+            manifestFetcher: UnusedManifestFetcher(),
+            mandateStore: SeededMandateStore(records: [seededActiveRecord()]),
+            backend: backend,
+            authorityClients: StubModerationAuthorityClientFactory(),
+            attestation: FixedAttestation(),
+            signer: FixedSigner(),
+            clock: { [now] in now }
+        )
+        let gate = GateCheckRepository(
+            attestation: FixedAttestation(),
+            backend: backend,
+            moderation: moderation,
+            signer: FixedSigner(),
+            store: store,
+            clock: { [now] in now }
+        )
+        await gate.checkNow()
+
+        let status = await gate.currentStatus()
+        XCTAssertEqual(status, .gateCheckRequired(.enrollmentLost))
+        // A success would have overwritten the persisted state with
+        // `{checkRequired, now}`; a refusal keeps the prior success.
+        XCTAssertEqual(store.load(), priorSuccess)
+    }
+
+    @MainActor
+    func testEnrollmentLostWithoutAuthoritiesBlocksInsteadOfOperational() async throws {
+        // Device holds an active mandate, the backend answers
+        // `no_mandate`, and the authorities directory is unavailable
+        // (empty). Consent can't be offered — but a mandate proves an
+        // authority was designated, so the flow must block on the
+        // check-required screen, never run the app unmoderated.
+        let backend = ThrowingBackend(error: AuthorityClientError.rejected(
+            AuthorityRejection(statusCode: 400, rawCode: "no_mandate", message: "gone")
+        ))
+        let moderation = ModerationRepository(
+            authoritiesFetcher: EmptyAuthoritiesFetcher(),
+            manifestFetcher: UnusedManifestFetcher(),
+            mandateStore: SeededMandateStore(records: [seededActiveRecord()]),
+            backend: backend,
+            authorityClients: StubModerationAuthorityClientFactory(),
+            attestation: FixedAttestation(),
+            signer: FixedSigner(),
+            clock: { [now] in now }
+        )
+        let gate = GateCheckRepository(
+            attestation: FixedAttestation(),
+            backend: backend,
+            moderation: moderation,
+            signer: FixedSigner(),
+            store: InMemoryGateStateStore(),
+            clock: { [now] in now }
+        )
+        await gate.checkNow()
+
+        let flow = ModerationGateFlow(moderation: moderation, gateCheck: gate)
+        flow.start()
+        defer { flow.stop() }
+
+        // Both repository streams yield their current state on
+        // subscription; poll until the flow leaves `.checking`.
+        for _ in 0..<500 where flow.gate == .checking {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(flow.gate, .gateCheckRequired(.enrollmentLost))
     }
 }

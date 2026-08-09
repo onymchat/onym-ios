@@ -179,6 +179,12 @@ public enum CheckRequiredReason: String, Codable, Sendable, Equatable {
     /// the recovery is consenting again, which re-runs enrollment,
     /// countersignature, and registration — the gate flow routes this
     /// state back to consent rather than to a retry that cannot succeed.
+    ///
+    /// Never accepted from a 200 body: the reason is plain `Codable`,
+    /// so a backend *could* serialize it into `checkRequired`, but
+    /// `GateCheckRepository` normalizes that onto the same refusal
+    /// path as the `no_mandate` envelope instead of treating it as a
+    /// successful check.
     case enrollmentLost
     /// Local policy: the device clock now reads earlier than the last
     /// successful check, so elapsed time can't be trusted to bound

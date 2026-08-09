@@ -74,18 +74,11 @@ public struct URLSessionEnforcementBackendClient: EnforcementBackendClient {
     // MARK: - Transport
 
     private func send(path: [String], body: Data) async throws -> Data {
-        // https only — except, in DEBUG builds, plain http to
-        // loopback so a local reference deployment can drive the full
-        // loop in development. Release binaries are structurally
-        // https-only, matching the authority client.
+        // https only, every build — matching the authority client. A
+        // local reference deployment is reached through an https
+        // proxy/tunnel, never by relaxing transport security here.
         let host = baseURL.host?.lowercased() ?? ""
-        let scheme = baseURL.scheme?.lowercased()
-        #if DEBUG
-        let loopback = ["localhost", "127.0.0.1", "::1"].contains(host)
-        #else
-        let loopback = false
-        #endif
-        guard !host.isEmpty, scheme == "https" || (scheme == "http" && loopback) else {
+        guard !host.isEmpty, baseURL.scheme?.lowercased() == "https" else {
             throw AuthorityClientError.insecureBaseURL(baseURL.absoluteString)
         }
         let url = path.reduce(baseURL) { partial, component in

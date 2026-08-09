@@ -123,7 +123,18 @@ public final class ModerationGateFlow {
             // retrying cannot succeed. Consent IS the recovery: it
             // re-runs enrollment, countersignature, and registration,
             // so route there instead of a dead-ended retry screen.
-            gate = authoritiesAvailable ? .needsConsent : .operational(openCases: [])
+            //
+            // The no-authorities softening from the `!hasMandate`
+            // branch does NOT transfer here: an active mandate proves
+            // an authority was designated, so a directory that hasn't
+            // loaded (cold launch, rate limit, fetch failure) is a
+            // transient outage, not evidence this install answers to
+            // no one. Falling back to operational would let a
+            // reachable backend's `no_mandate` answer run the app
+            // unmoderated for as long as the directory stays down —
+            // so without authorities this blocks on the (normally
+            // unreachable) check-required screen instead.
+            gate = authoritiesAvailable ? .needsConsent : .gateCheckRequired(.enrollmentLost)
         case .gateCheckRequired(let reason):
             gate = .gateCheckRequired(reason)
         }

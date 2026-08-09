@@ -233,6 +233,17 @@ public actor GateCheckRepository {
     /// self-inflict a replay refusal (consentCompleted + the cadence
     /// loop, or a double-tapped retry). Bumping into the next second
     /// stays comfortably inside the server's freshness window.
+    ///
+    /// Known limits, accepted deliberately:
+    /// - Each same-second bump sends a timestamp one second further
+    ///   into the future, so an N-call burst drifts N seconds ahead —
+    ///   fine against a symmetric freshness window (bursts are small:
+    ///   retry taps + foreground + cadence), and the drift resets the
+    ///   moment a second passes between calls.
+    /// - Not persisted: a relaunch inside the same second could still
+    ///   replay. The relaunch path takes far longer than a second in
+    ///   practice, and the cost of a collision is one refused check
+    ///   that the next retry clears.
     private var lastSessionTimestamp = Date.distantPast
 
     private func performAttempt(for record: MandateRecord) async -> AttemptOutcome {
@@ -264,7 +275,18 @@ public actor GateCheckRepository {
                 timestamp: timestamp,
                 signature: signature
             )
-            return .success(await sanitize(try await backend.gateCheck(request)))
+            let result = try await backend.gateCheck(request)
+            // `.enrollmentLost` is client-derived from the backend's
+            // `no_mandate` error envelope; a conforming backend never
+            // puts it in a 200 body. If one does anyway (the reason is
+            // plain `Codable`, so it decodes), normalize it onto the
+            // same refusal path as the envelope: it must not persist
+            // as a successful check, and downstream must see exactly
+            // one `.enrollmentLost` route.
+            if case .checkRequired(.enrollmentLost) = result {
+                return .refused(.enrollmentLost)
+            }
+            return .success(await sanitize(result))
         } catch {
             // Only a recognizable SESSION refusal blocks: 401/403, or
             // the backend's own session codes. A broader any-4xx rule

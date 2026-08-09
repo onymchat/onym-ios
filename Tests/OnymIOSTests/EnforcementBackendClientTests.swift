@@ -289,25 +289,22 @@ final class EnforcementBackendClientTests: XCTestCase {
         }
     }
 
-    func testInsecureBaseURLIsRefusedButLoopbackHTTPIsAllowed() async throws {
-        let insecure = URLSessionEnforcementBackendClient(
-            baseURL: URL(string: "http://moderation.example")!,
-            session: session
-        )
-        do {
-            _ = try await insecure.gateCheck(Self.gateRequest())
-            XCTFail("expected insecure base URL to be refused")
-        } catch AuthorityClientError.insecureBaseURL {
-            // expected
+    func testInsecureBaseURLIsRefusedIncludingLoopback() async throws {
+        // https-only in every build: even a loopback dev deployment
+        // must come through an https proxy/tunnel, so no binary ever
+        // carries an insecure-transport code path.
+        for base in ["http://moderation.example", "http://localhost:8080", "http://127.0.0.1:8080"] {
+            let insecure = URLSessionEnforcementBackendClient(
+                baseURL: URL(string: base)!,
+                session: session
+            )
+            do {
+                _ = try await insecure.gateCheck(Self.gateRequest())
+                XCTFail("expected insecure base URL to be refused: \(base)")
+            } catch AuthorityClientError.insecureBaseURL {
+                // expected
+            }
         }
-
-        StubURLProtocol.set { request in Self.ok(request, #"{"clear":{}}"#) }
-        let local = URLSessionEnforcementBackendClient(
-            baseURL: URL(string: "http://localhost:8080")!,
-            session: session
-        )
-        let result = try await local.gateCheck(Self.gateRequest())
-        XCTAssertEqual(result, .clear)
     }
 
     // MARK: - Helpers

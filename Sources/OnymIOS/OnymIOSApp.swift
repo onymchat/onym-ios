@@ -149,10 +149,11 @@ struct OnymIOSApp: App {
                 validatesBanVerdicts: false
             )
         } else {
-            // `--enforcement-base-url http://localhost:8080` points a
-            // dev build at a local reference deployment (plain http is
-            // accepted for loopback only). Without it, dev builds talk
-            // to the production service like release builds do.
+            // `--enforcement-base-url <https-url>` points a dev build
+            // at a local reference deployment (https only — reach a
+            // local server through an https tunnel/proxy). Without it,
+            // dev builds talk to the production service like release
+            // builds do.
             let backend = URLSessionEnforcementBackendClient(
                 baseURL: Self.resolveEnforcementBaseURL(args: args)
                     ?? URLSessionEnforcementBackendClient.defaultBaseURL
@@ -589,7 +590,9 @@ struct OnymIOSApp: App {
     #if DEBUG
     /// `--enforcement-base-url <url>` (with a DEBUG build): point the
     /// enforcement backend client at a local deployment for driving
-    /// the full moderation loop in development.
+    /// the full moderation loop in development. The client enforces
+    /// https in every build; a non-https URL fails every request with
+    /// `insecureBaseURL`.
     private static func resolveEnforcementBaseURL(args: [String]) -> URL? {
         guard let flagIndex = args.firstIndex(of: "--enforcement-base-url"),
               args.indices.contains(flagIndex + 1) else { return nil }

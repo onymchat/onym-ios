@@ -62,7 +62,9 @@ public struct GateCheckRequiredView: View {
             return String(localized: "The verification service refused this device's session. Check the date and time, then try again.")
         case .enrollmentLost:
             // Normally unreachable: the gate flow routes this state to
-            // consent. Rendered only if a host wires the view directly.
+            // consent. Rendered when the authorities directory is
+            // unavailable (so the consent flow has nothing to offer)
+            // or if a host wires the view directly.
             return String(localized: "This device's enrollment is no longer on record. Consent to your moderation authority again to re-enroll.")
         }
     }
