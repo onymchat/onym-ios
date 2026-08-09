@@ -189,13 +189,19 @@ public actor SendMessageInteractor {
         // Status flips later after the fan-out completes; the bubble
         // never disappears (re-tries flip pending → sent again, not
         // back to a different id).
+        //
+        // Persist `sentAt` from the wire millis (not the raw `now`):
+        // the proof signs the truncated millisecond value, so the
+        // stored date must reconstruct exactly that value — the same
+        // derivation every recipient makes — or the sender's own row
+        // could never re-derive the preimage it signed.
         let pending = ChatMessage(
             id: messageID,
             groupID: groupID,
             ownerIdentityID: group.ownerIdentityID,
             senderBlsPubkeyHex: myBlsHex,
             body: body,
-            sentAt: now,
+            sentAt: Date(timeIntervalSince1970: TimeInterval(sentAtMillis) / 1000.0),
             direction: .outgoing,
             status: .pending,
             replyToMessageID: replyToMessageID,

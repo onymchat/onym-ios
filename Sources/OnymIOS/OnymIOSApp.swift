@@ -714,13 +714,18 @@ struct OnymIOSApp: App {
                         // IdentityID (and the removed identity's keys
                         // are already gone) — so purge by keeping only
                         // the reporters that still exist locally.
-                        let remaining = (try? await identityRepository.currentIdentities()) ?? []
-                        await moderationRepository.purgeReportRecords(
-                            keepingReporters: Set(remaining.map { summary in
-                                "onym:key:" + summary.sendingPublicKey
-                                    .map { String(format: "%02x", $0) }.joined()
-                            })
-                        )
+                        // Skip the purge entirely if the identity list
+                        // can't be read: an empty keep-set would wipe
+                        // every identity's ledger, not just the
+                        // removed one's.
+                        if let remaining = try? await identityRepository.currentIdentities() {
+                            await moderationRepository.purgeReportRecords(
+                                keepingReporters: Set(remaining.map { summary in
+                                    "onym:key:" + summary.sendingPublicKey
+                                        .map { String(format: "%02x", $0) }.joined()
+                                })
+                            )
+                        }
                     }
                 }
                 .task {

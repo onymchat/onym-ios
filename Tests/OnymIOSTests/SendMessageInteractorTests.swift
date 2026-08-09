@@ -483,12 +483,11 @@ final class SendMessageInteractorTests: XCTestCase {
         let groupID = await seedGroupWithTwoPeers()
         let body = "exact UTF-8 evidence — こんにちは"
 
-        // Whole-second send time: the interactor truncates fractional
-        // millis into the wire value it signs, so a sub-millisecond
-        // `now` would make any local reconstruction ambiguous.
-        // (Receivers are unaffected — they recover the exact wire
-        // millis from the payload.)
-        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        // Deliberately sub-millisecond: the interactor truncates the
+        // wire millis it signs, and persists `sentAt` re-derived from
+        // that truncated value — so the stored row reconstructs the
+        // signed preimage exactly, whatever `now` was.
+        let now = Date(timeIntervalSince1970: 1_700_000_000.7777)
         let result = try await interactor.send(groupID: groupID, body: body, now: now)
 
         let encodedProof = try XCTUnwrap(result.moderationAuthenticityProof)

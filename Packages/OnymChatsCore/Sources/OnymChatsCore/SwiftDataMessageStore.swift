@@ -164,16 +164,21 @@ public actor SwiftDataMessageStore: MessageStore {
                 existing.encryptedBody = encoded.encryptedBody
                 existing.encryptedModerationAuthenticityProof =
                     encoded.encryptedModerationAuthenticityProof
+                // Attachments and the reply pointer gate report
+                // eligibility (media/voice messages aren't reportable),
+                // so they are preserved with the tuple — a proof-less
+                // replay that bolts on an attachment would otherwise
+                // keep the pair but still remove Report from the menu.
+                existing.replyToMessageIDString = encoded.replyToMessageIDString
+                existing.encryptedAttachmentJSON = encoded.encryptedAttachmentJSON
+                existing.encryptedVideoAttachmentJSON = encoded.encryptedVideoAttachmentJSON
+                existing.encryptedAlbumJSON = encoded.encryptedAlbumJSON
+                existing.encryptedVoiceAttachmentJSON = encoded.encryptedVoiceAttachmentJSON
             }
             existing.directionRaw = encoded.directionRaw
             existing.statusRaw = encoded.statusRaw
             existing.groupTypeRaw = encoded.groupTypeRaw
-            existing.replyToMessageIDString = encoded.replyToMessageIDString
             existing.failureReasonRaw = encoded.failureReasonRaw
-            existing.encryptedAttachmentJSON = encoded.encryptedAttachmentJSON
-            existing.encryptedVideoAttachmentJSON = encoded.encryptedVideoAttachmentJSON
-            existing.encryptedAlbumJSON = encoded.encryptedAlbumJSON
-            existing.encryptedVoiceAttachmentJSON = encoded.encryptedVoiceAttachmentJSON
             do {
                 try context.save()
             } catch {

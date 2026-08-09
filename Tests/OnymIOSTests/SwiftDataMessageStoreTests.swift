@@ -440,17 +440,25 @@ final class SwiftDataMessageStoreTests: XCTestCase {
         _ = await store.insertOrUpdate(original)
 
         // An abuser re-sends the same messageID with the proof omitted,
-        // a laundered body, AND a shifted timestamp. The proof signs the
-        // (body, group, id, sentAt) tuple, so the whole tuple must
-        // survive — a preserved proof over a replaced sentAt would no
-        // longer verify, and Report would silently vanish from the menu.
+        // a laundered body, a shifted timestamp, AND a bolted-on
+        // attachment (media messages aren't reportable, so a surviving
+        // attachment would remove Report from the menu even with the
+        // pair intact). The proof signs the (body, group, id, sentAt)
+        // tuple; the whole tuple plus the eligibility-gating fields
+        // must survive.
         let replay = makeMessage(
             id: id,
             body: "innocent content",
             sentAt: original.sentAt.addingTimeInterval(3600),
             direction: .incoming,
             status: .received,
-            moderationAuthenticityProof: nil
+            moderationAuthenticityProof: nil,
+            imageAttachment: ChatImageAttachment(
+                sha256: "cd".repeated(32), mimeType: "image/jpeg",
+                byteSize: 1, width: 1, height: 1,
+                encKey: Data(repeating: 7, count: 32),
+                blurhash: "LEHV6nWB2yk8", server: "https://blossom.test"
+            )
         )
         let outcome = await store.insertOrUpdate(replay)
         XCTAssertEqual(outcome, .updated)
@@ -463,6 +471,8 @@ final class SwiftDataMessageStoreTests: XCTestCase {
         XCTAssertEqual(listed[0].sentAt, original.sentAt)
         XCTAssertEqual(listed[0].senderBlsPubkeyHex, original.senderBlsPubkeyHex)
         XCTAssertEqual(listed[0].moderationAuthenticityProof, "c2lnbmF0dXJl")
+        XCTAssertNil(listed[0].imageAttachment,
+                     "a proof-less replay must not bolt on an attachment")
     }
 
     func test_insertOrUpdate_replayWithProof_overwritesBodyAndProofTogether() async {
@@ -518,7 +528,8 @@ final class SwiftDataMessageStoreTests: XCTestCase {
         direction: MessageDirection = .outgoing,
         status: MessageStatus = .sent,
         replyToMessageID: UUID? = nil,
-        moderationAuthenticityProof: String? = nil
+        moderationAuthenticityProof: String? = nil,
+        imageAttachment: ChatImageAttachment? = nil
     ) -> ChatMessage {
         ChatMessage(
             id: id,
@@ -531,7 +542,8 @@ final class SwiftDataMessageStoreTests: XCTestCase {
             status: status,
             replyToMessageID: replyToMessageID,
             groupType: .tyranny,
-            moderationAuthenticityProof: moderationAuthenticityProof
+            moderationAuthenticityProof: moderationAuthenticityProof,
+            imageAttachment: imageAttachment
         )
     }
 }
