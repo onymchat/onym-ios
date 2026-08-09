@@ -498,6 +498,7 @@ final class SendMessageInteractorTests: XCTestCase {
         let preimage = try ChatModerationProof.signedContent(
             messageID: result.id,
             groupID: groupID,
+            groupSecret: Data(repeating: 0x55, count: 32),  // seedGroup's secret
             sentAtMillis: ChatModerationProof.sentAtMillis(from: result.sentAt),
             body: body
         )

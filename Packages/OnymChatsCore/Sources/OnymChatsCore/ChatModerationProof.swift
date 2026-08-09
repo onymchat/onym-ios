@@ -22,14 +22,18 @@ import Foundation
 /// signing sender and the verifying recipient, both of which are this
 /// function.
 ///
-/// The group is bound through `group_binding` —
-/// `SHA-256("onym-moderation-proof-v1|" + groupID + "|" + messageID)` —
-/// rather than the raw group id. The recipient recomputes it from the
-/// same locals, so the binding is just as tight, but the disclosed
-/// content carries no cross-report-linkable identifier: two reports
-/// from the same group hash to unrelated values (the message id salts
-/// them), so an Authority cannot correlate independent reports to one
-/// group or join them against on-chain data.
+/// The group is bound through `group_binding` — a SHA-256 over the
+/// group's 32-byte shared secret (`ChatGroup.groupSecret`, sealed into
+/// invitations and never on-chain), the group id, and the message id —
+/// rather than the raw group id. Members recompute it from their
+/// stored group, so the binding is just as tight, but the disclosed
+/// content carries no identifier an outsider can resolve: group ids
+/// are public on-chain lookup keys, so a keyless hash could be broken
+/// by trial-hashing one candidate per group. The secret input closes
+/// that — an Authority cannot correlate independent reports to one
+/// group or join them against chain data — and the message id in the
+/// preimage keeps two reports from the same group unlinkable to each
+/// other as well.
 public enum ChatModerationProof {
     /// Version discriminator inside the preimage so a future shape
     /// change can't be confused with this one.
@@ -38,6 +42,7 @@ public enum ChatModerationProof {
     public static func signedContent(
         messageID: UUID,
         groupID: String,
+        groupSecret: Data,
         sentAtMillis: Int64,
         body: String
     ) throws -> String {
@@ -57,9 +62,12 @@ public enum ChatModerationProof {
             }
         }
         let messageIDString = messageID.uuidString.lowercased()
-        let binding = SHA256.hash(data: Data(
-            "onym-moderation-proof-v1|\(groupID)|\(messageIDString)".utf8
-        )).map { String(format: "%02x", $0) }.joined()
+        var hasher = SHA256()
+        hasher.update(data: Data("onym-moderation-proof-v1|".utf8))
+        hasher.update(data: groupSecret)
+        hasher.update(data: Data("|\(groupID)|\(messageIDString)".utf8))
+        let binding = hasher.finalize()
+            .map { String(format: "%02x", $0) }.joined()
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         let data = try encoder.encode(Preimage(

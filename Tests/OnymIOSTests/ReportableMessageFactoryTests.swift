@@ -16,12 +16,15 @@ final class ReportableMessageFactoryTests: XCTestCase {
     private let senderKey = Curve25519.Signing.PrivateKey()
     private let senderHex = String(repeating: "11", count: 48)
     private let groupID = String(repeating: "aa", count: 32)
+    private let groupSecret = Data(repeating: 0x55, count: 32)
 
     func test_incomingSignedTextMessage_isReportable() throws {
         let message = try signedMessage(body: "prohibited content")
 
         let reportable = try XCTUnwrap(
-            ReportableMessageFactory.make(from: message, memberProfiles: profiles())
+            ReportableMessageFactory.make(
+            from: message, memberProfiles: profiles(), groupSecret: groupSecret
+        )
         )
 
         XCTAssertEqual(reportable.id, message.id.uuidString.lowercased())
@@ -34,6 +37,7 @@ final class ReportableMessageFactoryTests: XCTestCase {
         XCTAssertEqual(reportable.disclosedContent, try ChatModerationProof.signedContent(
             messageID: message.id,
             groupID: groupID,
+            groupSecret: groupSecret,
             sentAtMillis: ChatModerationProof.sentAtMillis(from: message.sentAt),
             body: message.body
         ))
@@ -47,12 +51,16 @@ final class ReportableMessageFactoryTests: XCTestCase {
 
     func test_outgoingMessage_isNotReportable() throws {
         let message = try signedMessage(direction: .outgoing)
-        XCTAssertNil(ReportableMessageFactory.make(from: message, memberProfiles: profiles()))
+        XCTAssertNil(ReportableMessageFactory.make(
+            from: message, memberProfiles: profiles(), groupSecret: groupSecret
+        ))
     }
 
     func test_messageWithoutProof_isNotReportable() throws {
         let message = try signedMessage(proofOverride: .some(nil))
-        XCTAssertNil(ReportableMessageFactory.make(from: message, memberProfiles: profiles()))
+        XCTAssertNil(ReportableMessageFactory.make(
+            from: message, memberProfiles: profiles(), groupSecret: groupSecret
+        ))
     }
 
     func test_messageWithGarbageProof_isNotReportable() throws {
@@ -61,7 +69,9 @@ final class ReportableMessageFactoryTests: XCTestCase {
         let message = try signedMessage(
             proofOverride: .some(Data(repeating: 7, count: 64).base64EncodedString())
         )
-        XCTAssertNil(ReportableMessageFactory.make(from: message, memberProfiles: profiles()))
+        XCTAssertNil(ReportableMessageFactory.make(
+            from: message, memberProfiles: profiles(), groupSecret: groupSecret
+        ))
     }
 
     func test_proofOverBareBody_isNotReportable() throws {
@@ -70,17 +80,34 @@ final class ReportableMessageFactoryTests: XCTestCase {
         let body = "prohibited content"
         let bareProof = try senderKey.signature(for: Data(body.utf8)).base64EncodedString()
         let message = try signedMessage(body: body, proofOverride: .some(bareProof))
-        XCTAssertNil(ReportableMessageFactory.make(from: message, memberProfiles: profiles()))
+        XCTAssertNil(ReportableMessageFactory.make(
+            from: message, memberProfiles: profiles(), groupSecret: groupSecret
+        ))
+    }
+
+    func test_wrongGroupSecret_isNotReportable() throws {
+        // The group binding is keyed by the group's shared secret; a
+        // preimage rebuilt with a different secret must not verify.
+        let message = try signedMessage()
+        XCTAssertNil(ReportableMessageFactory.make(
+            from: message,
+            memberProfiles: profiles(),
+            groupSecret: Data(repeating: 0x66, count: 32)
+        ))
     }
 
     func test_emptyBody_isNotReportable() throws {
         let message = try signedMessage(body: "")
-        XCTAssertNil(ReportableMessageFactory.make(from: message, memberProfiles: profiles()))
+        XCTAssertNil(ReportableMessageFactory.make(
+            from: message, memberProfiles: profiles(), groupSecret: groupSecret
+        ))
     }
 
     func test_unknownSender_isNotReportable() throws {
         let message = try signedMessage()
-        XCTAssertNil(ReportableMessageFactory.make(from: message, memberProfiles: [:]))
+        XCTAssertNil(ReportableMessageFactory.make(
+            from: message, memberProfiles: [:], groupSecret: groupSecret
+        ))
     }
 
     func test_mediaMessage_isNotReportable() throws {
@@ -95,7 +122,9 @@ final class ReportableMessageFactoryTests: XCTestCase {
             server: "https://blossom.onym.app"
         )
         let message = try signedMessage(imageAttachment: image)
-        XCTAssertNil(ReportableMessageFactory.make(from: message, memberProfiles: profiles()))
+        XCTAssertNil(ReportableMessageFactory.make(
+            from: message, memberProfiles: profiles(), groupSecret: groupSecret
+        ))
     }
 
     func test_voiceMessage_isNotReportable() throws {
@@ -109,7 +138,9 @@ final class ReportableMessageFactoryTests: XCTestCase {
             server: "https://blossom.onym.app"
         )
         let message = try signedMessage(body: "caption", voiceAttachment: voice)
-        XCTAssertNil(ReportableMessageFactory.make(from: message, memberProfiles: profiles()))
+        XCTAssertNil(ReportableMessageFactory.make(
+            from: message, memberProfiles: profiles(), groupSecret: groupSecret
+        ))
     }
 
     // MARK: - Helpers
@@ -142,6 +173,7 @@ final class ReportableMessageFactoryTests: XCTestCase {
             let preimage = try ChatModerationProof.signedContent(
                 messageID: id,
                 groupID: groupID,
+                groupSecret: groupSecret,
                 sentAtMillis: ChatModerationProof.sentAtMillis(from: sentAt),
                 body: body
             )

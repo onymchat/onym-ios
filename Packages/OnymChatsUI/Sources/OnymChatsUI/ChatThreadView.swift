@@ -434,7 +434,14 @@ public struct ChatThreadView: View {
     }
 
     private func makeReportableMessage(from message: ChatMessage) -> ReportableMessage? {
-        ReportableMessageFactory.make(from: message, memberProfiles: currentMemberProfiles)
+        guard let group = chatsFlow.groups.first(where: { $0.id == groupID }) else {
+            return nil
+        }
+        return ReportableMessageFactory.make(
+            from: message,
+            memberProfiles: currentMemberProfiles,
+            groupSecret: group.groupSecret
+        )
     }
 }
 

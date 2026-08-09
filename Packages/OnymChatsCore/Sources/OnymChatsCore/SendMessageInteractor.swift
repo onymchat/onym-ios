@@ -163,6 +163,7 @@ public actor SendMessageInteractor {
                 Data(ChatModerationProof.signedContent(
                     messageID: messageID,
                     groupID: groupID,
+                    groupSecret: group.groupSecret,
                     sentAtMillis: sentAtMillis,
                     body: body
                 ).utf8)

@@ -443,9 +443,8 @@ final class SwiftDataMessageStoreTests: XCTestCase {
         // a laundered body, a shifted timestamp, AND a bolted-on
         // attachment (media messages aren't reportable, so a surviving
         // attachment would remove Report from the menu even with the
-        // pair intact). The proof signs the (body, group, id, sentAt)
-        // tuple; the whole tuple plus the eligibility-gating fields
-        // must survive.
+        // pair intact). Incoming rows are immutable once received, so
+        // nothing about the stored row may change.
         let replay = makeMessage(
             id: id,
             body: "innocent content",
@@ -475,26 +474,86 @@ final class SwiftDataMessageStoreTests: XCTestCase {
                      "a proof-less replay must not bolt on an attachment")
     }
 
-    func test_insertOrUpdate_replayWithProof_overwritesBodyAndProofTogether() async {
+    func test_insertOrUpdate_incomingReplayWithFreshProof_neverMutatesSignedTuple() async {
+        // The strongest laundering attempt: same messageID, laundered
+        // body, shifted timestamp, and a *fresh* proof over the new
+        // preimage (the sender holds the signing key, so it verifies).
+        // An incoming row is immutable once received — a legitimate
+        // replay is byte-identical, so divergence is hostile.
         let id = UUID()
-        _ = await store.insertOrUpdate(makeMessage(
+        let original = makeMessage(
             id: id,
-            body: "first",
-            moderationAuthenticityProof: nil
-        ))
+            body: "prohibited content",
+            direction: .incoming,
+            status: .received,
+            moderationAuthenticityProof: "c2lnbmF0dXJl"
+        )
+        _ = await store.insertOrUpdate(original)
 
         let replay = makeMessage(
             id: id,
-            body: "second",
-            moderationAuthenticityProof: "bmV3LXByb29m"
+            body: "innocent content",
+            sentAt: original.sentAt.addingTimeInterval(-3600),
+            direction: .incoming,
+            status: .received,
+            moderationAuthenticityProof: "ZnJlc2gtdmFsaWQtcHJvb2Y="
         )
-        _ = await store.insertOrUpdate(replay)
+        let outcome = await store.insertOrUpdate(replay)
+        XCTAssertEqual(outcome, .updated)
 
         let listed = await store.list(
-            groupID: replay.groupID, ownerIDString: kOwner.rawValue.uuidString
+            groupID: original.groupID, ownerIDString: kOwner.rawValue.uuidString
         )
-        XCTAssertEqual(listed[0].body, "second")
-        XCTAssertEqual(listed[0].moderationAuthenticityProof, "bmV3LXByb29m")
+        XCTAssertEqual(listed[0].body, "prohibited content")
+        XCTAssertEqual(listed[0].sentAt, original.sentAt)
+        XCTAssertEqual(listed[0].moderationAuthenticityProof, "c2lnbmF0dXJl")
+    }
+
+    func test_insertOrUpdate_incomingEcho_neverRewritesOutgoingRow() async {
+        // A group member replays the recipient's own messageID as an
+        // incoming payload. Cross-direction overwrites are refused —
+        // the sender's own row must survive untouched.
+        let id = UUID()
+        let mine = makeMessage(
+            id: id,
+            body: "my message",
+            direction: .outgoing,
+            status: .sent,
+            moderationAuthenticityProof: "bXktcHJvb2Y="
+        )
+        _ = await store.insertOrUpdate(mine)
+
+        let echo = makeMessage(
+            id: id,
+            body: "forged echo",
+            direction: .incoming,
+            status: .received
+        )
+        _ = await store.insertOrUpdate(echo)
+
+        let listed = await store.list(
+            groupID: mine.groupID, ownerIDString: kOwner.rawValue.uuidString
+        )
+        XCTAssertEqual(listed[0].body, "my message")
+        XCTAssertEqual(listed[0].direction, .outgoing)
+        XCTAssertEqual(listed[0].moderationAuthenticityProof, "bXktcHJvb2Y=")
+    }
+
+    func test_insertOrUpdate_outgoingRow_stillAcceptsOverwrites() async {
+        // Outgoing rows keep the full update path — the pending → sent
+        // flip and retry re-inserts depend on it.
+        let id = UUID()
+        _ = await store.insertOrUpdate(makeMessage(
+            id: id, body: "draft", status: .pending
+        ))
+        _ = await store.insertOrUpdate(makeMessage(
+            id: id, body: "draft", status: .sent
+        ))
+
+        let listed = await store.list(
+            groupID: "aa".repeated(32), ownerIDString: kOwner.rawValue.uuidString
+        )
+        XCTAssertEqual(listed[0].status, .sent)
     }
 
     func test_deleteOwner_removesAllMessagesForIdentity() async {

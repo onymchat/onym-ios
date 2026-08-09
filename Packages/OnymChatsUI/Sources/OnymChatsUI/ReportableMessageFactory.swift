@@ -13,7 +13,8 @@ import OnymModeration
 enum ReportableMessageFactory {
     static func make(
         from message: ChatMessage,
-        memberProfiles: [String: MemberProfile]
+        memberProfiles: [String: MemberProfile],
+        groupSecret: Data
     ) -> ReportableMessage? {
         guard message.direction == .incoming,
               message.media.isEmpty,
@@ -28,6 +29,7 @@ enum ReportableMessageFactory {
               let disclosedContent = try? ChatModerationProof.signedContent(
                 messageID: message.id,
                 groupID: message.groupID,
+                groupSecret: groupSecret,
                 sentAtMillis: ChatModerationProof.sentAtMillis(from: message.sentAt),
                 body: message.body
               ),

@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import OSLog
 
 /// Outcome of the most recent authorities-directory fetch. Same
 /// shape as `RelayerFetchStatus` so the picker copy stays consistent.
@@ -73,6 +74,10 @@ public struct ReviewedManifest: Sendable, Equatable {
 public actor ModerationRepository {
     /// This interface's component id, carried in every mandate.
     public static let interfaceComponentId = "onym:component:onym-ios"
+
+    private static let logger = Logger(
+        subsystem: "app.onym.ios", category: "moderation"
+    )
 
     /// Retention bound on the report ledger. Rows whose delivery is
     /// still ambiguous (no receipt) are always kept — they are the
@@ -542,9 +547,13 @@ public actor ModerationRepository {
         }
         let reporterMandateRef = try reporterMandate.mandate.mandateHash()
 
-        // The idempotency identity deliberately includes `classId`:
-        // re-reporting the same message under a different violation
-        // class is a distinct allegation and mints its own report.
+        // The idempotency identity deliberately includes `classId` and
+        // `reporterMandate`: re-reporting the same message under a
+        // different violation class is a distinct allegation, and a
+        // report's standing follows the mandate it was filed under
+        // (spec §5.4 constraint 5) — re-consenting mints new standing,
+        // with the Authority's own intake dedup as the backstop against
+        // duplicate allegations over identical evidence.
         if let existing = reportRecords.first(where: {
             $0.sourceMessageId == message.id
                 && $0.report.reporter == reporter
@@ -648,7 +657,16 @@ public actor ModerationRepository {
             recovered.receipt = receipt
             reportRecords.insert(recovered, at: 0)
         }
-        try saveReportRecords()
+        do {
+            try saveReportRecords()
+        } catch {
+            // The Authority has accepted — that outcome is authoritative
+            // and must reach the user. Losing the receipt's persistence
+            // is recoverable (a post-relaunch retry hits the terminal
+            // already-filed path); reporting success as failure is not.
+            // Error only — no report content — per no-activity-logging.
+            Self.logger.error("report receipt persistence failed: \(error)")
+        }
         return receipt
     }
 
