@@ -130,6 +130,18 @@ public struct DeviceRecoveryView: View {
             }
             .disabled(isChecking)
             .accessibilityIdentifier("moderation.device_recovery.check")
+            if flow.errorMessage != nil {
+                // The recurring-error exit: a persisted claim the
+                // authority no longer knows (re-consent, a pruned
+                // claim) would otherwise pin the holder here forever.
+                Button {
+                    flow.startOver()
+                } label: {
+                    Text("File a new claim", comment: "Recovery claim start over button")
+                        .font(.system(size: 14, weight: .medium))
+                }
+                .accessibilityIdentifier("moderation.device_recovery.start_over")
+            }
         }
     }
 

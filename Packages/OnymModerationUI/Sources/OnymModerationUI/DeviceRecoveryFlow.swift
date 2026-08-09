@@ -39,21 +39,28 @@ public final class DeviceRecoveryFlow: Identifiable {
     public private(set) var errorMessage: String?
 
     private let claimStore: any RecoveryClaimStore
+    /// The identity key claims are filed and polled under. A persisted
+    /// claim belongs to the key that signed it — the authority answers
+    /// it to no other — so a claim from a previous identity must not
+    /// resume here.
+    private let grantee: String
     private let fileClaim: @MainActor (_ contact: String, _ statement: String) async throws -> String
     private let claimStatus: @MainActor (_ claimId: String) async throws -> RecoveryClaimStatus
     private let redeem: @MainActor (RecoveryGrant) async -> RecoveryRedemption
 
     public init(
         claimStore: any RecoveryClaimStore,
+        grantee: String,
         fileClaim: @escaping @MainActor (_ contact: String, _ statement: String) async throws -> String,
         claimStatus: @escaping @MainActor (_ claimId: String) async throws -> RecoveryClaimStatus,
         redeem: @escaping @MainActor (RecoveryGrant) async -> RecoveryRedemption
     ) {
         self.claimStore = claimStore
+        self.grantee = grantee
         self.fileClaim = fileClaim
         self.claimStatus = claimStatus
         self.redeem = redeem
-        if let claimId = claimStore.load() {
+        if let claimId = claimStore.load(grantee: grantee) {
             phase = .awaitingReview(claimId: claimId)
         } else {
             phase = .form
@@ -74,7 +81,7 @@ public final class DeviceRecoveryFlow: Identifiable {
         errorMessage = nil
         do {
             let claimId = try await fileClaim(contact, statement)
-            claimStore.save(claimId)
+            claimStore.save(claimId, grantee: grantee)
             phase = .awaitingReview(claimId: claimId)
         } catch {
             phase = .form
@@ -100,7 +107,7 @@ public final class DeviceRecoveryFlow: Identifiable {
                 }
                 await redeemGrant(grant, claimId: claimId)
             case "refused":
-                claimStore.save(nil)
+                claimStore.save(nil, grantee: grantee)
                 phase = .refused(
                     reasons: status.reasoning
                         ?? String(localized: "The moderator did not include reasons.")
@@ -114,20 +121,29 @@ public final class DeviceRecoveryFlow: Identifiable {
         }
     }
 
-    /// After a refusal (or to correct a bad contact): drop the old
-    /// claim and show the form again.
+    /// After a refusal, a claim the authority no longer knows, or to
+    /// correct a bad contact: drop the old claim and show the form
+    /// again.
     public func startOver() {
-        claimStore.save(nil)
+        claimStore.save(nil, grantee: grantee)
         errorMessage = nil
         phase = .form
     }
 
     // MARK: - Private
 
+    /// `.checking` is deliberately NOT pollable: it means a check is
+    /// already in flight, and a second one racing it could redeem the
+    /// same single-use grant twice — the loser's failure would then
+    /// overwrite the winner's success. `.markInForce` IS pollable (the
+    /// claim and its grant were kept): "check again" after resolving
+    /// things with the authority re-polls and re-redeems.
     private var pollableClaimId: String? {
         switch phase {
-        case .awaitingReview(let claimId), .checking(let claimId):
+        case .awaitingReview(let claimId):
             return claimId
+        case .markInForce:
+            return claimStore.load(grantee: grantee)
         default:
             return nil
         }
@@ -139,7 +155,7 @@ public final class DeviceRecoveryFlow: Identifiable {
         case .recovered:
             // The claim served its purpose; the gate repository has
             // already published the new status.
-            claimStore.save(nil)
+            claimStore.save(nil, grantee: grantee)
             phase = .recovered
         case .markInForce(let contact, let newHolderURL, let appealURL):
             // Keep the claim: the grant on it stays valid for after

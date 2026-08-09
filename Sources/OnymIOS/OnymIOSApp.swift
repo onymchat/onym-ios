@@ -612,8 +612,14 @@ struct OnymIOSApp: App {
                 (try? await moderationRepository.recoverableCaseIDs()) ?? []
             },
             makeDeviceRecoveryFlow: { @MainActor in
-                DeviceRecoveryFlow(
+                // A resolvable key scopes the persisted claim to the
+                // identity that signed it. When no key resolves, the
+                // empty grantee matches no stored claim, and filing
+                // surfaces the signer's error on the form.
+                let grantee = (try? await moderationSigner.userKeyID()) ?? ""
+                return DeviceRecoveryFlow(
                     claimStore: UserDefaultsRecoveryClaimStore(),
+                    grantee: grantee,
                     fileClaim: { contact, statement in
                         try await moderationRepository.fileDeviceRecoveryClaim(
                             contact: contact,

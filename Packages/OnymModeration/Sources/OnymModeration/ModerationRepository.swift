@@ -472,16 +472,7 @@ public actor ModerationRepository {
     /// identity. The Authority authenticates the lookup with that identity
     /// and returns IDs only; details still require the case-status request.
     public func recoverableCaseIDs() async throws -> [String] {
-        guard let record = activeMandateRecord() else {
-            throw ModerationError.noMandate
-        }
-        guard let listing = authorities.first(where: {
-            $0.componentId == record.mandate.authority
-        }) else {
-            throw ModerationError.authorityUnavailable(record.mandate.authority)
-        }
-        let client = authorityClients.client(for: listing)
-        return try await client.queryRecoverableCases()
+        try await recoveryAuthorityClient().queryRecoverableCases()
     }
 
     /// File a device-recovery claim (§6) with the active mandate's

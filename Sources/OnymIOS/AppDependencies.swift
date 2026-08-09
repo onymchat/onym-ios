@@ -99,5 +99,5 @@ struct AppDependencies {
     /// Device recovery behind `reidentificationRequired`: file a claim
     /// with the authority's human moderator, poll it, and redeem the
     /// signed grant at the enforcement backend. Nothing self-serve.
-    let makeDeviceRecoveryFlow: @MainActor () -> DeviceRecoveryFlow
+    let makeDeviceRecoveryFlow: @MainActor () async -> DeviceRecoveryFlow
 }

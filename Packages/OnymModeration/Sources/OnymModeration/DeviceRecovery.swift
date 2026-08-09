@@ -17,6 +17,10 @@ import Foundation
 /// orphan it.
 public struct RecoveryGrant: Sendable, Equatable {
     public let raw: Data
+    /// The wire's `grantVersion`; the authority defaults an absent one
+    /// to 1, and so does this decode (`RecoveryGrant` in
+    /// `apple/src/types.rs`, `#[serde(default = "one")]`).
+    public let version: Int
     public let caseId: String
     /// The identity key the grant was issued to. The enforcement
     /// backend refuses a session by any other key, so a stolen grant
@@ -27,6 +31,7 @@ public struct RecoveryGrant: Sendable, Equatable {
 
     public init(raw: Data) throws {
         struct Wire: Decodable {
+            let grantVersion: Int?
             let caseId, grantee, authority, issuedAt, signature: String
         }
         let wire: Wire
@@ -35,7 +40,19 @@ public struct RecoveryGrant: Sendable, Equatable {
         } catch {
             throw ModerationError.grantInvalid("recovery grant: \(error)")
         }
+        // Refuse a version this client does not implement, by name —
+        // the version is inside the signed bytes, so presenting a v2
+        // grant through v1 assumptions could only fail at the backend
+        // with an opaque session rejection. The interface refuses the
+        // same way (`enforcement.rs`, "unsupported grantVersion").
+        let version = wire.grantVersion ?? 1
+        guard version == 1 else {
+            throw ModerationError.grantInvalid(
+                "unsupported recovery grant version \(version); this client implements 1"
+            )
+        }
         self.raw = raw
+        self.version = version
         self.caseId = wire.caseId
         self.grantee = wire.grantee
         self.authority = wire.authority
@@ -59,7 +76,7 @@ public struct RecoveryGrant: Sendable, Equatable {
         }
         let bytes = try ModerationCanonicalEncoder.encode(
             Unsigned(
-                grantVersion: 1,
+                grantVersion: version,
                 caseId: caseId,
                 grantee: grantee,
                 authority: authority,
@@ -122,6 +139,10 @@ public enum RecoveryResult: Sendable, Equatable {
 }
 
 extension RecoveryResult: Decodable {
+    // This is deliberately the exact `{status, …}` tagged shape the
+    // merged reference interface serializes (`RecoveryResult` in
+    // `apple/src/types.rs`, onym-moderation#27): `recovered` carries
+    // `gate`, `markInForce` carries the contact and optional routes.
     private enum CodingKeys: String, CodingKey {
         case status, gate, authorityContact, newHolderUrl, appealUrl
     }
@@ -138,7 +159,16 @@ extension RecoveryResult: Decodable {
                 appealURL: try container.decodeIfPresent(URL.self, forKey: .appealUrl)
             )
         case let other:
-            throw ModerationError.grantInvalid("recovery status \(other)")
+            // A DecodingError, not a ModerationError: the real client
+            // wraps every decode failure into
+            // `AuthorityClientError.malformedResponse`, and an unknown
+            // status is exactly that — a response this decode does not
+            // speak — not a defect in the grant.
+            throw DecodingError.dataCorruptedError(
+                forKey: .status,
+                in: container,
+                debugDescription: "unknown recovery status '\(other)'"
+            )
         }
     }
 }
@@ -190,10 +220,13 @@ extension ModerationAuthorityClient {
 // MARK: - Claim persistence
 
 /// The one pending claim id, kept across launches so the gate screen
-/// resumes polling instead of asking the holder to file again.
+/// resumes polling instead of asking the holder to file again. Scoped
+/// to the grantee key the claim was signed by: the authority answers
+/// a claim only to that key, so a claim resumed under a different
+/// identity could never be polled — it must read as "no claim".
 public protocol RecoveryClaimStore: Sendable {
-    func load() -> String?
-    func save(_ claimId: String?)
+    func load(grantee: String) -> String?
+    func save(_ claimId: String?, grantee: String)
 }
 
 /// `@unchecked Sendable` for the same reason as
@@ -201,6 +234,7 @@ public protocol RecoveryClaimStore: Sendable {
 /// thread-safe but not formally `Sendable`.
 public struct UserDefaultsRecoveryClaimStore: RecoveryClaimStore, @unchecked Sendable {
     private static let claimKey = "app.onym.ios.moderation.recoveryClaim"
+    private static let granteeKey = "app.onym.ios.moderation.recoveryClaimGrantee"
 
     private let defaults: UserDefaults
 
@@ -208,16 +242,21 @@ public struct UserDefaultsRecoveryClaimStore: RecoveryClaimStore, @unchecked Sen
         self.defaults = defaults
     }
 
-    public func load() -> String? {
-        defaults.string(forKey: Self.claimKey)
+    public func load(grantee: String) -> String? {
+        guard defaults.string(forKey: Self.granteeKey) == grantee else {
+            return nil
+        }
+        return defaults.string(forKey: Self.claimKey)
     }
 
-    public func save(_ claimId: String?) {
+    public func save(_ claimId: String?, grantee: String) {
         guard let claimId else {
             defaults.removeObject(forKey: Self.claimKey)
+            defaults.removeObject(forKey: Self.granteeKey)
             return
         }
         defaults.set(claimId, forKey: Self.claimKey)
+        defaults.set(grantee, forKey: Self.granteeKey)
     }
 }
 

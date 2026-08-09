@@ -11,10 +11,27 @@ public struct GateCheckRequiredView: View {
     let onRetry: @MainActor () async -> Void
     let lookupRecoveryCaseIDs: (@MainActor () async -> [String])?
     let makeRecoveryCaseFlow: (@MainActor (String) async -> ModerationCaseFlow?)?
-    let makeDeviceRecoveryFlow: (@MainActor () -> DeviceRecoveryFlow)?
+    let makeDeviceRecoveryFlow: (@MainActor () async -> DeviceRecoveryFlow)?
 
-    @State private var showRecovery = false
-    @State private var deviceRecoveryFlow: DeviceRecoveryFlow?
+    /// Both recovery paths present from this screen. One `sheet(item:)`
+    /// over one enum, deliberately: two `.sheet` modifiers live on the
+    /// same view here, and SwiftUI has a long history of only honoring
+    /// one of them.
+    private enum ActiveSheet: Identifiable {
+        case caseAppeal
+        case deviceRecovery(DeviceRecoveryFlow)
+
+        var id: String {
+            switch self {
+            case .caseAppeal:
+                return "caseAppeal"
+            case .deviceRecovery(let flow):
+                return "deviceRecovery-\(ObjectIdentifier(flow))"
+            }
+        }
+    }
+
+    @State private var activeSheet: ActiveSheet?
     @State private var isRetrying = false
     @State private var retryMessage: String?
 
@@ -23,7 +40,7 @@ public struct GateCheckRequiredView: View {
         onRetry: @escaping @MainActor () async -> Void,
         lookupRecoveryCaseIDs: (@MainActor () async -> [String])? = nil,
         makeRecoveryCaseFlow: (@MainActor (String) async -> ModerationCaseFlow?)? = nil,
-        makeDeviceRecoveryFlow: (@MainActor () -> DeviceRecoveryFlow)? = nil
+        makeDeviceRecoveryFlow: (@MainActor () async -> DeviceRecoveryFlow)? = nil
     ) {
         self.reason = reason
         self.onRetry = onRetry
@@ -70,7 +87,9 @@ public struct GateCheckRequiredView: View {
             }
             if reason == .reidentificationRequired, let makeDeviceRecoveryFlow {
                 SettingsPrimaryButton(action: {
-                    deviceRecoveryFlow = makeDeviceRecoveryFlow()
+                    Task { @MainActor in
+                        activeSheet = .deviceRecovery(await makeDeviceRecoveryFlow())
+                    }
                 }) {
                     Text("Ask a moderator to recover this device")
                 }
@@ -81,7 +100,7 @@ public struct GateCheckRequiredView: View {
             if reason == .reidentificationRequired,
                lookupRecoveryCaseIDs != nil,
                makeRecoveryCaseFlow != nil {
-                Button("Appeal by case ID") { showRecovery = true }
+                Button("Appeal by case ID") { activeSheet = .caseAppeal }
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(OnymTokens.text)
                     .accessibilityIdentifier("moderation.gate_required.appeal")
@@ -92,16 +111,18 @@ public struct GateCheckRequiredView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(OnymTokens.surface.ignoresSafeArea())
         .accessibilityIdentifier("moderation.gate_required")
-        .sheet(isPresented: $showRecovery) {
-            if let lookupRecoveryCaseIDs, let makeRecoveryCaseFlow {
-                RecoveryAppealView(
-                    lookupCaseIDs: lookupRecoveryCaseIDs,
-                    makeCaseFlow: makeRecoveryCaseFlow
-                )
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .caseAppeal:
+                if let lookupRecoveryCaseIDs, let makeRecoveryCaseFlow {
+                    RecoveryAppealView(
+                        lookupCaseIDs: lookupRecoveryCaseIDs,
+                        makeCaseFlow: makeRecoveryCaseFlow
+                    )
+                }
+            case .deviceRecovery(let flow):
+                DeviceRecoveryView(flow: flow)
             }
-        }
-        .sheet(item: $deviceRecoveryFlow) { flow in
-            DeviceRecoveryView(flow: flow)
         }
     }
 

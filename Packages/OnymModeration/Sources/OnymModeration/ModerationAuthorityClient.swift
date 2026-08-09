@@ -499,7 +499,15 @@ public struct URLSessionModerationAuthorityClient: ModerationAuthorityClient {
         let grantee = try await signer.userKeyID()
         // The authority verifies over the canonical bytes with the
         // signature field removed — the same form `Unsigned` encodes,
-        // as long as `Signed` adds nothing but the signature.
+        // as long as `Signed` adds nothing but the signature. This is
+        // deliberately the exact field set the reference Authority's
+        // `file_recovery_claim` (`authority/src/api.rs`,
+        // onym-moderation#28) recomputes via
+        // `canonical::grant_signing_bytes(&body)`: the request body
+        // minus `signature`, keys sorted. Adding a field client-side
+        // without the authority knowing it would not break the
+        // signature (it verifies the body it received) — but renaming
+        // or dropping one of these four would.
         let signingBytes = try ModerationCanonicalEncoder.encode(
             Unsigned(contact: contact, grantee: grantee, statement: statement, timestamp: timestamp)
         )
@@ -530,6 +538,12 @@ public struct URLSessionModerationAuthorityClient: ModerationAuthorityClient {
         }
         let timestamp = Self.timestamp(clock())
         let key = try await signer.userKeyID()
+        // This is deliberately the exact credential message verified by
+        // the reference Authority (`authority/src/api.rs`,
+        // `recovery_claim_status`, onym-moderation#28) — as with
+        // `query-status:` above, changing it client-side would make
+        // every status poll answer 404. The response's `{state,
+        // reasoning, grant}` (grant base64) is that handler's shape too.
         let message = Data("recovery-claim-status:\(claimId):\(timestamp)".utf8)
         let signature = try await signer.sign(message).base64EncodedString()
         let wire: Wire = try await decode(

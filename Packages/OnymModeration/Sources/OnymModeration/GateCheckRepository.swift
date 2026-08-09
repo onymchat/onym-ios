@@ -317,6 +317,15 @@ public actor GateCheckRepository {
             let timestamp = max(clock(), lastSessionTimestamp.addingTimeInterval(1))
             lastSessionTimestamp = timestamp
             let userKey = try await signer.userKeyID()
+            // The backend refuses a session by any key but the grantee;
+            // saying so here turns that opaque rejection into something
+            // the holder can act on (the grant belongs to a different
+            // identity — likely a re-consent since the claim was filed).
+            guard grant.grantee == userKey else {
+                return .failed(
+                    "This grant was issued to a different identity on this device. File a new claim under the current identity."
+                )
+            }
             let signature = try await signer.sign(
                 RecoveryRequest.signedPayload(
                     deviceToken: token,
@@ -338,9 +347,17 @@ public actor GateCheckRepository {
                 // its answer as the newest check so the gate opens (or
                 // honestly reports what still stands) without a second
                 // round trip. Bump the generation so a slow in-flight
-                // check can't overwrite this with a stale answer.
+                // check can't overwrite this with a stale answer — and,
+                // as in `checkNow`, re-check it after the await below:
+                // a `checkNow` starting inside `sanitize` takes a newer
+                // generation, and this completion must not overwrite
+                // its answer either.
                 generation &+= 1
+                let generation = generation
                 let sanitized = await sanitize(gate)
+                guard generation == self.generation else {
+                    return .recovered(cached)
+                }
                 let (status, persisted) = Self.derive(
                     persisted: store.load(),
                     attempt: .success(sanitized),
