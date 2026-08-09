@@ -84,6 +84,7 @@ public enum AuthorityClientError: Error, Sendable, Equatable {
     case rejected(AuthorityRejection)
     case mandateNotAccepted(mandateRef: String)
     case mandateReferenceMismatch(expected: String, received: String)
+    case reportIdentifierMismatch(expected: String, received: String)
     case invalidPathComponent(String)
     case insecureBaseURL(String)
 }
@@ -313,7 +314,14 @@ public struct URLSessionModerationAuthorityClient: ModerationAuthorityClient {
     public func fileReport(_ report: Report) async throws -> ReportReceipt {
         let body = try ModerationCanonicalEncoder.encode(report)
         let data = try await send(method: "POST", path: ["v1", "reports"], body: body)
-        return try decode(data)
+        let receipt: ReportReceipt = try decode(data)
+        guard receipt.reportId == report.reportId else {
+            throw AuthorityClientError.reportIdentifierMismatch(
+                expected: report.reportId,
+                received: receipt.reportId
+            )
+        }
+        return receipt
     }
 
     public func respond(_ response: CaseResponse) async throws {

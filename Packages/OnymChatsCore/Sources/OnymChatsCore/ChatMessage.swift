@@ -91,6 +91,12 @@ public struct ChatMessage: Equatable, Sendable, Identifiable {
     /// the image/video/album fields.
     public let voiceAttachment: ChatVoiceAttachment?
 
+    /// Sender's detached Ed25519 signature over `body`, retained solely
+    /// so an incoming text message can be disclosed as independently
+    /// verifiable moderation evidence. Nil for legacy and media-only
+    /// messages that this first reporting surface cannot file.
+    public let moderationAuthenticityProof: String?
+
     /// Canonical media list for rendering: the album when present, else
     /// the single image/video wrapped in a one-element list, else empty.
     public var media: [ChatMediaAttachment] {
@@ -131,6 +137,7 @@ public struct ChatMessage: Equatable, Sendable, Identifiable {
         replyToMessageID: UUID?,
         groupType: SEPGroupType,
         failureReason: SendFailureReason? = nil,
+        moderationAuthenticityProof: String? = nil,
         imageAttachment: ChatImageAttachment? = nil,
         videoAttachment: ChatVideoAttachment? = nil,
         albumAttachments: [ChatMediaAttachment]? = nil,
@@ -147,6 +154,7 @@ public struct ChatMessage: Equatable, Sendable, Identifiable {
         self.replyToMessageID = replyToMessageID
         self.groupType = groupType
         self.failureReason = failureReason
+        self.moderationAuthenticityProof = moderationAuthenticityProof
         self.imageAttachment = imageAttachment
         self.videoAttachment = videoAttachment
         self.albumAttachments = albumAttachments

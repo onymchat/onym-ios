@@ -90,6 +90,14 @@ public struct ChatMessagePayload: Codable, Equatable, Sendable {
     /// `ChatVoiceAttachment`.
     public let voiceAttachment: ChatVoiceAttachment?
 
+    /// Detached Ed25519 signature by the sender over the exact UTF-8
+    /// bytes of `variant.body`. A recipient retains this so a voluntary
+    /// disclosure can satisfy the Authority contract's authenticity
+    /// rule without exposing an envelope or any recipient secrets.
+    /// Optional for wire compatibility with messages sent before
+    /// reporting existed.
+    public let moderationAuthenticityProof: String?
+
     public init(
         version: Int,
         messageID: UUID,
@@ -101,7 +109,8 @@ public struct ChatMessagePayload: Codable, Equatable, Sendable {
         attachment: ChatImageAttachment? = nil,
         videoAttachment: ChatVideoAttachment? = nil,
         attachments: [ChatMediaAttachment]? = nil,
-        voiceAttachment: ChatVoiceAttachment? = nil
+        voiceAttachment: ChatVoiceAttachment? = nil,
+        moderationAuthenticityProof: String? = nil
     ) {
         self.version = version
         self.messageID = messageID
@@ -114,6 +123,7 @@ public struct ChatMessagePayload: Codable, Equatable, Sendable {
         self.videoAttachment = videoAttachment
         self.attachments = attachments
         self.voiceAttachment = voiceAttachment
+        self.moderationAuthenticityProof = moderationAuthenticityProof
     }
 
     enum CodingKeys: String, CodingKey {
@@ -128,6 +138,7 @@ public struct ChatMessagePayload: Codable, Equatable, Sendable {
         case videoAttachment = "video_attachment"
         case attachments
         case voiceAttachment = "voice_attachment"
+        case moderationAuthenticityProof = "moderation_authenticity_proof"
     }
 }
 

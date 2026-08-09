@@ -36,7 +36,8 @@ final class SwiftDataMessageStoreTests: XCTestCase {
             body: "hello",
             sentAt: Date(timeIntervalSince1970: 1_700_000_000),
             direction: .outgoing,
-            status: .pending
+            status: .pending,
+            moderationAuthenticityProof: "c2lnbmF0dXJl"
         )
 
         let outcome = await store.insertOrUpdate(msg)
@@ -54,6 +55,7 @@ final class SwiftDataMessageStoreTests: XCTestCase {
         XCTAssertEqual(first.direction, .outgoing)
         XCTAssertEqual(first.status, .pending)
         XCTAssertEqual(first.groupType, .tyranny)
+        XCTAssertEqual(first.moderationAuthenticityProof, "c2lnbmF0dXJl")
         XCTAssertNil(first.replyToMessageID,
                      "a non-reply message round-trips with no reply target")
     }
@@ -456,7 +458,8 @@ final class SwiftDataMessageStoreTests: XCTestCase {
         sentAt: Date = Date(timeIntervalSince1970: 1_700_000_000),
         direction: MessageDirection = .outgoing,
         status: MessageStatus = .sent,
-        replyToMessageID: UUID? = nil
+        replyToMessageID: UUID? = nil,
+        moderationAuthenticityProof: String? = nil
     ) -> ChatMessage {
         ChatMessage(
             id: id,
@@ -468,7 +471,8 @@ final class SwiftDataMessageStoreTests: XCTestCase {
             direction: direction,
             status: status,
             replyToMessageID: replyToMessageID,
-            groupType: .tyranny
+            groupType: .tyranny,
+            moderationAuthenticityProof: moderationAuthenticityProof
         )
     }
 }

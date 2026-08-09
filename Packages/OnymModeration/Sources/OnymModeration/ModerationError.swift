@@ -35,6 +35,12 @@ public enum ModerationError: Error, Sendable, Equatable {
     /// The requested artifact has already resolved (or was never a
     /// persisted registration attempt).
     case registrationNotPending
+    /// Reporting requires a currently registered Authority mandate and
+    /// a directory entry capable of receiving the signed report.
+    case reportingUnavailable(String)
+    /// The supplied evidence proof does not verify against the accused
+    /// key over the exact content the user is about to disclose.
+    case authenticityUnverified
     /// DeviceCheck is unsupported here (simulator, enterprise-signed
     /// build). Callers degrade toward gate-check-required, never toward
     /// unmoderated operation (profile §8.5).

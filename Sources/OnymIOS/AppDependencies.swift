@@ -7,6 +7,7 @@ import OnymRecovery
 import OnymChatsUI
 import OnymSettings
 import OnymModerationUI
+import OnymModeration
 
 /// App-wide composition root. Constructed exactly once by `OnymIOSApp`
 /// and threaded down to views via `RootView`. Each member is a factory
@@ -75,4 +76,5 @@ struct AppDependencies {
     let moderationGateFlow: ModerationGateFlow
     let makeModerationConsentFlow: @MainActor (ModerationConsentFlow.Mode) -> ModerationConsentFlow
     let makeModerationSettingsFlow: @MainActor () -> ModerationSettingsFlow
+    let makeModerationReportFlow: @MainActor (ReportableMessage) -> ModerationReportFlow
 }

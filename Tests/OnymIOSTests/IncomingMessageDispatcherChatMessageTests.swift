@@ -120,6 +120,27 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
                        "an inbound reply must carry its target id onto the persisted message")
     }
 
+    func test_chatMessage_persistsModerationAuthenticityProof() async throws {
+        let payload = makePayload(
+            body: "reportable",
+            moderationAuthenticityProof: "c2lnbmF0dXJl"
+        )
+        let dispatcher = makeDispatcher(
+            plaintext: try JSONEncoder().encode(payload),
+            envelopeSigner: senderEd25519
+        )
+
+        await dispatcher.dispatch(
+            messageID: "msg-proof",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+
+        let stored = await messages.currentMessages(groupID: groupIDHex, owner: owner)
+        XCTAssertEqual(stored.first?.moderationAuthenticityProof, "c2lnbmF0dXJl")
+    }
+
     // MARK: - Drop paths
 
     func test_chatMessage_unknownGroup_drops() async throws {
@@ -343,7 +364,8 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
         groupIDBytes: Data? = nil,
         senderBlsHex: String? = nil,
         messageID: UUID = UUID(),
-        replyToMessageID: UUID? = nil
+        replyToMessageID: UUID? = nil,
+        moderationAuthenticityProof: String? = nil
     ) -> ChatMessagePayload {
         ChatMessagePayload(
             version: 1,
@@ -352,7 +374,8 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
             senderBlsPubkeyHex: senderBlsHex ?? self.senderBlsHex,
             sentAtMillis: 1_700_000_000_000,
             replyToMessageID: replyToMessageID,
-            variant: .tyranny(body: body)
+            variant: .tyranny(body: body),
+            moderationAuthenticityProof: moderationAuthenticityProof
         )
     }
 

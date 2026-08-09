@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 /// Outcome of the most recent authorities-directory fetch. Same
 /// shape as `RelayerFetchStatus` so the picker copy stays consistent.
@@ -77,6 +78,7 @@ public actor ModerationRepository {
     private let manifestFetcher: any AuthorityManifestFetcher
     private let manifestValidator: AuthorityManifestValidator
     private let mandateStore: any MandateStore
+    private let reportStore: any ReportFilingStore
     private let backend: any EnforcementBackendClient
     private let authorityClients: any ModerationAuthorityClientFactory
     private let attestation: any DeviceAttestationProvider
@@ -102,18 +104,29 @@ public actor ModerationRepository {
         var waiters: Int
     }
 
+    private struct ReportKey: Hashable {
+        let authority: String
+        let reporter: String
+        let accused: String
+        let classId: String
+        let messageId: String
+    }
+
     private var authorities: [AuthorityListing] = []
     private var fetchStatus: AuthorityFetchStatus = .idle
     private var records: [MandateRecord]
+    private var reportRecords: [ReportFilingRecord]
     private var continuations: [UUID: AsyncStream<ModerationState>.Continuation] = [:]
     private var startTask: Task<Void, Never>?
     private var consentTasks: [ConsentKey: Task<MandateRecord, Error>] = [:]
     private var registrationFlights: [RegistrationKey: RegistrationFlight] = [:]
+    private var reportTasks: [ReportKey: Task<ReportReceipt, Error>] = [:]
 
     public init(
         authoritiesFetcher: any KnownAuthoritiesFetcher,
         manifestFetcher: any AuthorityManifestFetcher,
         mandateStore: any MandateStore,
+        reportStore: any ReportFilingStore = UserDefaultsReportFilingStore(),
         backend: any EnforcementBackendClient,
         authorityClients: any ModerationAuthorityClientFactory,
         attestation: any DeviceAttestationProvider,
@@ -125,12 +138,14 @@ public actor ModerationRepository {
         self.manifestFetcher = manifestFetcher
         self.manifestValidator = manifestValidator
         self.mandateStore = mandateStore
+        self.reportStore = reportStore
         self.backend = backend
         self.authorityClients = authorityClients
         self.attestation = attestation
         self.signer = signer
         self.clock = clock
         self.records = mandateStore.load()
+        self.reportRecords = reportStore.load()
     }
 
     // MARK: - Directory refresh
@@ -397,6 +412,58 @@ public actor ModerationRepository {
         )
     }
 
+    // MARK: - Reporting
+
+    /// Violation classes the current Authority declared and the user
+    /// consented to. The report UI presents these exact class IDs; the
+    /// Authority still independently checks the accused mandate.
+    public func availableReportClasses() throws -> [ViolationClass] {
+        let record = try activeReportingMandate()
+        guard let manifest = record.consentedManifest()?.manifest else {
+            throw ModerationError.reportingUnavailable("consented manifest is unavailable")
+        }
+        return manifest.violationClasses.filter {
+            record.mandate.classes.contains($0.classId)
+        }
+    }
+
+    /// File one recipient-held text message with the currently selected
+    /// Authority. The report is signed and persisted before delivery;
+    /// ambiguous retries reuse byte-identical JSON and the same reportId.
+    @discardableResult
+    public func fileReport(
+        message: ReportableMessage,
+        classId: String
+    ) async throws -> ReportReceipt {
+        let mandate = try activeReportingMandate()
+        let key = ReportKey(
+            authority: mandate.mandate.authority,
+            reporter: mandate.mandate.user,
+            accused: message.accused,
+            classId: classId,
+            messageId: message.id
+        )
+        if let task = reportTasks[key] {
+            return try await task.value
+        }
+        let task = Task {
+            try await self.performFileReport(
+                message: message,
+                classId: classId,
+                reporterMandate: mandate
+            )
+        }
+        reportTasks[key] = task
+        do {
+            let receipt = try await task.value
+            reportTasks.removeValue(forKey: key)
+            return receipt
+        } catch {
+            reportTasks.removeValue(forKey: key)
+            throw error
+        }
+    }
+
     // MARK: - AsyncStream
 
     public nonisolated var snapshots: AsyncStream<ModerationState> {
@@ -418,6 +485,154 @@ public actor ModerationRepository {
 
     private func unsubscribe(id: UUID) {
         continuations.removeValue(forKey: id)
+    }
+
+    private func activeReportingMandate() throws -> MandateRecord {
+        guard let record = activeMandateRecord(),
+              record.countersigned,
+              record.authorityRegistered
+        else {
+            throw ModerationError.reportingUnavailable(
+                "no active Authority-registered mandate"
+            )
+        }
+        return record
+    }
+
+    private func performFileReport(
+        message: ReportableMessage,
+        classId: String,
+        reporterMandate: MandateRecord
+    ) async throws -> ReportReceipt {
+        let reporter = try await signer.userKeyID()
+        guard reporter == reporterMandate.mandate.user else {
+            throw ModerationError.reportingUnavailable(
+                "active identity does not own the reporting mandate"
+            )
+        }
+        guard let manifest = reporterMandate.consentedManifest()?.manifest,
+              reporterMandate.mandate.classes.contains(classId),
+              manifest.violationClasses.contains(where: { $0.classId == classId })
+        else {
+            throw ModerationError.classOutsideMandate(classId)
+        }
+        guard !message.disclosedContent.isEmpty,
+              let signature = Data(base64Encoded: message.authenticityProof),
+              let accusedKey = try? AuthorityKey.publicKey(fromReference: message.accused),
+              accusedKey.isValidSignature(
+                signature,
+                for: Data(message.disclosedContent.utf8)
+              )
+        else {
+            throw ModerationError.authenticityUnverified
+        }
+        guard let listing = authorities.first(where: {
+            $0.componentId == reporterMandate.mandate.authority
+        }) else {
+            throw ModerationError.authorityUnavailable(
+                reporterMandate.mandate.authority
+            )
+        }
+        let reporterMandateRef = try reporterMandate.mandate.mandateHash()
+
+        if let existing = reportRecords.first(where: {
+            $0.sourceMessageId == message.id
+                && $0.report.reporter == reporter
+                && $0.report.reporterMandate == reporterMandateRef
+                && $0.report.accused == message.accused
+                && $0.report.classId == classId
+                && $0.report.evidence == [EvidenceItem(
+                    disclosedContent: message.disclosedContent,
+                    authenticityProof: message.authenticityProof
+                )]
+        }) {
+            if let receipt = existing.receipt { return receipt }
+            return try await submitReport(existing, to: listing)
+        }
+
+        var report = Report(
+            reportId: "report-\(UUID().uuidString.lowercased())",
+            reporter: reporter,
+            reporterMandate: reporterMandateRef,
+            accused: message.accused,
+            classId: classId,
+            evidence: [EvidenceItem(
+                disclosedContent: message.disclosedContent,
+                authenticityProof: message.authenticityProof
+            )],
+            filedAt: clock()
+        )
+        report.signature = try await signer.sign(report.signingBytes()).base64EncodedString()
+        let record = ReportFilingRecord(
+            sourceMessageId: message.id,
+            report: report,
+            authorityName: listing.name
+        )
+        reportRecords.insert(record, at: 0)
+        // Delivery must not begin unless the exact signed artifact is
+        // durably retained. A transport timeout may happen after intake
+        // committed; without this write, a retry would mint a second report.
+        do {
+            try reportStore.save(reportRecords)
+        } catch {
+            // Do not leave an unpersisted artifact eligible for the
+            // in-memory exact-retry path on the next tap.
+            if let index = reportIndex(of: record) {
+                reportRecords.remove(at: index)
+            }
+            throw error
+        }
+        return try await submitReport(record, to: listing)
+    }
+
+    private func submitReport(
+        _ record: ReportFilingRecord,
+        to listing: AuthorityListing
+    ) async throws -> ReportReceipt {
+        let client = authorityClients.client(for: listing)
+        let receipt: ReportReceipt
+        do {
+            receipt = try await client.fileReport(record.report)
+        } catch {
+            if isDeterministicReportRejection(error) {
+                discardReport(record)
+            }
+            throw error
+        }
+        guard receipt.reportId == record.report.reportId else {
+            throw AuthorityClientError.reportIdentifierMismatch(
+                expected: record.report.reportId,
+                received: receipt.reportId
+            )
+        }
+        if let index = reportIndex(of: record) {
+            reportRecords[index].receipt = receipt
+        } else {
+            var recovered = record
+            recovered.receipt = receipt
+            reportRecords.insert(recovered, at: 0)
+        }
+        try reportStore.save(reportRecords)
+        return receipt
+    }
+
+    private func reportIndex(of record: ReportFilingRecord) -> Int? {
+        reportRecords.firstIndex { $0.report.reportId == record.report.reportId }
+    }
+
+    private func discardReport(_ record: ReportFilingRecord) {
+        guard let index = reportIndex(of: record) else { return }
+        reportRecords.remove(at: index)
+        try? reportStore.save(reportRecords)
+    }
+
+    private func isDeterministicReportRejection(_ error: Error) -> Bool {
+        guard case let AuthorityClientError.rejected(rejection) = error else {
+            return false
+        }
+        return (400..<500).contains(rejection.statusCode)
+            && rejection.statusCode != 408
+            && rejection.statusCode != 429
     }
 
     /// Resume the newest interrupted consent after the directory is
@@ -582,7 +797,8 @@ public actor ModerationRepository {
             return (400..<500).contains(rejection.statusCode)
                 && rejection.statusCode != 408
                 && rejection.statusCode != 429
-        case .invalidResponse, .malformedResponse, .invalidPathComponent, .insecureBaseURL:
+        case .invalidResponse, .malformedResponse, .invalidPathComponent, .insecureBaseURL,
+             .reportIdentifierMismatch:
             return false
         }
     }

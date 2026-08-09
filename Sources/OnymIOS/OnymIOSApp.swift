@@ -564,6 +564,12 @@ struct OnymIOSApp: App {
                     repository: moderationRepository,
                     gateCheck: gateCheckRepository
                 )
+            },
+            makeModerationReportFlow: { @MainActor message in
+                ModerationReportFlow(
+                    message: message,
+                    repository: moderationRepository
+                )
             }
         )
     }

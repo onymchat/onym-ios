@@ -68,6 +68,10 @@ final class PersistedMessage {
 
     var encryptedSenderBlsPubkeyHex: Data
     var encryptedBody: Data
+    /// Optional encrypted detached signature over `body`, retained for
+    /// Authority reporting. Nil is the lightweight-migration value for
+    /// messages persisted before reporting existed.
+    var encryptedModerationAuthenticityProof: Data?
     /// AES-GCM-encrypted JSON of the `ChatImageAttachment` (or `nil`
     /// for a text-only message). Encrypted at rest like `body` — it
     /// carries the per-image key. Optional so SwiftData's lightweight
@@ -102,6 +106,7 @@ final class PersistedMessage {
         deliveredAckSent: Bool? = nil,
         encryptedSenderBlsPubkeyHex: Data,
         encryptedBody: Data,
+        encryptedModerationAuthenticityProof: Data? = nil,
         encryptedAttachmentJSON: Data? = nil,
         encryptedVideoAttachmentJSON: Data? = nil,
         encryptedAlbumJSON: Data? = nil,
@@ -119,6 +124,7 @@ final class PersistedMessage {
         self.deliveredAckSent = deliveredAckSent
         self.encryptedSenderBlsPubkeyHex = encryptedSenderBlsPubkeyHex
         self.encryptedBody = encryptedBody
+        self.encryptedModerationAuthenticityProof = encryptedModerationAuthenticityProof
         self.encryptedAttachmentJSON = encryptedAttachmentJSON
         self.encryptedVideoAttachmentJSON = encryptedVideoAttachmentJSON
         self.encryptedAlbumJSON = encryptedAlbumJSON

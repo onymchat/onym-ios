@@ -479,6 +479,21 @@ final class SendMessageInteractorTests: XCTestCase {
         XCTAssertEqual(stored[0].status, .sent)
     }
 
+    func test_send_signsExactBodyForModerationEvidence() async throws {
+        let groupID = await seedGroupWithTwoPeers()
+        let body = "exact UTF-8 evidence — こんにちは"
+
+        let result = try await interactor.send(groupID: groupID, body: body)
+
+        let encodedProof = try XCTUnwrap(result.moderationAuthenticityProof)
+        let proof = try XCTUnwrap(Data(base64Encoded: encodedProof))
+        let publicKey = try Curve25519.Signing.PublicKey(rawRepresentation: mySendingPubkey)
+        XCTAssertTrue(publicKey.isValidSignature(proof, for: Data(body.utf8)))
+
+        let stored = await messages.currentMessages(groupID: groupID, owner: currentIdentityID)
+        XCTAssertEqual(stored.first?.moderationAuthenticityProof, encodedProof)
+    }
+
     func test_send_skipsSelfRecipient() async throws {
         // Even though our profile is in memberProfiles, we must not
         // send a copy to our own inbox.

@@ -825,6 +825,7 @@ public struct IncomingMessageDispatcher: Sendable {
             // looks up local rows.
             replyToMessageID: payload.replyToMessageID,
             groupType: group.groupType,
+            moderationAuthenticityProof: payload.moderationAuthenticityProof,
             // Encrypted image (if any). The blob is fetched + decrypted
             // lazily at render time (`ChatImageLoader`); nothing is
             // downloaded on receipt.

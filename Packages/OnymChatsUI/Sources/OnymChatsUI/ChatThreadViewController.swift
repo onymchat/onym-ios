@@ -30,6 +30,11 @@ final class ChatThreadViewController: UIViewController {
     /// rows have the tap target installed by `ChatBubbleCell`, so
     /// this never fires for other statuses.
     var onRetryRequested: ((UUID) -> Void)?
+    /// Whether an incoming row carries the content-level proof required
+    /// by the Authority contract. Only those rows receive a Report menu.
+    var canReportMessage: ((ChatMessage) -> Bool)?
+    /// Fired from the system long-press context menu.
+    var onReportRequested: ((ChatMessage) -> Void)?
 
     /// Loader used by bubbles to fetch + decrypt image attachments.
     var imageLoader: ChatImageLoader?
@@ -504,6 +509,7 @@ final class ChatThreadViewController: UIViewController {
         tableView.register(ChatBubbleCell.self, forCellReuseIdentifier: ChatBubbleCell.textReuseID)
         tableView.register(ChatBubbleCell.self, forCellReuseIdentifier: ChatBubbleCell.mediaReuseID)
         tableView.keyboardDismissMode = .interactive
+        tableView.delegate = self
         view.addSubview(tableView)
 
         // Empty state — a hosted SwiftUI view filling the message-list
@@ -750,5 +756,30 @@ extension ChatThreadViewController: UIGestureRecognizerDelegate {
             return velocity.x > 0 && abs(velocity.x) > abs(velocity.y)
         }
         return true
+    }
+}
+
+extension ChatThreadViewController: UITableViewDelegate {
+    func tableView(
+        _ tableView: UITableView,
+        contextMenuConfigurationForRowAt indexPath: IndexPath,
+        point: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        guard indexPath.row < orderedMessages.count else { return nil }
+        let message = orderedMessages[indexPath.row]
+        guard canReportMessage?(message) == true else { return nil }
+        return UIContextMenuConfiguration(
+            identifier: message.id as NSUUID,
+            previewProvider: nil
+        ) { [weak self] _ in
+            let report = UIAction(
+                title: String(localized: "Report"),
+                image: UIImage(systemName: "exclamationmark.bubble"),
+                attributes: .destructive
+            ) { [weak self] _ in
+                self?.onReportRequested?(message)
+            }
+            return UIMenu(children: [report])
+        }
     }
 }

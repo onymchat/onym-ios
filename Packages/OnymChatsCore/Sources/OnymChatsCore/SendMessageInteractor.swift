@@ -146,6 +146,9 @@ public actor SendMessageInteractor {
 
         let messageID = UUID()
         let sentAtMillis = Int64(now.timeIntervalSince1970 * 1000)
+        let moderationAuthenticityProof = try await identity
+            .signWithStellarKey(Data(body.utf8))
+            .base64EncodedString()
         let payload = ChatMessagePayload(
             version: 1,
             messageID: messageID,
@@ -153,7 +156,8 @@ public actor SendMessageInteractor {
             senderBlsPubkeyHex: myBlsHex,
             sentAtMillis: sentAtMillis,
             replyToMessageID: replyToMessageID,
-            variant: variant
+            variant: variant,
+            moderationAuthenticityProof: moderationAuthenticityProof
         )
 
         // Optimistic insert — chat UI sees the bubble immediately.
@@ -170,7 +174,8 @@ public actor SendMessageInteractor {
             direction: .outgoing,
             status: .pending,
             replyToMessageID: replyToMessageID,
-            groupType: group.groupType
+            groupType: group.groupType,
+            moderationAuthenticityProof: moderationAuthenticityProof
         )
         await messageRepository.insert(pending)
 
@@ -204,7 +209,8 @@ public actor SendMessageInteractor {
             status: finalStatus,
             replyToMessageID: pending.replyToMessageID,
             groupType: pending.groupType,
-            failureReason: failureReason
+            failureReason: failureReason,
+            moderationAuthenticityProof: pending.moderationAuthenticityProof
         )
     }
 
@@ -757,7 +763,8 @@ public actor SendMessageInteractor {
             attachment: message.imageAttachment,
             videoAttachment: message.videoAttachment,
             attachments: message.albumAttachments,
-            voiceAttachment: message.voiceAttachment
+            voiceAttachment: message.voiceAttachment,
+            moderationAuthenticityProof: message.moderationAuthenticityProof
         )
 
         // Re-upload the persisted ciphertext for any attachment so the
@@ -1006,6 +1013,7 @@ private extension ChatMessage {
             replyToMessageID: replyToMessageID,
             groupType: groupType,
             failureReason: status == .failed ? failureReason : nil,
+            moderationAuthenticityProof: moderationAuthenticityProof,
             imageAttachment: imageAttachment,
             videoAttachment: videoAttachment,
             albumAttachments: albumAttachments,

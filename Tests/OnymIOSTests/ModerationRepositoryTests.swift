@@ -1,5 +1,7 @@
+import CryptoKit
 import XCTest
 @testable import OnymModeration
+import OnymFoundation
 
 /// Consent lifecycle: manifest hash pinning to fetched bytes, mandate
 /// immutability across authority switches, the stub's honesty
@@ -42,6 +44,12 @@ final class ModerationRepositoryTests: XCTestCase {
 
         func load() -> [MandateRecord] { lock.withLock { records } }
         func save(_ records: [MandateRecord]) { lock.withLock { self.records = records } }
+    }
+
+    private struct FailingReportStore: ReportFilingStore {
+        struct Failure: Error {}
+        func load() -> [ReportFilingRecord] { [] }
+        func save(_ records: [ReportFilingRecord]) throws { throw Failure() }
     }
 
     /// Records every request so tests can assert what the client
@@ -115,8 +123,20 @@ final class ModerationRepositoryTests: XCTestCase {
         private var _registrationError: AuthorityClientError?
         private var _rejectedManifestHash: String?
         private var _registrationDelayNanoseconds: UInt64 = 0
+        private var _reports: [Report] = []
+        private var _reportShouldFail = false
+        private var _reportReceiptId: String?
 
         var mandates: [ModerationMandate] { lock.withLock { _mandates } }
+        var reports: [Report] { lock.withLock { _reports } }
+        var reportShouldFail: Bool {
+            get { lock.withLock { _reportShouldFail } }
+            set { lock.withLock { _reportShouldFail = newValue } }
+        }
+        var reportReceiptId: String? {
+            get { lock.withLock { _reportReceiptId } }
+            set { lock.withLock { _reportReceiptId = newValue } }
+        }
         var shouldFail: Bool {
             get { lock.withLock { _shouldFail } }
             set { lock.withLock { _shouldFail = newValue } }
@@ -184,7 +204,16 @@ final class ModerationRepositoryTests: XCTestCase {
         }
 
         func fileReport(_ report: Report) async throws -> ReportReceipt {
-            throw ModerationError.notImplemented("unused")
+            let state = lock.withLock { () -> (Bool, String?) in
+                _reports.append(report)
+                return (_reportShouldFail, _reportReceiptId)
+            }
+            if state.0 { throw RegistrationFailure.unavailable }
+            return ReportReceipt(
+                reportId: state.1 ?? report.reportId,
+                receivedAt: Date(timeIntervalSince1970: 1_700_000_000),
+                caseId: "case-1"
+            )
         }
         func respond(_ response: CaseResponse) async throws {
             throw ModerationError.notImplemented("unused")
@@ -250,7 +279,8 @@ final class ModerationRepositoryTests: XCTestCase {
         backend: any EnforcementBackendClient,
         authorityClient: RecordingAuthorityClient? = nil,
         attestation: any DeviceAttestationProvider = FakeAttestation(supported: true),
-        store: MandateStore? = nil
+        store: MandateStore? = nil,
+        reportStore: any ReportFilingStore = InMemoryReportFilingStore()
     ) -> ModerationRepository {
         let authorityClients: any ModerationAuthorityClientFactory
         if let authorityClient {
@@ -262,11 +292,45 @@ final class ModerationRepositoryTests: XCTestCase {
             authoritiesFetcher: FakeAuthoritiesFetcher(listings: listings),
             manifestFetcher: FakeManifestFetcher(bytesByComponent: bytesByComponent),
             mandateStore: store ?? InMemoryMandateStore(),
+            reportStore: reportStore,
             backend: backend,
             authorityClients: authorityClients,
             attestation: attestation,
             signer: FakeSigner(),
             clock: { Date(timeIntervalSince1970: 1_700_000_000) }
+        )
+    }
+
+    private func activeRecord(componentId: String, bytes: Data) -> MandateRecord {
+        MandateRecord(
+            mandate: ModerationMandate(
+                user: "onym:key:test-user",
+                interface: ModerationRepository.interfaceComponentId,
+                authority: componentId,
+                manifestHash: SignedManifest.hash(of: bytes),
+                classes: ["csam"],
+                deviceBinding: "device-1",
+                acceptedAt: now,
+                signatures: ["user-signature", "interface-signature"]
+            ),
+            manifestBytes: bytes,
+            authorityName: "A",
+            countersigned: true,
+            authorityRegistered: true,
+            isActive: true,
+            createdAt: now
+        )
+    }
+
+    private func reportableMessage(body: String = "prohibited content") throws -> ReportableMessage {
+        let accused = Curve25519.Signing.PrivateKey()
+        let proof = try accused.signature(for: Data(body.utf8)).base64EncodedString()
+        let keyHex = accused.publicKey.rawRepresentation.map { String(format: "%02x", $0) }.joined()
+        return ReportableMessage(
+            id: "message-1",
+            accused: "onym:key:\(keyHex)",
+            disclosedContent: body,
+            authenticityProof: proof
         )
     }
 
@@ -850,6 +914,161 @@ final class ModerationRepositoryTests: XCTestCase {
         XCTAssertEqual(records.first?.mandate.signatures.last, "interface-signature-a")
         XCTAssertTrue(try XCTUnwrap(records.first).isActive)
         XCTAssertFalse(try XCTUnwrap(records.last).isActive)
+    }
+
+    // MARK: - Message reporting
+
+    func testFileReportSendsAccusedSignedMessageUnderActiveMandate() async throws {
+        let componentId = "onym:component:a"
+        let bytes = manifestBytes(componentId: componentId)
+        let authority = RecordingAuthorityClient()
+        let reportStore = InMemoryReportFilingStore()
+        let repository = makeRepository(
+            listings: [listing(componentId, name: "A")],
+            bytesByComponent: [componentId: bytes],
+            backend: RecordingBackend(),
+            authorityClient: authority,
+            store: InMemoryMandateStore(records: [activeRecord(componentId: componentId, bytes: bytes)]),
+            reportStore: reportStore
+        )
+        try await repository.refresh()
+        let message = try reportableMessage()
+
+        let receipt = try await repository.fileReport(message: message, classId: "csam")
+
+        XCTAssertEqual(receipt.caseId, "case-1")
+        let report = try XCTUnwrap(authority.reports.first)
+        XCTAssertEqual(report.reporter, "onym:key:test-user")
+        XCTAssertEqual(report.reporterMandate, try activeRecord(
+            componentId: componentId,
+            bytes: bytes
+        ).mandate.mandateHash())
+        XCTAssertEqual(report.accused, message.accused)
+        XCTAssertEqual(report.classId, "csam")
+        XCTAssertEqual(report.evidence, [EvidenceItem(
+            disclosedContent: message.disclosedContent,
+            authenticityProof: message.authenticityProof
+        )])
+        XCTAssertEqual(report.signature, Data("fake-signature".utf8).base64EncodedString())
+        XCTAssertEqual(reportStore.load().first?.receipt, receipt)
+    }
+
+    func testFileReportRejectsProofThatDoesNotSignTheDisclosedBytes() async throws {
+        let componentId = "onym:component:a"
+        let bytes = manifestBytes(componentId: componentId)
+        let authority = RecordingAuthorityClient()
+        let repository = makeRepository(
+            listings: [listing(componentId, name: "A")],
+            bytesByComponent: [componentId: bytes],
+            backend: RecordingBackend(),
+            authorityClient: authority,
+            store: InMemoryMandateStore(records: [activeRecord(componentId: componentId, bytes: bytes)])
+        )
+        try await repository.refresh()
+        let valid = try reportableMessage(body: "original")
+        let tampered = ReportableMessage(
+            id: valid.id,
+            accused: valid.accused,
+            disclosedContent: "modified",
+            authenticityProof: valid.authenticityProof
+        )
+
+        do {
+            _ = try await repository.fileReport(message: tampered, classId: "csam")
+            XCTFail("expected the altered disclosure to fail locally")
+        } catch ModerationError.authenticityUnverified {
+            // expected
+        }
+        XCTAssertTrue(authority.reports.isEmpty)
+    }
+
+    func testAmbiguousReportFailureRetriesExactPersistedArtifact() async throws {
+        let componentId = "onym:component:a"
+        let bytes = manifestBytes(componentId: componentId)
+        let authority = RecordingAuthorityClient()
+        authority.reportShouldFail = true
+        let reportStore = InMemoryReportFilingStore()
+        let repository = makeRepository(
+            listings: [listing(componentId, name: "A")],
+            bytesByComponent: [componentId: bytes],
+            backend: RecordingBackend(),
+            authorityClient: authority,
+            store: InMemoryMandateStore(records: [activeRecord(componentId: componentId, bytes: bytes)]),
+            reportStore: reportStore
+        )
+        try await repository.refresh()
+        let message = try reportableMessage()
+
+        do {
+            _ = try await repository.fileReport(message: message, classId: "csam")
+            XCTFail("expected an ambiguous transport failure")
+        } catch RegistrationFailure.unavailable {
+            // expected
+        }
+        let retained = try XCTUnwrap(reportStore.load().first?.report)
+        authority.reportShouldFail = false
+
+        _ = try await repository.fileReport(message: message, classId: "csam")
+
+        XCTAssertEqual(authority.reports, [retained, retained])
+        XCTAssertNotNil(reportStore.load().first?.receipt)
+    }
+
+    func testUserDefaultsReportStoreEncryptsDisclosedEvidenceAtRest() throws {
+        let suite = "report-store-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = UserDefaultsReportFilingStore(defaults: defaults)
+        let record = ReportFilingRecord(
+            sourceMessageId: "message-1",
+            report: Report(
+                reportId: "report-1",
+                reporter: "onym:key:reporter",
+                reporterMandate: "mandate-1",
+                accused: "onym:key:accused",
+                classId: "csam",
+                evidence: [EvidenceItem(
+                    disclosedContent: "sensitive disclosed message",
+                    authenticityProof: "proof"
+                )],
+                filedAt: now,
+                signature: "signature"
+            ),
+            authorityName: "A"
+        )
+
+        try store.save([record])
+
+        XCTAssertEqual(store.load(), [record])
+        let raw = try XCTUnwrap(defaults.data(forKey: "app.onym.ios.moderation.reports"))
+        XCTAssertFalse(String(decoding: raw, as: UTF8.self).contains("sensitive disclosed message"))
+    }
+
+    func testReportIsNeverDeliveredWhenExactArtifactCannotBePersisted() async throws {
+        let componentId = "onym:component:a"
+        let bytes = manifestBytes(componentId: componentId)
+        let authority = RecordingAuthorityClient()
+        let repository = makeRepository(
+            listings: [listing(componentId, name: "A")],
+            bytesByComponent: [componentId: bytes],
+            backend: RecordingBackend(),
+            authorityClient: authority,
+            store: InMemoryMandateStore(records: [activeRecord(componentId: componentId, bytes: bytes)]),
+            reportStore: FailingReportStore()
+        )
+        try await repository.refresh()
+        let message = try reportableMessage()
+
+        for _ in 0..<2 {
+            do {
+                _ = try await repository.fileReport(message: message, classId: "csam")
+                XCTFail("expected persistence to gate delivery")
+            } catch is FailingReportStore.Failure {
+                // expected
+            }
+        }
+
+        XCTAssertTrue(authority.reports.isEmpty)
     }
 
     // MARK: - Switching immutability
