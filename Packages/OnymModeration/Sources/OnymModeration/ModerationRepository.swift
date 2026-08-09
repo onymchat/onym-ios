@@ -126,7 +126,15 @@ public actor ModerationRepository {
     public func start() {
         guard startTask == nil else { return }
         startTask = Task { [weak self] in
-            try? await self?.refresh()
+            guard let self else { return }
+            do {
+                try await self.refresh()
+                try await self.retryNewestPendingRegistration()
+            } catch {
+                // Directory and registration retry state are already
+                // published/persisted by their individual operations.
+                // A later consent attempt resumes safely.
+            }
         }
     }
 
@@ -372,6 +380,21 @@ public actor ModerationRepository {
 
     private func unsubscribe(id: UUID) {
         continuations.removeValue(forKey: id)
+    }
+
+    /// Resume the newest interrupted consent after the directory is
+    /// available. The user already signed these exact bytes; this does
+    /// not create consent in the background, it only completes delivery
+    /// of the persisted artifact.
+    private func retryNewestPendingRegistration() async throws {
+        let userKey = try await signer.userKeyID()
+        guard let pending = records.first(where: {
+            $0.mandate.user == userKey && $0.registrationPending
+        }), let listing = authorities.first(where: {
+            $0.componentId == pending.mandate.authority
+        }) else { return }
+
+        _ = try await registerPending(pending, with: listing, activate: true)
     }
 
     /// Register a pending countersigned mandate and verify that the

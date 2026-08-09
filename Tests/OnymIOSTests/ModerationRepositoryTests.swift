@@ -443,6 +443,50 @@ final class ModerationRepositoryTests: XCTestCase {
         XCTAssertEqual(store.load().count, 1)
     }
 
+    func testStartRetriesNewestPersistedRegistration() async throws {
+        let componentId = "onym:component:a"
+        let selected = listing(componentId, name: "A")
+        let bytes = manifestBytes(componentId: componentId)
+        let pending = MandateRecord(
+            mandate: ModerationMandate(
+                user: "onym:key:test-user",
+                interface: ModerationRepository.interfaceComponentId,
+                authority: componentId,
+                manifestHash: SignedManifest.hash(of: bytes),
+                classes: ["csam"],
+                deviceBinding: "device-1",
+                acceptedAt: now,
+                signatures: ["user-signature", "interface-signature"]
+            ),
+            manifestBytes: bytes,
+            authorityName: "A",
+            countersigned: true,
+            isActive: false,
+            createdAt: now
+        )
+        let store = InMemoryMandateStore(records: [pending])
+        let authority = RecordingAuthorityClient()
+        let repository = makeRepository(
+            listings: [selected],
+            bytesByComponent: [componentId: bytes],
+            backend: RecordingBackend(),
+            authorityClient: authority,
+            store: store
+        )
+
+        await repository.start()
+        for _ in 0..<100 {
+            if await repository.activeMandateRecord() != nil { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        let activeRecord = await repository.activeMandateRecord()
+        let active = try XCTUnwrap(activeRecord)
+        XCTAssertTrue(active.authorityRegistered)
+        XCTAssertEqual(active.mandate, pending.mandate)
+        XCTAssertEqual(authority.mandates, [pending.mandate])
+    }
+
     func testMismatchedAuthorityReferenceDoesNotActivateMandate() async throws {
         let componentId = "onym:component:a"
         let backend = RecordingBackend()
