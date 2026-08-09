@@ -610,6 +610,23 @@ struct OnymIOSApp: App {
             },
             lookupModerationRecoveryCaseIDs: { @MainActor in
                 (try? await moderationRepository.recoverableCaseIDs()) ?? []
+            },
+            makeDeviceRecoveryFlow: { @MainActor in
+                DeviceRecoveryFlow(
+                    claimStore: UserDefaultsRecoveryClaimStore(),
+                    fileClaim: { contact, statement in
+                        try await moderationRepository.fileDeviceRecoveryClaim(
+                            contact: contact,
+                            statement: statement
+                        )
+                    },
+                    claimStatus: { claimId in
+                        try await moderationRepository.deviceRecoveryClaimStatus(claimId: claimId)
+                    },
+                    redeem: { grant in
+                        await gateCheckRepository.redeemRecoveryGrant(grant)
+                    }
+                )
             }
         )
     }

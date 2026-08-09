@@ -484,6 +484,33 @@ public actor ModerationRepository {
         return try await client.queryRecoverableCases()
     }
 
+    /// File a device-recovery claim (§6) with the active mandate's
+    /// authority: the contact a moderator can verify the holder
+    /// through, and the holder's account of how they hold the marked
+    /// device. Signed by the current (new) identity — the grantee a
+    /// grant would name. Returns the claim id to poll.
+    public func fileDeviceRecoveryClaim(contact: String, statement: String) async throws -> String {
+        try await recoveryAuthorityClient().fileRecoveryClaim(contact: contact, statement: statement)
+    }
+
+    /// Where a filed device-recovery claim stands; carries the signed
+    /// grant once a moderator issues one.
+    public func deviceRecoveryClaimStatus(claimId: String) async throws -> RecoveryClaimStatus {
+        try await recoveryAuthorityClient().recoveryClaimStatus(claimId: claimId)
+    }
+
+    private func recoveryAuthorityClient() throws -> any ModerationAuthorityClient {
+        guard let record = activeMandateRecord() else {
+            throw ModerationError.noMandate
+        }
+        guard let listing = authorities.first(where: {
+            $0.componentId == record.mandate.authority
+        }) else {
+            throw ModerationError.authorityUnavailable(record.mandate.authority)
+        }
+        return authorityClients.client(for: listing)
+    }
+
     /// Retry one persisted registration attempt without minting or
     /// signing anything new. A later consent always wins: resolving an
     /// older artifact records it as history rather than silently making

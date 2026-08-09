@@ -301,6 +301,71 @@ public actor GateCheckRepository {
         }
     }
 
+    // MARK: - Device recovery
+
+    /// Present a moderator-issued grant to the enforcement backend and
+    /// fold the answer into the gate state. Its own session, not a
+    /// gate check: recovery is exactly the state in which no
+    /// mandate-bound gate check can succeed, and the backend requires
+    /// a real device token — a nil token is refused, never guessed
+    /// about.
+    public func redeemRecoveryGrant(_ grant: RecoveryGrant) async -> RecoveryRedemption {
+        guard attestation.isSupported, let token = try? await attestation.generateToken() else {
+            return .failed("Device attestation is unavailable; recovery needs the marked device.")
+        }
+        do {
+            let timestamp = max(clock(), lastSessionTimestamp.addingTimeInterval(1))
+            lastSessionTimestamp = timestamp
+            let userKey = try await signer.userKeyID()
+            let signature = try await signer.sign(
+                RecoveryRequest.signedPayload(
+                    deviceToken: token,
+                    userKey: userKey,
+                    grantRef: try grant.reference(),
+                    timestamp: timestamp
+                )
+            )
+            let request = RecoveryRequest(
+                deviceToken: token,
+                userKey: userKey,
+                grant: grant.raw,
+                timestamp: timestamp,
+                signature: signature
+            )
+            switch try await backend.recover(request) {
+            case .recovered(let gate):
+                // The backend reconciled on this very session; adopt
+                // its answer as the newest check so the gate opens (or
+                // honestly reports what still stands) without a second
+                // round trip. Bump the generation so a slow in-flight
+                // check can't overwrite this with a stale answer.
+                generation &+= 1
+                let sanitized = await sanitize(gate)
+                let (status, persisted) = Self.derive(
+                    persisted: store.load(),
+                    attempt: .success(sanitized),
+                    now: clock(),
+                    policy: policy
+                )
+                store.save(persisted)
+                cached = status
+                publish()
+                return .recovered(status)
+            case .markInForce(let contact, let newHolderURL, let appealURL):
+                return .markInForce(
+                    authorityContact: contact,
+                    newHolderURL: newHolderURL,
+                    appealURL: appealURL
+                )
+            }
+        } catch {
+            if case let AuthorityClientError.rejected(rejection) = error {
+                return .failed(rejection.message)
+            }
+            return .failed("The enforcement backend could not be reached.")
+        }
+    }
+
     /// `no_mandate` is its own state because its recovery is different
     /// in kind: no amount of retrying fixes a backend that has lost the
     /// enrollment — only re-consent does, and the gate flow routes

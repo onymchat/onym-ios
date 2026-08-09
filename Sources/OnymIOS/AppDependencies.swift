@@ -96,4 +96,8 @@ struct AppDependencies {
     let makeModerationRecoveryCaseFlow: @MainActor (_ caseId: String) async -> ModerationCaseFlow?
     /// Authenticated recovery lookup; the Authority returns case IDs only.
     let lookupModerationRecoveryCaseIDs: @MainActor () async -> [String]
+    /// Device recovery behind `reidentificationRequired`: file a claim
+    /// with the authority's human moderator, poll it, and redeem the
+    /// signed grant at the enforcement backend. Nothing self-serve.
+    let makeDeviceRecoveryFlow: @MainActor () -> DeviceRecoveryFlow
 }

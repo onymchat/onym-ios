@@ -11,8 +11,10 @@ public struct GateCheckRequiredView: View {
     let onRetry: @MainActor () async -> Void
     let lookupRecoveryCaseIDs: (@MainActor () async -> [String])?
     let makeRecoveryCaseFlow: (@MainActor (String) async -> ModerationCaseFlow?)?
+    let makeDeviceRecoveryFlow: (@MainActor () -> DeviceRecoveryFlow)?
 
     @State private var showRecovery = false
+    @State private var deviceRecoveryFlow: DeviceRecoveryFlow?
     @State private var isRetrying = false
     @State private var retryMessage: String?
 
@@ -20,12 +22,14 @@ public struct GateCheckRequiredView: View {
         reason: CheckRequiredReason,
         onRetry: @escaping @MainActor () async -> Void,
         lookupRecoveryCaseIDs: (@MainActor () async -> [String])? = nil,
-        makeRecoveryCaseFlow: (@MainActor (String) async -> ModerationCaseFlow?)? = nil
+        makeRecoveryCaseFlow: (@MainActor (String) async -> ModerationCaseFlow?)? = nil,
+        makeDeviceRecoveryFlow: (@MainActor () -> DeviceRecoveryFlow)? = nil
     ) {
         self.reason = reason
         self.onRetry = onRetry
         self.lookupRecoveryCaseIDs = lookupRecoveryCaseIDs
         self.makeRecoveryCaseFlow = makeRecoveryCaseFlow
+        self.makeDeviceRecoveryFlow = makeDeviceRecoveryFlow
     }
 
     public var body: some View {
@@ -64,6 +68,16 @@ public struct GateCheckRequiredView: View {
                     .padding(.horizontal, 32)
                     .accessibilityIdentifier("moderation.gate_required.retry_result")
             }
+            if reason == .reidentificationRequired, let makeDeviceRecoveryFlow {
+                SettingsPrimaryButton(action: {
+                    deviceRecoveryFlow = makeDeviceRecoveryFlow()
+                }) {
+                    Text("Ask a moderator to recover this device")
+                }
+                .padding(.horizontal, 48)
+                .padding(.top, 8)
+                .accessibilityIdentifier("moderation.gate_required.recover")
+            }
             if reason == .reidentificationRequired,
                lookupRecoveryCaseIDs != nil,
                makeRecoveryCaseFlow != nil {
@@ -86,6 +100,9 @@ public struct GateCheckRequiredView: View {
                 )
             }
         }
+        .sheet(item: $deviceRecoveryFlow) { flow in
+            DeviceRecoveryView(flow: flow)
+        }
     }
 
     private var message: String {
@@ -99,7 +116,7 @@ public struct GateCheckRequiredView: View {
         case .attestationUnavailable:
             return String(localized: "Device verification isn't available in this environment. This is expected on Simulator; use UI-testing mode or a physical device.")
         case .reidentificationRequired:
-            return String(localized: "This device was previously flagged by the moderation authority, but this install cannot verify its original identity. Reinstalling or retrying will not fix this. Recover your case below to appeal the decision.")
+            return String(localized: "This device carries a moderation mark, but this install cannot verify its original identity. Reinstalling or retrying will not fix this. Ask a moderator to recover the device below — a person reviews your claim and decides.")
         case .clockRollback:
             return String(localized: "This device's clock is set earlier than its last verification. Check the date and time, then connect to continue.")
         case .backendRefused:
