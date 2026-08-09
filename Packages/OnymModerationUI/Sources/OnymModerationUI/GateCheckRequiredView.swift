@@ -99,7 +99,7 @@ public struct GateCheckRequiredView: View {
         case .attestationUnavailable:
             return String(localized: "Device verification isn't available in this environment. This is expected on Simulator; use UI-testing mode or a physical device.")
         case .reidentificationRequired:
-            return String(localized: "This install has a DeviceCheck mark, but it cannot be safely attached to the retained identity. Retrying cannot change that; recover the case below and appeal it.")
+            return String(localized: "This device was previously flagged by the moderation authority, but this install cannot verify its original identity. Reinstalling or retrying will not fix this. Recover your case below to appeal the decision.")
         case .clockRollback:
             return String(localized: "This device's clock is set earlier than its last verification. Check the date and time, then connect to continue.")
         case .backendRefused:
