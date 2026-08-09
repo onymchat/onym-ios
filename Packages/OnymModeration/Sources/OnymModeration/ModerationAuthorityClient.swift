@@ -533,32 +533,7 @@ public struct URLSessionModerationAuthorityClient: ModerationAuthorityClient {
     }
 
     private static func decoder() -> JSONDecoder {
-        let decoder = JSONDecoder()
-        // RFC 3339 permits fractional seconds. Foundation's built-in
-        // `.iso8601` strategy accepts only the whole-second form, so
-        // try both shapes used by conforming Authority implementations.
-        decoder.dateDecodingStrategy = .custom { decoder in
-            let container = try decoder.singleValueContainer()
-            let value = try container.decode(String.self)
-
-            let fractional = ISO8601DateFormatter()
-            fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            if let date = fractional.date(from: value) {
-                return date
-            }
-
-            let wholeSeconds = ISO8601DateFormatter()
-            wholeSeconds.formatOptions = [.withInternetDateTime]
-            if let date = wholeSeconds.date(from: value) {
-                return date
-            }
-
-            throw DecodingError.dataCorruptedError(
-                in: container,
-                debugDescription: "expected an RFC 3339 timestamp"
-            )
-        }
-        return decoder
+        ModerationJSON.decoder()
     }
 
     private static func timestamp(_ date: Date) -> String {

@@ -144,7 +144,14 @@ struct OnymIOSApp: App {
                 store: UITestGateStateStore()
             )
         } else {
-            let backend = URLSessionEnforcementBackendClient()
+            // `--enforcement-base-url http://localhost:8080` points a
+            // dev build at a local reference deployment (plain http is
+            // accepted for loopback only). Without it, dev builds talk
+            // to the production service like release builds do.
+            let backend = URLSessionEnforcementBackendClient(
+                baseURL: Self.resolveEnforcementBaseURL(args: args)
+                    ?? URLSessionEnforcementBackendClient.defaultBaseURL
+            )
             moderationManifestFetcher = URLSessionAuthorityManifestFetcher()
             moderationRepository = ModerationRepository(
                 authoritiesFetcher: GitHubReleasesKnownAuthoritiesFetcher(),
@@ -575,6 +582,15 @@ struct OnymIOSApp: App {
     }
 
     #if DEBUG
+    /// `--enforcement-base-url <url>` (with a DEBUG build): point the
+    /// enforcement backend client at a local deployment for driving
+    /// the full moderation loop in development.
+    private static func resolveEnforcementBaseURL(args: [String]) -> URL? {
+        guard let flagIndex = args.firstIndex(of: "--enforcement-base-url"),
+              args.indices.contains(flagIndex + 1) else { return nil }
+        return URL(string: args[flagIndex + 1])
+    }
+
     /// `--moderation-scenario clear|case-open|banned|check-required`
     /// (with `--ui-testing`): which canned world the stub enforcement
     /// backend answers, so UI tests can drive the ban screen, the

@@ -20,8 +20,12 @@ public enum ModerationTrust {
 
     /// Reject verdicts whose `signature` doesn't verify against the
     /// consented manifest's operator key. ON: the deployed authority
-    /// signs verdicts with the directory-pinned operator key. (The
-    /// stub backend's fixture verdicts carry sentinel signatures, but
-    /// no UI-test path routes them through `VerdictValidator`.)
+    /// signs verdicts with the directory-pinned operator key, and the
+    /// gate check runs every served ban verdict through
+    /// `VerdictValidator` before display. Honesty note: while
+    /// `enforceManifestSignatures` is off, the operator key used here
+    /// comes from a manifest that was itself accepted unverified at
+    /// consent time — this switch cannot be stronger than that one.
+    /// Publishing the `.sig` closes the chain.
     public static let enforceVerdictSignatures = true
 }

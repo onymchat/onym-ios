@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 /// The declared cadence from the DeviceCheck profile §5: gate check at
 /// launch and at least once per `interval`; a device that can't reach
@@ -102,10 +103,19 @@ public actor GateCheckRepository {
     /// Outcome of one contact attempt with the backend.
     public enum AttemptOutcome: Sendable, Equatable {
         case success(GateCheckResult)
-        /// Network failure / backend unreachable. NOT a backend
-        /// refusal — a reachable backend answers `.checkRequired`.
+        /// Network failure / backend unreachable — grace arithmetic
+        /// keeps serving the last known state within the window.
         case unreachable
+        /// The backend answered and deterministically refused the
+        /// session (4xx: replayed/invalid signature, no mandate).
+        /// NOT unreachable: cached `.clear` must not keep serving for
+        /// the grace window on the say-so of a refusal.
+        case refused
     }
+
+    private static let logger = Logger(
+        subsystem: "app.onym.ios", category: "moderation"
+    )
 
     private let attestation: any DeviceAttestationProvider
     private let backend: any EnforcementBackendClient
@@ -234,10 +244,60 @@ public actor GateCheckRepository {
                 timestamp: timestamp,
                 signature: signature
             )
-            return .success(try await backend.gateCheck(request))
+            return .success(await sanitize(try await backend.gateCheck(request)))
         } catch {
+            // Same deterministic/ambiguous split as everywhere else in
+            // the seat: a 4xx (minus the transient 408/429) can't
+            // become a success by retrying and must not be mistaken
+            // for being offline.
+            if case let AuthorityClientError.rejected(rejection) = error,
+               (400..<500).contains(rejection.statusCode),
+               rejection.statusCode != 408, rejection.statusCode != 429 {
+                return .refused
+            }
             return .unreachable
         }
+    }
+
+    /// A served ban's embedded verdict is display metadata — the marks
+    /// are the enforcement. Validate it against the consented manifest
+    /// (shape, authority, mandate binding, derived dates, and — with
+    /// `ModerationTrust.enforceVerdictSignatures` — the operator
+    /// signature) before it reaches the ban screen; an unverifiable
+    /// verdict is stripped so its narrative never renders, while the
+    /// ban itself stands.
+    private func sanitize(_ result: GateCheckResult) async -> GateCheckResult {
+        guard case .banned(let state) = result, let verdict = state.verdict else {
+            return result
+        }
+        guard let record = await moderation.mandateRecord(forRef: verdict.mandateRef),
+              let consented = record.consentedManifest() else {
+            Self.logger.error("banned verdict names an unretained mandate; stripping display verdict")
+            return .banned(Self.stripped(state))
+        }
+        do {
+            _ = try VerdictValidator().validate(
+                verdict,
+                mandate: record.mandate,
+                consented: consented,
+                now: clock()
+            )
+            return result
+        } catch {
+            Self.logger.error("banned verdict failed validation; stripping display verdict: \(error)")
+            return .banned(Self.stripped(state))
+        }
+    }
+
+    private static func stripped(_ state: BanState) -> BanState {
+        BanState(
+            verdictRef: state.verdictRef,
+            verdict: nil,
+            authorityContact: state.authorityContact,
+            banExpires: state.banExpires,
+            appealURL: state.appealURL,
+            newHolderURL: state.newHolderURL
+        )
     }
 
     // MARK: - Cadence arithmetic (pure)
@@ -264,6 +324,12 @@ public actor GateCheckRepository {
         switch attempt {
         case .success(let result):
             return (status(for: result), PersistedGateState(lastResult: result, lastSuccessAt: now))
+        case .refused:
+            // Persisted state is kept — a later successful check
+            // overwrites it — but a refusal blocks now: it is a
+            // reachable backend's answer, not a network condition the
+            // grace window exists for.
+            return (.gateCheckRequired(.backendRefused), persisted)
         case .unreachable:
             guard let persisted else {
                 return (.gateCheckRequired(.neverChecked), nil)

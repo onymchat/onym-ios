@@ -47,6 +47,10 @@ public enum ModerationError: Error, Sendable, Equatable {
     /// so switching the selected identity — not switching authorities —
     /// is what resolves this.
     case caseAccessUnavailable(String)
+    /// The enforcement backend's countersignature failed the local
+    /// plausibility check (not a 64-byte Ed25519 signature). The
+    /// consent attempt is aborted rather than recorded as countersigned.
+    case countersignatureInvalid(String)
     /// A case statement failed local validation (empty, or beyond the
     /// reference Authority's byte cap) before any signing or delivery.
     case statementInvalid(String)

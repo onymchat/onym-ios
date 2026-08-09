@@ -34,9 +34,18 @@ public struct URLSessionEnforcementBackendClient: EnforcementBackendClient {
     private let baseURL: URL
     private let session: URLSession
 
+    /// Ephemeral and cookie-less: session state that outlives a
+    /// request is linkable surface this codebase avoids everywhere.
+    public static let defaultSession: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpShouldSetCookies = false
+        configuration.httpCookieAcceptPolicy = .never
+        return URLSession(configuration: configuration)
+    }()
+
     public init(
         baseURL: URL = URLSessionEnforcementBackendClient.defaultBaseURL,
-        session: URLSession = .shared
+        session: URLSession = URLSessionEnforcementBackendClient.defaultSession
     ) {
         self.baseURL = baseURL
         self.session = session
@@ -65,7 +74,12 @@ public struct URLSessionEnforcementBackendClient: EnforcementBackendClient {
     // MARK: - Transport
 
     private func send(path: [String], body: Data) async throws -> Data {
-        guard baseURL.scheme?.lowercased() == "https", baseURL.host != nil else {
+        // https only — except plain http to loopback, so a local
+        // reference deployment can drive the full loop in development.
+        let host = baseURL.host?.lowercased() ?? ""
+        let scheme = baseURL.scheme?.lowercased()
+        let loopback = ["localhost", "127.0.0.1", "::1"].contains(host)
+        guard !host.isEmpty, scheme == "https" || (scheme == "http" && loopback) else {
             throw AuthorityClientError.insecureBaseURL(baseURL.absoluteString)
         }
         let url = path.reduce(baseURL) { partial, component in
@@ -108,27 +122,8 @@ public struct URLSessionEnforcementBackendClient: EnforcementBackendClient {
     }
 
     private func decode<Value: Decodable>(_ data: Data) throws -> Value {
-        let decoder = JSONDecoder()
-        // RFC 3339 with or without fractional seconds — same tolerance
-        // as the authority client, for the dates inside CaseNotice /
-        // BanState / Verdict.
-        decoder.dateDecodingStrategy = .custom { decoder in
-            let container = try decoder.singleValueContainer()
-            let raw = try container.decode(String.self)
-            let fractional = ISO8601DateFormatter()
-            fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            let plain = ISO8601DateFormatter()
-            plain.formatOptions = [.withInternetDateTime]
-            if let date = fractional.date(from: raw) ?? plain.date(from: raw) {
-                return date
-            }
-            throw DecodingError.dataCorruptedError(
-                in: container,
-                debugDescription: "unparseable RFC 3339 timestamp '\(raw)'"
-            )
-        }
         do {
-            return try decoder.decode(Value.self, from: data)
+            return try ModerationJSON.decoder().decode(Value.self, from: data)
         } catch {
             throw AuthorityClientError.malformedResponse(
                 "enforcement backend response: \(error)"

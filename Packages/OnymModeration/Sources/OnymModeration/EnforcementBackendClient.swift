@@ -167,6 +167,11 @@ public enum CheckRequiredReason: String, Codable, Sendable, Equatable {
     case offlineGraceExpired
     /// Local policy: no successful check has ever completed.
     case neverChecked
+    /// Client-derived (never sent by the backend): the backend was
+    /// reachable and deterministically refused the session — a
+    /// replayed or invalid signature, or no enrollment/mandate on
+    /// record. Retrying with a fresh session usually clears it.
+    case backendRefused
     /// Local policy: the device clock now reads earlier than the last
     /// successful check, so elapsed time can't be trusted to bound
     /// staleness — the grace window is refused rather than extended.

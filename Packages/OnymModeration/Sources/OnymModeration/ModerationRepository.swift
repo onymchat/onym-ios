@@ -393,8 +393,25 @@ public actor ModerationRepository {
         // The backend never hands back a mandate, so no consented
         // field can change behind the user's signature.
         let countersignature = try await backend.countersignMandate(mandate)
-        let isCountersigned = countersignature.signature
-            != StubEnforcementBackendClient.countersignSentinel
+        let isCountersigned: Bool
+        if countersignature.signature == StubEnforcementBackendClient.countersignSentinel {
+            isCountersigned = false
+        } else {
+            // Minimum plausibility before recording a countersigned
+            // mandate: a 64-byte base64 Ed25519 signature. A live
+            // backend answering an empty or garbage string must not
+            // mint an "active, countersigned" record. (Cryptographic
+            // verification needs the interface key distributed out of
+            // band — the Authority verifies it in full at
+            // registration.)
+            guard let raw = Data(base64Encoded: countersignature.signature),
+                  raw.count == 64 else {
+                throw ModerationError.countersignatureInvalid(
+                    "interface countersignature is not a 64-byte Ed25519 signature"
+                )
+            }
+            isCountersigned = true
+        }
         mandate.signatures = [
             userSignature.base64EncodedString(),
             countersignature.signature,
