@@ -113,6 +113,7 @@ final class ModerationRepositoryTests: XCTestCase {
         private var _returnedReference: String?
         private var _accepted = true
         private var _registrationError: AuthorityClientError?
+        private var _rejectedManifestHash: String?
 
         var mandates: [ModerationMandate] { lock.withLock { _mandates } }
         var shouldFail: Bool {
@@ -131,16 +132,36 @@ final class ModerationRepositoryTests: XCTestCase {
             get { lock.withLock { _registrationError } }
             set { lock.withLock { _registrationError = newValue } }
         }
+        var rejectedManifestHash: String? {
+            get { lock.withLock { _rejectedManifestHash } }
+            set { lock.withLock { _rejectedManifestHash = newValue } }
+        }
 
         func registerMandate(
             _ mandate: ModerationMandate
         ) async throws -> MandateRegistrationReceipt {
-            let state = lock.withLock { () -> (Bool, String?, Bool, AuthorityClientError?) in
+            let state = lock.withLock {
+                () -> (Bool, String?, Bool, AuthorityClientError?, String?) in
                 _mandates.append(mandate)
-                return (_shouldFail, _returnedReference, _accepted, _registrationError)
+                return (
+                    _shouldFail,
+                    _returnedReference,
+                    _accepted,
+                    _registrationError,
+                    _rejectedManifestHash
+                )
             }
             if state.0 { throw RegistrationFailure.unavailable }
             if let error = state.3 { throw error }
+            if state.4 == mandate.manifestHash {
+                throw AuthorityClientError.rejected(
+                    AuthorityRejection(
+                        statusCode: 400,
+                        rawCode: "bad_request",
+                        message: "manifest rotated"
+                    )
+                )
+            }
             let mandateRef: String
             if let returnedReference = state.1 {
                 mandateRef = returnedReference
@@ -428,6 +449,7 @@ final class ModerationRepositoryTests: XCTestCase {
         backend.countersignature = "interface-signature"
         let authority = RecordingAuthorityClient()
         authority.returnedReference = "wrong-reference"
+        authority.accepted = false
         let store = InMemoryMandateStore()
         let repository = makeRepository(
             listings: [listing(componentId, name: "A")],
@@ -529,6 +551,55 @@ final class ModerationRepositoryTests: XCTestCase {
         let activated = try await repository.consent(to: selected, reviewedManifest: reviewed)
         XCTAssertTrue(activated.isActive)
         XCTAssertEqual(Array(authority.mandates.suffix(2)), [pending.mandate, pending.mandate])
+    }
+
+    func testManifestRotationResolvesOldPendingBeforeRegisteringNewConsent() async throws {
+        let componentId = "onym:component:a"
+        let selected = listing(componentId, name: "A")
+        let oldBytes = manifestBytes(componentId: componentId)
+        let newBytes = manifestBytes(componentId: componentId, tweak: "-rotated")
+        let fetcher = SwitchingManifestFetcher(first: oldBytes, second: newBytes)
+        let backend = RecordingBackend()
+        backend.countersignature = "interface-signature"
+        let authority = RecordingAuthorityClient()
+        authority.shouldFail = true
+        let store = InMemoryMandateStore()
+        let repository = ModerationRepository(
+            authoritiesFetcher: FakeAuthoritiesFetcher(listings: [selected]),
+            manifestFetcher: fetcher,
+            mandateStore: store,
+            backend: backend,
+            authorityClients: RecordingAuthorityClientFactory(authority: authority),
+            attestation: FakeAttestation(supported: true),
+            signer: FakeSigner(),
+            clock: { Date(timeIntervalSince1970: 1_700_000_000) }
+        )
+
+        let oldReview = try await repository.manifestForReview(selected)
+        do {
+            _ = try await repository.consent(to: selected, reviewedManifest: oldReview)
+            XCTFail("expected ambiguous first registration")
+        } catch RegistrationFailure.unavailable {
+            // expected
+        }
+        let oldPending = try XCTUnwrap(store.load().first)
+        XCTAssertTrue(oldPending.registrationPending)
+
+        authority.shouldFail = false
+        authority.rejectedManifestHash = oldPending.mandate.manifestHash
+        let newReview = try await repository.manifestForReview(selected)
+        let current = try await repository.consent(to: selected, reviewedManifest: newReview)
+
+        XCTAssertEqual(current.mandate.manifestHash, SignedManifest.hash(of: newBytes))
+        XCTAssertTrue(current.authorityRegistered)
+        XCTAssertTrue(current.isActive)
+        XCTAssertEqual(store.load(), [current], "rotated pending attempt must not remain orphaned")
+        XCTAssertEqual(backend.countersignCount, 2)
+        XCTAssertEqual(authority.mandates.map(\.manifestHash), [
+            oldPending.mandate.manifestHash,
+            oldPending.mandate.manifestHash,
+            current.mandate.manifestHash,
+        ])
     }
 
     func testOverlappingConsentCallsShareOneArtifact() async throws {

@@ -223,17 +223,28 @@ public actor ModerationRepository {
         // pinned by a signed mandate.
         try manifestValidator.validateForConsent(signedManifest, now: clock())
 
-        // If registration previously failed after countersigning, retry
-        // that immutable mandate byte-for-byte. Minting a replacement
-        // would leave two consent artifacts at an Authority that may
-        // have accepted the first request before its response was lost.
-        if let pending = records.first(where: {
+        // Resolve every older ambiguous registration for this Authority
+        // before minting under newly reviewed terms. A manifest rotation
+        // must not orphan hidden pending bytes or create a replacement
+        // while the old request may already have committed.
+        while let pending = records.first(where: {
             $0.mandate.authority == listing.componentId
                 && $0.mandate.user == userKey
-                && $0.mandate.manifestHash == signedManifest.manifestHash
                 && $0.registrationPending
         }) {
-            return try await registerAndActivate(pending, with: listing)
+            if pending.mandate.manifestHash == signedManifest.manifestHash {
+                return try await registerPending(pending, with: listing, activate: true)
+            }
+            do {
+                _ = try await registerPending(pending, with: listing, activate: false)
+            } catch {
+                // A definitive refusal removes the old attempt, so the
+                // consent the user just gave to the new manifest may
+                // proceed. Ambiguous outcomes still block replacement.
+                guard isDeterministicRegistrationRejection(error) else {
+                    throw error
+                }
+            }
         }
 
         // Enrollment: (identity signature, device token) presented
@@ -309,7 +320,7 @@ public actor ModerationRepository {
             records.insert(record, at: 0)
             mandateStore.save(records)
             publish()
-            return try await registerAndActivate(record, with: listing)
+            return try await registerPending(record, with: listing, activate: true)
         }
 
         // Deactivate the previous active record without touching
@@ -363,12 +374,14 @@ public actor ModerationRepository {
         continuations.removeValue(forKey: id)
     }
 
-    /// Register a pending countersigned mandate, verify that the
-    /// Authority derived the same content reference, then atomically
-    /// make it the locally active record.
-    private func registerAndActivate(
+    /// Register a pending countersigned mandate and verify that the
+    /// Authority derived the same content reference. Current reviewed
+    /// terms become active; older terms resolved ahead of a rotation are
+    /// retained as history without transiently becoming current.
+    private func registerPending(
         _ pending: MandateRecord,
-        with listing: AuthorityListing
+        with listing: AuthorityListing,
+        activate: Bool
     ) async throws -> MandateRecord {
         let expectedRef = try pending.mandate.mandateHash()
         let client = authorityClients.client(for: listing)
@@ -389,10 +402,6 @@ public actor ModerationRepository {
         // The concrete HTTP client validates these too. Repeating the
         // checks here preserves the invariant for every factory-injected
         // implementation of the protocol.
-        guard receipt.accepted else {
-            discardRegistrationAttempt(pending)
-            throw AuthorityClientError.mandateNotAccepted(mandateRef: receipt.mandateRef)
-        }
         guard receipt.mandateRef == expectedRef else {
             discardRegistrationAttempt(pending)
             throw AuthorityClientError.mandateReferenceMismatch(
@@ -400,16 +409,38 @@ public actor ModerationRepository {
                 received: receipt.mandateRef
             )
         }
+        guard receipt.accepted else {
+            discardRegistrationAttempt(pending)
+            throw AuthorityClientError.mandateNotAccepted(mandateRef: receipt.mandateRef)
+        }
 
         // The content reference excludes signatures. Locate the exact
         // persisted record instead, then activate only that array entry;
         // two records with the same unsigned fields must never both become
         // active merely because they share a content hash.
         guard let pendingIndex = recordIndex(of: pending) else {
-            throw AuthorityClientError.localMandateRecordMissing(mandateRef: expectedRef)
+            // Defensive recovery for a future mutation path: the
+            // Authority has accepted these exact bytes, so reconstruct
+            // the local registered record rather than minting again.
+            var recovered = pending
+            recovered.authorityRegistered = true
+            recovered.isActive = activate
+            if activate {
+                for index in records.indices {
+                    records[index].isActive = false
+                }
+            }
+            records.insert(recovered, at: 0)
+            mandateStore.save(records)
+            publish()
+            return recovered
         }
-        for index in records.indices {
-            records[index].isActive = index == pendingIndex
+        if activate {
+            for index in records.indices {
+                records[index].isActive = index == pendingIndex
+            }
+        } else {
+            records[pendingIndex].isActive = false
         }
         records[pendingIndex].authorityRegistered = true
         let activated = records[pendingIndex]
@@ -444,7 +475,7 @@ public actor ModerationRepository {
             return (400..<500).contains(rejection.statusCode)
                 && rejection.statusCode != 408
                 && rejection.statusCode != 429
-        case .invalidResponse, .malformedResponse, .localMandateRecordMissing:
+        case .invalidResponse, .malformedResponse, .invalidPathComponent:
             return false
         }
     }

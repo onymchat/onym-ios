@@ -91,6 +91,32 @@ final class ModerationAuthorityClientTests: XCTestCase {
         XCTAssertThrowsError(try JSONDecoder().decode(AuthorityListing.self, from: data))
     }
 
+    func testDirectorySkipsInvalidEntryWithoutDroppingValidAuthorities() throws {
+        let data = Data(#"""
+        {
+          "authorities": [
+            {
+              "componentId":"onym:component:valid",
+              "name":"Valid",
+              "manifestURL":"https://cdn.example/valid/manifest.json",
+              "apiBaseURL":"https://api.example/valid",
+              "operatorPublicKeyBase64":"key"
+            },
+            {
+              "componentId":"onym:component:invalid",
+              "name":"Missing API endpoint",
+              "manifestURL":"https://cdn.example/invalid/manifest.json",
+              "operatorPublicKeyBase64":"key"
+            }
+          ]
+        }
+        """#.utf8)
+
+        let document = try JSONDecoder().decode(KnownAuthoritiesDocument.self, from: data)
+
+        XCTAssertEqual(document.authorities.map(\.componentId), ["onym:component:valid"])
+    }
+
     func testRegisterMandatePostsCanonicalBodyAndChecksReference() async throws {
         let mandate = mandate()
         let expectedRef = try mandate.mandateHash()
@@ -101,7 +127,7 @@ final class ModerationAuthorityClientTests: XCTestCase {
             XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
 
             let body = try XCTUnwrap(Self.body(of: request))
-            XCTAssertEqual(body, try JSONEncoder.moderationFixture().encode(mandate))
+            XCTAssertEqual(body, try ModerationCanonicalEncoder.encode(mandate))
             let response = Data(#"{"accepted":true,"mandateRef":"\#(expectedRef)"}"#.utf8)
             return (response, Self.httpResponse(for: request, status: 200))
         }
@@ -128,6 +154,24 @@ final class ModerationAuthorityClientTests: XCTestCase {
         }
     }
 
+    func testRegisterMandateChecksReferenceBeforeAcceptedFlag() async throws {
+        StubURLProtocol.set { request in
+            let response = Data(#"{"accepted":false,"mandateRef":"unrelated"}"#.utf8)
+            return (response, Self.httpResponse(for: request, status: 200))
+        }
+        let expected = try mandate().mandateHash()
+
+        do {
+            _ = try await makeClient().registerMandate(mandate())
+            XCTFail("expected unrelated receipt reference to be rejected")
+        } catch let AuthorityClientError.mandateReferenceMismatch(actual, received) {
+            XCTAssertEqual(actual, expected)
+            XCTAssertEqual(received, "unrelated")
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+    }
+
     func testFileReportDecodesFullReferenceReceipt() async throws {
         let report = Report(
             reportId: "report-1",
@@ -142,7 +186,7 @@ final class ModerationAuthorityClientTests: XCTestCase {
         StubURLProtocol.set { request in
             XCTAssertEqual(request.url?.absoluteString, "https://authority.example/service/v1/reports")
             XCTAssertEqual(request.httpMethod, "POST")
-            XCTAssertEqual(Self.body(of: request), try JSONEncoder.moderationFixture().encode(report))
+            XCTAssertEqual(Self.body(of: request), try ModerationCanonicalEncoder.encode(report))
             let response = Data(#"""
             {
               "reportId":"report-1",
@@ -357,8 +401,26 @@ final class ModerationAuthorityClientTests: XCTestCase {
         try await client.appeal(appeal)
 
         let bodies = recorded.snapshot()
-        XCTAssertEqual(bodies["respond"], try JSONEncoder.moderationFixture().encode(response))
-        XCTAssertEqual(bodies["appeal"], try JSONEncoder.moderationFixture().encode(appeal))
+        XCTAssertEqual(bodies["respond"], try ModerationCanonicalEncoder.encode(response))
+        XCTAssertEqual(bodies["appeal"], try ModerationCanonicalEncoder.encode(appeal))
+    }
+
+    func testCaseIDCannotEscapeItsPathSegment() async throws {
+        StubURLProtocol.set { _ in
+            XCTFail("invalid case id must be rejected before a request is sent")
+            throw URLError(.badURL)
+        }
+
+        do {
+            try await makeClient().respond(
+                CaseResponse(caseId: "case/../admin", statement: "answer", signature: "sig")
+            )
+            XCTFail("expected invalid path component")
+        } catch let AuthorityClientError.invalidPathComponent(component) {
+            XCTAssertEqual(component, "case/../admin")
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
     }
 
     private static func httpResponse(for request: URLRequest, status: Int) -> HTTPURLResponse {
@@ -382,14 +444,5 @@ final class ModerationAuthorityClientTests: XCTestCase {
             body.append(contentsOf: buffer.prefix(count))
         }
         return body
-    }
-}
-
-private extension JSONEncoder {
-    static func moderationFixture() -> JSONEncoder {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        return encoder
     }
 }

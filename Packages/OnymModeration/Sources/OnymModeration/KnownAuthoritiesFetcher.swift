@@ -32,11 +32,35 @@ public struct AuthorityListing: Codable, Sendable, Equatable {
         self.apiBaseURL = apiBaseURL
         self.operatorPublicKeyBase64 = operatorPublicKeyBase64
     }
-
 }
 
-struct KnownAuthoritiesDocument: Codable {
+private struct LossyAuthorityListing: Decodable {
+    let value: AuthorityListing?
+
+    init(from decoder: Decoder) throws {
+        value = try? AuthorityListing(from: decoder)
+    }
+}
+
+struct KnownAuthoritiesDocument: Decodable {
     let authorities: [AuthorityListing]
+
+    private enum CodingKeys: String, CodingKey {
+        case authorities
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let decoded = try container.decode([LossyAuthorityListing].self, forKey: .authorities)
+        authorities = decoded.compactMap(\.value)
+        guard !authorities.isEmpty else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .authorities,
+                in: container,
+                debugDescription: "directory contains no valid Authority entries"
+            )
+        }
+    }
 }
 
 /// Network seam that fetches the curated list of moderation

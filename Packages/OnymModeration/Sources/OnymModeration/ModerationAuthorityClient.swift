@@ -84,7 +84,7 @@ public enum AuthorityClientError: Error, Sendable, Equatable {
     case rejected(AuthorityRejection)
     case mandateNotAccepted(mandateRef: String)
     case mandateReferenceMismatch(expected: String, received: String)
-    case localMandateRecordMissing(mandateRef: String)
+    case invalidPathComponent(String)
 }
 
 /// The accused's signed response to a case notice: statements and
@@ -297,14 +297,14 @@ public struct URLSessionModerationAuthorityClient: ModerationAuthorityClient {
         let data = try await send(method: "POST", path: ["v1", "mandates"], body: body)
         let receipt: MandateRegistrationReceipt = try decode(data)
         let expected = try mandate.mandateHash()
-        guard receipt.accepted else {
-            throw AuthorityClientError.mandateNotAccepted(mandateRef: receipt.mandateRef)
-        }
         guard receipt.mandateRef == expected else {
             throw AuthorityClientError.mandateReferenceMismatch(
                 expected: expected,
                 received: receipt.mandateRef
             )
+        }
+        guard receipt.accepted else {
+            throw AuthorityClientError.mandateNotAccepted(mandateRef: receipt.mandateRef)
         }
         return receipt
     }
@@ -360,6 +360,28 @@ public struct URLSessionModerationAuthorityClient: ModerationAuthorityClient {
         path: [String],
         body: Data? = nil,
         headers: [String: String] = [:]
+    ) async throws -> Data {
+        let allowed = CharacterSet(
+            charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+        )
+        guard let invalid = path.first(where: {
+            $0 == "." || $0 == ".." || $0.rangeOfCharacter(from: allowed.inverted) != nil
+        }) else {
+            return try await sendValidated(
+                method: method,
+                path: path,
+                body: body,
+                headers: headers
+            )
+        }
+        throw AuthorityClientError.invalidPathComponent(invalid)
+    }
+
+    private func sendValidated(
+        method: String,
+        path: [String],
+        body: Data?,
+        headers: [String: String]
     ) async throws -> Data {
         let url = path.reduce(baseURL) { partial, component in
             partial.appending(path: component)
