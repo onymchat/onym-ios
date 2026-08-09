@@ -338,7 +338,7 @@ public struct ModerationCaseView: View {
                                 if flow.state.newHolderErrorMessage == nil { newHolderText = "" }
                             }
                         } label: {
-                            Text("File new-holder claim")
+                            Text(flow.state.isSubmittingNewHolder ? "Filing…" : "File new-holder claim")
                                 .font(.system(size: 15, weight: .medium))
                                 .foregroundStyle(OnymTokens.text)
                                 .frame(maxWidth: .infinity, minHeight: 44)
@@ -346,7 +346,7 @@ public struct ModerationCaseView: View {
                                             in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
                         .buttonStyle(.plain)
-                        .disabled(trimmed(newHolderText).isEmpty || flow.state.isSubmittingAppeal)
+                        .disabled(trimmed(newHolderText).isEmpty || flow.state.isSubmittingNewHolder)
                         .accessibilityIdentifier("moderation.case.submit_new_holder")
                     }
                 }

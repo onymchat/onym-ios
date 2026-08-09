@@ -18,7 +18,10 @@ public final class ModerationCaseFlow {
         public var snapshotFetchedAt: Date?
         public var isLoading = false
         public var isSubmittingResponse = false
+        /// Per-kind, like the receipts/errors: an in-flight new-holder
+        /// claim must not disable (or relabel) the appeal button.
         public var isSubmittingAppeal = false
+        public var isSubmittingNewHolder = false
         public var responseReceipt: CaseResponseReceipt?
         /// Per-kind receipts and errors: an ordinary appeal and a
         /// new-holder claim are independent filings, and one must never
@@ -58,10 +61,11 @@ public final class ModerationCaseFlow {
 
     public func start() async {
         // Load the offline snapshot once (re-appearance must not
-        // relabel an already-fresh status as a snapshot), and only if
-        // it belongs to this flow's mandate — a snapshot persisted for
-        // another identity's case must never render just because the
-        // caseId matches.
+        // relabel an already-fresh status as a snapshot). Ownership is
+        // the repository's check — `storedCaseStatus` returns nothing
+        // for a snapshot another local identity owns — and the
+        // mandateRef comparison here only keeps a caller that resolved
+        // a different mandate for the same case from mixing terms.
         if state.status == nil,
            let stored = await repository.storedCaseStatus(caseId: caseId),
            stored.mandateRef == mandateRef {
@@ -129,18 +133,27 @@ public final class ModerationCaseFlow {
             // Best-effort: pick up responded/responsesOnFile.
             await refresh()
         } catch {
-            state.responseErrorMessage = Self.submissionMessage(for: error)
+            state.responseErrorMessage = Self.submissionMessage(for: error, kind: nil)
         }
     }
 
     public func submitAppeal(kind: AppealSubmission.Kind, statement: String) async {
-        guard !state.isSubmittingAppeal else { return }
-        state.isSubmittingAppeal = true
         switch kind {
-        case .appeal: state.appealErrorMessage = nil
-        case .newHolderClaim: state.newHolderErrorMessage = nil
+        case .appeal:
+            guard !state.isSubmittingAppeal else { return }
+            state.isSubmittingAppeal = true
+            state.appealErrorMessage = nil
+        case .newHolderClaim:
+            guard !state.isSubmittingNewHolder else { return }
+            state.isSubmittingNewHolder = true
+            state.newHolderErrorMessage = nil
         }
-        defer { state.isSubmittingAppeal = false }
+        defer {
+            switch kind {
+            case .appeal: state.isSubmittingAppeal = false
+            case .newHolderClaim: state.isSubmittingNewHolder = false
+            }
+        }
         do {
             let receipt = try await repository.appeal(
                 caseId: caseId,
@@ -156,9 +169,9 @@ public final class ModerationCaseFlow {
         } catch {
             switch kind {
             case .appeal:
-                state.appealErrorMessage = Self.submissionMessage(for: error)
+                state.appealErrorMessage = Self.submissionMessage(for: error, kind: .appeal)
             case .newHolderClaim:
-                state.newHolderErrorMessage = Self.submissionMessage(for: error)
+                state.newHolderErrorMessage = Self.submissionMessage(for: error, kind: .newHolderClaim)
             }
         }
     }
@@ -240,7 +253,14 @@ public final class ModerationCaseFlow {
         }
     }
 
-    private static func submissionMessage(for error: Error) -> String {
+    /// `kind` is nil for a response filing. The 410 copy is
+    /// appeal-specific: the reference never 410s a response (late
+    /// filings are accepted and flagged), so a response 410 from a
+    /// nonconforming authority falls through to its bounded message.
+    private static func submissionMessage(
+        for error: Error,
+        kind: AppealSubmission.Kind?
+    ) -> String {
         switch error {
         case ModerationError.statementInvalid:
             return String(localized: "The statement is empty or exceeds your authority's 16 KB limit.")
@@ -250,7 +270,8 @@ public final class ModerationCaseFlow {
             return String(localized: "The mandate this case was opened under is no longer on this device.")
         case ModerationError.authorityUnavailable:
             return String(localized: "Your authority isn't in the directory right now. Check your connection and try again.")
-        case let AuthorityClientError.rejected(rejection) where rejection.statusCode == 410:
+        case let AuthorityClientError.rejected(rejection)
+            where rejection.statusCode == 410 && kind == .appeal:
             return String(localized: "The appeal window has closed.")
         case let AuthorityClientError.rejected(rejection) where rejection.statusCode == 404:
             return String(localized: "The authority didn't accept this filing. That can mean a connection or identity problem — it neither confirms nor denies the case.")

@@ -93,8 +93,14 @@ public struct BannedView: View {
                 SettingsFootnote("The ban covers this device on this app only. The Onym protocol itself remains open.")
 
                 VStack(spacing: 10) {
-                    // In-app appeal outranks a link-out: the flow
-                    // retains the exact signed filing and its receipt.
+                    // In-app appeal is primary — the flow retains the
+                    // exact signed filing and its receipt. The external
+                    // appellate link SUPPLEMENTS it rather than being
+                    // replaced: the case screen can be unable to help
+                    // (mandate no longer retained, authority missing
+                    // from the directory, anti-oracle 404), and a
+                    // permanent ban's header explicitly promises the
+                    // external appellate remains available.
                     if let builder = caseFlowBuilder {
                         SettingsPrimaryButton(action: { caseSheet = .appeal }) {
                             Text("Review case and appeal")
@@ -107,6 +113,20 @@ public struct BannedView: View {
                                     focusNewHolder: sheet == .newHolder
                                 )
                             }
+                        }
+                        if let appealURL = state.appealURL {
+                            Button {
+                                openURL(appealURL)
+                            } label: {
+                                Text("Appeal at the authority's appellate")
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundStyle(OnymTokens.text)
+                                    .frame(maxWidth: .infinity, minHeight: 44)
+                                    .background(OnymTokens.surface2,
+                                                in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("moderation.banned.appeal_external")
                         }
                     } else if let appealURL = state.appealURL {
                         SettingsPrimaryButton(action: { openURL(appealURL) }) {
