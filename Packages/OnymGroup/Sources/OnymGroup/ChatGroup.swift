@@ -150,4 +150,24 @@ public struct ChatGroup: Identifiable, Equatable, Sendable {
         }
         return data
     }
+
+    /// Whether `blsPublicKey` is this group's admin.
+    ///
+    /// One derivation, shared by every surface that gates on it — the
+    /// invite-sharing button, the in-thread join-request rows, and the
+    /// chat-list request signal. It had been hand-rolled three times,
+    /// and the copies were already drifting.
+    ///
+    /// Compares against the stored `adminPubkeyHex` rather than
+    /// `ownerIdentityID`, which only says "this device's copy of the
+    /// thread belongs to that identity" — true for every joiner too.
+    /// Groups with no privileged member (`.anarchy`, `.oneOnOne`) carry
+    /// no `adminPubkeyHex` and so answer `false` for everyone; callers
+    /// that additionally require a particular governance model check
+    /// `groupType` themselves.
+    public func isAdmin(blsPublicKey: Data) -> Bool {
+        guard let storedAdminHex = adminPubkeyHex?.lowercased() else { return false }
+        let candidate = blsPublicKey.map { String(format: "%02x", $0) }.joined().lowercased()
+        return candidate == storedAdminHex
+    }
 }

@@ -16,6 +16,17 @@ public protocol GroupStateRefreshing: Sendable {
         invitation: GroupInvitationPayload,
         ownerIdentityID: IdentityID
     ) async
+    /// Park a snapshot that failed verification for a reason the admin
+    /// cannot fix — this device couldn't read the chain, or the group's
+    /// anchoring hasn't settled. Records the pending group so the user
+    /// can see it and retry, but sends nothing to the admin: a refresh
+    /// request would be answered promptly and change nothing.
+    func deferLocally(
+        invitation: GroupInvitationPayload,
+        ownerIdentityID: IdentityID,
+        senderEd25519PublicKey: Data?,
+        status: PendingGroupVerification.Status
+    ) async
     func handleRefreshRequest(
         _ request: GroupStateRefreshRequest,
         ownerIdentityID: IdentityID,
@@ -32,6 +43,12 @@ public protocol GroupStateRefreshing: Sendable {
 public struct NoopGroupStateRefresher: GroupStateRefreshing {
     public init() {}
     public func deferVerification(invitation: GroupInvitationPayload, ownerIdentityID: IdentityID) async {}
+    public func deferLocally(
+        invitation: GroupInvitationPayload,
+        ownerIdentityID: IdentityID,
+        senderEd25519PublicKey: Data?,
+        status: PendingGroupVerification.Status
+    ) async {}
     public func handleRefreshRequest(_ request: GroupStateRefreshRequest, ownerIdentityID: IdentityID, requesterEd25519: Data?) async {}
 }
 
@@ -58,6 +75,23 @@ public actor GroupStateVerifier: GroupStateRefreshing {
     /// rapid Retry taps / re-delivery firing duplicate sealed sends.
     private var inFlight: Set<String> = []
     private var watchTask: Task<Void, Never>?
+    /// Snapshots parked for a reason no admin can fix, kept so Retry can
+    /// re-run verification against the chain. Same in-memory lifetime as
+    /// everything else here: the snapshot is a retained relay event and
+    /// comes back on the next launch anyway.
+    private var localDeferrals: [String: (invitation: GroupInvitationPayload, owner: IdentityID, senderEd25519: Data?)] = [:]
+    /// Re-runs receive-side verification for a parked snapshot. Set by
+    /// the app after the dispatcher exists — the dispatcher owns
+    /// verification and holds this verifier, so the dependency has to be
+    /// closed one way or the other, and a closure keeps the cycle out of
+    /// initialization.
+    private var reverify: (@Sendable (GroupInvitationPayload, IdentityID, Data?) async -> Void)?
+
+    public func setReverify(
+        _ reverify: @escaping @Sendable (GroupInvitationPayload, IdentityID, Data?) async -> Void
+    ) {
+        self.reverify = reverify
+    }
 
     private struct RefreshTarget {
         let groupID: Data
@@ -146,10 +180,47 @@ public actor GroupStateVerifier: GroupStateRefreshing {
         await sendRefresh(groupIDHex: groupIDHex)
     }
 
+    public func deferLocally(
+        invitation: GroupInvitationPayload,
+        ownerIdentityID: IdentityID,
+        senderEd25519PublicKey: Data?,
+        status: PendingGroupVerification.Status
+    ) async {
+        let groupIDHex = Self.hex(invitation.groupID)
+        localDeferrals[groupIDHex] = (invitation, ownerIdentityID, senderEd25519PublicKey)
+        if await store.status(groupIDHex: groupIDHex) != nil {
+            // Already parked. Refresh the reason so a group that moved
+            // from "settling" to "can't read the chain" says so.
+            await store.updateStatus(groupIDHex: groupIDHex, status: status)
+            return
+        }
+        await store.record(PendingGroupVerification(
+            groupIDHex: groupIDHex,
+            ownerIdentityID: ownerIdentityID,
+            groupName: invitation.name,
+            status: status,
+            receivedAt: Date()
+        ))
+        // Deliberately no `targets` entry and no send. Retry on one of
+        // these re-reads the chain, which happens when the snapshot is
+        // re-delivered on the next relay replay — there is nobody to ask.
+    }
+
     /// Re-send a refresh for a still-pending group (manual Retry, or an
     /// auto-retry on foreground). No-op if the group resolved or we have
     /// no target for it.
     public func retry(groupIDHex: String) async {
+        // A locally-parked snapshot has nobody to ask: retrying it means
+        // reading the chain again, which is exactly what re-running
+        // verification does.
+        if let parked = localDeferrals[groupIDHex] {
+            guard !inFlight.contains(groupIDHex) else { return }
+            inFlight.insert(groupIDHex)
+            defer { inFlight.remove(groupIDHex) }
+            await reverify?(parked.invitation, parked.owner, parked.senderEd25519)
+            return
+        }
+
         // Need a target, no send already in flight, and a failed entry —
         // re-sending a `.verifying` one (request still outstanding) would
         // just burn relay budget.
@@ -211,6 +282,11 @@ public actor GroupStateVerifier: GroupStateRefreshing {
             timeouts[hex]?.cancel()
             timeouts[hex] = nil
             targets[hex] = nil
+        }
+        for hex in localDeferrals.keys where materializedHexes.contains(hex) {
+            // Verified on a later pass — drop the retained snapshot so a
+            // group secret doesn't outlive the reason it was kept.
+            localDeferrals[hex] = nil
         }
         await store.resolveMaterialized(materializedHexes)
     }

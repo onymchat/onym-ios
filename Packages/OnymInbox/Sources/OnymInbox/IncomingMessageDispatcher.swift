@@ -80,6 +80,16 @@ public struct IncomingMessageDispatcher: Sendable {
     /// receipts. Defaulted to `true` (the shipping default).
     let readReceiptsEnabled: @Sendable () -> Bool
 
+    /// Mints the membership notices this device is entitled to render:
+    /// "X joined" off a verified announcement, "You joined X" off a
+    /// verified invitation. Derived from `messageRepository` rather than
+    /// injected — it is a thin, stateless wrapper over the same
+    /// repository, and every existing test construction of the
+    /// dispatcher gets the behaviour without a new parameter.
+    private var systemEvents: ChatSystemEventRecorder {
+        ChatSystemEventRecorder(messageRepository: messageRepository)
+    }
+
     public init(
         envelopeDecrypter: any InvitationEnvelopeDecrypting,
         identities: any IdentitiesProviding,
@@ -309,6 +319,31 @@ public struct IncomingMessageDispatcher: Sendable {
     /// Skipped when `tier_raw` / `group_type_raw` don't decode (older
     /// or future wire versions) — better to drop the message than
     /// materialize a partial group.
+    /// Re-run verification for a snapshot parked because *this* device
+    /// couldn't confirm it — no chain read, or the anchoring hadn't
+    /// settled. Drives the Retry on those cards, since the remedy is
+    /// another chain read rather than another message to the admin.
+    ///
+    /// Idempotent: a snapshot that still fails is re-parked with a fresh
+    /// reason, and one that now verifies materializes and clears itself.
+    public func reverify(
+        invitation: GroupInvitationPayload,
+        ownerIdentityID: IdentityID,
+        senderEd25519PublicKey: Data?
+    ) async {
+        await materializeGroup(
+            invitation,
+            ownerIdentityID: ownerIdentityID,
+            // Carried through from the original delivery. Dropping it
+            // would leave the materialized group without
+            // `adminEd25519PubkeyHex`, and every later
+            // `MemberAnnouncementPayload` is checked against exactly
+            // that — so a group admitted via Retry would silently stop
+            // accepting new members.
+            senderEd25519PublicKey: senderEd25519PublicKey
+        )
+    }
+
     private func materializeGroup(
         _ invitation: GroupInvitationPayload,
         ownerIdentityID: IdentityID,
@@ -324,21 +359,42 @@ public struct IncomingMessageDispatcher: Sendable {
         // groups skip verification (no admin-anchored update path; trust
         // falls back to the sender's envelope signature).
         if groupType == .tyranny {
-            switch await verifyTyrannyInvitation(invitation, tier: tier) {
+            let verification = await verifyTyrannyInvitation(invitation, tier: tier)
+            switch verification {
             case .verified:
                 break  // materialize below
             case .reject:
                 return
             case .staleNeedsRefresh:
-                // The chain has advanced past this snapshot's epoch, so
-                // we can't byte-verify it. Don't materialize an
-                // unverifiable group — hand it to the verifier, which
-                // asks the admin for the current state and surfaces a
-                // "couldn't verify" state to the user if the admin is
-                // unreachable.
+                // Genuinely past the archive window: the admin is the
+                // only remaining source of current state, so ask them.
                 await groupStateRefresher.deferVerification(
                     invitation: invitation,
                     ownerIdentityID: ownerIdentityID
+                )
+                return
+            case .chainUnreachable, .chainNotConfigured:
+                // This device's problem, not the admin's. Park it with a
+                // reason the user can act on and send nothing — a
+                // refresh request would be answered and still leave the
+                // snapshot unverifiable.
+                await groupStateRefresher.deferLocally(
+                    invitation: invitation,
+                    ownerIdentityID: ownerIdentityID,
+                    senderEd25519PublicKey: senderEd25519PublicKey,
+                    status: verification == .chainNotConfigured
+                        ? .chainNotConfigured
+                        : .chainUnreachable
+                )
+                return
+            case .groupNotOnChainYet, .chainBehindSnapshot:
+                // Both resolve by re-reading in a moment: the group's
+                // anchoring is still settling, or our read lags it.
+                await groupStateRefresher.deferLocally(
+                    invitation: invitation,
+                    ownerIdentityID: ownerIdentityID,
+                    senderEd25519PublicKey: senderEd25519PublicKey,
+                    status: .chainSettling
                 )
                 return
             }
@@ -396,7 +452,30 @@ public struct IncomingMessageDispatcher: Sendable {
             // The group's invitation/intro, as the sender wrote it.
             invitationMessage: invitation.invitationMessage
         )
+
+        // Was this thread already on the device? Relays replay the
+        // inbox on every reconnect, so a re-delivered invitation is
+        // routine — only the first one is a "you joined" moment.
+        let existing = await groupRepository.currentGroups().contains {
+            $0.id == groupIDHex && $0.ownerIdentityID == ownerIdentityID
+        }
+
         await groupRepository.insert(group)
+
+        // Open the joiner's brand-new thread with a line explaining
+        // what it is, instead of a blank screen, once the invitation has
+        // cleared verification above.
+        guard !existing,
+              let selfEntry = await selfMemberProfileEntry(for: ownerIdentityID)
+        else { return }
+        await systemEvents.recordYouJoined(
+            groupID: groupIDHex,
+            ownerIdentityID: ownerIdentityID,
+            groupType: groupType,
+            groupName: invitation.name,
+            ownBlsPubkeyHex: selfEntry.key,
+            at: Date()
+        )
     }
 
     /// PR 13b: validate a Tyranny invitation's commitment against
@@ -433,9 +512,34 @@ public struct IncomingMessageDispatcher: Sendable {
         /// an exact epoch — safe to materialize.
         case verified
         /// Internally consistent and the group exists on chain, but the
-        /// chain has advanced past the snapshot's epoch, so it can't be
-        /// byte-verified. Needs a current-state refresh from the admin.
+        /// chain has advanced past the snapshot's epoch *and* the
+        /// archived entry for that epoch is out of the contract's
+        /// 64-entry window. Only here is a refresh from the admin the
+        /// actual remedy.
         case staleNeedsRefresh
+        /// The chain couldn't be read at all — throttled, offline, or a
+        /// relayer that answered with an error.
+        ///
+        /// Split out from `staleNeedsRefresh` because the two need
+        /// opposite responses. This one is entirely local to the
+        /// receiver: asking the admin cannot fix it, and the previous
+        /// behaviour — defer, tell the user "the admin is offline",
+        /// offer a Retry that re-sends to the admin — left a joiner
+        /// looping forever against a wall they alone could take down.
+        case chainUnreachable
+        /// No relayer endpoint or no contract binding for the active
+        /// network — nothing was attempted over the network at all.
+        case chainNotConfigured
+        /// The contract has no record of this group yet
+        /// (`GroupNotFound`). The admin's `create_group` is still
+        /// settling; seconds later this becomes verifiable on its own.
+        case groupNotOnChainYet
+        /// The chain is *behind* the snapshot: our read hasn't caught up
+        /// with an `update_commitment` that has already landed. Also
+        /// what a self-consistent forgery claiming a future epoch looks
+        /// like — indistinguishable here, which is why this waits rather
+        /// than trusting. Resolves by re-reading, not by asking anyone.
+        case chainBehindSnapshot
         /// Forged / unverifiable — drop.
         case reject
     }
@@ -493,12 +597,23 @@ public struct IncomingMessageDispatcher: Sendable {
                 groupID: invitation.groupID
             )
         } catch {
-            // Couldn't reach / read the relayer (throttled, offline, or
-            // unconfigured). NOT evidence of forgery — never reject. Defer
-            // so the verifier retries via the admin-refresh path and the
-            // group materializes once the read succeeds, instead of being
-            // silently dropped until the next relay replay (a restart).
-            return .staleNeedsRefresh
+            // NOT evidence of forgery — never reject. But which failure
+            // it is decides what the user should do about it, and these
+            // used to be indistinguishable: everything became "ask the
+            // admin", including the failures no admin could resolve.
+            if let sepError = error as? SEPError,
+               sepError.contractErrorCode == SEPContractErrorCode.groupNotFound.rawValue {
+                return .groupNotOnChainYet
+            }
+            if let readError = error as? ChainReadError {
+                // No relayer / no contract binding: nothing was even
+                // attempted over the network, so this is a setup state
+                // rather than a failed call — and on a fresh install
+                // it's usually just the launch fetch not having landed.
+                _ = readError
+                return .chainNotConfigured
+            }
+            return .chainUnreachable
         }
         // Verify at current chain state (Option 2). The chain stores
         // only the LATEST (commitment, epoch), so a snapshot is only
@@ -519,12 +634,46 @@ public struct IncomingMessageDispatcher: Sendable {
         //   - chain AHEAD → can't byte-verify here; defer and ask the
         //     admin for the current state rather than trusting (and
         //     thereby letting a self-consistent fake materialize).
-        guard onchain.epoch >= invitation.epoch else { return .staleNeedsRefresh }
+        guard onchain.epoch >= invitation.epoch else { return .chainBehindSnapshot }
         if onchain.epoch == invitation.epoch {
             return onchain.commitment == claimedCommitment ? .verified : .reject
         }
+
+        // Chain AHEAD. The contract archives every entry it supersedes
+        // and keeps the last `historyWindow`, so a snapshot the chain
+        // has moved past is still checkable against what was actually
+        // committed at its own epoch — reproducing
+        // `Poseidon(Poseidon(root, epoch), salt)` for an archived epoch
+        // needs the same never-on-chain `salt`, so this is exactly as
+        // strong as the exact-epoch check above.
+        //
+        // This is why the admin no longer has to be awake for the common
+        // case: an admin who admits a second joiner before the first has
+        // opened the app used to strand that first invitation on a
+        // round-trip to a sleeping phone.
+        do {
+            let history = try await chainState.tyrannyHistory(
+                groupID: invitation.groupID,
+                maxEntries: Self.historyWindow
+            )
+            if let archived = history.first(where: { $0.epoch == invitation.epoch }) {
+                return archived.commitment == claimedCommitment ? .verified : .reject
+            }
+        } catch {
+            // History unreadable (older relayer, throttle). Fall through
+            // to the admin refresh rather than failing: this path is an
+            // optimization over asking, not a replacement for it.
+        }
+
+        // Older than the window, or no history available — the admin is
+        // now genuinely the only source for current state.
         return .staleNeedsRefresh
     }
+
+    /// Matches `HISTORY_WINDOW` in `sep-tyranny`. Asking for more than
+    /// the contract keeps is harmless (it clamps), but asking for the
+    /// exact figure documents the bound this relies on.
+    private static let historyWindow: UInt32 = 64
 
     /// PR 13b: validate a Tyranny `MemberAnnouncementPayload`'s
     /// claimed commitment + epoch against the on-chain state. Same
@@ -686,6 +835,21 @@ public struct IncomingMessageDispatcher: Sendable {
             sendingPubkey: payload.newMember.sendingPub
         )
         await groupRepository.insert(updated)
+
+        // "X joined", for every existing member. Reached only past the
+        // dedup guard above (`memberProfiles[key] != nil`), the admin
+        // signature check, and the on-chain commitment check — so a
+        // relay replaying this announcement on each reconnect can't
+        // append a second notice, and an unverified announcement can't
+        // append one at all.
+        await systemEvents.recordMemberJoined(
+            groupID: updated.id,
+            ownerIdentityID: updated.ownerIdentityID,
+            groupType: updated.groupType,
+            joinerBlsPubkeyHex: key,
+            alias: payload.newMember.alias,
+            at: Date()
+        )
     }
 
     /// Apply an inbound group-photo update to the matching local group.

@@ -111,6 +111,23 @@ public struct SEPContractClient: Sendable {
         )
     }
 
+    /// Superseded commitments, newest last, up to `maxEntries`.
+    ///
+    /// The contract keeps the last 64. This is what lets a receiver
+    /// verify a snapshot the chain has already advanced past — without
+    /// it, the only way to check a stale invitation was to ask the admin
+    /// for a fresh one and hope they were awake.
+    public func getHistory(
+        groupID: Data,
+        maxEntries: UInt32
+    ) async throws -> [SEPCommitmentEntry] {
+        try await invoke(
+            "get_history",
+            payload: GetHistoryPayload(groupID: groupID, maxEntries: maxEntries),
+            responseType: [SEPCommitmentEntry].self
+        )
+    }
+
     private func invoke<Payload: Encodable & Sendable, Response: Decodable & Sendable>(
         _ function: String,
         payload: Payload,

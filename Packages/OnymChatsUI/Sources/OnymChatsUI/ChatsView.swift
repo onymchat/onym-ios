@@ -95,14 +95,17 @@ public struct ChatsView: View {
             ToolbarItem(placement: .topBarLeading) {
                 IdentityPickerMenu(flow: identitiesFlow)
             }
-            // Pending join requests — always rendered so the surface
-            // is discoverable even before the first request lands;
-            // the badge only appears when `pending.count > 0`.
-            ToolbarItem(placement: .topBarTrailing) {
-                ApproveRequestsToolbarButton(flow: approveRequestsFlow)
-            }
-            // Invitations received by this identity (push offers). Same
-            // always-rendered + badge-on-nonempty treatment.
+            // Join requests used to live behind a badged button here,
+            // opening a modal list. New users never found it — nothing
+            // in the conversation told them someone was waiting. They now
+            // render as a row inside the group's own thread, surfaced on
+            // the list row itself (see `pendingJoinRequestCounts`), so
+            // there is no separate surface to discover.
+            // `approveRequestsFlow` is still started below: it collects
+            // the requests both of those read.
+
+            // Invitations received by this identity (push offers).
+            // Always-rendered + badge-on-nonempty.
             ToolbarItem(placement: .topBarTrailing) {
                 PendingInvitesToolbarButton(flow: pendingInvitesFlow)
             }
@@ -291,10 +294,66 @@ public struct ChatsView: View {
 
     // MARK: - Populated list
 
+    /// Pending join requests per group id, for the chat-list signal.
+    ///
+    /// Removing the toolbar badge took away the *only* ambient hint that
+    /// someone was waiting. A request isn't a `ChatMessage`, so it moves
+    /// no `chatListPreview`, and the "X joined" notice it eventually
+    /// becomes is deliberately excluded from `unreadCount` — so without
+    /// this a founder who never opens that particular thread would see
+    /// nothing at all, and the request would age out under
+    /// `SwiftDataIntroRequestStore.retention` while the joiner waited.
+    /// That's the same discoverability failure this PR set out to fix,
+    /// one screen further in.
+    ///
+    /// Keyed by hex group id to match `ChatListItem.id`.
+    ///
+    /// Gated on being this group's admin, the same way the thread row is.
+    /// "Only the admin's device has entries" is true of the *device* and
+    /// not of the active identity: `IntroKeyStore.find(introPublicKey:)`
+    /// searches every key on the device rather than the current
+    /// identity's, so a request decodes under whichever identity happens
+    /// to be selected. With two local identities in one group — which
+    /// this app supports — the non-admin one would otherwise see
+    /// "Someone wants to join", tap through, and find nothing to act on,
+    /// because the thread does apply this check.
+    private var pendingJoinRequestCounts: [String: Int] {
+        var counts: [String: Int] = [:]
+        for request in approveRequestsFlow.pending {
+            let hex = request.groupId.map { String(format: "%02x", $0) }.joined()
+            guard isAdmin(ofGroupID: hex) else { continue }
+            counts[hex, default: 0] += 1
+        }
+        return counts
+    }
+
+    /// Whether the active identity administers this group.
+    ///
+    /// Same derivation as `ChatThreadView.isGroupAdmin` and
+    /// `ChatMembersView.canShareInvite`: compare the active identity's
+    /// BLS pubkey against the group's stored admin pubkey, rather than
+    /// trusting whoever holds the thread on this device.
+    private func isAdmin(ofGroupID groupID: String) -> Bool {
+        guard
+            let group = flow.items.first(where: { $0.group.id == groupID })?.group,
+            let activeID = identitiesFlow.currentID,
+            let activeSummary = identitiesFlow.identities.first(where: { $0.id == activeID })
+        else { return false }
+        return group.isAdmin(blsPublicKey: activeSummary.blsPublicKey)
+    }
+
     private var groupList: some View {
-        List(flow.items) { item in
+        // Built once per render rather than per row: as a computed
+        // property read inside the row builder it rebuilt the whole
+        // dictionary — and re-ran the admin derivation for every pending
+        // request — once for each group in the list.
+        let joinRequestCounts = pendingJoinRequestCounts
+        return List(flow.items) { item in
             NavigationLink(value: item.group.id) {
-                ChatsRow(item: item)
+                ChatsRow(
+                    item: item,
+                    joinRequestCount: joinRequestCounts[item.group.id] ?? 0
+                )
             }
             .listRowSeparator(.visible)
             // Swipe-to-delete with confirmation. Full-swipe is disabled so
@@ -349,7 +408,8 @@ public struct ChatsView: View {
                 imageLoader: imageLoader,
                 videoLoader: videoLoader,
                 voiceLoader: voiceLoader,
-                makeModerationReportView: makeModerationReportView
+                makeModerationReportView: makeModerationReportView,
+                approveRequestsFlow: approveRequestsFlow
             )
         }
     }
@@ -357,6 +417,10 @@ public struct ChatsView: View {
 
 private struct ChatsRow: View {
     let item: ChatListItem
+    /// Join requests waiting in this group's thread. Drives the row's
+    /// "someone wants in" signal — the replacement for the toolbar badge
+    /// this change removed.
+    var joinRequestCount: Int = 0
 
     private var group: ChatGroup { item.group }
 
@@ -377,8 +441,27 @@ private struct ChatsRow: View {
                 Text(group.name.isEmpty ? "(Unnamed)" : group.name)
                     .font(.system(size: 16, weight: .semibold))
                     .lineLimit(1)
+                // The join hint leads, because it is the only line in the
+                // row that needs an action and a badge alone was what
+                // nobody noticed on the toolbar. It no longer *replaces*
+                // the rest: a founder with unread messages and a pending
+                // request was losing both the preview and the count, and
+                // the two signals answer different questions.
                 HStack(spacing: 6) {
-                    if item.latestPreview == nil {
+                    if joinRequestCount > 0 {
+                        Image(systemName: "person.crop.circle.badge.plus")
+                            .font(.caption2)
+                            .foregroundStyle(OnymAccent.blue.color)
+                        Text(joinRequestSubtitle)
+                            .font(.caption)
+                            .foregroundStyle(OnymAccent.blue.color)
+                            .lineLimit(1)
+                            .layoutPriority(1)
+                            .accessibilityIdentifier("chats.row.join_request.\(group.id)")
+                        Text("·")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else if item.latestPreview == nil {
                         Image(systemName: "lock.fill")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
@@ -395,6 +478,15 @@ private struct ChatsRow: View {
 
             Spacer(minLength: 0)
 
+            // Both badges when both apply. They mean different things —
+            // one is work waiting for the founder, the other is reading
+            // waiting for the reader — and dropping the unread count
+            // because someone asked to join loses a signal the row was
+            // already carrying.
+            if joinRequestCount > 0 {
+                JoinRequestBadge(count: joinRequestCount)
+                    .accessibilityIdentifier("chats.row.join_request_badge.\(group.id)")
+            }
             if item.unreadCount > 0 {
                 UnreadBadge(count: item.unreadCount)
                     .accessibilityIdentifier("chats.row.unread.\(group.id)")
@@ -407,6 +499,17 @@ private struct ChatsRow: View {
         }
         .padding(.vertical, 4)
         .accessibilityIdentifier("chats.row.\(group.id)")
+    }
+
+    /// Prefixed to the subtitle line while requests are outstanding,
+    /// ahead of the message preview rather than in place of it (the row
+    /// renders both, separated by a `·`). The founder can see there is
+    /// something to act on without opening the thread, and the chat
+    /// doesn't lose its last message to say so.
+    private var joinRequestSubtitle: String {
+        joinRequestCount == 1
+            ? String(localized: "Someone wants to join")
+            : String(localized: "\(joinRequestCount) people want to join")
     }
 
     /// Latest message preview when the group has messages; otherwise the
@@ -425,6 +528,40 @@ private struct ChatsRow: View {
         }
         let parts = [group.groupType.label.capitalized, memberText].compactMap { $0 }
         return parts.joined(separator: " · ")
+    }
+}
+
+/// Accent-coloured counterpart to `UnreadBadge` for pending join
+/// requests. Deliberately not red: this is an invitation to act, not a
+/// backlog of unread messages, and a founder should be able to tell the
+/// two apart at a glance down the list.
+private struct JoinRequestBadge: View {
+    let count: Int
+
+    var body: some View {
+        // The number is shown, not only implied by the glyph. A
+        // person-vs-people icon distinguishes one from many and nothing
+        // else — two pending requests and nine looked identical unless
+        // you read the subtitle or used VoiceOver, while the unread badge
+        // beside it has always carried its count.
+        HStack(spacing: 3) {
+            Image(systemName: "person.crop.circle.badge.plus")
+                .font(.system(size: 12, weight: .semibold))
+            if count > 1 {
+                Text(count > 99 ? "99+" : "\(count)")
+                    .font(.system(size: 13, weight: .semibold))
+                    .monospacedDigit()
+            }
+        }
+        .foregroundStyle(OnymTokens.onAccent)
+        .padding(.horizontal, 7)
+        .frame(minHeight: 20)
+        .background(OnymAccent.blue.color, in: Capsule())
+        .accessibilityLabel(
+            count == 1
+                ? String(localized: "1 join request")
+                : String(localized: "\(count) join requests")
+        )
     }
 }
 

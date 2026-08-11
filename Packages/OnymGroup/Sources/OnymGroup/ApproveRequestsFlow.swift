@@ -3,9 +3,11 @@ import Observation
 
 /// `@Observable @MainActor` view-model for the approver UI. Mirrors
 /// `IdentitiesFlow`'s posture — one shared instance lives in
-/// `AppDependencies`, the toolbar badge on `ChatsView` watches
-/// `pending.count`, and the modal `ApproveRequestsView` consumes the
-/// full list + dispatches Approve / Decline taps.
+/// `AppDependencies`. `ChatsView` reads `pending` for the per-group
+/// chat-list signal, and each group's `ChatThreadView` renders its own
+/// slice of the list as in-thread rows that dispatch Accept / Decline.
+/// (Both surfaces used to be one modal + toolbar badge; the requests
+/// moved into the thread because nobody found the badge.)
 ///
 /// Purely a thin wrapper over `JoinRequestApprover` — no UI logic
 /// beyond mapping `ApproveOutcome` to a user-facing reason string.
@@ -16,18 +18,18 @@ import Observation
 public final class ApproveRequestsFlow {
     /// Decoded pending requests, newest-first.
     public private(set) var pending: [JoinRequestApprover.PendingRequest] = []
-    /// Last failed-approve reason, or nil. Cleared on the next
-    /// successful Approve / Decline / dismiss.
-    public internal(set) var lastError: String?
-    /// Brief success banner copy after a `.sent` approval. Auto-
-    /// dismisses ~3s after being set so the admin gets a positive
-    /// confirmation without having to manually clear it. The row
-    /// disappearing is also feedback, but explicit "Approved on
-    /// chain" makes the on-chain step visible.
-    public internal(set) var lastSuccessMessage: String?
+    /// Why each request's last Approve failed, keyed by request id.
+    ///
+    /// A map rather than a single slot because the thread renders one
+    /// row per pending request: with two outstanding failures, a single
+    /// slot could only ever explain the newer one, and the older row
+    /// would silently lose its explanation while its request was still
+    /// there to retry. Each row reads its own entry, so an unrelated
+    /// failure can neither overwrite nor leak onto it.
+    public internal(set) var errors: [String: String] = [:]
     /// Request IDs whose Approve / Decline call is currently in
     /// flight. Drives the per-row spinner + disabled-buttons state
-    /// in `ApproveRequestsView`. Necessary because PR 13a turned
+    /// in the thread's join-request row. Necessary because PR 13a turned
     /// `approve` into a multi-second flow (PLONK prove +
     /// `update_commitment` HTTP roundtrip + Stellar tx wait) — without
     /// this signal the UI looks frozen while the proof generates.
@@ -57,6 +59,13 @@ public final class ApproveRequestsFlow {
             for await snapshot in stream {
                 guard let self else { break }
                 self.pending = snapshot
+                // Drop errors for requests that are no longer pending.
+                // An entry is otherwise only cleared by acting on that
+                // same request again, so one removed by the retention
+                // sweep — or approved from another device — left its
+                // failure behind for the process lifetime.
+                let live = Set(snapshot.map(\.id))
+                self.errors = self.errors.filter { live.contains($0.key) }
             }
         }
     }
@@ -77,40 +86,28 @@ public final class ApproveRequestsFlow {
         // waste of cycles + can confuse `lastError` ordering.
         guard !inFlightRequestIDs.contains(id) else { return }
         inFlightRequestIDs.insert(id)
+        // Clear this request's failure as the retry starts, not when it
+        // succeeds. Waiting for `.sent` rendered the spinner and the
+        // previous error together — "Anchoring on chain…" under "that
+        // didn't work" — which reads as a fresh failure rather than a
+        // stale one.
+        clearError(for: id)
         let approver = self.approver
-        // Capture joiner alias before firing — used for the success
-        // banner. Falls back to "this person" if the row was already
-        // removed somehow.
-        let joinerAlias = pending.first { $0.id == id }?.joinerDisplayLabel
         Task { @MainActor [weak self] in
             let outcome = await approver.approve(requestId: id)
             guard let self else { return }
             self.inFlightRequestIDs.remove(id)
             switch outcome {
             case .sent:
-                self.lastError = nil
-                let alias = joinerAlias?.trimmingCharacters(in: .whitespacesAndNewlines)
-                let label = (alias?.isEmpty ?? true) ? "this person" : alias!
-                self.lastSuccessMessage = "\(label) is now in the group."
-                self.scheduleSuccessDismiss()
+                // No success banner: the confirmation is now the "X
+                // joined" system message the approval itself writes into
+                // the thread, right where the request row was.
+                //
+                // Nothing to clear: this request's error went when the
+                // attempt started.
+                break
             default:
-                self.lastSuccessMessage = nil
-                self.lastError = Self.failureReason(for: outcome)
-            }
-        }
-    }
-
-    /// Auto-clear the success banner after ~3s. Cancelled implicitly
-    /// when a fresh approval overwrites `lastSuccessMessage` — the
-    /// detached Task only zeroes the field if it's still the same
-    /// content it set.
-    private func scheduleSuccessDismiss() {
-        let snapshot = lastSuccessMessage
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
-            guard let self else { return }
-            if self.lastSuccessMessage == snapshot {
-                self.lastSuccessMessage = nil
+                self.errors[id] = Self.failureReason(for: outcome)
             }
         }
     }
@@ -118,41 +115,81 @@ public final class ApproveRequestsFlow {
     public func decline(_ id: String) {
         guard !inFlightRequestIDs.contains(id) else { return }
         inFlightRequestIDs.insert(id)
+        // Same reasoning as `approve`: the error goes when the action
+        // starts, so the row never shows a spinner over a stale failure.
+        clearError(for: id)
         let approver = self.approver
         Task { @MainActor [weak self] in
             await approver.decline(requestId: id)
             self?.inFlightRequestIDs.remove(id)
-            self?.lastError = nil
         }
     }
 
-    public func dismissError() { lastError = nil }
+    /// This request's last failure, if it has one. Each row reads its
+    /// own; nothing else can surface on it.
+    public func error(for requestID: String) -> String? {
+        errors[requestID]
+    }
 
+    /// Drop one request's error. Keyed, so acting on one request cannot
+    /// clear the explanation another row is still showing. A request's
+    /// error goes when that request is acted on again — retried or
+    /// declined — and not before.
+    ///
+    /// There is deliberately no dismiss affordance now that the modal is
+    /// gone: the error sits on the row it belongs to, and the row is the
+    /// thing the founder is going to touch next. A `dismissError()` used
+    /// to exist for the modal's toolbar and had no caller left, so it
+    /// went rather than sitting there looking like an API.
+    private func clearError(for id: String) {
+        errors.removeValue(forKey: id)
+    }
+
+    /// These render on the request row in the thread, next to copy that
+    /// all resolves through the app's string catalog — so they go
+    /// through it too. They used to sit behind a modal and were raw
+    /// English; `ChatSystemEvent.localizedText` makes the same point for
+    /// the notice text.
     private static func failureReason(
         for outcome: JoinRequestApprover.ApproveOutcome
     ) -> String? {
         switch outcome {
         case .sent: return nil
         case .unknownGroup:
-            return "This invite isn\u{2019}t for any group on this device."
+            return String(localized: "This invite isn’t for any group on this device.")
         case .unknownRequest:
-            return "Request expired or was already handled."
+            return String(localized: "Request expired or was already handled.")
         case .noIdentityLoaded:
-            return "Sign in first."
+            return String(localized: "Sign in first.")
         case .transportFailed(let reason):
-            return "Couldn\u{2019}t send: \(reason)"
+            return String(localized: "Couldn’t send: \(reason)")
         case .outdatedJoinerClient:
-            return "Joiner is on an outdated app. Ask them to update."
+            return String(localized: "Joiner is on an outdated app. Ask them to update.")
         case .noActiveRelayer:
-            return "No chain relayer configured. Set one in Settings \u{2192} Network \u{2192} Relayer."
+            return String(
+                localized: "No chain relayer configured. Set one in Settings → Network → Relayer."
+            )
         case .noContractBinding:
-            return "No Founder contract selected for this network. Pick one in Settings \u{2192} Network \u{2192} Anchors."
+            return String(
+                localized: "No Founder contract selected for this network. Pick one in Settings → Network → Anchors."
+            )
         case .notAdminOfThisGroup:
-            return "The active identity isn\u{2019}t this group\u{2019}s admin. Switch to the identity that created the group, then try again."
+            return String(
+                localized: "The active identity isn’t this group’s admin. Switch to the identity that created the group, then try again."
+            )
         case .proofFailed(let reason):
-            return "Couldn\u{2019}t generate proof: \(reason)"
+            return String(localized: "Couldn’t generate proof: \(reason)")
+        case .groupNotAnchoredYet:
+            // Not a failure the founder can do anything about except
+            // wait a moment: the group's own create transaction is still
+            // being included in a ledger. Says "try again" because that
+            // is literally the fix, and gives a duration so it doesn't
+            // read as "retry forever".
+            return String(
+                localized: "This group isn’t on the chain yet. Give it a few seconds and tap Accept again."
+            )
         case .anchorRejected(let reason):
-            return "Chain rejected the proof: \(reason)"
+            return String(localized: "Chain rejected the proof: \(reason)")
         }
     }
 }

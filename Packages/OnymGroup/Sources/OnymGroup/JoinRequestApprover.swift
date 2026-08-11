@@ -124,6 +124,14 @@ public actor JoinRequestApprover: JoinRequestApproving {
         /// Relayer accepted the POST but the contract rejected the
         /// proof (admin pubkey mismatch, replay, etc.).
         case anchorRejected(String)
+        /// The contract has no record of this group yet
+        /// (`GroupNotFound`). Almost always a race rather than a fault:
+        /// the group's own `create_group` transaction is still waiting
+        /// to be included in a ledger, and the admin approved a joiner
+        /// within those few seconds. Retrying shortly succeeds, so this
+        /// is separated from `anchorRejected` — which means "the chain
+        /// looked at this and said no" and is not worth retrying.
+        case groupNotAnchoredYet
     }
 
     private let identity: IdentityRepository
@@ -136,6 +144,12 @@ public actor JoinRequestApprover: JoinRequestApproving {
     private let networkPreference: any NetworkPreferenceProviding
     private let proofGenerator: any GroupProofGenerator
     private let makeContractTransport: @Sendable (URL) -> any SEPContractTransport
+    /// Appends the "X joined" notice to the admin's own copy of the
+    /// thread once an approval lands. Every other member gets theirs
+    /// from the fanned-out `MemberAnnouncementPayload`; the admin never
+    /// receives that (it's the sender), so this is the admin's only
+    /// source for the row.
+    private let systemEvents: any GroupSystemEventRecording
 
     private var pendingValue: [PendingRequest] = []
     private var pendingContinuations: [UUID: AsyncStream<[PendingRequest]>.Continuation] = [:]
@@ -167,7 +181,8 @@ public actor JoinRequestApprover: JoinRequestApproving {
                 endpoint: url,
                 authToken: RelayerSecrets.authToken
             )
-        }
+        },
+        systemEvents: any GroupSystemEventRecording = NoopGroupSystemEventRecorder()
     ) {
         self.identity = identity
         self.introKeyStore = introKeyStore
@@ -179,6 +194,7 @@ public actor JoinRequestApprover: JoinRequestApproving {
         self.networkPreference = networkPreference
         self.proofGenerator = proofGenerator
         self.makeContractTransport = makeContractTransport
+        self.systemEvents = systemEvents
     }
 
     /// Hot stream of decoded pending requests. Replays the current
@@ -370,6 +386,17 @@ public actor JoinRequestApprover: JoinRequestApproving {
                 joinerSendingPub: req.joinerSendingPublicKey,
                 joinerAlias: req.joinerDisplayLabel
             )
+            // The admin's own "X joined" row. Everyone else derives
+            // theirs from the announcement fanned out just above, which
+            // the admin — as its sender — never receives.
+            await systemEvents.recordMemberJoined(
+                groupID: anchored.id,
+                ownerIdentityID: anchored.ownerIdentityID,
+                groupType: anchored.groupType,
+                joinerBlsPubkeyHex: blsPub.map { String(format: "%02x", $0) }.joined(),
+                alias: req.joinerDisplayLabel,
+                at: Date()
+            )
         }
         // Best-effort cleanup.
         if let introPub = await findIntroPub(forRequestID: requestId) {
@@ -509,10 +536,25 @@ public actor JoinRequestApprover: JoinRequestApproving {
         do {
             response = try await client.updateCommitmentTyranny(payload)
         } catch {
+            // A refused call arrives as a non-2xx whose body carries the
+            // simulation output, so the contract's own error number is
+            // in there rather than in a structured field.
+            if let sepError = error as? SEPError,
+               sepError.contractErrorCode == SEPContractErrorCode.groupNotFound.rawValue {
+                return .failed(.groupNotAnchoredYet)
+            }
             return .failed(.transportFailed("anchor: \(error)"))
         }
         guard response.accepted else {
-            return .failed(.anchorRejected(response.message ?? "(no message)"))
+            // The same condition can also come back as a 200 with
+            // `accepted: false`, depending on where the relayer catches
+            // it — so both paths check.
+            let message = response.message ?? "(no message)"
+            if SEPContractErrorCode.parse(fromDiagnostics: message)
+                == SEPContractErrorCode.groupNotFound.rawValue {
+                return .failed(.groupNotAnchoredYet)
+            }
+            return .failed(.anchorRejected(message))
         }
 
         // Build the updated local ChatGroup. `commitment` becomes

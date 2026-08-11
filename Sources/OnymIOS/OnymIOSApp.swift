@@ -404,9 +404,16 @@ struct OnymIOSApp: App {
         let introKeyStore = KeychainIntroKeyStore()
         let inviteIntroducer = InviteIntroducer(store: introKeyStore)
         self.introKeyStore = introKeyStore
-        // Process-lifetime sink for inbound "request to join"
-        // envelopes. The sender-approval UI (PR-5+) consumes this.
-        self.introRequestStore = InMemoryIntroRequestStore()
+        // Durable sink for inbound "request to join" envelopes. The
+        // request now renders as a row inside the founder's chat
+        // thread, so it has to survive a relaunch the way any other
+        // message does — an in-memory store would silently drop it on
+        // force-quit while the joiner sat on "Waiting for the host to
+        // approve…". Falls back to the in-memory store if the on-disk
+        // container can't be opened, so a storage failure degrades to
+        // the old behaviour instead of blocking launch.
+        self.introRequestStore = (try? SwiftDataIntroRequestStore())
+            ?? InMemoryIntroRequestStore()
 
         // Single shared IdentitiesFlow so the toolbar picker on Chats
         // and the Settings → Identities screen observe the same state.
@@ -426,7 +433,11 @@ struct OnymIOSApp: App {
             inboxTransport: inboxTransport,
             relayers: relayerRepository,
             contracts: contractsRepository,
-            makeContractTransport: contractTransportFactory
+            makeContractTransport: contractTransportFactory,
+            // Gives the admin its own "X joined" row on approve. Every
+            // other member's copy comes from the fanned-out
+            // announcement, which the admin never receives.
+            systemEvents: ChatSystemEventRecorder(messageRepository: messageRepository)
         )
         let approveRequestsFlow = ApproveRequestsFlow(approver: joinRequestApprover)
 
@@ -879,6 +890,32 @@ struct OnymIOSApp: App {
                         ),
                         readReceiptsEnabled: { ReadReceiptsPreference.isEnabled }
                     )
+                    // Close the loop for the Retry on a snapshot parked
+                    // because *this* device couldn't read the chain. The
+                    // dispatcher owns verification and holds the
+                    // verifier, so the back-reference is installed here
+                    // rather than threaded through both initializers.
+                    await groupStateVerifier.setReverify { invitation, owner, signer in
+                        // Re-fetch the relayer + contract lists first.
+                        // The overwhelmingly common reason a joiner
+                        // can't read the chain is that neither has
+                        // arrived yet — both are fetched from GitHub in
+                        // the background at launch, and a device that
+                        // was offline for those few seconds has no
+                        // endpoint to call and no contract to call it
+                        // on. Retrying the read alone would fail the
+                        // same way every time.
+                        // `refresh`, not `start`: `start` returns as soon
+                        // as it has spawned the fetch, so the read below
+                        // would race it and fail exactly as before.
+                        try? await relayerRepository.refresh()
+                        try? await contractsRepository.refresh()
+                        await dispatcher.reverify(
+                            invitation: invitation,
+                            ownerIdentityID: owner,
+                            senderEd25519PublicKey: signer
+                        )
+                    }
                     let fanout = InboxFanoutInteractor(
                         inboxTransport: inboxTransport,
                         identityRepository: identityRepository,

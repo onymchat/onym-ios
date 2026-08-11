@@ -76,7 +76,19 @@ public actor RelayerRepository {
         guard startTask == nil else { return }
         startTask = Task { [weak self] in
             await self?.refreshFromNetwork()
+            // Released on completion so a *failed* bootstrap can be
+            // retried. Holding it forever meant one unlucky launch —
+            // no connectivity in the first seconds, or a slow fetch —
+            // left the device with zero relayer endpoints for the whole
+            // session, and every chain read failing with
+            // `noActiveRelayer`. The guard still collapses concurrent
+            // calls, which is all it was for.
+            await self?.clearStartTask()
         }
+    }
+
+    private func clearStartTask() {
+        startTask = nil
     }
 
     /// Force a fresh fetch (user-initiated pull-to-refresh, eventually).

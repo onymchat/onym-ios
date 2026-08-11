@@ -145,53 +145,74 @@ struct JoinScreen {
     }
 }
 
-// MARK: - Approve Requests
+// MARK: - Join requests (in-thread)
 
-struct ApproveRequestsScreen {
+/// Join requests are no longer a separate screen. The founder accepts or
+/// declines from a row inside the group's own chat thread, so this page
+/// object drives the thread rather than a modal.
+struct JoinRequestRow {
     let app: XCUIApplication
 
-    var toolbarButton: XCUIElement { app.buttons["approve_requests.toolbar_button"] }
-    var successBanner: XCUIElement { app.staticTexts["approve_requests.success_banner"] }
-    var closeButton: XCUIElement { app.buttons["approve_requests.close_button"] }
-
-    /// The badge only appears once the (buffered) join request has been
-    /// pumped in under the now-active admin identity.
-    @discardableResult
-    func waitForBadge(timeout: TimeInterval = 40) -> Bool {
-        toolbarButton.waitForExistence(timeout: timeout)
-    }
-
-    func open() {
-        XCTAssertTrue(waitForBadge(), "approve-requests toolbar button never appeared")
-        toolbarButton.tap()
-    }
-
-    /// The request only lands in the admin's list once their intro
-    /// pump has re-subscribed under the now-active identity and the
-    /// (buffered) request is decoded — a few seconds after the identity
-    /// switch. The sheet updates reactively, so wait generously.
-    func approveFirst() {
-        // The request card's `.accessibilityIdentifier` propagates to
-        // its child buttons, overriding their own ids — so the Approve
-        // control surfaces as `approve_requests.row.<id>` with label
-        // "Approve". Match on that pair.
-        let approve = app.buttons.matching(
-            NSPredicate(format: "identifier BEGINSWITH 'approve_requests.row.' AND label == 'Approve'")
+    /// Accept buttons carry `chat.join_request.accept.<requestID>`.
+    private var acceptButton: XCUIElement {
+        app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH 'chat.join_request.accept.'")
         ).firstMatch
-        XCTAssertTrue(approve.waitForExistence(timeout: 45),
-                      "no approve button in the requests list")
-        approve.tap()
     }
 
-    /// The approve does a real Poseidon `update_commitment` proof, so
-    /// the success banner can take a few seconds.
+    private var declineButton: XCUIElement {
+        app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH 'chat.join_request.decline.'")
+        ).firstMatch
+    }
+
+    /// The row only appears once the admin's intro pump has
+    /// re-subscribed under the now-active identity and decoded the
+    /// buffered request — a few seconds after an identity switch. The
+    /// thread updates reactively, so wait generously.
     @discardableResult
-    func waitForSuccess(timeout: TimeInterval = 60) -> Bool {
-        successBanner.waitForExistence(timeout: timeout)
+    func waitForRequest(timeout: TimeInterval = 45) -> Bool {
+        acceptButton.waitForExistence(timeout: timeout)
     }
 
-    func close() {
-        if closeButton.waitForExistence(timeout: 3) { closeButton.tap() }
+    func acceptFirst() {
+        XCTAssertTrue(waitForRequest(), "no join-request row appeared in the thread")
+        acceptButton.tap()
+    }
+
+    func declineFirst() {
+        XCTAssertTrue(waitForRequest(), "no join-request row appeared in the thread")
+        declineButton.tap()
+    }
+
+    /// Accept runs a real Poseidon `update_commitment` proof plus a
+    /// relayer round-trip, so the "joined" notice replacing the row can
+    /// take a while.
+    @discardableResult
+    /// Matches the notice by its accessibility identifier and then by
+    /// the alias appearing inside it, rather than by the whole English
+    /// sentence.
+    ///
+    /// The sentence now comes from the string catalog, so asserting on
+    /// `"\(alias) joined"` made the flow pass only in English. The alias
+    /// is user data and appears in every translation; the identifier is
+    /// stable by construction.
+    func waitForJoinedNotice(alias: String, timeout: TimeInterval = 60) -> Bool {
+        // One predicate over the element itself, not `.containing(...)`:
+        // that filters by *descendants*, and a static text backed by a
+        // `UILabel` has none — so the chained form matched nothing and
+        // this always timed out. Matches the shape used everywhere else
+        // in this suite.
+        let notice = app.staticTexts
+            .matching(
+                NSPredicate(
+                    format: "identifier == %@ AND label CONTAINS[c] %@",
+                    "chat.system_notice",
+                    alias
+                )
+            )
+            .firstMatch
+        return notice.waitForExistence(timeout: timeout)
     }
 }
 

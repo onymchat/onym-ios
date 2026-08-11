@@ -92,6 +92,17 @@ final class PersistedMessage {
     /// lightweight-migration shape as the other attachment columns; carries
     /// the per-clip key + the waveform.
     var encryptedVoiceAttachmentJSON: Data?
+    /// AES-GCM-encrypted JSON of the `ChatSystemEvent` for a locally-minted
+    /// system notice; `nil` for an ordinary message. Encrypted rather than
+    /// plain because the payload carries a member alias — same posture as
+    /// `encryptedSenderBlsPubkeyHex`. Optional, so adding it is a
+    /// lightweight migration over the existing store.
+    ///
+    /// Not queryable, which is deliberate: the one read that needs to
+    /// *filter* on it (`unreadCount`) does so after decode rather than in
+    /// a `#Predicate`. Making it plain would leak "who joined" to anyone
+    /// with the raw store file.
+    var encryptedSystemEventJSON: Data?
 
     init(
         id: String,
@@ -110,7 +121,8 @@ final class PersistedMessage {
         encryptedAttachmentJSON: Data? = nil,
         encryptedVideoAttachmentJSON: Data? = nil,
         encryptedAlbumJSON: Data? = nil,
-        encryptedVoiceAttachmentJSON: Data? = nil
+        encryptedVoiceAttachmentJSON: Data? = nil,
+        encryptedSystemEventJSON: Data? = nil
     ) {
         self.id = id
         self.groupID = groupID
@@ -129,5 +141,6 @@ final class PersistedMessage {
         self.encryptedVideoAttachmentJSON = encryptedVideoAttachmentJSON
         self.encryptedAlbumJSON = encryptedAlbumJSON
         self.encryptedVoiceAttachmentJSON = encryptedVoiceAttachmentJSON
+        self.encryptedSystemEventJSON = encryptedSystemEventJSON
     }
 }

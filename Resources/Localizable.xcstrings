@@ -719,22 +719,6 @@
         }
       }
     },
-    "Approved on chain": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Approved on chain"
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Закреплено в блокчейне"
-          }
-        }
-      }
-    },
     "Ask for their ": {
       "localizations": {
         "en": {
@@ -2075,23 +2059,6 @@
         }
       }
     },
-    "Join requests": {
-      "extractionState": "stale",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Join requests"
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Запросы на вступление"
-          }
-        }
-      }
-    },
     "Keep this screen open. The chat will appear automatically once they approve.": {
       "localizations": {
         "en": {
@@ -2370,22 +2337,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Пока нет сообщений. Поздоровайтесь."
-          }
-        }
-      }
-    },
-    "No pending requests": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No pending requests"
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Нет ожидающих запросов"
           }
         }
       }
@@ -3781,22 +3732,6 @@
         }
       }
     },
-    "This request is for a group that isn’t on this device. Decline to clear it.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This request is for a group that isn’t on this device. Decline to clear it."
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Этот запрос относится к группе, которой нет на этом устройстве. Отклоните, чтобы убрать."
-          }
-        }
-      }
-    },
     "This usually takes a few seconds. It’s safe to close this — we’ll finish in the background.": {
       "localizations": {
         "en": {
@@ -3990,22 +3925,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ждём одобрения от хоста…"
-          }
-        }
-      }
-    },
-    "wants to join “%@”": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "wants to join “%@”"
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "хочет вступить в «%@»"
           }
         }
       }
@@ -4220,6 +4139,431 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ваш релеер — ваши правила"
+          }
+        }
+      }
+    },
+    "(unnamed)": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "(unnamed)"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "(без имени)"
+          }
+        }
+      }
+    },
+    "(Unnamed)": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "(Unnamed)"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "(Без названия)"
+          }
+        }
+      }
+    },
+    "%@ joined": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ joined"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Теперь в группе: %@"
+          }
+        }
+      }
+    },
+    "%@ wants to join": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ wants to join"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ хочет присоединиться"
+          }
+        }
+      }
+    },
+    "%lld join requests": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld join requests"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Запросов на вступление: %lld"
+          }
+        }
+      }
+    },
+    "%lld people want to join": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld people want to join"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Хотят присоединиться: %lld"
+          }
+        }
+      }
+    },
+    "1 join request": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 join request"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 запрос на вступление"
+          }
+        }
+      }
+    },
+    "Accept": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Accept"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Принять"
+          }
+        }
+      }
+    },
+    "Chain rejected the proof: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chain rejected the proof: %@"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Сеть отклонила доказательство: %@"
+          }
+        }
+      }
+    },
+    "Couldn’t generate proof: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t generate proof: %@"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не удалось сформировать доказательство: %@"
+          }
+        }
+      }
+    },
+    "Couldn’t send: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t send: %@"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не удалось отправить: %@"
+          }
+        }
+      }
+    },
+    "inbox %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "inbox %@"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "входящий ключ %@"
+          }
+        }
+      }
+    },
+    "Joiner is on an outdated app. Ask them to update.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Joiner is on an outdated app. Ask them to update."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "У отправителя устаревшая версия приложения. Попросите обновить её."
+          }
+        }
+      }
+    },
+    "No chain relayer configured. Set one in Settings → Network → Relayer.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No chain relayer configured. Set one in Settings → Network → Relayer."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ретранслятор сети не настроен. Укажите его в «Настройки → Сеть → Ретранслятор»."
+          }
+        }
+      }
+    },
+    "No Founder contract selected for this network. Pick one in Settings → Network → Anchors.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Founder contract selected for this network. Pick one in Settings → Network → Anchors."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Для этой сети не выбран контракт Founder. Выберите его в «Настройки → Сеть → Якоря»."
+          }
+        }
+      }
+    },
+    "Request expired or was already handled.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Request expired or was already handled."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Срок запроса истёк, или он уже обработан."
+          }
+        }
+      }
+    },
+    "Sign in first.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign in first."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Сначала войдите."
+          }
+        }
+      }
+    },
+    "Someone wants to join": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Someone wants to join"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Кто-то хочет присоединиться"
+          }
+        }
+      }
+    },
+    "The active identity isn’t this group’s admin. Switch to the identity that created the group, then try again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The active identity isn’t this group’s admin. Switch to the identity that created the group, then try again."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Активная личность не является администратором этой группы. Переключитесь на личность, создавшую группу, и повторите попытку."
+          }
+        }
+      }
+    },
+    "This invite isn’t for any group on this device.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This invite isn’t for any group on this device."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Это приглашение не относится ни к одной группе на этом устройстве."
+          }
+        }
+      }
+    },
+    "You joined %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You joined %@"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Вы присоединились к %@"
+          }
+        }
+      }
+    },
+    "This group isn’t on the chain yet. Give it a few seconds and tap Accept again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This group isn’t on the chain yet. Give it a few seconds and tap Accept again."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Группа ещё не записана в сеть. Подождите несколько секунд и нажмите «Принять» ещё раз."
+          }
+        }
+      }
+    },
+    "Waiting for the group to be confirmed on chain… This usually takes a few seconds.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting for the group to be confirmed on chain… This usually takes a few seconds."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ожидаем подтверждения группы в сети… Обычно это занимает несколько секунд."
+          }
+        }
+      }
+    },
+    "Still setting up this device’s connection to the chain. Tap Retry in a moment.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Still setting up this device’s connection to the chain. Tap Retry in a moment."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Подключение этого устройства к сети ещё настраивается. Нажмите «Повторить» через мгновение."
+          }
+        }
+      }
+    },
+    "Couldn’t reach the chain to verify this group. Check your connection and try again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t reach the chain to verify this group. Check your connection and try again."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не удалось обратиться к сети для проверки группы. Проверьте подключение и повторите попытку."
           }
         }
       }

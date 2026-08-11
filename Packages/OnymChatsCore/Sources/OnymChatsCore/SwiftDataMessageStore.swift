@@ -68,6 +68,28 @@ public actor SwiftDataMessageStore: MessageStore {
 
     // MARK: - MessageStore
 
+    /// Test-only: replace a row's stored system event with arbitrary
+    /// JSON, so the decode-failure path can be exercised without
+    /// fabricating a downgrade.
+    #if DEBUG
+    public func overwriteSystemEventForTests(
+        groupID: String,
+        ownerIDString: String,
+        json: String
+    ) {
+        let descriptor = FetchDescriptor<PersistedMessage>(
+            predicate: #Predicate {
+                $0.groupID == groupID && $0.ownerIdentityIDString == ownerIDString
+            }
+        )
+        guard let rows = try? context.fetch(descriptor) else { return }
+        for row in rows where row.encryptedSystemEventJSON != nil {
+            row.encryptedSystemEventJSON = try? StorageEncryption.encrypt(Data(json.utf8))
+        }
+        try? context.save()
+    }
+    #endif
+
     public func list(groupID: String, ownerIDString: String) -> [ChatMessage] {
         let descriptor = FetchDescriptor<PersistedMessage>(
             predicate: #Predicate {
@@ -93,6 +115,13 @@ public actor SwiftDataMessageStore: MessageStore {
 
     public func unreadCount(groupID: String, ownerIDString: String, since: Date) -> Int {
         // Plain columns only (direction + sentAt) → no decryption needed.
+        // The system-event exclusion is a nil check on the stored column,
+        // not a read of its contents, so this stays a cheap `fetchCount`.
+        //
+        // System notices are deliberately not unread-worthy: "Alice
+        // joined" lands on every member's device at once, and counting it
+        // would light up an unread badge on a chat nobody actually said
+        // anything in.
         let incoming = MessageDirection.incoming.rawValue
         let descriptor = FetchDescriptor<PersistedMessage>(
             predicate: #Predicate {
@@ -100,6 +129,7 @@ public actor SwiftDataMessageStore: MessageStore {
                     && $0.ownerIdentityIDString == ownerIDString
                     && $0.directionRaw == incoming
                     && $0.sentAt > since
+                    && $0.encryptedSystemEventJSON == nil
             }
         )
         return (try? context.fetchCount(descriptor)) ?? 0
@@ -173,6 +203,12 @@ public actor SwiftDataMessageStore: MessageStore {
             existing.encryptedVideoAttachmentJSON = encoded.encryptedVideoAttachmentJSON
             existing.encryptedAlbumJSON = encoded.encryptedAlbumJSON
             existing.encryptedVoiceAttachmentJSON = encoded.encryptedVoiceAttachmentJSON
+            // Unreachable today — notices are always `.incoming`, and
+            // this branch is outgoing→outgoing — but every other
+            // encrypted column is copied here, and a field that silently
+            // survives an overwrite is not a thing to leave to whoever
+            // makes notices outgoing later.
+            existing.encryptedSystemEventJSON = encoded.encryptedSystemEventJSON
             do {
                 try context.save()
             } catch {
@@ -288,6 +324,9 @@ public actor SwiftDataMessageStore: MessageStore {
         let encryptedVoice = try message.voiceAttachment.map { attachment in
             try StorageEncryption.encrypt(JSONEncoder().encode(attachment))
         }
+        let encryptedSystemEvent = try message.systemEvent.map { event in
+            try StorageEncryption.encrypt(JSONEncoder().encode(event))
+        }
         return PersistedMessage(
             id: message.id.uuidString,
             groupID: message.groupID,
@@ -306,7 +345,8 @@ public actor SwiftDataMessageStore: MessageStore {
             encryptedAttachmentJSON: encryptedAttachment,
             encryptedVideoAttachmentJSON: encryptedVideoAttachment,
             encryptedAlbumJSON: encryptedAlbum,
-            encryptedVoiceAttachmentJSON: encryptedVoice
+            encryptedVoiceAttachmentJSON: encryptedVoice,
+            encryptedSystemEventJSON: encryptedSystemEvent
         )
     }
 
@@ -338,6 +378,21 @@ public actor SwiftDataMessageStore: MessageStore {
             .flatMap { try? JSONDecoder().decode(ChatVoiceAttachment.self, from: $0) }
         let moderationAuthenticityProof = row.encryptedModerationAuthenticityProof
             .flatMap { try? StorageEncryption.decryptString($0) }
+        // A row that carries a system event but cannot decode it — an
+        // unknown `kind` after a downgrade — is dropped rather than
+        // degraded. Falling back to `nil` renders it as an ordinary
+        // *empty bubble* attributed to the joiner, which is a message
+        // nobody sent; hiding the row says less but says nothing false.
+        let systemEvent: ChatSystemEvent?
+        if let stored = row.encryptedSystemEventJSON {
+            guard
+                let plaintext = try? StorageEncryption.decrypt(stored),
+                let decoded = try? JSONDecoder().decode(ChatSystemEvent.self, from: plaintext)
+            else { return nil }
+            systemEvent = decoded
+        } else {
+            systemEvent = nil
+        }
         return ChatMessage(
             id: id,
             groupID: row.groupID,
@@ -354,7 +409,8 @@ public actor SwiftDataMessageStore: MessageStore {
             imageAttachment: imageAttachment,
             videoAttachment: videoAttachment,
             albumAttachments: albumAttachments,
-            voiceAttachment: voiceAttachment
+            voiceAttachment: voiceAttachment,
+            systemEvent: systemEvent
         )
     }
 }

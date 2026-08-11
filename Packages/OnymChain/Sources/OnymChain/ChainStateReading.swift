@@ -18,6 +18,27 @@ public protocol ChainStateReading: Sendable {
     /// treat any throw as "couldn't verify, reject" — never as
     /// "verification passed".
     func tyrannyCommitment(groupID: Data) async throws -> SEPCommitmentEntry
+
+    /// Superseded commitments for a Tyranny group, newest last.
+    ///
+    /// The contract archives every entry `update_commitment` replaces
+    /// and keeps the most recent 64. A receiver holding a snapshot the
+    /// chain has already moved past can therefore still check it
+    /// against what was actually committed at *its* epoch, instead of
+    /// having to ask the admin for a fresh one and wait for them to be
+    /// online.
+    ///
+    /// Defaulted to an empty list so existing conformers (tests, stubs)
+    /// keep compiling; callers treat "no history" as "can't verify this
+    /// way" and fall back to the refresh path.
+    func tyrannyHistory(groupID: Data, maxEntries: UInt32) async throws -> [SEPCommitmentEntry]
+}
+
+public extension ChainStateReading {
+    func tyrannyHistory(
+        groupID: Data,
+        maxEntries: UInt32
+    ) async throws -> [SEPCommitmentEntry] { [] }
 }
 
 /// Production conformer. Resolves the user's selected chain relayer
@@ -51,6 +72,17 @@ public struct SEPContractChainStateReader: ChainStateReading {
     }
 
     public func tyrannyCommitment(groupID: Data) async throws -> SEPCommitmentEntry {
+        try await client().getCommitment(groupID: groupID)
+    }
+
+    public func tyrannyHistory(
+        groupID: Data,
+        maxEntries: UInt32
+    ) async throws -> [SEPCommitmentEntry] {
+        try await client().getHistory(groupID: groupID, maxEntries: maxEntries)
+    }
+
+    private func client() async throws -> SEPContractClient {
         guard let relayerURL = await relayers.selectURL() else {
             throw ChainReadError.noActiveRelayer
         }
@@ -59,14 +91,12 @@ public struct SEPContractChainStateReader: ChainStateReading {
         guard let binding = await contracts.binding(for: key) else {
             throw ChainReadError.noContractBinding
         }
-        let transport = makeContractTransport(relayerURL)
-        let client = SEPContractClient(
+        return SEPContractClient(
             contractID: binding.contractID,
             contractType: .tyranny,
             network: activeNetwork.sepNetwork,
-            transport: transport
+            transport: makeContractTransport(relayerURL)
         )
-        return try await client.getCommitment(groupID: groupID)
     }
 }
 

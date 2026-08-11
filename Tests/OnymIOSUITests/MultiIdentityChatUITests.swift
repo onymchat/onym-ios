@@ -85,19 +85,22 @@ final class MultiIdentityChatUITests: XCTestCase {
         join.send()
         join.dismissAfterSend()
 
-        // Identity 1 (Alice) approves the join request.
+        // Identity 1 (Alice) approves the join request — from inside the
+        // group's chat thread, which is the whole point of the surface:
+        // there is no separate "Join requests" screen to find.
         switchIdentity(app, to: "Alice")
-        let approve = ApproveRequestsScreen(app: app)
-        approve.open()
-        approve.approveFirst()
-        XCTAssertTrue(approve.waitForSuccess(),
-                      "join approval (update_commitment) never succeeded")
-        approve.close()
+        openChat(app)
+        let thread = ChatThreadScreen(app: app)
+        XCTAssertTrue(thread.waitReady(), "Alice's chat thread never opened")
+        let joinRequest = JoinRequestRow(app: app)
+        joinRequest.acceptFirst()
+        XCTAssertTrue(joinRequest.waitForJoinedNotice(alias: "Bob"),
+                      "join approval (update_commitment) never produced a joined notice")
+        thread.back()
 
         // ───────── Bob → Alice: message received + read ─────────
         switchIdentity(app, to: "Bob")
         openChat(app)
-        let thread = ChatThreadScreen(app: app)
         XCTAssertTrue(thread.waitReady(), "Bob's chat thread never opened")
         thread.send("Hello from Bob")
         XCTAssertTrue(thread.waitForMessage("Hello from Bob"),

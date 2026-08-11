@@ -247,6 +247,60 @@ final class JoinRequestApproverTests: XCTestCase {
         XCTAssertTrue(sends.isEmpty, "no envelopes shipped on outdated-client failure")
     }
 
+    /// Approving within seconds of creating the group races that group's
+    /// own `create_group` into the ledger, and the contract answers
+    /// `GroupNotFound`. That is a wait, not a rejection, so it gets its
+    /// own outcome — and like every other failure it must leave the
+    /// request there to retry.
+    func test_approve_groupNotYetOnChain_isDistinctFromARejection() async throws {
+        contractTransport.nextAccepted = false
+        contractTransport.nextRejectionMessage =
+            "❌ error: transaction simulation failed: HostError: Error(Contract, #5)"
+        let env = try await seedEnvironment()
+        await env.approver.pumpOnce()
+
+        let outcome = await env.approver.approve(requestId: env.requestID)
+
+        XCTAssertEqual(outcome, .groupNotAnchoredYet)
+        let remaining = await introRequestStore.current()
+        XCTAssertEqual(remaining.count, 1, "the request must survive so Accept can be retried")
+        let sends = await transport.sends
+        XCTAssertTrue(sends.isEmpty, "no invitation ships when the group isn't on chain yet")
+    }
+
+    /// The same condition arriving as a non-2xx rather than an
+    /// `accepted: false` body.
+    func test_approve_groupNotYetOnChain_isReadFromAThrownTransportError() async throws {
+        contractTransport.nextThrownError = SEPError.invalidResponse(
+            statusCode: 502,
+            body: "{\"accepted\":false,\"message\":\"HostError: Error(Contract, #5)\"}"
+        )
+        let env = try await seedEnvironment()
+        await env.approver.pumpOnce()
+
+        let outcome = await env.approver.approve(requestId: env.requestID)
+
+        XCTAssertEqual(outcome, .groupNotAnchoredYet)
+    }
+
+    /// A contract error we have no advice for stays a rejection with its
+    /// diagnostic attached — inventing friendly copy for a condition we
+    /// can't explain would be worse than showing the raw message.
+    func test_approve_anUnrecognizedContractErrorStaysARejection() async throws {
+        contractTransport.nextAccepted = false
+        contractTransport.nextRejectionMessage =
+            "HostError: Error(Contract, #12)"
+        let env = try await seedEnvironment()
+        await env.approver.pumpOnce()
+
+        let outcome = await env.approver.approve(requestId: env.requestID)
+
+        guard case .anchorRejected(let reason) = outcome else {
+            return XCTFail("expected .anchorRejected, got \(outcome)")
+        }
+        XCTAssertTrue(reason.contains("#12"), "the diagnostic must survive: \(reason)")
+    }
+
     func test_approve_anchorRejected_doesNotConsumeRequest() async throws {
         // Chain returns accepted=false (e.g. proof verification
         // failed on the contract side). Admin should NOT ship the
@@ -630,11 +684,26 @@ private actor ApproverStubProofGenerator: GroupProofGenerator {
 private final class ApproverStubContractTransport: SEPContractTransport, @unchecked Sendable {
     private let lock = NSLock()
     private var _nextAccepted: Bool = true
+    private var _nextRejectionMessage: String = "stub rejected"
+    private var _nextThrownError: Error?
     private var _calls: [String] = []
 
     var nextAccepted: Bool {
         get { lock.withLock { _nextAccepted } }
         set { lock.withLock { _nextAccepted = newValue } }
+    }
+    /// Body of an `accepted: false` response. A contract refusal carries
+    /// its diagnostic here, which is one of the two shapes the approver
+    /// has to read a contract error number out of.
+    var nextRejectionMessage: String {
+        get { lock.withLock { _nextRejectionMessage } }
+        set { lock.withLock { _nextRejectionMessage = newValue } }
+    }
+    /// The other shape: the relayer answers non-2xx and the client
+    /// throws, with the diagnostic in the body.
+    var nextThrownError: Error? {
+        get { lock.withLock { _nextThrownError } }
+        set { lock.withLock { _nextThrownError = newValue } }
     }
     var calls: [String] {
         lock.withLock { _calls }
@@ -645,10 +714,11 @@ private final class ApproverStubContractTransport: SEPContractTransport, @unchec
         responseType: Response.Type
     ) async throws -> Response {
         lock.withLock { _calls.append(invocation.function) }
+        if let error = nextThrownError { throw error }
         let response = SEPSubmissionResponse(
             accepted: nextAccepted,
             transactionHash: nextAccepted ? "0xstubhash" : nil,
-            message: nextAccepted ? nil : "stub rejected"
+            message: nextAccepted ? nil : nextRejectionMessage
         )
         let data = try JSONEncoder().encode(response)
         return try JSONDecoder().decode(Response.self, from: data)

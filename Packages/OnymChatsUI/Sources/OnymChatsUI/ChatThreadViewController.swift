@@ -1,3 +1,4 @@
+import CryptoKit
 import SwiftUI
 import UIKit
 import OnymDesign
@@ -68,6 +69,15 @@ final class ChatThreadViewController: UIViewController {
     /// Fired when the ✕ on a staged item is tapped (host drops it).
     var onRemovePendingMedia: ((UUID) -> Void)?
 
+    /// Founder tapped Accept on an in-thread join request. Carries the
+    /// `JoinRequestApprover.PendingRequest.id`; the host routes it to
+    /// `ApproveRequestsFlow.approve`. Same fire-and-forget contract as
+    /// `onRetryRequested` — the flow owns the in-flight + error state
+    /// and pushes it back through `update(joinRequests:)`.
+    var onJoinRequestAccepted: ((String) -> Void)?
+    /// Founder tapped Decline. Routed to `ApproveRequestsFlow.decline`.
+    var onJoinRequestDeclined: ((String) -> Void)?
+
     private let tableView = UITableView()
     /// The group's invitation message, surfaced in the empty state.
     private var invitationMessage: String?
@@ -93,6 +103,20 @@ final class ChatThreadViewController: UIViewController {
     /// run-grouping pass (name header at the start of each consecutive
     /// same-sender run) can look at neighbours.
     private var orderedMessages: [ChatMessage] = []
+    /// Pending join-request rows, keyed by the same synthetic UUID used
+    /// in the diffable snapshot. Parallel to `messagesByID` rather than
+    /// merged into it: a request is not a `ChatMessage` and has no place
+    /// in the message store — it's a live view of
+    /// `JoinRequestApprover.pending`, which disappears the moment the
+    /// founder acts on it.
+    ///
+    /// The cell provider checks this map first, so a synthetic id can
+    /// never collide with a real message id (it's derived from the
+    /// request id, which is a Nostr event id).
+    private var joinRequestsByID: [UUID: ChatJoinRequestDisplay] = [:]
+    /// Display order for the request rows — oldest first, so they sit at
+    /// the bottom of the thread in arrival order like any other row.
+    private var orderedJoinRequestIDs: [UUID] = []
     /// The parent group's member profiles, keyed by BLS pubkey hex —
     /// the source for resolving a sender's alias. Pushed by the SwiftUI
     /// wrapper via `update(memberProfiles:)`; updated live as joiners
@@ -261,13 +285,17 @@ final class ChatThreadViewController: UIViewController {
         orderedMessages = sorted
         rebuildSenderDisplays()
 
-        // Empty state: visible iff the message list is empty. Toggling
-        // `isHidden` is cheap and survives keyboard show/hide.
-        emptyStateHost.view.isHidden = !sorted.isEmpty
+        // Empty state: visible iff the thread has nothing to show. A
+        // pending join request counts — a founder whose only content is
+        // "Alice wants to join" should see that, not the onboarding
+        // panel sitting on top of it.
+        emptyStateHost.view.isHidden = !(sorted.isEmpty && orderedJoinRequestIDs.isEmpty)
 
         var snapshot = NSDiffableDataSourceSnapshot<Section, UUID>()
         snapshot.appendSections([.main])
-        snapshot.appendItems(sorted.map(\.id))
+        // Requests pin below the messages: they're the live thing
+        // awaiting action, and the thread is read bottom-up.
+        snapshot.appendItems(sorted.map(\.id) + orderedJoinRequestIDs)
         if !changedIDs.isEmpty {
             snapshot.reconfigureItems(changedIDs)
         }
@@ -288,6 +316,141 @@ final class ChatThreadViewController: UIViewController {
                 self.scrollToBottom(animated: true)
             }
         }
+    }
+
+    /// Push the founder's pending join requests for *this* group into
+    /// the thread. Called by the SwiftUI wrapper on every render with an
+    /// already-filtered, already-authorized list — the wrapper owns both
+    /// the group filter and the "am I the admin" check, so this method
+    /// renders whatever it is handed.
+    ///
+    /// Ordering is by arrival (oldest first) and stable across renders,
+    /// so a second request landing doesn't reshuffle the first.
+    ///
+    /// Rows whose content changed (in-flight flip, error text) are
+    /// `reconfigureItems`-ed rather than re-inserted, so tapping Accept
+    /// swaps the button to its spinner without the card animating out
+    /// and back in.
+    /// `messagesLoaded` says whether the message stream has delivered a
+    /// snapshot yet, which `orderedMessages.isEmpty` cannot: an empty
+    /// list means "nothing arrived" until the first snapshot lands, and
+    /// only means "this thread is empty" afterwards.
+    func update(joinRequests: [ChatJoinRequestDisplay], messagesLoaded: Bool = true) {
+        // A repeated request id would trap twice over: in the dictionary
+        // build, and again in `appendItems` (a diffable snapshot rejects
+        // duplicate identifiers). The approver already collapses
+        // duplicates, so this shouldn't happen — but dropping the repeat
+        // beats crashing the thread if it ever does.
+        var seen = Set<UUID>()
+        var ids: [UUID] = []
+        var byID: [UUID: ChatJoinRequestDisplay] = [:]
+        for request in joinRequests {
+            let id = Self.rowID(forRequestID: request.requestID)
+            guard seen.insert(id).inserted else { continue }
+            ids.append(id)
+            byID[id] = request
+        }
+        // Evaluated *before* the unchanged-guard below, because in
+        // production the two calls split exactly across it.
+        //
+        // `hasLoadedMessages` starts false on the host and only flips
+        // after the first render, so a founder opening an empty group
+        // with an already-pending request gets: call one with the row
+        // and `messagesLoaded: false` (stores it, hides the empty state,
+        // cannot reveal yet), then call two with `messagesLoaded: true`
+        // and an identical list. Deciding the reveal after the guard
+        // meant the only call allowed to reveal was the one that
+        // returned early — a blank table with the empty state
+        // suppressed, in the one flow this feature exists for.
+        let revealOwed = !ids.isEmpty
+            && messagesLoaded
+            && !hasAppliedFirstSnapshot
+            && orderedMessages.isEmpty
+
+        guard byID != joinRequestsByID || ids != orderedJoinRequestIDs else {
+            // Rows are already applied and laid out from the earlier
+            // call, so there is nothing to wait for.
+            if revealOwed { revealForRequestOnlyThread() }
+            return
+        }
+
+        let changed = ids.filter { id in
+            guard let previous = joinRequestsByID[id] else { return false }
+            return previous != byID[id]
+        }
+        // Compare against the *previous* state, before it's overwritten
+        // below — a request arriving while the founder is already at the
+        // bottom should pull the thread down to it.
+        let gainedRequest = ids.contains { joinRequestsByID[$0] == nil }
+        let wasNearBottom = isNearBottom
+
+        joinRequestsByID = byID
+        orderedJoinRequestIDs = ids
+
+        emptyStateHost.view.isHidden = !(orderedMessages.isEmpty && ids.isEmpty)
+
+        var snapshot = NSDiffableDataSourceSnapshot<Section, UUID>()
+        snapshot.appendSections([.main])
+        snapshot.appendItems(orderedMessages.map(\.id) + ids)
+        if !changed.isEmpty {
+            snapshot.reconfigureItems(changed)
+        }
+        dataSource.apply(snapshot, animatingDifferences: hasAppliedFirstSnapshot) { [weak self] in
+            guard let self else { return }
+            // The table sits at alpha 0 until the cold open reveals it,
+            // and that reveal is driven by the first *message* snapshot.
+            // A brand-new group whose founder hasn't sent anything yet —
+            // precisely when the first join request lands — would
+            // otherwise render the row invisibly.
+            //
+            if revealOwed { self.revealForRequestOnlyThread() }
+            guard gainedRequest, wasNearBottom else { return }
+            self.scrollToBottom(animated: true)
+        }
+    }
+
+    /// Reveal a table whose only content is a pending request.
+    ///
+    /// Narrow on purpose. `update(messages:)` owns the cold open, and
+    /// this covers the one case it cannot: a loaded, genuinely empty
+    /// thread, where no message snapshot will ever arrive to reveal the
+    /// table and the request row would sit on an invisible one.
+    ///
+    /// "Loaded and empty" is not the same as "no messages yet", which is
+    /// why the caller needs `messagesLoaded` to tell them apart —
+    /// revealing on the latter latched the cold open before a group's
+    /// history had arrived, and its search target with it.
+    private func revealForRequestOnlyThread() {
+        tableView.alpha = 1
+        // Latch the cold open too. Revealing without this left
+        // `isFirstApply` true, so the next message snapshot — usually
+        // the "X joined" notice landing seconds later, right after
+        // Accept — would take the cold-open branch and hard-jump a table
+        // the user is already looking at, instead of animating the
+        // append.
+        hasAppliedFirstSnapshot = true
+    }
+
+    /// Synthetic, stable row id for a pending request. Derived from the
+    /// request id (a Nostr event id) so the row keeps its identity
+    /// across renders — a fresh UUID each time would make the diffable
+    /// source delete and re-insert the card on every state flip.
+    ///
+    /// SHA-256 rather than `Hasher`: `Hasher` is seeded per process, and
+    /// an id that changes between launches would be a latent trap for
+    /// anything that persists or compares these across sessions.
+    private static func rowID(forRequestID requestID: String) -> UUID {
+        var digest = Array(
+            SHA256.hash(data: Data("onym-join-request-row:\(requestID)".utf8)).prefix(16)
+        )
+        digest[6] = (digest[6] & 0x0F) | 0x40
+        digest[8] = (digest[8] & 0x3F) | 0x80
+        return UUID(uuid: (
+            digest[0], digest[1], digest[2], digest[3],
+            digest[4], digest[5], digest[6], digest[7],
+            digest[8], digest[9], digest[10], digest[11],
+            digest[12], digest[13], digest[14], digest[15]
+        ))
     }
 
     /// Position the cold open directly at the latest message, without
@@ -337,6 +500,11 @@ final class ChatThreadViewController: UIViewController {
         var displays: [UUID: ChatSenderDisplay] = [:]
         var previousSender: String?
         for message in orderedMessages {
+            // A system notice has no author to name, and it must not
+            // break the run-grouping of the messages around it — two
+            // messages from the same person separated by "Alice joined"
+            // are still one run.
+            guard !message.isSystem else { continue }
             let isRunStart = message.senderBlsPubkeyHex != previousSender
             let showHeader = isRunStart
                 && message.direction == .incoming
@@ -508,6 +676,14 @@ final class ChatThreadViewController: UIViewController {
         // recycles a cell that still carries a media width lock.
         tableView.register(ChatBubbleCell.self, forCellReuseIdentifier: ChatBubbleCell.textReuseID)
         tableView.register(ChatBubbleCell.self, forCellReuseIdentifier: ChatBubbleCell.mediaReuseID)
+        tableView.register(
+            ChatSystemNoticeCell.self,
+            forCellReuseIdentifier: ChatSystemNoticeCell.reuseID
+        )
+        tableView.register(
+            ChatJoinRequestCell.self,
+            forCellReuseIdentifier: ChatJoinRequestCell.reuseID
+        )
         tableView.keyboardDismissMode = .interactive
         tableView.delegate = self
         view.addSubview(tableView)
@@ -549,6 +725,31 @@ final class ChatThreadViewController: UIViewController {
         dataSource = UITableViewDiffableDataSource<Section, UUID>(
             tableView: tableView
         ) { [weak self] tableView, indexPath, id in
+            // Join-request rows are checked first: they're synthetic ids
+            // that never appear in `messagesByID`.
+            if let request = self?.joinRequestsByID[id] {
+                let cell = tableView.dequeueReusableCell(
+                    withIdentifier: ChatJoinRequestCell.reuseID,
+                    for: indexPath
+                )
+                if let requestCell = cell as? ChatJoinRequestCell {
+                    requestCell.configure(request)
+                    requestCell.onAccept = { [weak self] in self?.onJoinRequestAccepted?($0) }
+                    requestCell.onDecline = { [weak self] in self?.onJoinRequestDeclined?($0) }
+                }
+                return cell
+            }
+
+            // Membership notices render as a centred pill, not a bubble.
+            if let event = self?.messagesByID[id]?.systemEvent {
+                let cell = tableView.dequeueReusableCell(
+                    withIdentifier: ChatSystemNoticeCell.reuseID,
+                    for: indexPath
+                )
+                (cell as? ChatSystemNoticeCell)?.configure(event: event)
+                return cell
+            }
+
             // Pick the reuse pool from the message content so a text bubble
             // never recycles a media cell (with its 75%-width lock still on).
             let message = self?.messagesByID[id]
@@ -770,8 +971,12 @@ extension ChatThreadViewController: UITableViewDelegate {
         // `apply` commits, so during an in-flight insert the committed
         // rows and the array can disagree and a positional index would
         // attach Report to the wrong message.
+        // A system notice has no author to report and isn't evidence of
+        // anything — no menu on it, regardless of what the host's
+        // reportability predicate says.
         guard let id = dataSource.itemIdentifier(for: indexPath),
               let message = messagesByID[id],
+              !message.isSystem,
               canReportMessage?(message) == true else { return nil }
         return UIContextMenuConfiguration(
             identifier: message.id as NSUUID,

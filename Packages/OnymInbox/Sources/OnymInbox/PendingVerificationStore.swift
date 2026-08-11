@@ -14,6 +14,30 @@ public struct PendingGroupVerification: Identifiable, Equatable, Sendable {
         /// No reply within the timeout (or no admin inbox to ask) —
         /// surfaced to the user with a Retry.
         case unreachable
+        /// This device couldn't read the chain: no relayer, no contract
+        /// binding for the active network, or the relayer refused.
+        ///
+        /// Distinct from `unreachable` because the remedy is the user's
+        /// own settings, not the admin's availability. These were the
+        /// same state until it turned out that the most common way to
+        /// get "the admin is offline" was a receiver that had never
+        /// resolved a contract binding — a message that named the wrong
+        /// party and offered a Retry that could not possibly work.
+        case chainUnreachable
+        /// This device has no relayer endpoint or no contract binding
+        /// for the active network yet.
+        ///
+        /// Usually not a misconfiguration but a race: both lists are
+        /// fetched from GitHub in the background at launch, so a device
+        /// that was offline for those few seconds has nothing to call
+        /// and nothing to call it on. Separated from `chainUnreachable`
+        /// because "we're still setting up, try again" and "your network
+        /// or settings are wrong" ask the user for different things.
+        case chainNotConfigured
+        /// The group's own anchoring transaction hasn't settled yet, or
+        /// our read is lagging one that has. Resolves on its own within
+        /// seconds; the Retry here re-reads the chain.
+        case chainSettling
     }
 
     /// Dedupe key — one pending verification per group.

@@ -756,6 +756,237 @@ final class ChatThreadViewControllerTests: XCTestCase {
 
     // MARK: - Helpers
 
+    // MARK: - Join requests in the thread
+
+    /// The founder-only path, which had no coverage: duplicate ids,
+    /// append order, the empty-state toggle, and the cold-open reveal.
+
+    func test_joinRequests_appendAfterMessages() {
+        let vc = ChatThreadViewController()
+        vc.loadViewIfNeeded()
+        vc.update(messages: [
+            makeMessage(body: "one", direction: .incoming),
+            makeMessage(body: "two", direction: .incoming),
+        ])
+        vc.update(joinRequests: [makeRequest(id: "r1"), makeRequest(id: "r2")])
+
+        // Requests sit below the conversation: they are the newest thing
+        // in the thread and the only thing needing an action.
+        XCTAssertEqual(tableView(in: vc)?.numberOfRows(inSection: 0), 4)
+    }
+
+    func test_joinRequests_duplicateIDsAreDroppedRatherThanTrapping() {
+        // A diffable snapshot traps on a repeated identifier. The
+        // approver collapses duplicates, so this should not happen —
+        // dropping the repeat beats crashing the thread if it does.
+        let vc = ChatThreadViewController()
+        vc.loadViewIfNeeded()
+        vc.update(joinRequests: [makeRequest(id: "same"), makeRequest(id: "same")])
+
+        XCTAssertEqual(tableView(in: vc)?.numberOfRows(inSection: 0), 1)
+    }
+
+    func test_joinRequests_orderIsStableAcrossRenders() {
+        // A second request landing must not reshuffle the first — the
+        // founder may already be reaching for its Accept button.
+        let vc = ChatThreadViewController()
+        vc.loadViewIfNeeded()
+        vc.update(joinRequests: [makeRequest(id: "first")])
+        vc.update(joinRequests: [makeRequest(id: "first"), makeRequest(id: "second")])
+
+        XCTAssertEqual(tableView(in: vc)?.numberOfRows(inSection: 0), 2)
+
+        // Re-rendering the same list changes nothing.
+        vc.update(joinRequests: [makeRequest(id: "first"), makeRequest(id: "second")])
+        XCTAssertEqual(tableView(in: vc)?.numberOfRows(inSection: 0), 2)
+    }
+
+    func test_joinRequestAlone_hidesTheEmptyState() {
+        // A brand-new group whose founder has sent nothing: the request
+        // is the only content, and "no messages yet" alongside it would
+        // be wrong.
+        let vc = ChatThreadViewController()
+        vc.loadViewIfNeeded()
+        vc.update(messages: [])
+        XCTAssertFalse(emptyStateView(in: vc)?.isHidden ?? true)
+
+        vc.update(joinRequests: [makeRequest(id: "r1")])
+        XCTAssertTrue(emptyStateView(in: vc)?.isHidden ?? false,
+                      "a pending request is content; the empty state must go")
+    }
+
+    func test_joinRequestsCleared_returnsTheEmptyState() {
+        let vc = ChatThreadViewController()
+        vc.loadViewIfNeeded()
+        vc.update(messages: [])
+        vc.update(joinRequests: [makeRequest(id: "r1")])
+        vc.update(joinRequests: [])
+
+        XCTAssertFalse(emptyStateView(in: vc)?.isHidden ?? true,
+                       "the toggle is symmetric, as it is for messages")
+    }
+
+    func test_joinRequestOnAnEmptyThread_revealsTheTable() {
+        // The reveal is normally driven by the first *message* snapshot.
+        // A founder whose only content is a request would otherwise be
+        // looking at an invisible table.
+        let vc = ChatThreadViewController()
+        vc.loadViewIfNeeded()
+        vc.update(joinRequests: [makeRequest(id: "r1")], messagesLoaded: true)
+        settle()
+
+        XCTAssertEqual(tableView(in: vc)?.alpha, 1)
+    }
+
+    func test_joinRequestAfterMessages_leavesTheRevealToTheColdOpen() {
+        // The case the old `alpha == 0` check got wrong: once messages
+        // have landed the cold open owns the reveal, and it defers a
+        // runloop precisely to mask the height settle. Revealing from
+        // the request path would beat that and show a frame at the wrong
+        // offset.
+        //
+        // Both the cold open's reveal and the snapshot completions are
+        // deferred, so the runloop has to be pumped for either to run —
+        // without that this asserts nothing, which is how the first
+        // attempt at this test passed against the very bug it was
+        // written for.
+        //
+        // Alpha is put back to 0 after the cold open has had its turn,
+        // so what is measured is only what the *request* path does.
+        let vc = ChatThreadViewController()
+        vc.loadViewIfNeeded()
+        vc.update(messages: [makeMessage(body: "hi", direction: .incoming)])
+        settle()
+        tableView(in: vc)?.alpha = 0
+
+        vc.update(joinRequests: [makeRequest(id: "r1")])
+        settle()
+
+        XCTAssertEqual(tableView(in: vc)?.alpha, 0,
+                       "the request path must not take the reveal from the cold open")
+    }
+
+    /// Let deferred work run: snapshot completions and the cold open's
+    /// reveal are both `DispatchQueue.main.async`, so a synchronous
+    /// assertion sees neither.
+    /// The production order, and the one that was broken: the request
+    /// arrives before the history.
+    ///
+    /// `messages` starts empty on the host while the request flow is
+    /// app-lifetime, so a founder opening a group *with* history gets
+    /// `update(messages: [])` then the request. Revealing and latching
+    /// there made the real history land as an animated append — every
+    /// message flying in and scrolling — which is exactly what the cold
+    /// open exists to prevent.
+    func test_requestBeforeHistory_leavesTheColdOpenToTheMessages() {
+        let vc = ChatThreadViewController()
+        vc.loadViewIfNeeded()
+
+        // First pass: no snapshot yet, request already pending.
+        vc.update(messages: [])
+        vc.update(joinRequests: [makeRequest(id: "r1")], messagesLoaded: false)
+        settle()
+
+        XCTAssertEqual(tableView(in: vc)?.alpha, 0,
+                       "an unloaded thread must not be revealed by the request path")
+
+        // History lands: this is the cold open, and it must still be one.
+        vc.update(messages: [
+            makeMessage(body: "one", direction: .incoming),
+            makeMessage(body: "two", direction: .incoming),
+        ])
+        settle()
+
+        XCTAssertEqual(tableView(in: vc)?.alpha, 1, "the cold open reveals it")
+        XCTAssertEqual(tableView(in: vc)?.numberOfRows(inSection: 0), 3)
+    }
+
+    /// The search-open consequence of the same bug: `openAtMessageID` is
+    /// consumed only by the cold open, so skipping it lost the target
+    /// silently.
+    func test_requestBeforeHistory_stillLandsOnASearchTarget() {
+        let vc = ChatThreadViewController()
+        vc.loadViewIfNeeded()
+        let target = makeMessage(body: "the hit", direction: .incoming)
+        vc.openAtMessageID = target.id
+
+        vc.update(messages: [])
+        vc.update(joinRequests: [makeRequest(id: "r1")], messagesLoaded: false)
+        settle()
+
+        vc.update(messages: [
+            makeMessage(body: "before", direction: .incoming),
+            target,
+            makeMessage(body: "after", direction: .incoming),
+        ])
+        settle()
+
+        XCTAssertNil(vc.openAtMessageID,
+                     "the cold open must run and consume the search target")
+    }
+
+    /// And a genuinely empty thread still gets its reveal — the case the
+    /// request path was added for.
+    func test_emptyLoadedThreadWithARequest_isStillRevealed() {
+        let vc = ChatThreadViewController()
+        vc.loadViewIfNeeded()
+        vc.update(messages: [])
+        vc.update(joinRequests: [makeRequest(id: "r1")], messagesLoaded: true)
+        settle()
+
+        XCTAssertEqual(tableView(in: vc)?.alpha, 1)
+    }
+
+    /// The production sequence, which the previous two tests both missed:
+    /// the same request list arrives twice, `messagesLoaded` false then
+    /// true, because the host's flag only flips after the first render.
+    ///
+    /// The second call is the only one allowed to reveal and the only one
+    /// the unchanged-guard short-circuits, so deciding the reveal after
+    /// that guard left the table blank with the empty state suppressed.
+    func test_requestPushedBeforeTheLoadFlag_isStillRevealedOnTheSecondPass() {
+        let vc = ChatThreadViewController()
+        vc.loadViewIfNeeded()
+        let request = makeRequest(id: "r1")
+
+        // Call one: the row exists, but nothing knows the thread is empty
+        // rather than unloaded.
+        vc.update(messages: [])
+        vc.update(joinRequests: [request], messagesLoaded: false)
+        settle()
+        XCTAssertEqual(tableView(in: vc)?.alpha, 0)
+        XCTAssertTrue(emptyStateView(in: vc)?.isHidden ?? false,
+                      "the row is content, so the empty state is already gone")
+
+        // Call two: identical list, and now the flag says the thread is
+        // genuinely empty.
+        vc.update(joinRequests: [request], messagesLoaded: true)
+        settle()
+
+        XCTAssertEqual(tableView(in: vc)?.alpha, 1,
+                       "an unchanged list must not cost the reveal")
+        XCTAssertEqual(tableView(in: vc)?.numberOfRows(inSection: 0), 1)
+    }
+
+    private func settle() {
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+    }
+
+    private func makeRequest(
+        id: String,
+        alias: String = "Alice",
+        isInFlight: Bool = false,
+        errorText: String? = nil
+    ) -> ChatJoinRequestDisplay {
+        ChatJoinRequestDisplay(
+            requestID: id,
+            alias: alias,
+            fingerprint: "ab12cd34",
+            isInFlight: isInFlight,
+            errorText: errorText
+        )
+    }
+
     private func tableView(in vc: UIViewController) -> UITableView? {
         find(in: vc.view) { $0 is UITableView } as? UITableView
     }
