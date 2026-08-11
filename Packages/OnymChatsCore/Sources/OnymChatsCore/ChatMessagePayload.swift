@@ -99,6 +99,11 @@ public struct ChatMessagePayload: Codable, Equatable, Sendable {
     /// contract's authenticity rule without exposing an envelope or
     /// any recipient secrets. Optional for wire compatibility with
     /// messages sent before reporting existed.
+    ///
+    /// When the payload carries media the preimage is v2, which also
+    /// commits to each attached blob's plaintext digest, MIME type and
+    /// byte length — the only sender commitment to attachment bytes
+    /// that exists anywhere in the system.
     public let moderationAuthenticityProof: String?
 
     public init(

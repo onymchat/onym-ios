@@ -509,6 +509,82 @@ final class SendMessageInteractorTests: XCTestCase {
         XCTAssertEqual(stored.first?.moderationAuthenticityProof, encodedProof)
     }
 
+    func test_sendImage_signsThePhotoBytes_notJustTheCaption() async throws {
+        let groupID = await seedGroupWithTwoPeers()
+        let imageData = Self.makeJPEG()
+        let caption = "pic"
+
+        let result = try await interactor.sendImage(
+            groupID: groupID, imageData: imageData, caption: caption
+        )
+
+        let encodedProof = try XCTUnwrap(
+            result.moderationAuthenticityProof,
+            "an image send must carry a proof — without one the photo is unreportable in principle"
+        )
+        let proof = try XCTUnwrap(Data(base64Encoded: encodedProof))
+        let publicKey = try Curve25519.Signing.PublicKey(rawRepresentation: mySendingPubkey)
+        let attachment = try XCTUnwrap(result.imageAttachment)
+        let encoded = try XCTUnwrap(ChatImageEncoder.encode(fromImageData: imageData))
+
+        let preimage = try ChatModerationProof.signedContent(
+            messageID: result.id,
+            groupID: groupID,
+            groupSecret: Data(repeating: 0x55, count: 32),  // seedGroup's secret
+            sentAtMillis: ChatModerationProof.sentAtMillis(from: result.sentAt),
+            body: caption,
+            media: [ChatModerationProof.MediaCommitment(
+                blobSha256: attachment.sha256,
+                mimeType: "image/jpeg",
+                plaintextSha256: ChatImageCrypto.sha256Hex(encoded.jpeg),
+                plaintextByteLength: encoded.jpeg.count,
+                width: encoded.width,
+                height: encoded.height
+            )]
+        )
+        XCTAssertTrue(publicKey.isValidSignature(proof, for: Data(preimage.utf8)))
+
+        // The caption alone must NOT verify. This is the whole point:
+        // a proof that covered only the caption would let an Authority
+        // believe it had authenticated a photo it had no commitment to.
+        let captionOnly = try ChatModerationProof.signedContent(
+            messageID: result.id,
+            groupID: groupID,
+            groupSecret: Data(repeating: 0x55, count: 32),
+            sentAtMillis: ChatModerationProof.sentAtMillis(from: result.sentAt),
+            body: caption
+        )
+        XCTAssertFalse(publicKey.isValidSignature(proof, for: Data(captionOnly.utf8)))
+
+        let stored = await messages.currentMessages(groupID: groupID, owner: currentIdentityID)
+        XCTAssertEqual(stored.first?.moderationAuthenticityProof, encodedProof)
+    }
+
+    func test_sendVoice_signsTheAudioBytes() async throws {
+        // Voice evidence is not accepted by any Authority yet, but the
+        // commitment is only creatable at send time — so it is made now
+        // rather than stranding today's sends behind a future version.
+        let groupID = await seedGroupWithTwoPeers()
+        let sut = makeVoiceInteractor { _ in Self.cannedVoiceEncoded() }
+
+        let result = try await sut.sendVoice(
+            groupID: groupID, audioURL: Self.dummyVoiceURL()
+        )
+
+        let encodedProof = try XCTUnwrap(result.moderationAuthenticityProof)
+        let proof = try XCTUnwrap(Data(base64Encoded: encodedProof))
+        let publicKey = try Curve25519.Signing.PublicKey(rawRepresentation: mySendingPubkey)
+        let empty = try ChatModerationProof.signedContent(
+            messageID: result.id,
+            groupID: groupID,
+            groupSecret: Data(repeating: 0x55, count: 32),
+            sentAtMillis: ChatModerationProof.sentAtMillis(from: result.sentAt),
+            body: ""
+        )
+        XCTAssertFalse(publicKey.isValidSignature(proof, for: Data(empty.utf8)),
+                       "a voice proof must commit to the audio, not just an empty body")
+    }
+
     func test_send_skipsSelfRecipient() async throws {
         // Even though our profile is in memberProfiles, we must not
         // send a copy to our own inbox.

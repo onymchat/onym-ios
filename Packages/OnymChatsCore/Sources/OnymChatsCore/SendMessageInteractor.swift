@@ -157,24 +157,13 @@ public actor SendMessageInteractor {
         // message. Best-effort by design: a signing failure ships the
         // message without a proof (recipients just can't report it)
         // rather than adding a crypto dependency to every text send.
-        let moderationAuthenticityProof: String?
-        do {
-            moderationAuthenticityProof = try await identity.signWithStellarKey(
-                Data(ChatModerationProof.signedContent(
-                    messageID: messageID,
-                    groupID: groupID,
-                    groupSecret: group.groupSecret,
-                    sentAtMillis: sentAtMillis,
-                    body: body
-                ).utf8)
-            ).base64EncodedString()
-        } catch {
-            // A systematic failure (e.g. keychain) must be visible in
-            // diagnostics. Error only — no message/group identifiers,
-            // per the no-activity-logging policy.
-            Self.logger.error("moderation proof signing failed: \(error, privacy: .private)")
-            moderationAuthenticityProof = nil
-        }
+        let moderationAuthenticityProof = await moderationProof(
+            messageID: messageID,
+            groupID: groupID,
+            groupSecret: group.groupSecret,
+            sentAtMillis: sentAtMillis,
+            body: body
+        )
         let payload = ChatMessagePayload(
             version: 1,
             messageID: messageID,
@@ -246,6 +235,47 @@ public actor SendMessageInteractor {
         )
     }
 
+    /// Sign the moderation proof preimage for one send.
+    ///
+    /// Best-effort by design, matching the text path this was factored
+    /// out of: a signing failure ships the message without a proof —
+    /// recipients just can't report it — rather than making every send
+    /// depend on the keychain succeeding.
+    ///
+    /// Passing a non-empty `media` produces a v2 preimage committing to
+    /// those exact bytes. Every media send supplies it, including video,
+    /// album, and voice, whose evidence the Authority does not accept
+    /// yet: the commitment is only creatable at send time, so omitting
+    /// it now would make today's sends permanently unauthenticable and
+    /// force a third preimage version later.
+    private func moderationProof(
+        messageID: UUID,
+        groupID: String,
+        groupSecret: Data,
+        sentAtMillis: Int64,
+        body: String,
+        media: [ChatModerationProof.MediaCommitment] = []
+    ) async -> String? {
+        do {
+            return try await identity.signWithStellarKey(
+                Data(ChatModerationProof.signedContent(
+                    messageID: messageID,
+                    groupID: groupID,
+                    groupSecret: groupSecret,
+                    sentAtMillis: sentAtMillis,
+                    body: body,
+                    media: media
+                ).utf8)
+            ).base64EncodedString()
+        } catch {
+            // A systematic failure (e.g. keychain) must be visible in
+            // diagnostics. Error only — no message/group identifiers,
+            // per the no-activity-logging policy.
+            Self.logger.error("moderation proof signing failed: \(error, privacy: .private)")
+            return nil
+        }
+    }
+
     /// Send an image message. Encodes + AES-GCM-encrypts the image, then
     /// inserts the optimistic bubble **before** the upload so the sender
     /// sees the image immediately (rendered from the primed plaintext)
@@ -313,6 +343,21 @@ public actor SendMessageInteractor {
 
         let messageID = UUID()
         let sentAtMillis = Int64(now.timeIntervalSince1970 * 1000)
+        let moderationAuthenticityProof = await moderationProof(
+            messageID: messageID,
+            groupID: groupID,
+            groupSecret: group.groupSecret,
+            sentAtMillis: sentAtMillis,
+            body: caption,
+            media: [ChatModerationProof.MediaCommitment(
+                blobSha256: sealed.sha256Hex,
+                mimeType: "image/jpeg",
+                plaintextSha256: ChatImageCrypto.sha256Hex(encoded.jpeg),
+                plaintextByteLength: encoded.jpeg.count,
+                width: encoded.width,
+                height: encoded.height
+            )]
+        )
         let payload = ChatMessagePayload(
             version: 1,
             messageID: messageID,
@@ -321,7 +366,8 @@ public actor SendMessageInteractor {
             sentAtMillis: sentAtMillis,
             replyToMessageID: nil,
             variant: variant,
-            attachment: attachment
+            attachment: attachment,
+            moderationAuthenticityProof: moderationAuthenticityProof
         )
         let pending = ChatMessage(
             id: messageID,
@@ -329,11 +375,15 @@ public actor SendMessageInteractor {
             ownerIdentityID: group.ownerIdentityID,
             senderBlsPubkeyHex: myBlsHex,
             body: caption,
-            sentAt: now,
+            // From the wire millis, not the raw `now`: the proof signs
+            // the truncated value, so the stored date must reconstruct
+            // exactly what every recipient derives.
+            sentAt: Date(timeIntervalSince1970: TimeInterval(sentAtMillis) / 1000.0),
             direction: .outgoing,
             status: .pending,
             replyToMessageID: nil,
             groupType: group.groupType,
+            moderationAuthenticityProof: moderationAuthenticityProof,
             imageAttachment: attachment
         )
         // Optimistic insert BEFORE the upload — the bubble appears
@@ -441,6 +491,33 @@ public actor SendMessageInteractor {
 
         let messageID = UUID()
         let sentAtMillis = Int64(now.timeIntervalSince1970 * 1000)
+        // Poster first, then the video — the same order they upload in,
+        // and the order is inside the signed bytes.
+        let moderationAuthenticityProof = await moderationProof(
+            messageID: messageID,
+            groupID: groupID,
+            groupSecret: group.groupSecret,
+            sentAtMillis: sentAtMillis,
+            body: caption,
+            media: [
+                ChatModerationProof.MediaCommitment(
+                    blobSha256: posterSealed.sha256Hex,
+                    mimeType: "image/jpeg",
+                    plaintextSha256: ChatImageCrypto.sha256Hex(encoded.poster.jpeg),
+                    plaintextByteLength: encoded.poster.jpeg.count,
+                    width: encoded.poster.width,
+                    height: encoded.poster.height
+                ),
+                ChatModerationProof.MediaCommitment(
+                    blobSha256: videoSealed.sha256Hex,
+                    mimeType: "video/mp4",
+                    plaintextSha256: ChatImageCrypto.sha256Hex(encoded.mp4),
+                    plaintextByteLength: encoded.mp4.count,
+                    width: encoded.width,
+                    height: encoded.height
+                ),
+            ]
+        )
         let payload = ChatMessagePayload(
             version: 1,
             messageID: messageID,
@@ -449,7 +526,8 @@ public actor SendMessageInteractor {
             sentAtMillis: sentAtMillis,
             replyToMessageID: nil,
             variant: variant,
-            videoAttachment: videoAttachment
+            videoAttachment: videoAttachment,
+            moderationAuthenticityProof: moderationAuthenticityProof
         )
         let pending = ChatMessage(
             id: messageID,
@@ -457,11 +535,12 @@ public actor SendMessageInteractor {
             ownerIdentityID: group.ownerIdentityID,
             senderBlsPubkeyHex: myBlsHex,
             body: caption,
-            sentAt: now,
+            sentAt: Date(timeIntervalSince1970: TimeInterval(sentAtMillis) / 1000.0),
             direction: .outgoing,
             status: .pending,
             replyToMessageID: nil,
             groupType: group.groupType,
+            moderationAuthenticityProof: moderationAuthenticityProof,
             videoAttachment: videoAttachment
         )
         // Optimistic insert BEFORE upload.
@@ -532,6 +611,11 @@ public actor SendMessageInteractor {
         var items: [ChatMediaAttachment] = []
         var uploads: [(Data, String)] = []
         var shas: [String] = []
+        // Accumulated in lockstep with `uploads`/`shas`, so the signed
+        // media order is the album's own order. A skipped item is absent
+        // from both, which keeps the commitment describing exactly what
+        // was sent rather than what was picked.
+        var commitments: [ChatModerationProof.MediaCommitment] = []
         for source in sources {
             switch source {
             case .image(let data):
@@ -547,6 +631,14 @@ public actor SendMessageInteractor {
                 items.append(.image(attachment))
                 uploads.append((sealed.blob, "image/jpeg"))
                 shas.append(sealed.sha256Hex)
+                commitments.append(ChatModerationProof.MediaCommitment(
+                    blobSha256: sealed.sha256Hex,
+                    mimeType: "image/jpeg",
+                    plaintextSha256: ChatImageCrypto.sha256Hex(encoded.jpeg),
+                    plaintextByteLength: encoded.jpeg.count,
+                    width: encoded.width,
+                    height: encoded.height
+                ))
             case .video(let url):
                 guard let encoded = await videoEncoder(url),
                       let posterSealed = try? ChatImageCrypto.seal(encoded.poster.jpeg),
@@ -572,6 +664,22 @@ public actor SendMessageInteractor {
                 uploads.append((videoSealed.blob, "video/mp4"))
                 shas.append(posterSealed.sha256Hex)
                 shas.append(videoSealed.sha256Hex)
+                commitments.append(ChatModerationProof.MediaCommitment(
+                    blobSha256: posterSealed.sha256Hex,
+                    mimeType: "image/jpeg",
+                    plaintextSha256: ChatImageCrypto.sha256Hex(encoded.poster.jpeg),
+                    plaintextByteLength: encoded.poster.jpeg.count,
+                    width: encoded.poster.width,
+                    height: encoded.poster.height
+                ))
+                commitments.append(ChatModerationProof.MediaCommitment(
+                    blobSha256: videoSealed.sha256Hex,
+                    mimeType: "video/mp4",
+                    plaintextSha256: ChatImageCrypto.sha256Hex(encoded.mp4),
+                    plaintextByteLength: encoded.mp4.count,
+                    width: encoded.width,
+                    height: encoded.height
+                ))
             }
         }
         guard !items.isEmpty else { throw SendError.imageEncodeFailed }
@@ -583,6 +691,14 @@ public actor SendMessageInteractor {
         let singleImage: ChatImageAttachment? = items.count == 1 ? items[0].asImage : nil
         let singleVideo: ChatVideoAttachment? = items.count == 1 ? items[0].asVideo : nil
         let album: [ChatMediaAttachment]? = items.count > 1 ? items : nil
+        let moderationAuthenticityProof = await moderationProof(
+            messageID: messageID,
+            groupID: groupID,
+            groupSecret: group.groupSecret,
+            sentAtMillis: sentAtMillis,
+            body: caption,
+            media: commitments
+        )
         let payload = ChatMessagePayload(
             version: 1,
             messageID: messageID,
@@ -593,13 +709,16 @@ public actor SendMessageInteractor {
             variant: variant,
             attachment: singleImage,
             videoAttachment: singleVideo,
-            attachments: album
+            attachments: album,
+            moderationAuthenticityProof: moderationAuthenticityProof
         )
         let pending = ChatMessage(
             id: messageID, groupID: groupID, ownerIdentityID: group.ownerIdentityID,
-            senderBlsPubkeyHex: myBlsHex, body: caption, sentAt: now,
+            senderBlsPubkeyHex: myBlsHex, body: caption,
+            sentAt: Date(timeIntervalSince1970: TimeInterval(sentAtMillis) / 1000.0),
             direction: .outgoing, status: .pending, replyToMessageID: nil,
             groupType: group.groupType,
+            moderationAuthenticityProof: moderationAuthenticityProof,
             imageAttachment: singleImage, videoAttachment: singleVideo,
             albumAttachments: album
         )
@@ -683,6 +802,21 @@ public actor SendMessageInteractor {
 
         let messageID = UUID()
         let sentAtMillis = Int64(now.timeIntervalSince1970 * 1000)
+        // No width/height: those keys are absent from the preimage for
+        // audio rather than carrying a placeholder value.
+        let moderationAuthenticityProof = await moderationProof(
+            messageID: messageID,
+            groupID: groupID,
+            groupSecret: group.groupSecret,
+            sentAtMillis: sentAtMillis,
+            body: "",
+            media: [ChatModerationProof.MediaCommitment(
+                blobSha256: sealed.sha256Hex,
+                mimeType: "audio/mp4",
+                plaintextSha256: ChatImageCrypto.sha256Hex(encoded.m4a),
+                plaintextByteLength: encoded.m4a.count
+            )]
+        )
         let payload = ChatMessagePayload(
             version: 1,
             messageID: messageID,
@@ -691,7 +825,8 @@ public actor SendMessageInteractor {
             sentAtMillis: sentAtMillis,
             replyToMessageID: nil,
             variant: variant,
-            voiceAttachment: voiceAttachment
+            voiceAttachment: voiceAttachment,
+            moderationAuthenticityProof: moderationAuthenticityProof
         )
         let pending = ChatMessage(
             id: messageID,
@@ -699,11 +834,12 @@ public actor SendMessageInteractor {
             ownerIdentityID: group.ownerIdentityID,
             senderBlsPubkeyHex: myBlsHex,
             body: "",
-            sentAt: now,
+            sentAt: Date(timeIntervalSince1970: TimeInterval(sentAtMillis) / 1000.0),
             direction: .outgoing,
             status: .pending,
             replyToMessageID: nil,
             groupType: group.groupType,
+            moderationAuthenticityProof: moderationAuthenticityProof,
             voiceAttachment: voiceAttachment
         )
         // Optimistic insert BEFORE the upload.
