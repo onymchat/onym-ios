@@ -207,7 +207,7 @@ public actor ModerationRepository {
     private var caseStatusTasks: [CaseStatusKey: Task<CaseStatus, Error>] = [:]
     private var caseResponseTasks: [CaseSubmissionKey: Task<CaseResponseReceipt, Error>] = [:]
     private var caseAppealTasks: [CaseSubmissionKey: Task<AppealReceipt, Error>] = [:]
-    private var refreshTask: Task<Void, Error>?
+    private var refreshTask: Task<[AuthorityListing], Error>?
     private var termsCheckTask: Task<Void, Never>?
     /// Last authenticated, consentable manifest seen for an authority,
     /// and the authority the directory has stopped listing. Each holds
@@ -266,7 +266,20 @@ public actor ModerationRepository {
                 // published/persisted by their individual operations.
                 // A later consent attempt resumes safely.
             }
+            await self.checkTermsIfNotYetEstablished()
         }
+    }
+
+    /// An install whose active mandate only appears when a pending
+    /// registration resolves has already missed the launch terms check,
+    /// which returned immediately on finding no active record. Nothing
+    /// else re-triggers one, so those installs would run unchecked
+    /// until the next foreground. Narrow by design: it does nothing
+    /// when a check has already produced an answer for the record that
+    /// is active now.
+    private func checkTermsIfNotYetEstablished() async {
+        guard activeMandateRecord() != nil, termsCurrency == .unknown else { return }
+        await refreshActiveTerms()
     }
 
     /// Fetch the latest directory. Throws so consent UI can surface
@@ -278,27 +291,54 @@ public actor ModerationRepository {
     /// `.failed` land after a winner's `.success` and put a spurious
     /// "Couldn't load the authority list." under the onboarding picker.
     public func refresh() async throws {
+        _ = try await refreshedAuthorities()
+    }
+
+    /// `refresh()` for callers that need to act on the list it fetched.
+    /// The list comes back as a value rather than being read off the
+    /// actor afterwards: with fetches coalesced, another caller can
+    /// start a new one in the suspension between this task finishing
+    /// and its awaiter resuming, so `fetchStatus` at that point may
+    /// describe a fetch that has nothing to do with this call.
+    @discardableResult
+    private func refreshedAuthorities() async throws -> [AuthorityListing] {
         if let task = refreshTask {
             return try await task.value
         }
         let task = Task { try await self.performRefresh() }
         refreshTask = task
-        try await task.value
+        return try await task.value
     }
 
-    private func performRefresh() async throws {
-        fetchStatus = .fetching
-        publish()
+    private func performRefresh() async throws -> [AuthorityListing] {
+        // A list already on screen is not replaced by a spinner for a
+        // background re-read, and is not replaced by an error if that
+        // read fails. The terms check re-reads the directory on every
+        // foreground, and without this the consent picker — which is
+        // exactly what is on screen when the re-consent gate is up —
+        // would flicker through its loading and failure affordances on
+        // each resume.
+        let hadList = fetchStatus == .success
+        if !hadList {
+            fetchStatus = .fetching
+            publish()
+        }
         do {
             authorities = try await authoritiesFetcher.fetchLatest()
             fetchStatus = .success
         } catch {
-            fetchStatus = .failed(message: String(localized: "Couldn't load the authority list."))
             // Cleared before the task's value becomes available, so a
             // caller that arrives while this one is finishing starts a
             // fresh fetch instead of awaiting a settled one.
             refreshTask = nil
-            publish()
+            if hadList {
+                Self.logger.debug("directory re-read failed; keeping the list already loaded")
+            } else {
+                fetchStatus = .failed(
+                    message: String(localized: "Couldn't load the authority list.")
+                )
+                publish()
+            }
             throw error
         }
         refreshTask = nil
@@ -312,6 +352,7 @@ public actor ModerationRepository {
         // remedy on screen.
         reconcileDirectoryWithActiveMandate()
         publish()
+        return authorities
     }
 
     private func reconcileDirectoryWithActiveMandate() {
@@ -374,8 +415,7 @@ public actor ModerationRepository {
         // cold-start-only discovery and pins the check to a key that
         // may since have rotated. Callers share one fetch, so a
         // foreground that races the launch check costs nothing.
-        try? await refresh()
-        guard fetchStatus == .success else { return }
+        guard let listings = try? await refreshedAuthorities() else { return }
 
         // Listing and delisting were both settled by the refresh above,
         // which reconciles them for every caller. Presence is the same
@@ -385,7 +425,7 @@ public actor ModerationRepository {
         // momentarily fails to fetch showing "Authority Unavailable",
         // offering only the remedy of switching away from an authority
         // the directory does list.
-        guard let listing = authorities.first(where: {
+        guard let listing = listings.first(where: {
             $0.componentId == record.mandate.authority
         }) else { return }
 
@@ -531,29 +571,6 @@ public actor ModerationRepository {
         // pinned by a signed mandate.
         try manifestValidator.validateForConsent(signedManifest, now: clock())
 
-        // These bytes were fetched, authenticated, and validated moments
-        // ago, so they are the freshest observation this repository has
-        // of what this authority publishes. Recording it here — before
-        // any of the paths below activate a record — is what lets
-        // currency stay derived: whichever record ends up active is
-        // compared against this, and consenting to current terms comes
-        // out `.current` without anyone having to say so.
-        //
-        // Only for the authority the active mandate already names. The
-        // other remedy the re-consent copy offers is moving to a
-        // different authority, and an observation about *that* one
-        // makes the derived currency `.unknown` — dropping the
-        // undismissable gate while this method is still enrolling and
-        // signing. A failure after that point would return the user to
-        // the app under the stale mandate, ungated, without ever
-        // showing the signing error. The gate must stay up until a new
-        // record is actually active, and with the observation withheld
-        // it does: currency keeps reading the old record against the
-        // old authority's published hash.
-        if listing.componentId == activeMandateRecord()?.mandate.authority {
-            notePublishedManifest(signedManifest.manifestHash, for: listing.componentId)
-        }
-
         // Resolve every older ambiguous registration for this Authority
         // before minting under newly reviewed terms. A manifest rotation
         // must not orphan hidden pending bytes or create a replacement
@@ -564,7 +581,7 @@ public actor ModerationRepository {
                 && $0.registrationPending
         }) {
             if pending.mandate.manifestHash == signedManifest.manifestHash {
-                return try await registerPending(pending, with: listing, activate: true)
+                return try await activate(pending, with: listing, publishing: signedManifest)
             }
             do {
                 _ = try await registerPending(pending, with: listing, activate: false)
@@ -668,7 +685,7 @@ public actor ModerationRepository {
             records.insert(record, at: 0)
             mandateStore.save(records)
             publish()
-            return try await registerPending(record, with: listing, activate: true)
+            return try await activate(record, with: listing, publishing: signedManifest)
         }
 
         // Deactivate the previous active record without touching
@@ -680,8 +697,45 @@ public actor ModerationRepository {
         }
         records.insert(record, at: 0)
         mandateStore.save(records)
+        noteConsentedManifest(signedManifest, for: listing)
         publish()
         return record
+    }
+
+    /// Register a pending record and, once it is actually the active
+    /// one, record the manifest it consented to.
+    ///
+    /// The observation belongs *at* activation, not before it. Recorded
+    /// earlier, it would drop the undismissable gate while this method
+    /// is still enrolling and signing — a failure after that point
+    /// returns the user to the app under the stale mandate, ungated,
+    /// never seeing the error. Recorded earlier but withheld for other
+    /// authorities (the previous shape of this) it would survive a
+    /// switch away and describe an authority no record names, ready to
+    /// fire a false `.superseded` against a stale hash if the user ever
+    /// switched back. Tying it to activation gives both properties for
+    /// free: no observation outlives the record it describes, and none
+    /// exists before one does.
+    private func activate(
+        _ record: MandateRecord,
+        with listing: AuthorityListing,
+        publishing signedManifest: SignedManifest
+    ) async throws -> MandateRecord {
+        let activated = try await registerPending(record, with: listing, activate: true)
+        noteConsentedManifest(signedManifest, for: listing)
+        return activated
+    }
+
+    /// These bytes were fetched, authenticated, and validated moments
+    /// ago, so they are the freshest observation this repository has of
+    /// what the authority publishes — and the record that just became
+    /// active pins them, so derived currency reads `.current` without
+    /// anyone having to say so.
+    private func noteConsentedManifest(
+        _ signedManifest: SignedManifest,
+        for listing: AuthorityListing
+    ) {
+        notePublishedManifest(signedManifest.manifestHash, for: listing.componentId)
     }
 
     // MARK: - Read

@@ -83,31 +83,17 @@ struct RootView: View {
                 tabs
             }
         }
-        .task { dependencies.moderationGateFlow.start() }
+        .task {
+            dependencies.moderationGateFlow.start()
+            // The gate can already be decided by the time this view
+            // appears, and `onChange` alone would never present for a
+            // value that never changes.
+            consentPresentation = Self.presentation(
+                for: dependencies.moderationGateFlow.gate
+            )
+        }
         .onChange(of: dependencies.moderationGateFlow.gate) { _, gate in
-            let next = Self.presentation(for: gate)
-            guard next?.id != consentPresentation?.id else { return }
-            guard consentPresentation != nil, next != nil else {
-                consentPresentation = next
-                return
-            }
-            // One gate replacing another while a cover is already up
-            // (terms change, then the authority leaves the directory).
-            // `fullScreenCover(item:)` is not dependable about
-            // re-presenting on an identity change alone, and the failure
-            // is silent — the old reason and old flow stay on screen.
-            // Dismissing first makes the swap explicit.
-            consentPresentation = nil
-            Task { @MainActor in
-                // Re-derive rather than replaying the captured value:
-                // the gate can move again before this turn runs (the
-                // stale mandate resolving, a swap back), and applying a
-                // superseded decision would put an undismissable cover
-                // back over an app that no longer needs one.
-                consentPresentation = Self.presentation(
-                    for: dependencies.moderationGateFlow.gate
-                )
-            }
+            consentPresentation = Self.presentation(for: gate)
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
@@ -115,9 +101,19 @@ struct RootView: View {
             }
         }
         .fullScreenCover(item: $consentPresentation) { presentation in
+            // `.id` rather than a dismiss-and-re-present dance: one gate
+            // can replace another while the cover is up (terms change,
+            // then the authority leaves the directory), and
+            // `fullScreenCover(item:)` is not dependable about rebuilding
+            // on an identity change alone. Taking the cover down and
+            // putting it back lands inside the dismiss animation, where
+            // the likely outcome is no cover at all — an ungated app,
+            // strictly worse than a stale reason. This rebuilds the view
+            // and its flow in place instead.
             ModerationConsentView(
                 flow: dependencies.makeModerationConsentFlow(presentation.mode)
             )
+            .id(presentation.id)
         }
     }
 
