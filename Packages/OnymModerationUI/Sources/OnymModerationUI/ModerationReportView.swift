@@ -26,6 +26,8 @@ public struct ModerationReportView: View {
                         success(receipt)
                     } else if flow.state.alreadyFiled {
                         alreadyFiled
+                    } else if hasUndisplayableImage {
+                        unrenderablePhoto
                     } else {
                         reportForm
                     }
@@ -53,6 +55,33 @@ public struct ModerationReportView: View {
         flow.state.receipt != nil || flow.state.alreadyFiled
     }
 
+    /// Whether any disclosed photo cannot be drawn on this device.
+    ///
+    /// Computed once here rather than per row, because it gates the
+    /// whole form: the invariant this screen exists to uphold is that
+    /// the reporter sees exactly what they are about to send. A row
+    /// that quietly renders nothing while Submit still uploads the
+    /// bytes inverts it — the user would be disclosing a picture they
+    /// were never shown. Refusing to present is the safe direction.
+    private var hasUndisplayableImage: Bool {
+        flow.message.images.contains { UIImage(data: $0.bytes) == nil }
+    }
+
+    private var unrenderablePhoto: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 44))
+                .foregroundStyle(.orange)
+            Text("This photo can't be displayed.")
+                .font(.title3.weight(.semibold))
+            Text("Onym won't send a photo it can't show you first — you'd be disclosing something you haven't seen. Try opening the photo in the conversation, then reporting it again.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityIdentifier("moderation.report.photoUnavailable")
+    }
+
     private var alreadyFiled: some View {
         VStack(alignment: .leading, spacing: 16) {
             Image(systemName: "checkmark.shield.fill")
@@ -78,16 +107,18 @@ public struct ModerationReportView: View {
                 // will be uploaded — not a thumbnail or a re-fetch.
                 // What the reporter agrees to disclose and what leaves
                 // the device must be the same thing.
-                ForEach(Array(flow.message.images.enumerated()), id: \.element.sha256) { _, image in
-                    if let rendered = UIImage(data: image.bytes) {
-                        Image(uiImage: rendered)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxWidth: .infinity, maxHeight: 260)
-                            .clipShape(RoundedRectangle(cornerRadius: 14))
-                            .accessibilityLabel("The photo you are disclosing")
-                            .accessibilityIdentifier("moderation.report.photo")
-                    }
+                // Force-unwrapped deliberately: the form is only reached
+                // when every image decodes, checked above. A silent
+                // fallback here is what would let an unseen photo be
+                // disclosed.
+                ForEach(flow.message.images, id: \.sha256) { image in
+                    Image(uiImage: UIImage(data: image.bytes) ?? UIImage())
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity, maxHeight: 260)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                        .accessibilityLabel("The photo you are disclosing")
+                        .accessibilityIdentifier("moderation.report.photo")
                 }
                 if !flow.message.displayBody.isEmpty || flow.message.images.isEmpty {
                     Text(flow.message.displayBody)

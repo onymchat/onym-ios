@@ -130,6 +130,10 @@ public struct ChatThreadView: View {
     /// hands the controller fresh data via `updateUIViewController`.
     @State private var messages: [ChatMessage] = []
     @State private var reportableMessage: ReportableMessage?
+    /// The message whose disclosure is being prepared, if any. Doubles
+    /// as the in-flight indicator and the repeat-tap guard.
+    @State private var preparingReportFor: UUID?
+    @State private var reportUnavailable = false
 
     public var body: some View {
         ChatThreadControllerBridge(
@@ -175,9 +179,32 @@ public struct ChatThreadView: View {
             onReportRequested: { message in
                 // A photo's disclosure needs its decrypted bytes, which
                 // come from an actor, so this is async even though the
-                // menu predicate above is not. Nothing is presented
-                // until the bytes verify against what the sender signed.
-                Task { reportableMessage = await makeReportableMessage(from: message) }
+                // menu predicate above is not. For an uncached photo
+                // that is a blob download and a decrypt — seconds, not
+                // milliseconds — so the tap gets a visible state rather
+                // than an unexplained pause.
+                //
+                // Guarded against repeat taps: the menu predicate is
+                // deliberately optimistic about photos, so a slow or
+                // failing preparation is a normal path here, and a
+                // second tap would otherwise queue a second sheet that
+                // arrives after the user has moved on.
+                guard preparingReportFor == nil else { return }
+                preparingReportFor = message.id
+                Task {
+                    let prepared = await makeReportableMessage(from: message)
+                    guard preparingReportFor == message.id else { return }
+                    preparingReportFor = nil
+                    if let prepared {
+                        reportableMessage = prepared
+                    } else {
+                        // Nothing is presented when the bytes cannot be
+                        // produced or do not match what the sender
+                        // signed. Saying so is the point: silence would
+                        // read as the app ignoring the tap.
+                        reportUnavailable = true
+                    }
+                }
             },
             imageLoader: imageLoader,
             scrollToMessageID: scrollToMessageID,
@@ -282,6 +309,22 @@ public struct ChatThreadView: View {
         }
         .sheet(item: $reportableMessage) { message in
             makeModerationReportView(message)
+        }
+        .overlay {
+            if preparingReportFor != nil {
+                ZStack {
+                    Color.black.opacity(0.2).ignoresSafeArea()
+                    ProgressView("Preparing report…")
+                        .padding(20)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+                }
+                .accessibilityIdentifier("chat.report.preparing")
+            }
+        }
+        .alert("This message can't be reported", isPresented: $reportUnavailable) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Onym couldn't confirm the sender signed this exact content. That can happen if the photo hasn't finished downloading, or if it was sent before Onym started signing attachments.")
         }
         // The chat screen uses the standard SwiftUI navigation bar (its
         // system back button is the only "back" affordance — the UIKit

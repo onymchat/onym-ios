@@ -49,7 +49,7 @@ enum ReportableMessageFactory {
         else { return false }
 
         if message.imageAttachment != nil {
-            return message.media.count <= 1
+            return true
         }
         return make(
             from: message,
@@ -85,7 +85,6 @@ enum ReportableMessageFactory {
         // ones the sender committed to.
         if let attachment = message.imageAttachment {
             guard let bytes = attachmentBytes,
-                  message.media.count <= 1,
                   let commitment = try? commitment(for: attachment, bytes: bytes),
                   let disclosedContent = try? ChatModerationProof.signedContent(
                     messageID: message.id,

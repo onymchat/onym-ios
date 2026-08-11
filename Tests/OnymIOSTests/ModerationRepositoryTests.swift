@@ -1023,6 +1023,85 @@ final class ModerationRepositoryTests: XCTestCase {
         XCTAssertTrue(authority.reports.isEmpty)
     }
 
+    /// A deterministic upload rejection must go through the same
+    /// discard as a deterministic filing rejection.
+    ///
+    /// The record is inserted and persisted before submission, so an
+    /// upload failure that skipped the discard would leave a disclosure
+    /// row on disk that can never be filed and re-fails identically on
+    /// every retry — the exact outcome the discard exists to prevent.
+    func testADeterministicUploadRejectionDiscardsTheReport() async throws {
+        let componentId = "onym:component:a"
+        let bytes = manifestBytes(componentId: componentId)
+        let authority = RecordingAuthorityClient()
+        authority.failUploads(with: AuthorityClientError.rejected(AuthorityRejection(
+            statusCode: 415,
+            rawCode: "media_unsupported",
+            message: "not an image this authority accepts"
+        )))
+        let reportStore = InMemoryReportFilingStore()
+        let repository = makeRepository(
+            listings: [listing(componentId, name: "A")],
+            bytesByComponent: [componentId: bytes],
+            backend: RecordingBackend(),
+            authorityClient: authority,
+            store: InMemoryMandateStore(records: [activeRecord(componentId: componentId, bytes: bytes)]),
+            reportStore: reportStore
+        )
+        try await repository.refresh()
+        let message = try reportableMessage(images: [ReportableMessage.Image(
+            sha256: "digest-of-the-photo",
+            bytes: Data("bytes".utf8),
+            width: 10,
+            height: 10
+        )])
+
+        do {
+            _ = try await repository.fileReport(message: message, classId: "csam")
+            XCTFail("an unsupported image must not file a report")
+        } catch {}
+
+        XCTAssertTrue(authority.reports.isEmpty)
+        XCTAssertTrue(
+            reportStore.load().isEmpty,
+            "a report that can never be filed must not be retained on disk"
+        )
+    }
+
+    /// A conflict on a content-addressed upload is agreement, not a
+    /// rejection: the Authority already holds these exact bytes and
+    /// there is nothing to resend. Filing must proceed.
+    func testAnUploadConflictIsTreatedAsAgreementAndFilingProceeds() async throws {
+        let componentId = "onym:component:a"
+        let bytes = manifestBytes(componentId: componentId)
+        let authority = RecordingAuthorityClient()
+        authority.failUploads(with: AuthorityClientError.rejected(AuthorityRejection(
+            statusCode: 409,
+            rawCode: "already_stored",
+            message: "these bytes are already on file"
+        )))
+        let repository = makeRepository(
+            listings: [listing(componentId, name: "A")],
+            bytesByComponent: [componentId: bytes],
+            backend: RecordingBackend(),
+            authorityClient: authority,
+            store: InMemoryMandateStore(records: [activeRecord(componentId: componentId, bytes: bytes)]),
+            reportStore: InMemoryReportFilingStore()
+        )
+        try await repository.refresh()
+        let message = try reportableMessage(images: [ReportableMessage.Image(
+            sha256: "digest-of-the-photo",
+            bytes: Data("bytes".utf8),
+            width: 10,
+            height: 10
+        )])
+
+        let receipt = try await repository.fileReport(message: message, classId: "csam")
+
+        XCTAssertEqual(receipt.caseId, "case-1")
+        XCTAssertEqual(authority.reports.count, 1, "an upload conflict must not block filing")
+    }
+
     func testFileReportSendsAccusedSignedMessageUnderActiveMandate() async throws {
         let componentId = "onym:component:a"
         let bytes = manifestBytes(componentId: componentId)

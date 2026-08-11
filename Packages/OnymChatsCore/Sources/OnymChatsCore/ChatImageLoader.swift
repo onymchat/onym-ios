@@ -94,7 +94,13 @@ public actor ChatImageLoader {
         cacheDir.appendingPathComponent(key).appendingPathExtension("img")
     }
 
+    /// Atomic, because a half-written cache file is no longer only a
+    /// broken thumbnail. `plaintext(for:)` hands these bytes back
+    /// verbatim as evidence, so a truncated file hashes to the wrong
+    /// digest, fails its commitment check, and makes the photo
+    /// permanently unreportable — with the picture still rendering fine
+    /// from whatever decoded.
     private func writeDisk(_ key: String, _ data: Data) {
-        try? data.write(to: fileURL(key), options: .completeFileProtection)
+        try? data.write(to: fileURL(key), options: [.atomic, .completeFileProtection])
     }
 }
