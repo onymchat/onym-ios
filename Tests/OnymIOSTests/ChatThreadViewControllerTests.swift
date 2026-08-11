@@ -937,6 +937,37 @@ final class ChatThreadViewControllerTests: XCTestCase {
         XCTAssertEqual(tableView(in: vc)?.alpha, 1)
     }
 
+    /// The production sequence, which the previous two tests both missed:
+    /// the same request list arrives twice, `messagesLoaded` false then
+    /// true, because the host's flag only flips after the first render.
+    ///
+    /// The second call is the only one allowed to reveal and the only one
+    /// the unchanged-guard short-circuits, so deciding the reveal after
+    /// that guard left the table blank with the empty state suppressed.
+    func test_requestPushedBeforeTheLoadFlag_isStillRevealedOnTheSecondPass() {
+        let vc = ChatThreadViewController()
+        vc.loadViewIfNeeded()
+        let request = makeRequest(id: "r1")
+
+        // Call one: the row exists, but nothing knows the thread is empty
+        // rather than unloaded.
+        vc.update(messages: [])
+        vc.update(joinRequests: [request], messagesLoaded: false)
+        settle()
+        XCTAssertEqual(tableView(in: vc)?.alpha, 0)
+        XCTAssertTrue(emptyStateView(in: vc)?.isHidden ?? false,
+                      "the row is content, so the empty state is already gone")
+
+        // Call two: identical list, and now the flag says the thread is
+        // genuinely empty.
+        vc.update(joinRequests: [request], messagesLoaded: true)
+        settle()
+
+        XCTAssertEqual(tableView(in: vc)?.alpha, 1,
+                       "an unchanged list must not cost the reveal")
+        XCTAssertEqual(tableView(in: vc)?.numberOfRows(inSection: 0), 1)
+    }
+
     private func settle() {
         RunLoop.current.run(until: Date().addingTimeInterval(0.05))
     }

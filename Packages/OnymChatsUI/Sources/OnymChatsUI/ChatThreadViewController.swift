@@ -350,7 +350,29 @@ final class ChatThreadViewController: UIViewController {
             ids.append(id)
             byID[id] = request
         }
-        guard byID != joinRequestsByID || ids != orderedJoinRequestIDs else { return }
+        // Evaluated *before* the unchanged-guard below, because in
+        // production the two calls split exactly across it.
+        //
+        // `hasLoadedMessages` starts false on the host and only flips
+        // after the first render, so a founder opening an empty group
+        // with an already-pending request gets: call one with the row
+        // and `messagesLoaded: false` (stores it, hides the empty state,
+        // cannot reveal yet), then call two with `messagesLoaded: true`
+        // and an identical list. Deciding the reveal after the guard
+        // meant the only call allowed to reveal was the one that
+        // returned early — a blank table with the empty state
+        // suppressed, in the one flow this feature exists for.
+        let revealOwed = !ids.isEmpty
+            && messagesLoaded
+            && !hasAppliedFirstSnapshot
+            && orderedMessages.isEmpty
+
+        guard byID != joinRequestsByID || ids != orderedJoinRequestIDs else {
+            // Rows are already applied and laid out from the earlier
+            // call, so there is nothing to wait for.
+            if revealOwed { revealForRequestOnlyThread() }
+            return
+        }
 
         let changed = ids.filter { id in
             guard let previous = joinRequestsByID[id] else { return false }
@@ -381,40 +403,32 @@ final class ChatThreadViewController: UIViewController {
             // precisely when the first join request lands — would
             // otherwise render the row invisibly.
             //
-            // Only for a thread that is genuinely empty — the snapshot
-            // has arrived and contained nothing — and never before it
-            // arrives.
-            //
-            // This is the whole reason `messagesLoaded` exists. The host
-            // starts `messages` empty and the request flow is
-            // app-lifetime, so a founder opening a group *with* history
-            // gets the request first. Revealing on "no messages yet"
-            // latched the cold open before the history existed: it then
-            // landed as an animated append, flying every message in and
-            // scrolling — precisely what the cold open exists to avoid —
-            // and `openAtMessageID` was never consumed, so opening a
-            // search hit silently lost its target.
-            //
-            // With the flag, `update(messages:)` keeps owning the cold
-            // open, and this path only covers the case it was added for:
-            // a brand-new group whose founder has sent nothing, where
-            // the request is the only content and nothing else would
-            // ever reveal the table.
-            if !ids.isEmpty, messagesLoaded, !self.hasAppliedFirstSnapshot,
-               self.orderedMessages.isEmpty
-            {
-                self.tableView.alpha = 1
-                // Latch the cold open too. Revealing without this left
-                // `isFirstApply` true, so the next message snapshot —
-                // usually the "X joined" notice landing seconds later,
-                // right after Accept — would take the cold-open branch
-                // and hard-jump a table the user is already looking at,
-                // instead of animating the append.
-                self.hasAppliedFirstSnapshot = true
-            }
+            if revealOwed { self.revealForRequestOnlyThread() }
             guard gainedRequest, wasNearBottom else { return }
             self.scrollToBottom(animated: true)
         }
+    }
+
+    /// Reveal a table whose only content is a pending request.
+    ///
+    /// Narrow on purpose. `update(messages:)` owns the cold open, and
+    /// this covers the one case it cannot: a loaded, genuinely empty
+    /// thread, where no message snapshot will ever arrive to reveal the
+    /// table and the request row would sit on an invisible one.
+    ///
+    /// "Loaded and empty" is not the same as "no messages yet", which is
+    /// why the caller needs `messagesLoaded` to tell them apart —
+    /// revealing on the latter latched the cold open before a group's
+    /// history had arrived, and its search target with it.
+    private func revealForRequestOnlyThread() {
+        tableView.alpha = 1
+        // Latch the cold open too. Revealing without this left
+        // `isFirstApply` true, so the next message snapshot — usually
+        // the "X joined" notice landing seconds later, right after
+        // Accept — would take the cold-open branch and hard-jump a table
+        // the user is already looking at, instead of animating the
+        // append.
+        hasAppliedFirstSnapshot = true
     }
 
     /// Synthetic, stable row id for a pending request. Derived from the

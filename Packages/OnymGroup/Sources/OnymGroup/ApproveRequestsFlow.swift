@@ -77,6 +77,12 @@ public final class ApproveRequestsFlow {
         // waste of cycles + can confuse `lastError` ordering.
         guard !inFlightRequestIDs.contains(id) else { return }
         inFlightRequestIDs.insert(id)
+        // Clear this request's failure as the retry starts, not when it
+        // succeeds. Waiting for `.sent` rendered the spinner and the
+        // previous error together — "Anchoring on chain…" under "that
+        // didn't work" — which reads as a fresh failure rather than a
+        // stale one.
+        clearErrorIfOwned(by: id)
         let approver = self.approver
         Task { @MainActor [weak self] in
             let outcome = await approver.approve(requestId: id)
@@ -88,11 +94,9 @@ public final class ApproveRequestsFlow {
                 // joined" system message the approval itself writes into
                 // the thread, right where the request row was.
                 //
-                // Only clears the error if it belonged to *this* request.
-                // The whole point of keying it was that the thread shows
-                // one row per request — wiping unconditionally would make
-                // approving A erase the failure still displayed under B.
-                self.clearErrorIfOwned(by: id)
+                // Nothing to clear: this request's error went when the
+                // attempt started.
+                break
             default:
                 self.lastError = Self.failureReason(for: outcome)
                 self.lastErrorRequestID = id
@@ -103,11 +107,13 @@ public final class ApproveRequestsFlow {
     public func decline(_ id: String) {
         guard !inFlightRequestIDs.contains(id) else { return }
         inFlightRequestIDs.insert(id)
+        // Same reasoning as `approve`: the error goes when the action
+        // starts, so the row never shows a spinner over a stale failure.
+        clearErrorIfOwned(by: id)
         let approver = self.approver
         Task { @MainActor [weak self] in
             await approver.decline(requestId: id)
             self?.inFlightRequestIDs.remove(id)
-            self?.clearErrorIfOwned(by: id)
         }
     }
 

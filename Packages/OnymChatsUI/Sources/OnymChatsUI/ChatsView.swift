@@ -494,7 +494,7 @@ private struct ChatsRow: View {
             if item.unreadCount > 0 {
                 UnreadBadge(count: item.unreadCount)
                     .accessibilityIdentifier("chats.row.unread.\(group.id)")
-            } else if joinRequestCount == 0, group.isPublishedOnChain {
+            } else if group.isPublishedOnChain {
                 Image(systemName: "checkmark.seal.fill")
                     .font(.caption)
                     .foregroundStyle(Color.green)
@@ -542,17 +542,29 @@ private struct JoinRequestBadge: View {
     let count: Int
 
     var body: some View {
-        Image(systemName: count > 1 ? "person.2.badge.plus" : "person.crop.circle.badge.plus")
-            .font(.system(size: 14, weight: .semibold))
-            .foregroundStyle(OnymTokens.onAccent)
-            .padding(.horizontal, 7)
-            .frame(minHeight: 20)
-            .background(OnymAccent.blue.color, in: Capsule())
-            .accessibilityLabel(
-                count == 1
-                    ? String(localized: "1 join request")
-                    : String(localized: "\(count) join requests")
-            )
+        // The number is shown, not only implied by the glyph. A
+        // person-vs-people icon distinguishes one from many and nothing
+        // else — two pending requests and nine looked identical unless
+        // you read the subtitle or used VoiceOver, while the unread badge
+        // beside it has always carried its count.
+        HStack(spacing: 3) {
+            Image(systemName: "person.crop.circle.badge.plus")
+                .font(.system(size: 12, weight: .semibold))
+            if count > 1 {
+                Text(count > 99 ? "99+" : "\(count)")
+                    .font(.system(size: 13, weight: .semibold))
+                    .monospacedDigit()
+            }
+        }
+        .foregroundStyle(OnymTokens.onAccent)
+        .padding(.horizontal, 7)
+        .frame(minHeight: 20)
+        .background(OnymAccent.blue.color, in: Capsule())
+        .accessibilityLabel(
+            count == 1
+                ? String(localized: "1 join request")
+                : String(localized: "\(count) join requests")
+        )
     }
 }
 

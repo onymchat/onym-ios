@@ -183,7 +183,24 @@ public actor SwiftDataIntroRequestStore: IntroRequestStore {
         guard let stale = try? context.fetch(descriptor), !stale.isEmpty else { return }
         for row in stale { context.delete(row) }
         try? context.save()
+
+        // Tell subscribers. A sweep triggered by a plain `current()` read
+        // used to delete the row and leave it on screen until some
+        // unrelated `record`/`consume` happened to publish — the founder
+        // would be looking at a request that no longer exists.
+        //
+        // `publish()` calls `loadAll()`, which calls back into here, so
+        // the flag breaks the recursion: the nested sweep finds nothing
+        // to delete anyway, but relying on that would make this correct
+        // by accident.
+        guard !isPruning else { return }
+        isPruning = true
+        defer { isPruning = false }
+        publish()
     }
+
+    /// Guards `pruneExpired` → `publish` → `loadAll` → `pruneExpired`.
+    private var isPruning = false
 
     /// Newest-first, matching `InMemoryIntroRequestStore.current()`.
     /// Rows that fail to decrypt are skipped rather than failing the
