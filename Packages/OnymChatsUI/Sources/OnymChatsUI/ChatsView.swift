@@ -336,14 +336,10 @@ public struct ChatsView: View {
     private func isAdmin(ofGroupID groupID: String) -> Bool {
         guard
             let group = flow.items.first(where: { $0.group.id == groupID })?.group,
-            let storedAdminHex = group.adminPubkeyHex?.lowercased(),
             let activeID = identitiesFlow.currentID,
             let activeSummary = identitiesFlow.identities.first(where: { $0.id == activeID })
         else { return false }
-        let activeHex = activeSummary.blsPublicKey
-            .map { String(format: "%02x", $0) }.joined()
-            .lowercased()
-        return activeHex == storedAdminHex
+        return group.isAdmin(blsPublicKey: activeSummary.blsPublicKey)
     }
 
     private var groupList: some View {

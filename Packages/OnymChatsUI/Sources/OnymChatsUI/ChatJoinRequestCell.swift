@@ -190,13 +190,18 @@ final class ChatJoinRequestCell: UITableViewCell {
         // The state should be unreachable (the row only renders inside a
         // group's own thread), but if it ever is reached, say why and
         // point at the way out — the copy the deleted modal carried.
-        if !display.canAccept {
+        // In-flight wins. Both states at once should be unreachable —
+        // an un-acceptable request can't be in flight — but if it
+        // happens, the spinner is what the founder is looking at, and
+        // explaining a button they just pressed as unavailable would be
+        // the wrong caption for it.
+        if display.isInFlight {
             hintLabel.text = String(
-                localized: "This request is for a group that isn’t on this device. Decline to clear it."
+                localized: "Generating proof and updating the on-chain commitment. This usually takes a few seconds."
             )
         } else {
             hintLabel.text = String(
-                localized: "Generating proof and updating the on-chain commitment. This usually takes a few seconds."
+                localized: "This request is for a group that isn’t on this device. Decline to clear it."
             )
         }
         hintLabel.isHidden = display.canAccept && !display.isInFlight

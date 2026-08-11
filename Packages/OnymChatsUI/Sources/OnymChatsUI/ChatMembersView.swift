@@ -118,14 +118,10 @@ struct ChatMembersView: View {
         guard
             let group = currentGroup,
             group.groupType == .tyranny,
-            let storedAdminHex = group.adminPubkeyHex?.lowercased(),
             let activeID = identitiesFlow.currentID,
             let activeSummary = identitiesFlow.identities.first(where: { $0.id == activeID })
         else { return false }
-        let activeHex = activeSummary.blsPublicKey
-            .map { String(format: "%02x", $0) }.joined()
-            .lowercased()
-        return activeHex == storedAdminHex
+        return group.isAdmin(blsPublicKey: activeSummary.blsPublicKey)
     }
 
     /// Whether to show the editable (picker) avatar vs a read-only one.

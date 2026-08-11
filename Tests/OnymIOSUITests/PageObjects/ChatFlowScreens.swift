@@ -198,9 +198,19 @@ struct JoinRequestRow {
     /// is user data and appears in every translation; the identifier is
     /// stable by construction.
     func waitForJoinedNotice(alias: String, timeout: TimeInterval = 60) -> Bool {
+        // One predicate over the element itself, not `.containing(...)`:
+        // that filters by *descendants*, and a static text backed by a
+        // `UILabel` has none — so the chained form matched nothing and
+        // this always timed out. Matches the shape used everywhere else
+        // in this suite.
         let notice = app.staticTexts
-            .matching(identifier: "chat.system_notice")
-            .containing(NSPredicate(format: "label CONTAINS[c] %@", alias))
+            .matching(
+                NSPredicate(
+                    format: "identifier == %@ AND label CONTAINS[c] %@",
+                    "chat.system_notice",
+                    alias
+                )
+            )
             .firstMatch
         return notice.waitForExistence(timeout: timeout)
     }

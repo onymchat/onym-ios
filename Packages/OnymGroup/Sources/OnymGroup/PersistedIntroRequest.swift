@@ -24,7 +24,27 @@ import OnymFoundation
 @Model
 final class PersistedIntroRequest {
     @Attribute(.unique) var id: String
+    /// The sender's claim of when they sent, used for display order
+    /// only. Sourced from the Nostr event's `ms` tag, which the *joiner*
+    /// writes — so it is an assertion, not an observation, and nothing
+    /// that decides whether a row lives or dies may read it.
     var receivedAt: Date
+    /// When this device first wrote the row. Local clock, set once at
+    /// `record` and never updated.
+    ///
+    /// Retention prunes on this rather than `receivedAt`, because
+    /// `receivedAt` is attacker- and clock-controlled. Pruning on it
+    /// would mean a founder offline past the retention window has every
+    /// replayed request swept on the first read — never seeing a request
+    /// the joiner is still waiting on, which is the failure this whole
+    /// change exists to fix — and a joiner who stamps `ms` far in the
+    /// future gets a row that never expires.
+    ///
+    /// Optional so adding it is a SwiftData lightweight migration; nil
+    /// rows (written before this column existed) are treated as
+    /// first-seen now, which grants them a fresh window rather than
+    /// sweeping them on sight.
+    var firstSeenAt: Date?
 
     var encryptedTargetIntroPublicKey: Data
     var encryptedPayload: Data
@@ -32,11 +52,13 @@ final class PersistedIntroRequest {
     init(
         id: String,
         receivedAt: Date,
+        firstSeenAt: Date,
         encryptedTargetIntroPublicKey: Data,
         encryptedPayload: Data
     ) {
         self.id = id
         self.receivedAt = receivedAt
+        self.firstSeenAt = firstSeenAt
         self.encryptedTargetIntroPublicKey = encryptedTargetIntroPublicKey
         self.encryptedPayload = encryptedPayload
     }

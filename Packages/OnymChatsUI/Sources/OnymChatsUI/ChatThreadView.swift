@@ -568,14 +568,10 @@ public struct ChatThreadView: View {
     private var isGroupAdmin: Bool {
         guard
             let group = chatsFlow.groups.first(where: { $0.id == groupID }),
-            let storedAdminHex = group.adminPubkeyHex?.lowercased(),
             let activeID = identitiesFlow.currentID,
             let activeSummary = identitiesFlow.identities.first(where: { $0.id == activeID })
         else { return false }
-        let activeHex = activeSummary.blsPublicKey
-            .map { String(format: "%02x", $0) }.joined()
-            .lowercased()
-        return activeHex == storedAdminHex
+        return group.isAdmin(blsPublicKey: activeSummary.blsPublicKey)
     }
 
     /// Pending join requests belonging to *this* group, shaped for the
@@ -615,10 +611,9 @@ public struct ChatThreadView: View {
                     // sitting on disk forever.
                     canAccept: request.groupName != nil,
                     isInFlight: approveRequestsFlow.isInFlight(request.id),
-                    // Only the row that actually failed shows the error.
-                    errorText: approveRequestsFlow.lastErrorRequestID == request.id
-                        ? approveRequestsFlow.lastError
-                        : nil
+                    // Each row reads its own failure, so two outstanding
+                    // errors both stay explained.
+                    errorText: approveRequestsFlow.error(for: request.id)
                 )
             }
     }

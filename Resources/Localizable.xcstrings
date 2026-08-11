@@ -4203,7 +4203,7 @@
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ присоединился"
+            "value": "Теперь в группе: %@"
           }
         }
       }
@@ -4374,6 +4374,176 @@
           "stringUnit": {
             "state": "translated",
             "value": "(Без названия)"
+          }
+        }
+      }
+    },
+    "This invite isn’t for any group on this device.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This invite isn’t for any group on this device."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Это приглашение не относится ни к одной группе на этом устройстве."
+          }
+        }
+      }
+    },
+    "Request expired or was already handled.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Request expired or was already handled."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Срок запроса истёк, или он уже обработан."
+          }
+        }
+      }
+    },
+    "Sign in first.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign in first."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Сначала войдите."
+          }
+        }
+      }
+    },
+    "Couldn’t send: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t send: %@"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не удалось отправить: %@"
+          }
+        }
+      }
+    },
+    "Joiner is on an outdated app. Ask them to update.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Joiner is on an outdated app. Ask them to update."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "У отправителя устаревшая версия приложения. Попросите обновить её."
+          }
+        }
+      }
+    },
+    "No chain relayer configured. Set one in Settings → Network → Relayer.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No chain relayer configured. Set one in Settings → Network → Relayer."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ретранслятор сети не настроен. Укажите его в «Настройки → Сеть → Ретранслятор»."
+          }
+        }
+      }
+    },
+    "No Founder contract selected for this network. Pick one in Settings → Network → Anchors.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Founder contract selected for this network. Pick one in Settings → Network → Anchors."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Для этой сети не выбран контракт Founder. Выберите его в «Настройки → Сеть → Якоря»."
+          }
+        }
+      }
+    },
+    "The active identity isn’t this group’s admin. Switch to the identity that created the group, then try again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The active identity isn’t this group’s admin. Switch to the identity that created the group, then try again."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Активная личность не является администратором этой группы. Переключитесь на личность, создавшую группу, и повторите попытку."
+          }
+        }
+      }
+    },
+    "Couldn’t generate proof: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t generate proof: %@"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не удалось сформировать доказательство: %@"
+          }
+        }
+      }
+    },
+    "Chain rejected the proof: %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chain rejected the proof: %@"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Сеть отклонила доказательство: %@"
           }
         }
       }

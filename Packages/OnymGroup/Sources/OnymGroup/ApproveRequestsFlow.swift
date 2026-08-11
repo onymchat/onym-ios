@@ -18,13 +18,15 @@ import Observation
 public final class ApproveRequestsFlow {
     /// Decoded pending requests, newest-first.
     public private(set) var pending: [JoinRequestApprover.PendingRequest] = []
-    /// Last failed-approve reason, or nil. Cleared on the next
-    /// successful Approve / Decline / dismiss.
-    public internal(set) var lastError: String?
-    /// Which request `lastError` belongs to. The thread renders each
-    /// pending request as its own row, so an un-keyed error would paint
-    /// a failure from one request onto every other row on screen.
-    public internal(set) var lastErrorRequestID: String?
+    /// Why each request's last Approve failed, keyed by request id.
+    ///
+    /// A map rather than a single slot because the thread renders one
+    /// row per pending request: with two outstanding failures, a single
+    /// slot could only ever explain the newer one, and the older row
+    /// would silently lose its explanation while its request was still
+    /// there to retry. Each row reads its own entry, so an unrelated
+    /// failure can neither overwrite nor leak onto it.
+    public internal(set) var errors: [String: String] = [:]
     /// Request IDs whose Approve / Decline call is currently in
     /// flight. Drives the per-row spinner + disabled-buttons state
     /// in the thread's join-request row. Necessary because PR 13a turned
@@ -82,7 +84,7 @@ public final class ApproveRequestsFlow {
         // previous error together — "Anchoring on chain…" under "that
         // didn't work" — which reads as a fresh failure rather than a
         // stale one.
-        clearErrorIfOwned(by: id)
+        clearError(for: id)
         let approver = self.approver
         Task { @MainActor [weak self] in
             let outcome = await approver.approve(requestId: id)
@@ -98,8 +100,7 @@ public final class ApproveRequestsFlow {
                 // attempt started.
                 break
             default:
-                self.lastError = Self.failureReason(for: outcome)
-                self.lastErrorRequestID = id
+                self.errors[id] = Self.failureReason(for: outcome)
             }
         }
     }
@@ -109,7 +110,7 @@ public final class ApproveRequestsFlow {
         inFlightRequestIDs.insert(id)
         // Same reasoning as `approve`: the error goes when the action
         // starts, so the row never shows a spinner over a stale failure.
-        clearErrorIfOwned(by: id)
+        clearError(for: id)
         let approver = self.approver
         Task { @MainActor [weak self] in
             await approver.decline(requestId: id)
@@ -117,47 +118,62 @@ public final class ApproveRequestsFlow {
         }
     }
 
-    /// Drop `lastError` only when it belongs to `id`. Acting on one
-    /// request must not clear the error another row is still showing.
-    /// A request's error is cleared when that request is acted on again
-    /// — retried or declined — and not before.
+    /// This request's last failure, if it has one. Each row reads its
+    /// own; nothing else can surface on it.
+    public func error(for requestID: String) -> String? {
+        errors[requestID]
+    }
+
+    /// Drop one request's error. Keyed, so acting on one request cannot
+    /// clear the explanation another row is still showing. A request's
+    /// error goes when that request is acted on again — retried or
+    /// declined — and not before.
     ///
     /// There is deliberately no dismiss affordance now that the modal is
     /// gone: the error sits on the row it belongs to, and the row is the
     /// thing the founder is going to touch next. A `dismissError()` used
     /// to exist for the modal's toolbar and had no caller left, so it
     /// went rather than sitting there looking like an API.
-    private func clearErrorIfOwned(by id: String) {
-        guard lastErrorRequestID == id || lastErrorRequestID == nil else { return }
-        lastError = nil
-        lastErrorRequestID = nil
+    private func clearError(for id: String) {
+        errors.removeValue(forKey: id)
     }
 
+    /// These render on the request row in the thread, next to copy that
+    /// all resolves through the app's string catalog — so they go
+    /// through it too. They used to sit behind a modal and were raw
+    /// English; `ChatSystemEvent.localizedText` makes the same point for
+    /// the notice text.
     private static func failureReason(
         for outcome: JoinRequestApprover.ApproveOutcome
     ) -> String? {
         switch outcome {
         case .sent: return nil
         case .unknownGroup:
-            return "This invite isn\u{2019}t for any group on this device."
+            return String(localized: "This invite isn’t for any group on this device.")
         case .unknownRequest:
-            return "Request expired or was already handled."
+            return String(localized: "Request expired or was already handled.")
         case .noIdentityLoaded:
-            return "Sign in first."
+            return String(localized: "Sign in first.")
         case .transportFailed(let reason):
-            return "Couldn\u{2019}t send: \(reason)"
+            return String(localized: "Couldn’t send: \(reason)")
         case .outdatedJoinerClient:
-            return "Joiner is on an outdated app. Ask them to update."
+            return String(localized: "Joiner is on an outdated app. Ask them to update.")
         case .noActiveRelayer:
-            return "No chain relayer configured. Set one in Settings \u{2192} Network \u{2192} Relayer."
+            return String(
+                localized: "No chain relayer configured. Set one in Settings → Network → Relayer."
+            )
         case .noContractBinding:
-            return "No Founder contract selected for this network. Pick one in Settings \u{2192} Network \u{2192} Anchors."
+            return String(
+                localized: "No Founder contract selected for this network. Pick one in Settings → Network → Anchors."
+            )
         case .notAdminOfThisGroup:
-            return "The active identity isn\u{2019}t this group\u{2019}s admin. Switch to the identity that created the group, then try again."
+            return String(
+                localized: "The active identity isn’t this group’s admin. Switch to the identity that created the group, then try again."
+            )
         case .proofFailed(let reason):
-            return "Couldn\u{2019}t generate proof: \(reason)"
+            return String(localized: "Couldn’t generate proof: \(reason)")
         case .anchorRejected(let reason):
-            return "Chain rejected the proof: \(reason)"
+            return String(localized: "Chain rejected the proof: \(reason)")
         }
     }
 }

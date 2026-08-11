@@ -1,7 +1,7 @@
 import XCTest
 @testable import OnymIOS
 import OnymFoundation
-import OnymGroup
+@testable import OnymGroup
 
 /// Join requests used to live in memory only — a force-quit dropped them
 /// and the joiner had to re-share. Now that the request renders as a row
@@ -81,27 +81,65 @@ final class SwiftDataIntroRequestStoreTests: XCTestCase {
     /// keeps those from accumulating on disk forever.
     func test_requestsOlderThanRetention_areDropped() async {
         let store = SwiftDataIntroRequestStore.inMemory()
-        let now = Date()
-        let stale = now.addingTimeInterval(-SwiftDataIntroRequestStore.retention - 60)
-        let fresh = now.addingTimeInterval(-60)
+        _ = await store.record(makeRequest(id: "evt-stale"))
 
-        _ = await store.record(makeRequest(id: "evt-stale", receivedAt: stale))
-        _ = await store.record(makeRequest(id: "evt-fresh", receivedAt: fresh))
+        // Advance past the window rather than back-dating the row: the
+        // clock this measures is the store's own, stamped at `record`.
+        await store.pruneExpired(
+            now: Date().addingTimeInterval(SwiftDataIntroRequestStore.retention + 60)
+        )
 
         let current = await store.current()
-        XCTAssertEqual(current.map(\.id), ["evt-fresh"],
-                       "a request past the retention window must be swept")
+        XCTAssertTrue(current.isEmpty, "a request past the retention window must be swept")
     }
 
     func test_requestJustInsideRetention_isKept() async {
         let store = SwiftDataIntroRequestStore.inMemory()
-        let justInside = Date()
-            .addingTimeInterval(-SwiftDataIntroRequestStore.retention + 3600)
+        _ = await store.record(makeRequest(id: "evt-edge"))
 
-        _ = await store.record(makeRequest(id: "evt-edge", receivedAt: justInside))
+        await store.pruneExpired(
+            now: Date().addingTimeInterval(SwiftDataIntroRequestStore.retention - 3600)
+        )
 
         let current = await store.current()
         XCTAssertEqual(current.map(\.id), ["evt-edge"])
+    }
+
+    /// Retention must not read `receivedAt`.
+    ///
+    /// That timestamp comes from the Nostr event's `ms` tag, which the
+    /// *joiner* writes — so it is a claim, not an observation. Pruning on
+    /// it meant a founder offline longer than the window had every
+    /// replayed request swept on the first read, never seeing a request
+    /// the joiner was still waiting on.
+    func test_anOldSenderTimestampDoesNotAgeOutAFreshlySeenRequest() async {
+        let store = SwiftDataIntroRequestStore.inMemory()
+        let ancient = Date()
+            .addingTimeInterval(-SwiftDataIntroRequestStore.retention * 10)
+
+        _ = await store.record(makeRequest(id: "evt-backdated", receivedAt: ancient))
+
+        let current = await store.current()
+        XCTAssertEqual(
+            current.map(\.id), ["evt-backdated"],
+            "a request first seen just now is fresh, whatever the sender stamped on it"
+        )
+    }
+
+    /// The other direction: a joiner stamping `ms` far in the future
+    /// must not mint a row that outlives every sweep.
+    func test_aFutureSenderTimestampStillExpires() async {
+        let store = SwiftDataIntroRequestStore.inMemory()
+        let farFuture = Date()
+            .addingTimeInterval(SwiftDataIntroRequestStore.retention * 10)
+
+        _ = await store.record(makeRequest(id: "evt-future", receivedAt: farFuture))
+        await store.pruneExpired(
+            now: Date().addingTimeInterval(SwiftDataIntroRequestStore.retention + 60)
+        )
+
+        let current = await store.current()
+        XCTAssertTrue(current.isEmpty, "retention is on local first-sight, not the sender's claim")
     }
 
     // MARK: - Helpers

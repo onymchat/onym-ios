@@ -92,9 +92,19 @@ public actor SwiftDataIntroRequestStore: IntroRequestStore {
         let existing = FetchDescriptor<PersistedIntroRequest>(
             predicate: #Predicate { $0.id == id }
         )
-        if let found = try? context.fetchCount(existing), found > 0 { return false }
+        if let found = try? context.fetch(existing), let row = found.first {
+            // Backfill a row written before `firstSeenAt` existed. Its
+            // clock starts now rather than at some sender-asserted past,
+            // so a migrated request gets a full window instead of being
+            // swept on the next read.
+            if row.firstSeenAt == nil {
+                row.firstSeenAt = Date()
+                try? context.save()
+            }
+            return false
+        }
 
-        guard let row = try? Self.encode(request) else { return false }
+        guard let row = try? Self.encode(request, firstSeenAt: Date()) else { return false }
         context.insert(row)
         do {
             try context.save()
@@ -175,10 +185,25 @@ public actor SwiftDataIntroRequestStore: IntroRequestStore {
     /// write paths rather than on a timer: the store is only interesting
     /// while the app is running, and a sweep here is a single indexed
     /// delete over a table that holds a handful of rows.
-    private func pruneExpired(now: Date = Date()) {
+    ///
+    /// Measured on `firstSeenAt` — this device's own clock — and never
+    /// on `receivedAt`, which the joiner asserts in the event's `ms`
+    /// tag. On `receivedAt`, a founder who was offline longer than the
+    /// window would have every replayed request swept the moment the app
+    /// read the store, and a joiner stamping a far-future `ms` would get
+    /// a row that outlived every sweep.
+    ///
+    /// Rows written before `firstSeenAt` existed have nil and are left
+    /// alone; `record` backfills them, so they age from first sight
+    /// rather than being swept on the migration read.
+    /// `now` is injectable so tests can advance the clock rather than
+    /// fabricate a `firstSeenAt` the production path would never write.
+    func pruneExpired(now: Date = Date()) {
         let cutoff = now.addingTimeInterval(-Self.retention)
         let descriptor = FetchDescriptor<PersistedIntroRequest>(
-            predicate: #Predicate { $0.receivedAt < cutoff }
+            predicate: #Predicate { row in
+                if let firstSeen = row.firstSeenAt { firstSeen < cutoff } else { false }
+            }
         )
         guard let stale = try? context.fetch(descriptor), !stale.isEmpty else { return }
         for row in stale { context.delete(row) }
@@ -217,10 +242,14 @@ public actor SwiftDataIntroRequestStore: IntroRequestStore {
 
     // MARK: - Mapping
 
-    private static func encode(_ request: IntroRequest) throws -> PersistedIntroRequest {
+    private static func encode(
+        _ request: IntroRequest,
+        firstSeenAt: Date
+    ) throws -> PersistedIntroRequest {
         PersistedIntroRequest(
             id: request.id,
             receivedAt: request.receivedAt,
+            firstSeenAt: firstSeenAt,
             encryptedTargetIntroPublicKey: try StorageEncryption.encrypt(
                 request.targetIntroPublicKey
             ),
