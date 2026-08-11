@@ -896,6 +896,20 @@ struct OnymIOSApp: App {
                     // verifier, so the back-reference is installed here
                     // rather than threaded through both initializers.
                     await groupStateVerifier.setReverify { invitation, owner, signer in
+                        // Re-fetch the relayer + contract lists first.
+                        // The overwhelmingly common reason a joiner
+                        // can't read the chain is that neither has
+                        // arrived yet — both are fetched from GitHub in
+                        // the background at launch, and a device that
+                        // was offline for those few seconds has no
+                        // endpoint to call and no contract to call it
+                        // on. Retrying the read alone would fail the
+                        // same way every time.
+                        // `refresh`, not `start`: `start` returns as soon
+                        // as it has spawned the fetch, so the read below
+                        // would race it and fail exactly as before.
+                        try? await relayerRepository.refresh()
+                        try? await contractsRepository.refresh()
                         await dispatcher.reverify(
                             invitation: invitation,
                             ownerIdentityID: owner,

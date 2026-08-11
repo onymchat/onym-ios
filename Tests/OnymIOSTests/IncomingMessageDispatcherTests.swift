@@ -1447,7 +1447,8 @@ final class IncomingMessageDispatcherTests: XCTestCase {
         let local = await refresher.locallyDeferred()
         XCTAssertEqual(local.map(\.groupID), [groupID],
                        "a chain-read failure must defer locally (retry), not reject+drop")
-        XCTAssertEqual(local.map(\.status), [.chainUnreachable])
+        XCTAssertEqual(local.map(\.status), [.chainNotConfigured],
+                       "no relayer configured is a setup state, not a failed call")
     }
 
     /// The admin admitted somebody else before this joiner opened the

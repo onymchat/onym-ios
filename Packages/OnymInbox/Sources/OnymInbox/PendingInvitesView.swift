@@ -99,6 +99,31 @@ struct PendingInvitesView: View {
     /// on-chain state — kept out of the chats list. Shows progress while
     /// waiting for the admin's current-state reply, and a Retry when the
     /// admin couldn't be reached.
+    /// One sentence per reason, because the reasons need different
+    /// things from the reader. Naming the admin for a failure that is
+    /// entirely local sends people to wait on somebody who cannot help.
+    private func verificationMessage(
+        for status: PendingGroupVerification.Status
+    ) -> String {
+        switch status {
+        case .chainNotConfigured:
+            // Usually a cold-install race rather than a wrong setting:
+            // the relayer and contract lists arrive from the network
+            // shortly after launch, and Retry re-fetches them.
+            return String(
+                localized: "Still setting up this device\u{2019}s connection to the chain. Tap Retry in a moment."
+            )
+        case .chainUnreachable:
+            return String(
+                localized: "Couldn\u{2019}t reach the chain to verify this group. Check your connection and try again."
+            )
+        default:
+            return String(
+                localized: "Couldn\u{2019}t verify \u{2014} the admin is offline. The group stays hidden until it can be verified on chain."
+            )
+        }
+    }
+
     private func verifyingCard(_ entry: PendingGroupVerification) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(entry.groupName.isEmpty ? "Group" : entry.groupName)
@@ -122,18 +147,14 @@ struct PendingInvitesView: View {
                         .font(.system(size: 13))
                         .foregroundStyle(OnymTokens.text2)
                 }
-            case .unreachable, .chainUnreachable:
+            case .unreachable, .chainUnreachable, .chainNotConfigured:
                 // The two failures name different parties, because they
                 // have different remedies: one is the admin's phone
                 // being asleep, the other is this device's own network
                 // or anchor settings. Saying "the admin is offline" for
                 // both sent people to wait on someone who could not have
                 // helped.
-                Text(
-                    entry.status == .chainUnreachable
-                        ? "Couldn\u{2019}t reach the chain to verify this group. Check your connection, and that a relayer and Founder contract are set in Settings \u{2192} Network."
-                        : "Couldn\u{2019}t verify \u{2014} the admin is offline. The group stays hidden until it can be verified on chain."
-                )
+                Text(verificationMessage(for: entry.status))
                     .font(.system(size: 13))
                     .foregroundStyle(OnymTokens.text2)
                 Button {

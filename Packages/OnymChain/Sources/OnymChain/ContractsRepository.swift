@@ -98,7 +98,16 @@ public actor ContractsRepository {
         guard startTask == nil else { return }
         startTask = Task { [weak self] in
             await self?.refreshSilently()
+            // Released on completion so a failed first fetch can be
+            // retried — same reasoning as `RelayerRepository.start()`.
+            // Without a manifest there is no contract binding, and
+            // every chain read throws `noContractBinding`.
+            await self?.clearStartTask()
         }
+    }
+
+    private func clearStartTask() {
+        startTask = nil
     }
 
     /// Force a refresh and surface any error to the caller (so a

@@ -4746,19 +4746,36 @@
         }
       }
     },
-    "Couldn’t reach the chain to verify this group. Check your connection, and that a relayer and Founder contract are set in Settings → Network.": {
+    "Still setting up this device’s connection to the chain. Tap Retry in a moment.": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Couldn’t reach the chain to verify this group. Check your connection, and that a relayer and Founder contract are set in Settings → Network."
+            "value": "Still setting up this device’s connection to the chain. Tap Retry in a moment."
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Не удалось обратиться к сети для проверки группы. Проверьте подключение и то, что в «Настройки → Сеть» указаны ретранслятор и контракт Founder."
+            "value": "Подключение этого устройства к сети ещё настраивается. Нажмите «Повторить» через мгновение."
+          }
+        }
+      }
+    },
+    "Couldn’t reach the chain to verify this group. Check your connection and try again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t reach the chain to verify this group. Check your connection and try again."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не удалось обратиться к сети для проверки группы. Проверьте подключение и повторите попытку."
           }
         }
       }

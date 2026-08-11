@@ -359,7 +359,8 @@ public struct IncomingMessageDispatcher: Sendable {
         // groups skip verification (no admin-anchored update path; trust
         // falls back to the sender's envelope signature).
         if groupType == .tyranny {
-            switch await verifyTyrannyInvitation(invitation, tier: tier) {
+            let verification = await verifyTyrannyInvitation(invitation, tier: tier)
+            switch verification {
             case .verified:
                 break  // materialize below
             case .reject:
@@ -372,7 +373,7 @@ public struct IncomingMessageDispatcher: Sendable {
                     ownerIdentityID: ownerIdentityID
                 )
                 return
-            case .chainUnreachable:
+            case .chainUnreachable, .chainNotConfigured:
                 // This device's problem, not the admin's. Park it with a
                 // reason the user can act on and send nothing — a
                 // refresh request would be answered and still leave the
@@ -381,7 +382,9 @@ public struct IncomingMessageDispatcher: Sendable {
                     invitation: invitation,
                     ownerIdentityID: ownerIdentityID,
                     senderEd25519PublicKey: senderEd25519PublicKey,
-                    status: .chainUnreachable
+                    status: verification == .chainNotConfigured
+                        ? .chainNotConfigured
+                        : .chainUnreachable
                 )
                 return
             case .groupNotOnChainYet, .chainBehindSnapshot:
@@ -514,8 +517,8 @@ public struct IncomingMessageDispatcher: Sendable {
         /// 64-entry window. Only here is a refresh from the admin the
         /// actual remedy.
         case staleNeedsRefresh
-        /// The chain couldn't be read at all — no relayer, no contract
-        /// binding, throttled, or offline.
+        /// The chain couldn't be read at all — throttled, offline, or a
+        /// relayer that answered with an error.
         ///
         /// Split out from `staleNeedsRefresh` because the two need
         /// opposite responses. This one is entirely local to the
@@ -524,6 +527,9 @@ public struct IncomingMessageDispatcher: Sendable {
         /// offer a Retry that re-sends to the admin — left a joiner
         /// looping forever against a wall they alone could take down.
         case chainUnreachable
+        /// No relayer endpoint or no contract binding for the active
+        /// network — nothing was attempted over the network at all.
+        case chainNotConfigured
         /// The contract has no record of this group yet
         /// (`GroupNotFound`). The admin's `create_group` is still
         /// settling; seconds later this becomes verifiable on its own.
@@ -598,6 +604,14 @@ public struct IncomingMessageDispatcher: Sendable {
             if let sepError = error as? SEPError,
                sepError.contractErrorCode == SEPContractErrorCode.groupNotFound.rawValue {
                 return .groupNotOnChainYet
+            }
+            if let readError = error as? ChainReadError {
+                // No relayer / no contract binding: nothing was even
+                // attempted over the network, so this is a setup state
+                // rather than a failed call — and on a fresh install
+                // it's usually just the launch fetch not having landed.
+                _ = readError
+                return .chainNotConfigured
             }
             return .chainUnreachable
         }
