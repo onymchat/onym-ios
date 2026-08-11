@@ -33,15 +33,15 @@ public struct ModerationConsentView: View {
                 .padding(.bottom, 32)
             }
             .background(OnymTokens.surface.ignoresSafeArea())
-            .navigationTitle(flow.mode == .onboarding ? "Moderation" : "Switch Authority")
+            .navigationTitle(navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 // Switching is a normal, abandonable settings task, and
                 // the `.done` step has no other way out — `onConsented`
                 // belongs to the app factory and can't dismiss us.
-                // Onboarding deliberately has no escape: consent is the
-                // gate.
-                if flow.mode == .switching {
+                // Onboarding and re-consent deliberately have no escape:
+                // consent is the gate.
+                if flow.isDismissable {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button(dismissLabel) { dismiss() }
                             .accessibilityIdentifier("moderation.consent.dismiss")
@@ -51,7 +51,16 @@ public struct ModerationConsentView: View {
             .task { flow.start() }
             .onDisappear { flow.stop() }
         }
-        .interactiveDismissDisabled(flow.mode == .onboarding)
+        .interactiveDismissDisabled(!flow.isDismissable)
+    }
+
+    private var navigationTitle: LocalizedStringKey {
+        switch flow.mode {
+        case .onboarding: return "Moderation"
+        case .switching: return "Switch Authority"
+        case .reconsent(.termsChanged): return "Terms Updated"
+        case .reconsent(.authorityDelisted): return "Authority Unavailable"
+        }
     }
 
     /// "Cancel" while the task can still be abandoned; "Done" once the
@@ -78,8 +87,8 @@ public struct ModerationConsentView: View {
 
     @ViewBuilder
     private var picker: some View {
-        SettingsLargeTitle("Choose a moderation authority")
-        Text("Onym requires a moderation authority to handle reports of prohibited content. You choose who that is. Its entire power over you is written in the terms you'll review next — nothing can be added to them later without your fresh consent.")
+        SettingsLargeTitle(pickerTitle)
+        Text(pickerBlurb)
             .font(.system(size: 14))
             .foregroundStyle(OnymTokens.text2)
             .lineSpacing(3)
@@ -119,7 +128,7 @@ public struct ModerationConsentView: View {
                     Button { flow.selectedAuthority(listing) } label: {
                         SettingsRow(
                             titleText: listing.name,
-                            subtitle: listing.componentId,
+                            subtitle: rowSubtitle(for: listing),
                             last: idx == flow.state.authorities.count - 1
                         ) {
                             SettingsIconTile(symbol: "checkmark.shield", bg: SettingsTile.indigo)
@@ -134,6 +143,42 @@ public struct ModerationConsentView: View {
         if let error = flow.state.errorMessage {
             SettingsFootnote(verbatim: error)
         }
+    }
+
+    private var pickerTitle: LocalizedStringKey {
+        switch flow.mode {
+        case .onboarding, .switching:
+            return "Choose a moderation authority"
+        case .reconsent(.termsChanged):
+            return "These terms have changed"
+        case .reconsent(.authorityDelisted):
+            return "Your authority is no longer listed"
+        }
+    }
+
+    /// The re-consent copy has one job beyond explaining itself: not to
+    /// frighten. Nothing the user signed has been altered and no case
+    /// has been re-termed — the mandate they hold is still honoured on
+    /// its own terms. What has run out is its currency, and only fresh
+    /// consent renews that.
+    private var pickerBlurb: LocalizedStringKey {
+        switch flow.mode {
+        case .onboarding, .switching:
+            return "Onym requires a moderation authority to handle reports of prohibited content. You choose who that is. Its entire power over you is written in the terms you'll review next — nothing can be added to them later without your fresh consent."
+        case .reconsent(.termsChanged):
+            return "Your authority now publishes terms that differ from the ones you signed. The mandate you hold is untouched — anything already under way is still judged by the terms you agreed to, and no one can edit them. Onym won't keep running on consent that no longer matches what's published, so read the new terms and sign them, or move to another authority."
+        case .reconsent(.authorityDelisted):
+            return "The authority your mandate names is no longer designated, so it can't publish terms or answer for you any more. Choose an authority below to review its terms and sign a fresh mandate."
+        }
+    }
+
+    /// Runtime data, so never a localization key — the marker is
+    /// localized and the component id appended verbatim.
+    private func rowSubtitle(for listing: AuthorityListing) -> String {
+        guard case .reconsent = flow.mode,
+              listing.componentId == flow.state.currentAuthorityId
+        else { return listing.componentId }
+        return String(localized: "Your current authority") + " · " + listing.componentId
     }
 
     @ViewBuilder

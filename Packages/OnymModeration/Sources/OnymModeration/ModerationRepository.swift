@@ -11,6 +11,31 @@ public enum AuthorityFetchStatus: Equatable, Sendable {
     case failed(message: String)
 }
 
+/// Whether the active mandate still pins the manifest its authority
+/// publishes today.
+///
+/// A mandate stays valid under the bytes it signed — the reference
+/// Authority judges every case under the manifest that mandate pinned,
+/// so superseded terms are not an outage and nothing in flight breaks.
+/// What they are is stale *consent*: the user is operating under terms
+/// the authority no longer stands behind, and only fresh consent can
+/// move them onto the new ones.
+public enum TermsCurrency: Sendable, Equatable {
+    /// Not established yet — no active mandate, the directory hasn't
+    /// loaded, or the manifest couldn't be fetched. Never blocks: an
+    /// unreachable authority must not lock the user out of the app.
+    case unknown
+    /// The active mandate's hash equals the published manifest's.
+    case current
+    /// The authority publishes a different manifest than the one this
+    /// mandate consented to.
+    case superseded(publishedHash: String)
+    /// The active mandate's authority is no longer in the designated
+    /// directory. There are no new terms to re-sign — the only way
+    /// forward is a different authority.
+    case authorityDelisted
+}
+
 /// Combined snapshot for consent and settings UI: the designated
 /// authorities, the fetch state of that list, and the mandate
 /// history for this device.
@@ -23,6 +48,8 @@ public struct ModerationState: Sendable, Equatable {
     /// still ambiguous, newest first. Definitively refused attempts are
     /// not mandates and are removed from this retained state.
     public let history: [MandateRecord]
+    /// Result of the most recent `refreshActiveTerms()`.
+    public let termsCurrency: TermsCurrency
 
     public static let empty = ModerationState(
         authorities: [],
@@ -35,12 +62,14 @@ public struct ModerationState: Sendable, Equatable {
         authorities: [AuthorityListing],
         fetchStatus: AuthorityFetchStatus,
         activeMandate: MandateRecord?,
-        history: [MandateRecord]
+        history: [MandateRecord],
+        termsCurrency: TermsCurrency = .unknown
     ) {
         self.authorities = authorities
         self.fetchStatus = fetchStatus
         self.activeMandate = activeMandate
         self.history = history
+        self.termsCurrency = termsCurrency
     }
 }
 
@@ -178,6 +207,8 @@ public actor ModerationRepository {
     private var caseStatusTasks: [CaseStatusKey: Task<CaseStatus, Error>] = [:]
     private var caseResponseTasks: [CaseSubmissionKey: Task<CaseResponseReceipt, Error>] = [:]
     private var caseAppealTasks: [CaseSubmissionKey: Task<AppealReceipt, Error>] = [:]
+    private var termsCurrency: TermsCurrency = .unknown
+    private var termsCheckTask: Task<Void, Never>?
 
     public init(
         authoritiesFetcher: any KnownAuthoritiesFetcher,
@@ -243,6 +274,83 @@ public actor ModerationRepository {
             publish()
             throw error
         }
+        publish()
+    }
+
+    // MARK: - Terms currency
+
+    /// Re-establish whether the active mandate still pins the manifest
+    /// its authority publishes today. Called on app open and on every
+    /// return to the foreground.
+    ///
+    /// Never throws and never blocks the app on a bad answer: an
+    /// unreachable authority, a directory that hasn't loaded, or a
+    /// manifest that fails verification all leave the last known
+    /// currency in place. Only a manifest that authenticates and hashes
+    /// to something other than the mandate's can supersede it — a
+    /// forged or corrupted document must not be able to push the user
+    /// into re-signing.
+    ///
+    /// Idempotent while in flight: overlapping calls (launch racing the
+    /// first foreground notification) share one check.
+    public func refreshActiveTerms() async {
+        if let task = termsCheckTask {
+            await task.value
+            return
+        }
+        let task = Task { await self.performTermsCheck() }
+        termsCheckTask = task
+        await task.value
+        termsCheckTask = nil
+    }
+
+    private func performTermsCheck() async {
+        guard let record = activeMandateRecord() else {
+            // No mandate is the consent gate's business, not this one.
+            setTermsCurrency(.unknown)
+            return
+        }
+        if fetchStatus != .success {
+            // The directory names the operator key each manifest is
+            // pinned against, so there is no authenticated fetch
+            // without it.
+            try? await refresh()
+        }
+        guard fetchStatus == .success else { return }
+
+        guard let listing = authorities.first(where: {
+            $0.componentId == record.mandate.authority
+        }) else {
+            // A published directory that no longer lists this authority
+            // is a definitive answer, not a fetch failure.
+            setTermsCurrency(.authorityDelisted)
+            return
+        }
+
+        let published: SignedManifest
+        do {
+            published = try await manifestFetcher.fetch(listing)
+        } catch {
+            Self.logger.debug("terms check: manifest unavailable, keeping last known currency")
+            return
+        }
+        // The active record can have changed while the fetch was in
+        // flight (actor reentrancy) — compare against the record that
+        // is active now, not the one this check started with.
+        guard let current = activeMandateRecord(),
+              current.mandate.authority == listing.componentId
+        else { return }
+
+        if published.manifestHash == current.mandate.manifestHash {
+            setTermsCurrency(.current)
+        } else {
+            setTermsCurrency(.superseded(publishedHash: published.manifestHash))
+        }
+    }
+
+    private func setTermsCurrency(_ currency: TermsCurrency) {
+        guard termsCurrency != currency else { return }
+        termsCurrency = currency
         publish()
     }
 
@@ -437,7 +545,13 @@ public actor ModerationRepository {
             records.insert(record, at: 0)
             mandateStore.save(records)
             publish()
-            return try await registerPending(record, with: listing, activate: true)
+            let registered = try await registerPending(record, with: listing, activate: true)
+            // The record that just became active pins bytes fetched
+            // moments ago, so its terms are current by construction.
+            // Saying so here is what dismisses the re-consent gate
+            // without waiting for the next foreground check.
+            setTermsCurrency(.current)
+            return registered
         }
 
         // Deactivate the previous active record without touching
@@ -449,6 +563,7 @@ public actor ModerationRepository {
         }
         records.insert(record, at: 0)
         mandateStore.save(records)
+        setTermsCurrency(.current)
         publish()
         return record
     }
@@ -464,7 +579,8 @@ public actor ModerationRepository {
             authorities: authorities,
             fetchStatus: fetchStatus,
             activeMandate: activeMandateRecord(),
-            history: records
+            history: records,
+            termsCurrency: termsCurrency
         )
     }
 

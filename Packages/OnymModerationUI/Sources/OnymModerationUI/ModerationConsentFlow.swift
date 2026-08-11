@@ -2,14 +2,21 @@ import Foundation
 import OnymModeration
 
 /// Drives the authority pick → manifest review → sign sequence, used
-/// both at onboarding (`.onboarding`, blocking gate) and from Settings
-/// (`.switching`, signs a fresh mandate; the old record stays pinned).
+/// at onboarding (`.onboarding`, blocking gate), from Settings
+/// (`.switching`, signs a fresh mandate; the old record stays pinned),
+/// and when standing consent has gone stale (`.reconsent`, blocking).
 @MainActor
 @Observable
 public final class ModerationConsentFlow {
     public enum Mode: Equatable {
         case onboarding
         case switching
+        /// The user holds a mandate, but not one that matches what its
+        /// authority publishes today. Mechanically identical to
+        /// switching — consent is always a fresh mandate, never an edit
+        /// (spec §12) — and differs only in being unskippable and in
+        /// naming what changed.
+        case reconsent(ReconsentReason)
     }
 
     public enum Step: Equatable {
@@ -34,10 +41,20 @@ public final class ModerationConsentFlow {
         /// repository's verified fetch.
         public var reviewingManifest: ReviewedManifest?
         public var errorMessage: String?
+        /// The authority the current mandate names, when there is one.
+        /// The re-consent picker marks its row: "the terms you already
+        /// agreed to, restated" is a different offer from the rest of
+        /// the list, and hiding which is which would make re-signing
+        /// look like switching.
+        public var currentAuthorityId: String?
     }
 
     public let mode: Mode
     public private(set) var state = State()
+
+    /// Settings can be walked away from; a gate cannot. Re-consent is a
+    /// gate — the app is running on consent the authority has withdrawn.
+    public var isDismissable: Bool { mode == .switching }
 
     private let repository: ModerationRepository
     private var snapshotTask: Task<Void, Never>?
@@ -62,6 +79,7 @@ public final class ModerationConsentFlow {
             for await snapshot in self.repository.snapshots {
                 self.state.authorities = snapshot.authorities
                 self.state.fetchStatus = snapshot.fetchStatus
+                self.state.currentAuthorityId = snapshot.activeMandate?.mandate.authority
                 if self.state.step == .loadingDirectory {
                     switch snapshot.fetchStatus {
                     case .success, .failed:
