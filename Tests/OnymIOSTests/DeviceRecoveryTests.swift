@@ -62,9 +62,11 @@ final class DeviceRecoveryTests: XCTestCase {
     /// The order pins the `grantVersion` < `grantee` case ('V' < 'e'
     /// by byte, the opposite of a case-insensitive sort) — the exact
     /// spot where a wrong canonicalization would diverge from serde.
+    /// These raw bytes carry no `grantType`, and canonicalization does
+    /// not invent one: only what the authority signed is hashed.
     func testGrantReferenceMatchesTheCanonicalBytesHash() throws {
         let grant = try RecoveryGrant(raw: Data(Self.grantJSON.utf8))
-        let canonical = #"{"authority":"onym:component:authority","caseId":"case-1","grantType":"onym-recovery-grant-v1","grantVersion":1,"grantee":"onym:key:test","issuedAt":"2026-08-09T00:00:00Z"}"#
+        let canonical = #"{"authority":"onym:component:authority","caseId":"case-1","grantVersion":1,"grantee":"onym:key:test","issuedAt":"2026-08-09T00:00:00Z"}"#
         let expected = SHA256.hash(data: Data(canonical.utf8))
             .map { String(format: "%02x", $0) }.joined()
         XCTAssertEqual(try grant.reference(), expected)
@@ -92,7 +94,7 @@ final class DeviceRecoveryTests: XCTestCase {
         XCTAssertEqual(grant.caseId, "case-11111111-2222-3333-4444-555555555555")
         XCTAssertEqual(grant.grantee, "npub1granteegranteegranteegranteegranteegranteegrantee")
         XCTAssertEqual(grant.authority, "authority.example")
-        XCTAssertEqual(grant.issuedAt, "2025-08-09T00:40:00Z")
+        XCTAssertEqual(grant.issuedAt, "2025-08-09T06:13:20Z")
         XCTAssertEqual(try grant.reference(), Self.serverGrantRef)
     }
 
@@ -138,7 +140,7 @@ final class DeviceRecoveryTests: XCTestCase {
         )
         let grant = try RecoveryGrant(raw: raw)
         XCTAssertEqual(grant.version, 1)
-        let canonical = #"{"authority":"authority.example","caseId":"case-11111111-2222-3333-4444-555555555555","grantType":"onym-recovery-grant-v1","grantee":"npub1granteegranteegranteegranteegranteegranteegrantee","issuedAt":"2025-08-09T00:40:00Z"}"#
+        let canonical = #"{"authority":"authority.example","caseId":"case-11111111-2222-3333-4444-555555555555","grantType":"onym-recovery-grant-v1","grantee":"npub1granteegranteegranteegranteegranteegranteegrantee","issuedAt":"2025-08-09T06:13:20Z"}"#
         let expected = SHA256.hash(data: Data(canonical.utf8))
             .map { String(format: "%02x", $0) }.joined()
         XCTAssertEqual(try grant.reference(), expected)
