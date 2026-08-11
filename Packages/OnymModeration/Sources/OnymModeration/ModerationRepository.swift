@@ -1215,7 +1215,7 @@ public actor ModerationRepository {
                     reportId: existing.report.reportId
                 )
             }
-            return try await submitReport(existing, to: listing)
+            return try await submitReport(existing, to: listing, images: message.images)
         }
 
         var report = Report(
@@ -1250,20 +1250,59 @@ public actor ModerationRepository {
             }
             throw error
         }
-        return try await submitReport(record, to: listing)
+        return try await submitReport(record, to: listing, images: message.images)
     }
 
     private func submitReport(
         _ record: ReportFilingRecord,
-        to listing: AuthorityListing
+        to listing: AuthorityListing,
+        images: [ReportableMessage.Image]
     ) async throws -> ReportReceipt {
         let client = authorityClients.client(for: listing)
+
+        // Bytes first, then the report that names them.
+        //
+        // The other order would leave a filed report pointing at an
+        // image the Authority does not hold — a case opened, and a mark
+        // set, on evidence nobody can look at. Uploading is idempotent
+        // (the digest is the address), so a retry after a partial
+        // upload re-sends the same bytes rather than creating anything
+        // new, and an upload that never gets referenced expires on the
+        // Authority's own sweep.
+        //
+        // Inside the same `do` as the filing, and not before it: the
+        // record is already inserted and persisted by this point, so an
+        // upload failure that skipped the handling below would strand a
+        // disclosure row on disk that can never be filed and re-fails
+        // identically on every retry — the outcome the discard exists to
+        // prevent, reached through the one call that bypassed it.
         let receipt: ReportReceipt
         do {
+            for image in images {
+                do {
+                    try await client.uploadEvidenceImage(
+                        sha256: image.sha256,
+                        bytes: image.bytes
+                    )
+                } catch let AuthorityClientError.rejected(rejection)
+                    where rejection.statusCode == 409 {
+                    // The Authority already holds these exact bytes.
+                    // Content addressing makes that the *expected*
+                    // outcome of any retry, and there is nothing to
+                    // resend. The merged reference answers 2xx here
+                    // (`INSERT OR IGNORE`), but the contract does not
+                    // require that, and a conflict on a
+                    // content-addressed PUT can only mean agreement.
+                    continue
+                }
+            }
+
             receipt = try await client.fileReport(record.report)
         } catch {
-            // 409: the Authority already holds these exact bytes — a
-            // terminal, benign state, not a rejection. Keep the ledger
+            // 409 from the filing: the Authority already holds this
+            // exact report — a terminal, benign state, not a rejection.
+            // (An upload conflict never reaches here; it is agreement,
+            // and is absorbed above.) Keep the ledger
             // row (it is the idempotency key) and surface it as its own
             // error so the UI can present "already on file" rather than
             // retry advice. The original receipt is unrecoverable until

@@ -291,6 +291,21 @@ public struct CaseStatus: Codable, Sendable, Equatable {
 public protocol ModerationAuthorityClient: Sendable {
     func registerMandate(_ mandate: ModerationMandate) async throws -> MandateRegistrationReceipt
     func fileReport(_ report: Report) async throws -> ReportReceipt
+
+    /// Upload the bytes of one reported image, addressed by their
+    /// SHA-256.
+    ///
+    /// Evidence bytes travel on their own content-addressed route
+    /// rather than inside the report: they do not fit in the JSON body
+    /// limit, and naming them by digest is what makes the upload safe
+    /// to accept at all. The Authority recomputes the hash and matches
+    /// it against the digest the accused signed, so bytes that hash to
+    /// anything else are simply not the reported photo.
+    ///
+    /// Idempotent by construction — re-uploading the same bytes is the
+    /// same object, so an interrupted upload resumes by sending them
+    /// again.
+    func uploadEvidenceImage(sha256: String, bytes: Data) async throws
     @discardableResult
     func respond(_ response: CaseResponse) async throws -> CaseResponseReceipt
     @discardableResult
@@ -391,6 +406,31 @@ public struct URLSessionModerationAuthorityClient: ModerationAuthorityClient {
             )
         }
         return receipt
+    }
+
+    public func uploadEvidenceImage(sha256: String, bytes: Data) async throws {
+        let timestamp = Self.timestamp(clock())
+        // The exact credential message the reference Authority verifies
+        // (`authority/src/api.rs`, `put_evidence_blob`). It authorizes
+        // the upload — it is not what makes the bytes trustworthy; the
+        // digest in the path does that.
+        let signedBytes = Data("evidence-blob:\(sha256):\(timestamp)".utf8)
+        let key = try await signer.userKeyID()
+        let signature = try await signer.sign(signedBytes).base64EncodedString()
+        _ = try await send(
+            method: "PUT",
+            path: ["v1", "evidence-blobs", sha256],
+            body: bytes,
+            // Opaque bytes, not JSON. The Authority sniffs the real type
+            // from the content and ignores whatever is declared here,
+            // but sending `application/json` would still be a lie.
+            contentType: "application/octet-stream",
+            headers: [
+                "X-Onym-Key": key,
+                "X-Onym-Timestamp": timestamp,
+                "X-Onym-Signature": signature,
+            ]
+        )
     }
 
     @discardableResult
@@ -568,6 +608,7 @@ public struct URLSessionModerationAuthorityClient: ModerationAuthorityClient {
         method: String,
         path: [String],
         body: Data? = nil,
+        contentType: String = "application/json",
         headers: [String: String] = [:]
     ) async throws -> Data {
         guard baseURL.scheme?.lowercased() == "https", baseURL.host != nil else {
@@ -583,6 +624,7 @@ public struct URLSessionModerationAuthorityClient: ModerationAuthorityClient {
                 method: method,
                 path: path,
                 body: body,
+                contentType: contentType,
                 headers: headers
             )
         }
@@ -593,6 +635,7 @@ public struct URLSessionModerationAuthorityClient: ModerationAuthorityClient {
         method: String,
         path: [String],
         body: Data?,
+        contentType: String,
         headers: [String: String]
     ) async throws -> Data {
         let url = path.reduce(baseURL) { partial, component in
@@ -603,7 +646,7 @@ public struct URLSessionModerationAuthorityClient: ModerationAuthorityClient {
         request.timeoutInterval = 15
         request.httpBody = body
         if body != nil {
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         }
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         for (name, value) in headers {
@@ -664,6 +707,10 @@ public struct StubModerationAuthorityClient: ModerationAuthorityClient {
 
     public func fileReport(_ report: Report) async throws -> ReportReceipt {
         throw ModerationError.notImplemented("file-report")
+    }
+
+    public func uploadEvidenceImage(sha256: String, bytes: Data) async throws {
+        throw ModerationError.notImplemented("upload-evidence-image")
     }
 
     public func respond(_ response: CaseResponse) async throws -> CaseResponseReceipt {
