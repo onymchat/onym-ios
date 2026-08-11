@@ -347,11 +347,16 @@ public struct ChatsView: View {
     }
 
     private var groupList: some View {
-        List(flow.items) { item in
+        // Built once per render rather than per row: as a computed
+        // property read inside the row builder it rebuilt the whole
+        // dictionary — and re-ran the admin derivation for every pending
+        // request — once for each group in the list.
+        let joinRequestCounts = pendingJoinRequestCounts
+        return List(flow.items) { item in
             NavigationLink(value: item.group.id) {
                 ChatsRow(
                     item: item,
-                    joinRequestCount: pendingJoinRequestCounts[item.group.id] ?? 0
+                    joinRequestCount: joinRequestCounts[item.group.id] ?? 0
                 )
             }
             .listRowSeparator(.visible)

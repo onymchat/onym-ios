@@ -232,14 +232,6 @@ final class ApproveRequestsFlowTests: XCTestCase {
 
     // MARK: - Misc
 
-    func test_dismissError_clearsLastError() {
-        let stub = StubApprover()
-        let flow = ApproveRequestsFlow(approver: stub)
-        flow.lastError = "boom"
-        flow.dismissError()
-        XCTAssertNil(flow.lastError)
-    }
-
     // MARK: - Helpers
 
     private static func makeRequest(

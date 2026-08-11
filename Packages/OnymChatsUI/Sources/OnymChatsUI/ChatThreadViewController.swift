@@ -331,7 +331,11 @@ final class ChatThreadViewController: UIViewController {
     /// `reconfigureItems`-ed rather than re-inserted, so tapping Accept
     /// swaps the button to its spinner without the card animating out
     /// and back in.
-    func update(joinRequests: [ChatJoinRequestDisplay]) {
+    /// `messagesLoaded` says whether the message stream has delivered a
+    /// snapshot yet, which `orderedMessages.isEmpty` cannot: an empty
+    /// list means "nothing arrived" until the first snapshot lands, and
+    /// only means "this thread is empty" afterwards.
+    func update(joinRequests: [ChatJoinRequestDisplay], messagesLoaded: Bool = true) {
         // A repeated request id would trap twice over: in the dictionary
         // build, and again in `appendItems` (a diffable snapshot rejects
         // duplicate identifiers). The approver already collapses
@@ -377,15 +381,28 @@ final class ChatThreadViewController: UIViewController {
             // precisely when the first join request lands — would
             // otherwise render the row invisibly.
             //
-            // Gated on the message snapshot not having landed, not on
-            // `alpha == 0`. They differ for exactly one case, and it is a
-            // reachable one: a founder cold-opening a thread that has
-            // both messages and a pending request. Both snapshots arrive
-            // while alpha is still 0, and `jumpToBottomForColdOpen`
-            // defers its own reveal a runloop precisely to mask the
-            // height settle. Revealing from here on the alpha check would
-            // beat that deferral and show a frame at the wrong offset.
-            if !ids.isEmpty, !self.hasAppliedFirstSnapshot, self.orderedMessages.isEmpty {
+            // Only for a thread that is genuinely empty — the snapshot
+            // has arrived and contained nothing — and never before it
+            // arrives.
+            //
+            // This is the whole reason `messagesLoaded` exists. The host
+            // starts `messages` empty and the request flow is
+            // app-lifetime, so a founder opening a group *with* history
+            // gets the request first. Revealing on "no messages yet"
+            // latched the cold open before the history existed: it then
+            // landed as an animated append, flying every message in and
+            // scrolling — precisely what the cold open exists to avoid —
+            // and `openAtMessageID` was never consumed, so opening a
+            // search hit silently lost its target.
+            //
+            // With the flag, `update(messages:)` keeps owning the cold
+            // open, and this path only covers the case it was added for:
+            // a brand-new group whose founder has sent nothing, where
+            // the request is the only content and nothing else would
+            // ever reveal the table.
+            if !ids.isEmpty, messagesLoaded, !self.hasAppliedFirstSnapshot,
+               self.orderedMessages.isEmpty
+            {
                 self.tableView.alpha = 1
                 // Latch the cold open too. Revealing without this left
                 // `isFirstApply` true, so the next message snapshot —

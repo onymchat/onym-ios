@@ -30,10 +30,17 @@ final class ChatSystemNoticeCellTests: XCTestCase {
             style: .default,
             reuseIdentifier: ChatSystemNoticeCell.reuseID
         )
-        cell.configure(event: .memberJoined(alias: "Bob"))
+        let event = ChatSystemEvent.memberJoined(alias: "Bob")
+        cell.configure(event: event)
 
         let label = Self.firstLabel(in: cell)
-        XCTAssertEqual(label?.text, "Bob joined")
+        // Compared against the event's own rendering rather than an
+        // English literal: the sentence resolves through the string
+        // catalog now, so hardcoding it here would pin the test to one
+        // language — the same brittleness the UI-test page object was
+        // rewritten to shed.
+        XCTAssertEqual(label?.text, event.localizedText)
+        XCTAssertTrue(label?.text?.contains("Bob") == true, "the alias survives every language")
         XCTAssertEqual(label?.accessibilityIdentifier, "chat.system_notice")
     }
 

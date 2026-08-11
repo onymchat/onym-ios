@@ -832,7 +832,7 @@ final class ChatThreadViewControllerTests: XCTestCase {
         // looking at an invisible table.
         let vc = ChatThreadViewController()
         vc.loadViewIfNeeded()
-        vc.update(joinRequests: [makeRequest(id: "r1")])
+        vc.update(joinRequests: [makeRequest(id: "r1")], messagesLoaded: true)
         settle()
 
         XCTAssertEqual(tableView(in: vc)?.alpha, 1)
@@ -869,6 +869,74 @@ final class ChatThreadViewControllerTests: XCTestCase {
     /// Let deferred work run: snapshot completions and the cold open's
     /// reveal are both `DispatchQueue.main.async`, so a synchronous
     /// assertion sees neither.
+    /// The production order, and the one that was broken: the request
+    /// arrives before the history.
+    ///
+    /// `messages` starts empty on the host while the request flow is
+    /// app-lifetime, so a founder opening a group *with* history gets
+    /// `update(messages: [])` then the request. Revealing and latching
+    /// there made the real history land as an animated append — every
+    /// message flying in and scrolling — which is exactly what the cold
+    /// open exists to prevent.
+    func test_requestBeforeHistory_leavesTheColdOpenToTheMessages() {
+        let vc = ChatThreadViewController()
+        vc.loadViewIfNeeded()
+
+        // First pass: no snapshot yet, request already pending.
+        vc.update(messages: [])
+        vc.update(joinRequests: [makeRequest(id: "r1")], messagesLoaded: false)
+        settle()
+
+        XCTAssertEqual(tableView(in: vc)?.alpha, 0,
+                       "an unloaded thread must not be revealed by the request path")
+
+        // History lands: this is the cold open, and it must still be one.
+        vc.update(messages: [
+            makeMessage(body: "one", direction: .incoming),
+            makeMessage(body: "two", direction: .incoming),
+        ])
+        settle()
+
+        XCTAssertEqual(tableView(in: vc)?.alpha, 1, "the cold open reveals it")
+        XCTAssertEqual(tableView(in: vc)?.numberOfRows(inSection: 0), 3)
+    }
+
+    /// The search-open consequence of the same bug: `openAtMessageID` is
+    /// consumed only by the cold open, so skipping it lost the target
+    /// silently.
+    func test_requestBeforeHistory_stillLandsOnASearchTarget() {
+        let vc = ChatThreadViewController()
+        vc.loadViewIfNeeded()
+        let target = makeMessage(body: "the hit", direction: .incoming)
+        vc.openAtMessageID = target.id
+
+        vc.update(messages: [])
+        vc.update(joinRequests: [makeRequest(id: "r1")], messagesLoaded: false)
+        settle()
+
+        vc.update(messages: [
+            makeMessage(body: "before", direction: .incoming),
+            target,
+            makeMessage(body: "after", direction: .incoming),
+        ])
+        settle()
+
+        XCTAssertNil(vc.openAtMessageID,
+                     "the cold open must run and consume the search target")
+    }
+
+    /// And a genuinely empty thread still gets its reveal — the case the
+    /// request path was added for.
+    func test_emptyLoadedThreadWithARequest_isStillRevealed() {
+        let vc = ChatThreadViewController()
+        vc.loadViewIfNeeded()
+        vc.update(messages: [])
+        vc.update(joinRequests: [makeRequest(id: "r1")], messagesLoaded: true)
+        settle()
+
+        XCTAssertEqual(tableView(in: vc)?.alpha, 1)
+    }
+
     private func settle() {
         RunLoop.current.run(until: Date().addingTimeInterval(0.05))
     }

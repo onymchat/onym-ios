@@ -113,13 +113,16 @@ public final class ApproveRequestsFlow {
 
     /// Drop `lastError` only when it belongs to `id`. Acting on one
     /// request must not clear the error another row is still showing.
+    /// A request's error is cleared when that request is acted on again
+    /// — retried or declined — and not before.
+    ///
+    /// There is deliberately no dismiss affordance now that the modal is
+    /// gone: the error sits on the row it belongs to, and the row is the
+    /// thing the founder is going to touch next. A `dismissError()` used
+    /// to exist for the modal's toolbar and had no caller left, so it
+    /// went rather than sitting there looking like an API.
     private func clearErrorIfOwned(by id: String) {
         guard lastErrorRequestID == id || lastErrorRequestID == nil else { return }
-        lastError = nil
-        lastErrorRequestID = nil
-    }
-
-    public func dismissError() {
         lastError = nil
         lastErrorRequestID = nil
     }

@@ -137,6 +137,16 @@ public struct ChatThreadView: View {
     /// `sentAt`. SwiftUI re-renders on every push so the bridge
     /// hands the controller fresh data via `updateUIViewController`.
     @State private var messages: [ChatMessage] = []
+    /// Whether the message stream has delivered its first snapshot,
+    /// empty or not.
+    ///
+    /// `messages` starts empty and so cannot answer "is this thread
+    /// empty?" — only "has nothing arrived *yet*". The join-request rows
+    /// need that distinction: a founder opening a group with history and
+    /// a pending request gets the request before the history, and a
+    /// reveal driven off an empty `messages` would fire on a thread that
+    /// is merely unloaded.
+    @State private var hasLoadedMessages = false
     @State private var reportableMessage: ReportableMessage?
     /// The message whose disclosure is being prepared, if any. Doubles
     /// as the in-flight indicator and the repeat-tap guard.
@@ -148,6 +158,7 @@ public struct ChatThreadView: View {
             memberProfiles: currentMemberProfiles,
             invitationMessage: currentInvitationMessage,
             messages: messages,
+            hasLoadedMessages: hasLoadedMessages,
             onSendTapped: { body, replyToMessageID in
                 // Fire-and-forget. `SendMessageInteractor` does the
                 // optimistic insert as `.pending` synchronously
@@ -394,6 +405,7 @@ public struct ChatThreadView: View {
             else { return }
             for await snapshot in messageRepository.snapshots(groupID: groupID, owner: owner) {
                 messages = snapshot
+                hasLoadedMessages = true
                 // Read receipts: the thread is on-screen (this task is
                 // tied to its lifetime), so any incoming message here is
                 // "read". Gated by the symmetric setting, batched per
@@ -635,6 +647,7 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
     let memberProfiles: [String: MemberProfile]
     let invitationMessage: String?
     let messages: [ChatMessage]
+    let hasLoadedMessages: Bool
     let onSendTapped: (String, UUID?) -> Void
     let onRetryRequested: (UUID) -> Void
     let canReportMessage: (ChatMessage) -> Bool
@@ -686,7 +699,7 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         vc.update(memberProfiles: memberProfiles)
         vc.update(invitationMessage: invitationMessage)
         vc.update(messages: messages)
-        vc.update(joinRequests: joinRequests)
+        vc.update(joinRequests: joinRequests, messagesLoaded: hasLoadedMessages)
         vc.setPendingMedia(pendingMedia)
         return vc
     }
@@ -717,7 +730,7 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         vc.update(messages: messages)
         // After `update(messages:)`: the request rows are appended below
         // the messages, so the message list has to be current first.
-        vc.update(joinRequests: joinRequests)
+        vc.update(joinRequests: joinRequests, messagesLoaded: hasLoadedMessages)
         vc.setPendingMedia(pendingMedia)
     }
 }
