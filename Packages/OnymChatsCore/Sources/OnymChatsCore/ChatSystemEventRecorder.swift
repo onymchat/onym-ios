@@ -73,14 +73,10 @@ public struct ChatSystemEventRecorder: GroupSystemEventRecording {
         at: Date
     ) async {
         await record(
-            // Same reasoning as the alias: a group created without a
-            // name would otherwise write "You joined " into history.
-            // "(Unnamed)" matches how the chat list renders one.
-            event: .youJoined(
-                groupName: groupName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    ? String(localized: "(Unnamed)")
-                    : groupName
-            ),
+            // Stored raw, including empty. `ChatSystemEvent.localizedText`
+            // supplies the placeholder when it renders — resolving it
+            // here would freeze one language into permanent history.
+            event: .youJoined(groupName: groupName),
             discriminator: "you-joined",
             groupID: groupID,
             ownerIdentityID: ownerIdentityID,
@@ -96,14 +92,17 @@ public struct ChatSystemEventRecorder: GroupSystemEventRecording {
     /// from `JoinRequestPayload.joinerDisplayLabel` (admin side) and
     /// `MemberAnnouncementPayload.newMember.alias` (member side).
     ///
-    /// The request row already trims and falls back before rendering, but
-    /// a notice is written into *permanent history* — an empty or
-    /// whitespace-only alias would leave " joined" sitting in the thread
-    /// forever, with no way to correct it. Same trim + `(unnamed)`
-    /// fallback the request row uses, applied before the row is stored.
+    /// Trim only. An empty alias stays empty in the stored row, and
+    /// `ChatSystemEvent.localizedText` supplies the placeholder when the
+    /// notice is read.
+    ///
+    /// A notice is written into *permanent history*, so a placeholder
+    /// resolved here would outlive the language it was resolved in — the
+    /// row would still read "(unnamed)" after the device switched to
+    /// French, and there would be no way to correct it. Trimming is safe
+    /// to do once because it changes no meaning; choosing words is not.
     static func displayAlias(_ raw: String) -> String {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? String(localized: "(unnamed)") : trimmed
+        raw.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func record(

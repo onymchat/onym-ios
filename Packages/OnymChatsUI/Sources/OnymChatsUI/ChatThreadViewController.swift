@@ -376,7 +376,16 @@ final class ChatThreadViewController: UIViewController {
             // A brand-new group whose founder hasn't sent anything yet —
             // precisely when the first join request lands — would
             // otherwise render the row invisibly.
-            if !ids.isEmpty, self.tableView.alpha == 0 {
+            //
+            // Gated on the message snapshot not having landed, not on
+            // `alpha == 0`. They differ for exactly one case, and it is a
+            // reachable one: a founder cold-opening a thread that has
+            // both messages and a pending request. Both snapshots arrive
+            // while alpha is still 0, and `jumpToBottomForColdOpen`
+            // defers its own reveal a runloop precisely to mask the
+            // height settle. Revealing from here on the alpha check would
+            // beat that deferral and show a frame at the wrong offset.
+            if !ids.isEmpty, !self.hasAppliedFirstSnapshot, self.orderedMessages.isEmpty {
                 self.tableView.alpha = 1
                 // Latch the cold open too. Revealing without this left
                 // `isFirstApply` true, so the next message snapshot —

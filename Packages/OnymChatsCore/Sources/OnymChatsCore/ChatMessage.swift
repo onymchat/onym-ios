@@ -220,12 +220,27 @@ public enum ChatSystemEvent: Equatable, Sendable, Codable {
     /// own copy of these sentences meant a re-word in one place silently
     /// diverged from the other. The strings live in the app's catalog;
     /// package sources resolve against `Bundle.main`.
+    /// The fallback for a value that arrived empty, applied here rather
+    /// than at record time.
+    ///
+    /// An alias is self-asserted and a group may have no name, so both
+    /// can be blank. Resolving the placeholder before storing would
+    /// freeze one language into permanent history — the row would still
+    /// say "(unnamed)" after the device switched to French — which is
+    /// the thing this enum's "structured data, not prose" rule exists to
+    /// prevent. The stored row keeps whatever arrived, including
+    /// nothing, and the sentence is assembled every time it is read.
+    private static func display(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? String(localized: "(unnamed)") : trimmed
+    }
+
     public var localizedText: String {
         switch self {
         case .memberJoined(let alias):
-            return String(localized: "\(alias) joined")
+            return String(localized: "\(Self.display(alias)) joined")
         case .youJoined(let groupName):
-            return String(localized: "You joined \(groupName)")
+            return String(localized: "You joined \(Self.display(groupName))")
         }
     }
 

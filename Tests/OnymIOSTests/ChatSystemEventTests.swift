@@ -310,9 +310,19 @@ final class ChatSystemEventTests: XCTestCase {
         guard case .memberJoined(let alias)? = listed.first?.systemEvent else {
             return XCTFail("expected a memberJoined notice")
         }
-        XCTAssertFalse(alias.trimmingCharacters(in: .whitespaces).isEmpty,
-                       "a blank alias must not persist as whitespace")
-        XCTAssertFalse(listed.first?.chatListPreview.hasPrefix(" ") == true)
+        // The *stored* value keeps what arrived, which for a blank alias
+        // is nothing. Resolving the placeholder before storing would
+        // freeze one language into permanent history — the row would
+        // still read "(unnamed)" after the device switched to French,
+        // with no way to correct it.
+        XCTAssertTrue(alias.isEmpty, "the placeholder belongs at render time, not in the row")
+
+        // What the user sees still falls back, which is the part that
+        // matters: no " joined" with a leading space, ever.
+        let rendered = listed.first?.chatListPreview ?? ""
+        XCTAssertFalse(rendered.hasPrefix(" "))
+        XCTAssertFalse(rendered.trimmingCharacters(in: .whitespaces).isEmpty)
+        XCTAssertTrue(rendered.contains("joined"))
     }
 
     func test_blankGroupName_fallsBack() async {
@@ -338,7 +348,53 @@ final class ChatSystemEventTests: XCTestCase {
         guard case .youJoined(let name)? = listed.first?.systemEvent else {
             return XCTFail("expected a youJoined notice")
         }
-        XCTAssertFalse(name.isEmpty)
+        // Stored raw for the same reason as the alias above.
+        XCTAssertTrue(name.isEmpty, "the placeholder belongs at render time, not in the row")
+
+        let rendered = listed.first?.chatListPreview ?? ""
+        XCTAssertFalse(rendered.hasSuffix(" "), "no trailing space where the name should be")
+        XCTAssertTrue(rendered.contains("You joined"))
+    }
+
+    /// A row carrying a system event it cannot decode is dropped, not
+    /// degraded.
+    ///
+    /// After a downgrade an unknown `kind` fails to decode. Falling back
+    /// to `systemEvent: nil` renders the row as an ordinary *empty
+    /// bubble* attributed to the joiner — a message nobody sent. Hiding
+    /// it says less, but it says nothing false.
+    func test_undecodableSystemEvent_dropsTheRowRatherThanShowingAnEmptyBubble() async {
+        let owner = IdentityID()
+        let groupID = String(repeating: "cd", count: 32)
+        let recorder = ChatSystemEventRecorder(
+            messageRepository: MessageRepository(store: store)
+        )
+        await recorder.recordMemberJoined(
+            groupID: groupID,
+            ownerIdentityID: owner,
+            groupType: .tyranny,
+            joinerBlsPubkeyHex: String(repeating: "88", count: 48),
+            alias: "Alice",
+            at: Date()
+        )
+        let before = await store.list(
+            groupID: groupID,
+            ownerIDString: owner.rawValue.uuidString
+        )
+        XCTAssertEqual(before.count, 1)
+
+        // Rewrite the stored event as a kind this build does not know.
+        await store.overwriteSystemEventForTests(
+            groupID: groupID,
+            ownerIDString: owner.rawValue.uuidString,
+            json: #"{"kind":"member_left_in_a_future_version"}"#
+        )
+
+        let listed = await store.list(
+            groupID: groupID,
+            ownerIDString: owner.rawValue.uuidString
+        )
+        XCTAssertTrue(listed.isEmpty, "an unreadable notice must not render as a blank message")
     }
 
     // MARK: - Helpers

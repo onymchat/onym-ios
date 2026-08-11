@@ -189,8 +189,20 @@ struct JoinRequestRow {
     /// relayer round-trip, so the "joined" notice replacing the row can
     /// take a while.
     @discardableResult
+    /// Matches the notice by its accessibility identifier and then by
+    /// the alias appearing inside it, rather than by the whole English
+    /// sentence.
+    ///
+    /// The sentence now comes from the string catalog, so asserting on
+    /// `"\(alias) joined"` made the flow pass only in English. The alias
+    /// is user data and appears in every translation; the identifier is
+    /// stable by construction.
     func waitForJoinedNotice(alias: String, timeout: TimeInterval = 60) -> Bool {
-        app.staticTexts["\(alias) joined"].waitForExistence(timeout: timeout)
+        let notice = app.staticTexts
+            .matching(identifier: "chat.system_notice")
+            .containing(NSPredicate(format: "label CONTAINS[c] %@", alias))
+            .firstMatch
+        return notice.waitForExistence(timeout: timeout)
     }
 }
 

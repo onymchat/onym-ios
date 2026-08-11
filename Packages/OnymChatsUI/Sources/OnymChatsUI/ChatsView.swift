@@ -306,16 +306,44 @@ public struct ChatsView: View {
     /// That's the same discoverability failure this PR set out to fix,
     /// one screen further in.
     ///
-    /// Keyed by hex group id to match `ChatListItem.id`. Only the admin's
-    /// device ever has entries: a request is sealed to an intro key no
-    /// one else holds.
+    /// Keyed by hex group id to match `ChatListItem.id`.
+    ///
+    /// Gated on being this group's admin, the same way the thread row is.
+    /// "Only the admin's device has entries" is true of the *device* and
+    /// not of the active identity: `IntroKeyStore.find(introPublicKey:)`
+    /// searches every key on the device rather than the current
+    /// identity's, so a request decodes under whichever identity happens
+    /// to be selected. With two local identities in one group — which
+    /// this app supports — the non-admin one would otherwise see
+    /// "Someone wants to join", tap through, and find nothing to act on,
+    /// because the thread does apply this check.
     private var pendingJoinRequestCounts: [String: Int] {
         var counts: [String: Int] = [:]
         for request in approveRequestsFlow.pending {
             let hex = request.groupId.map { String(format: "%02x", $0) }.joined()
+            guard isAdmin(ofGroupID: hex) else { continue }
             counts[hex, default: 0] += 1
         }
         return counts
+    }
+
+    /// Whether the active identity administers this group.
+    ///
+    /// Same derivation as `ChatThreadView.isGroupAdmin` and
+    /// `ChatMembersView.canShareInvite`: compare the active identity's
+    /// BLS pubkey against the group's stored admin pubkey, rather than
+    /// trusting whoever holds the thread on this device.
+    private func isAdmin(ofGroupID groupID: String) -> Bool {
+        guard
+            let group = flow.items.first(where: { $0.group.id == groupID })?.group,
+            let storedAdminHex = group.adminPubkeyHex?.lowercased(),
+            let activeID = identitiesFlow.currentID,
+            let activeSummary = identitiesFlow.identities.first(where: { $0.id == activeID })
+        else { return false }
+        let activeHex = activeSummary.blsPublicKey
+            .map { String(format: "%02x", $0) }.joined()
+            .lowercased()
+        return activeHex == storedAdminHex
     }
 
     private var groupList: some View {
@@ -412,12 +440,14 @@ private struct ChatsRow: View {
                 Text(group.name.isEmpty ? "(Unnamed)" : group.name)
                     .font(.system(size: 16, weight: .semibold))
                     .lineLimit(1)
+                // The join hint leads, because it is the only line in the
+                // row that needs an action and a badge alone was what
+                // nobody noticed on the toolbar. It no longer *replaces*
+                // the rest: a founder with unread messages and a pending
+                // request was losing both the preview and the count, and
+                // the two signals answer different questions.
                 HStack(spacing: 6) {
                     if joinRequestCount > 0 {
-                        // Takes the subtitle outright rather than sitting
-                        // beside the last message: it's the only line in
-                        // the row that needs an action, and a small badge
-                        // alone was what nobody noticed on the toolbar.
                         Image(systemName: "person.crop.circle.badge.plus")
                             .font(.caption2)
                             .foregroundStyle(OnymAccent.blue.color)
@@ -425,33 +455,41 @@ private struct ChatsRow: View {
                             .font(.caption)
                             .foregroundStyle(OnymAccent.blue.color)
                             .lineLimit(1)
+                            .layoutPriority(1)
                             .accessibilityIdentifier("chats.row.join_request.\(group.id)")
-                    } else {
-                        if item.latestPreview == nil {
-                            Image(systemName: "lock.fill")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                        Text(subtitle)
+                        Text("·")
                             .font(.caption)
-                            // Unread rows read a touch stronger than the muted
-                            // "no messages / metadata" line.
-                            .foregroundStyle(item.unreadCount > 0 ? .primary : .secondary)
-                            .lineLimit(1)
-                            .accessibilityIdentifier("chats.row.subtitle.\(group.id)")
+                            .foregroundStyle(.secondary)
+                    } else if item.latestPreview == nil {
+                        Image(systemName: "lock.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
+                    Text(subtitle)
+                        .font(.caption)
+                        // Unread rows read a touch stronger than the muted
+                        // "no messages / metadata" line.
+                        .foregroundStyle(item.unreadCount > 0 ? .primary : .secondary)
+                        .lineLimit(1)
+                        .accessibilityIdentifier("chats.row.subtitle.\(group.id)")
                 }
             }
 
             Spacer(minLength: 0)
 
+            // Both badges when both apply. They mean different things —
+            // one is work waiting for the founder, the other is reading
+            // waiting for the reader — and dropping the unread count
+            // because someone asked to join loses a signal the row was
+            // already carrying.
             if joinRequestCount > 0 {
                 JoinRequestBadge(count: joinRequestCount)
                     .accessibilityIdentifier("chats.row.join_request_badge.\(group.id)")
-            } else if item.unreadCount > 0 {
+            }
+            if item.unreadCount > 0 {
                 UnreadBadge(count: item.unreadCount)
                     .accessibilityIdentifier("chats.row.unread.\(group.id)")
-            } else if group.isPublishedOnChain {
+            } else if joinRequestCount == 0, group.isPublishedOnChain {
                 Image(systemName: "checkmark.seal.fill")
                     .font(.caption)
                     .foregroundStyle(Color.green)
