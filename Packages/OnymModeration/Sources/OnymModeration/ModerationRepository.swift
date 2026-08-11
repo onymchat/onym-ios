@@ -11,6 +11,31 @@ public enum AuthorityFetchStatus: Equatable, Sendable {
     case failed(message: String)
 }
 
+/// Whether the active mandate still pins the manifest its authority
+/// publishes today.
+///
+/// A mandate stays valid under the bytes it signed — the reference
+/// Authority judges every case under the manifest that mandate pinned,
+/// so superseded terms are not an outage and nothing in flight breaks.
+/// What they are is stale *consent*: the user is operating under terms
+/// the authority no longer stands behind, and only fresh consent can
+/// move them onto the new ones.
+public enum TermsCurrency: Sendable, Equatable {
+    /// Not established yet — no active mandate, the directory hasn't
+    /// loaded, or the manifest couldn't be fetched. Never blocks: an
+    /// unreachable authority must not lock the user out of the app.
+    case unknown
+    /// The active mandate's hash equals the published manifest's.
+    case current
+    /// The authority publishes a different manifest than the one this
+    /// mandate consented to.
+    case superseded(publishedHash: String)
+    /// The active mandate's authority is no longer in the designated
+    /// directory. There are no new terms to re-sign — the only way
+    /// forward is a different authority.
+    case authorityDelisted
+}
+
 /// Combined snapshot for consent and settings UI: the designated
 /// authorities, the fetch state of that list, and the mandate
 /// history for this device.
@@ -23,6 +48,8 @@ public struct ModerationState: Sendable, Equatable {
     /// still ambiguous, newest first. Definitively refused attempts are
     /// not mandates and are removed from this retained state.
     public let history: [MandateRecord]
+    /// Result of the most recent `refreshActiveTerms()`.
+    public let termsCurrency: TermsCurrency
 
     public static let empty = ModerationState(
         authorities: [],
@@ -35,12 +62,14 @@ public struct ModerationState: Sendable, Equatable {
         authorities: [AuthorityListing],
         fetchStatus: AuthorityFetchStatus,
         activeMandate: MandateRecord?,
-        history: [MandateRecord]
+        history: [MandateRecord],
+        termsCurrency: TermsCurrency = .unknown
     ) {
         self.authorities = authorities
         self.fetchStatus = fetchStatus
         self.activeMandate = activeMandate
         self.history = history
+        self.termsCurrency = termsCurrency
     }
 }
 
@@ -178,6 +207,16 @@ public actor ModerationRepository {
     private var caseStatusTasks: [CaseStatusKey: Task<CaseStatus, Error>] = [:]
     private var caseResponseTasks: [CaseSubmissionKey: Task<CaseResponseReceipt, Error>] = [:]
     private var caseAppealTasks: [CaseSubmissionKey: Task<AppealReceipt, Error>] = [:]
+    private var refreshTask: Task<[AuthorityListing], Error>?
+    private var termsCheckTask: Task<Void, Never>?
+    /// Last authenticated, consentable manifest seen for an authority,
+    /// and the authority the directory has stopped listing. Each holds
+    /// one authority, not a table: they are observations about the one
+    /// the active mandate names, and are only ever read through
+    /// `termsCurrency`, which discards them when they describe anyone
+    /// else. Reading either directly would need that check restated.
+    private var publishedManifest: (authority: String, hash: String)?
+    private var delistedAuthority: String?
 
     public init(
         authoritiesFetcher: any KnownAuthoritiesFetcher,
@@ -227,23 +266,232 @@ public actor ModerationRepository {
                 // published/persisted by their individual operations.
                 // A later consent attempt resumes safely.
             }
+            await self.checkTermsIfNotYetEstablished()
         }
+    }
+
+    /// An install whose active mandate only appears when a pending
+    /// registration resolves has already missed the launch terms check,
+    /// which returned immediately on finding no active record. Nothing
+    /// else re-triggers one, so those installs would run unchecked
+    /// until the next foreground. Narrow by design: it does nothing
+    /// when a check has already produced an answer for the record that
+    /// is active now.
+    private func checkTermsIfNotYetEstablished() async {
+        guard activeMandateRecord() != nil, termsCurrency == .unknown else { return }
+        await refreshActiveTerms()
     }
 
     /// Fetch the latest directory. Throws so consent UI can surface
     /// failure with a retry affordance.
+    ///
+    /// One fetch at a time, shared by every caller: launch, the consent
+    /// flow, and the terms check all ask for the directory within the
+    /// same moment of a cold start. Racing fetches let a loser's
+    /// `.failed` land after a winner's `.success` and put a spurious
+    /// "Couldn't load the authority list." under the onboarding picker.
     public func refresh() async throws {
-        fetchStatus = .fetching
-        publish()
+        _ = try await refreshedAuthorities()
+    }
+
+    /// `refresh()` for callers that need to act on the list it fetched.
+    /// The list comes back as a value rather than being read off the
+    /// actor afterwards: with fetches coalesced, another caller can
+    /// start a new one in the suspension between this task finishing
+    /// and its awaiter resuming, so `fetchStatus` at that point may
+    /// describe a fetch that has nothing to do with this call.
+    @discardableResult
+    private func refreshedAuthorities() async throws -> [AuthorityListing] {
+        if let task = refreshTask {
+            return try await task.value
+        }
+        let task = Task { try await self.performRefresh() }
+        refreshTask = task
+        return try await task.value
+    }
+
+    private func performRefresh() async throws -> [AuthorityListing] {
+        // A list already on screen is not replaced by a spinner for a
+        // background re-read, and is not replaced by an error if that
+        // read fails. The terms check re-reads the directory on every
+        // foreground, and without this the consent picker — which is
+        // exactly what is on screen when the re-consent gate is up —
+        // would flicker through its loading and failure affordances on
+        // each resume.
+        let hadList = fetchStatus == .success
+        if !hadList {
+            fetchStatus = .fetching
+            publish()
+        }
         do {
             authorities = try await authoritiesFetcher.fetchLatest()
             fetchStatus = .success
         } catch {
-            fetchStatus = .failed(message: String(localized: "Couldn't load the authority list."))
-            publish()
+            // Cleared before the task's value becomes available, so a
+            // caller that arrives while this one is finishing starts a
+            // fresh fetch instead of awaiting a settled one.
+            refreshTask = nil
+            if hadList {
+                Self.logger.debug("directory re-read failed; keeping the list already loaded")
+            } else {
+                fetchStatus = .failed(
+                    message: String(localized: "Couldn't load the authority list.")
+                )
+                publish()
+            }
             throw error
         }
+        refreshTask = nil
+        // Every successful directory read is evidence about the active
+        // mandate's authority, wherever it was asked for. The consent
+        // flow refreshes on appear and on its retry button without ever
+        // going through the terms check, so leaving reconciliation
+        // there let a stale `publishedManifest` outlive the listing it
+        // came from — an undismissable "these terms have changed" over
+        // a picker reading "No authorities are published yet", with no
+        // remedy on screen.
+        reconcileDirectoryWithActiveMandate()
         publish()
+        return authorities
+    }
+
+    private func reconcileDirectoryWithActiveMandate() {
+        guard let record = activeMandateRecord() else { return }
+        if authorities.contains(where: { $0.componentId == record.mandate.authority }) {
+            noteAuthorityListed(record.mandate.authority)
+        } else {
+            noteAuthorityDelisted(record.mandate.authority)
+        }
+    }
+
+    // MARK: - Terms currency
+
+    /// Re-establish whether the active mandate still pins the manifest
+    /// its authority publishes today. Called on app open and on every
+    /// return to the foreground.
+    ///
+    /// Never throws and never blocks the app on a bad answer: an
+    /// unreachable authority, a directory that hasn't loaded, or a
+    /// manifest that fails verification all leave the last known
+    /// currency in place. Only a manifest that authenticates and hashes
+    /// to something other than the mandate's can supersede it — a
+    /// forged or corrupted document must not be able to push the user
+    /// into re-signing.
+    ///
+    /// Idempotent while in flight: overlapping calls (launch racing the
+    /// first foreground notification) share one check.
+    public func refreshActiveTerms() async {
+        if let task = termsCheckTask {
+            // A foreground arriving mid-check takes that check's answer
+            // even though its fetches may predate the backgrounding. A
+            // deliberate gap: the alternative is queueing a second full
+            // round of fetches behind every one already running, and
+            // the verdict this returns is at worst one foreground
+            // stale, which the next one corrects.
+            await task.value
+            return
+        }
+        let task = Task { await self.runTermsCheck() }
+        termsCheckTask = task
+        await task.value
+    }
+
+    /// Clears the in-flight marker *before* returning, so it is already
+    /// nil by the time any awaiter resumes. Clearing after `await
+    /// task.value` in the caller instead would leave a suspension-wide
+    /// window in which an arriving foreground event joins a finished
+    /// check, returns its stale verdict, and never runs one of its own.
+    private func runTermsCheck() async {
+        await performTermsCheck()
+        termsCheckTask = nil
+    }
+
+    private func performTermsCheck() async {
+        guard let record = activeMandateRecord() else { return }
+        // Always re-read the directory, not just when it has never
+        // loaded. It is what says the authority is still designated,
+        // and it carries the operator key the manifest below is
+        // authenticated against — a cached copy makes delisting a
+        // cold-start-only discovery and pins the check to a key that
+        // may since have rotated. Callers share one fetch, so a
+        // foreground that races the launch check costs nothing.
+        guard let listings = try? await refreshedAuthorities() else { return }
+
+        // Listing and delisting were both settled by the refresh above,
+        // which reconciles them for every caller. Presence is the same
+        // quality of answer as absence and is recorded the moment the
+        // directory lands — never held hostage to the manifest fetch
+        // below, which would leave a relisted authority whose manifest
+        // momentarily fails to fetch showing "Authority Unavailable",
+        // offering only the remedy of switching away from an authority
+        // the directory does list.
+        guard let listing = listings.first(where: {
+            $0.componentId == record.mandate.authority
+        }) else { return }
+
+        let published: SignedManifest
+        do {
+            published = try await manifestFetcher.fetch(listing)
+        } catch {
+            Self.logger.debug("terms check: manifest unavailable, keeping last known currency")
+            return
+        }
+        // Terms that cannot be consented to must not supersede consent.
+        // The same validity conditions gate signing, so an authority
+        // republishing an expired or unsupported manifest would
+        // otherwise gate every install on a re-consent whose only
+        // remedy — reviewing those very bytes — `manifestForReview`
+        // then refuses. Leaving the mandate current is both the honest
+        // reading (nothing consentable has replaced it) and the only
+        // one with a way out.
+        do {
+            try manifestValidator.validateForConsent(published, now: clock())
+        } catch {
+            Self.logger.debug("terms check: published manifest is not consentable, ignoring")
+            return
+        }
+        notePublishedManifest(published.manifestHash, for: listing.componentId)
+    }
+
+    // MARK: Derived currency
+
+    /// Currency is *derived* from the last authenticated observation and
+    /// whichever record is active right now — never latched at the
+    /// moments consent happens to pass through. Every path that can
+    /// activate a record (fresh consent, a resolved pending
+    /// registration, a retried one) would otherwise have to remember to
+    /// update it, and the one that forgot would strand the user on an
+    /// undismissable gate.
+    private var termsCurrency: TermsCurrency {
+        guard let record = activeMandateRecord() else { return .unknown }
+        if delistedAuthority == record.mandate.authority { return .authorityDelisted }
+        guard let observed = publishedManifest,
+              observed.authority == record.mandate.authority
+        else { return .unknown }
+        return observed.hash == record.mandate.manifestHash
+            ? .current
+            : .superseded(publishedHash: observed.hash)
+    }
+
+    private func notePublishedManifest(_ hash: String, for authority: String) {
+        let before = termsCurrency
+        publishedManifest = (authority: authority, hash: hash)
+        if delistedAuthority == authority { delistedAuthority = nil }
+        if termsCurrency != before { publish() }
+    }
+
+    private func noteAuthorityListed(_ authority: String) {
+        guard delistedAuthority == authority else { return }
+        let before = termsCurrency
+        delistedAuthority = nil
+        if termsCurrency != before { publish() }
+    }
+
+    private func noteAuthorityDelisted(_ authority: String) {
+        let before = termsCurrency
+        delistedAuthority = authority
+        if publishedManifest?.authority == authority { publishedManifest = nil }
+        if termsCurrency != before { publish() }
     }
 
     // MARK: - Consent
@@ -333,7 +581,7 @@ public actor ModerationRepository {
                 && $0.registrationPending
         }) {
             if pending.mandate.manifestHash == signedManifest.manifestHash {
-                return try await registerPending(pending, with: listing, activate: true)
+                return try await activate(pending, with: listing, publishing: signedManifest)
             }
             do {
                 _ = try await registerPending(pending, with: listing, activate: false)
@@ -437,7 +685,7 @@ public actor ModerationRepository {
             records.insert(record, at: 0)
             mandateStore.save(records)
             publish()
-            return try await registerPending(record, with: listing, activate: true)
+            return try await activate(record, with: listing, publishing: signedManifest)
         }
 
         // Deactivate the previous active record without touching
@@ -449,8 +697,45 @@ public actor ModerationRepository {
         }
         records.insert(record, at: 0)
         mandateStore.save(records)
+        noteConsentedManifest(signedManifest, for: listing)
         publish()
         return record
+    }
+
+    /// Register a pending record and, once it is actually the active
+    /// one, record the manifest it consented to.
+    ///
+    /// The observation belongs *at* activation, not before it. Recorded
+    /// earlier, it would drop the undismissable gate while this method
+    /// is still enrolling and signing — a failure after that point
+    /// returns the user to the app under the stale mandate, ungated,
+    /// never seeing the error. Recorded earlier but withheld for other
+    /// authorities (the previous shape of this) it would survive a
+    /// switch away and describe an authority no record names, ready to
+    /// fire a false `.superseded` against a stale hash if the user ever
+    /// switched back. Tying it to activation gives both properties for
+    /// free: no observation outlives the record it describes, and none
+    /// exists before one does.
+    private func activate(
+        _ record: MandateRecord,
+        with listing: AuthorityListing,
+        publishing signedManifest: SignedManifest
+    ) async throws -> MandateRecord {
+        let activated = try await registerPending(record, with: listing, activate: true)
+        noteConsentedManifest(signedManifest, for: listing)
+        return activated
+    }
+
+    /// These bytes were fetched, authenticated, and validated moments
+    /// ago, so they are the freshest observation this repository has of
+    /// what the authority publishes — and the record that just became
+    /// active pins them, so derived currency reads `.current` without
+    /// anyone having to say so.
+    private func noteConsentedManifest(
+        _ signedManifest: SignedManifest,
+        for listing: AuthorityListing
+    ) {
+        notePublishedManifest(signedManifest.manifestHash, for: listing.componentId)
     }
 
     // MARK: - Read
@@ -464,7 +749,8 @@ public actor ModerationRepository {
             authorities: authorities,
             fetchStatus: fetchStatus,
             activeMandate: activeMandateRecord(),
-            history: records
+            history: records,
+            termsCurrency: termsCurrency
         )
     }
 

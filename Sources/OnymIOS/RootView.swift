@@ -27,10 +27,34 @@ struct RootView: View {
     @State private var selectedTab: RootTab = .chats
     @Environment(\.scenePhase) private var scenePhase
 
-    /// Whether the blocking consent sheet is up. Driven by the gate;
-    /// a `Bool` binding because `fullScreenCover(isPresented:)` wants
-    /// one, with the gate as the single source of truth.
-    @State private var showConsent = false
+    /// The blocking consent sheet, when one is up. Driven by the gate,
+    /// which stays the single source of truth: `needsConsent` presents
+    /// onboarding, `needsReconsent` presents the same surface with the
+    /// reason attached, and anything else dismisses it.
+    @State private var consentPresentation: ConsentPresentation?
+
+    /// `fullScreenCover(item:)` needs identity, and the two consent
+    /// gates the root can host are exactly "no mandate yet" and "the
+    /// mandate is stale, for this reason" — switching is a Settings
+    /// task with its own cover and is deliberately not expressible
+    /// here. Changing between them rebuilds the flow rather than
+    /// reusing it.
+    private struct ConsentPresentation: Identifiable, Equatable {
+        /// `nil` when there is no mandate at all.
+        let reason: ReconsentReason?
+
+        var mode: ModerationConsentFlow.Mode {
+            reason.map { .reconsent($0) } ?? .onboarding
+        }
+
+        var id: String {
+            switch reason {
+            case nil: return "onboarding"
+            case .termsChanged: return "reconsent.termsChanged"
+            case .authorityDelisted: return "reconsent.authorityDelisted"
+            }
+        }
+    }
 
     var body: some View {
         // The moderation gate is the enforcement surface (DeviceCheck
@@ -55,23 +79,57 @@ struct RootView: View {
                     },
                     makeDeviceRecoveryFlow: dependencies.makeDeviceRecoveryFlow
                 )
-            case .checking, .needsConsent, .operational:
+            case .checking, .needsConsent, .needsReconsent, .operational:
                 tabs
             }
         }
-        .task { dependencies.moderationGateFlow.start() }
+        .task {
+            dependencies.moderationGateFlow.start()
+            // The gate can already be decided by the time this view
+            // appears, and `onChange` alone would never present for a
+            // value that never changes.
+            consentPresentation = Self.presentation(
+                for: dependencies.moderationGateFlow.gate
+            )
+        }
         .onChange(of: dependencies.moderationGateFlow.gate) { _, gate in
-            showConsent = gate == .needsConsent
+            consentPresentation = Self.presentation(for: gate)
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 dependencies.moderationGateFlow.appForegrounded()
             }
         }
-        .fullScreenCover(isPresented: $showConsent) {
+        .fullScreenCover(item: $consentPresentation) { presentation in
+            // `.id` rather than a dismiss-and-re-present dance: one gate
+            // can replace another while the cover is up (terms change,
+            // then the authority leaves the directory), and
+            // `fullScreenCover(item:)` is not dependable about rebuilding
+            // on an identity change alone. Taking the cover down and
+            // putting it back lands inside the dismiss animation, where
+            // the likely outcome is no cover at all — an ungated app,
+            // strictly worse than a stale reason. This rebuilds the view
+            // and its flow in place instead.
             ModerationConsentView(
-                flow: dependencies.makeModerationConsentFlow(.onboarding)
+                flow: dependencies.makeModerationConsentFlow(presentation.mode)
             )
+            .id(presentation.id)
+        }
+    }
+
+    /// Both consent gates present the same surface; only the gate
+    /// decides which one, so a mandate signed (or a terms check coming
+    /// back current) takes the cover down on its own.
+    private static func presentation(
+        for gate: ModerationGateFlow.RootGate
+    ) -> ConsentPresentation? {
+        switch gate {
+        case .needsConsent:
+            return ConsentPresentation(reason: nil)
+        case .needsReconsent(let reason):
+            return ConsentPresentation(reason: reason)
+        case .checking, .banned, .gateCheckRequired, .operational:
+            return nil
         }
     }
 
