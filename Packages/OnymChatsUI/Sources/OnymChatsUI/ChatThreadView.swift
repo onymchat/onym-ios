@@ -597,19 +597,16 @@ public struct ChatThreadView: View {
                         .prefix(8)
                         .map { String(format: "%02x", $0) }
                         .joined() + "\u{2026}",
-                    // In practice always true here: the row only renders
-                    // inside the thread of a group found above, and
-                    // `groupName` is nil precisely when no such local
-                    // group exists. Kept as a guard rather than dropped
-                    // because it's the approver's own precondition —
-                    // approving without a local group returns
-                    // `.unknownGroup`. A request whose group *has* been
-                    // deleted locally can no longer be surfaced at all
-                    // (the old modal was the only place that listed
-                    // requests across groups); it now ages out via
-                    // `SwiftDataIntroRequestStore.retention` instead of
-                    // sitting on disk forever.
-                    canAccept: request.groupName != nil,
+                    // No `canAccept`: the row only renders inside the
+                    // thread of a group found above, and `groupName` is
+                    // nil precisely when no such local group exists — so
+                    // the un-acceptable state was unreachable, and the
+                    // disabled button and its explanation were code and
+                    // copy for a case that could not occur. A request
+                    // whose group *has* been deleted locally has no
+                    // surface at all (the old modal was the only place
+                    // that listed requests across groups); it ages out
+                    // via `SwiftDataIntroRequestStore.retention`.
                     isInFlight: approveRequestsFlow.isInFlight(request.id),
                     // Each row reads its own failure, so two outstanding
                     // errors both stay explained.

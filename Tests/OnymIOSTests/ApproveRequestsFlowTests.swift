@@ -157,6 +157,29 @@ final class ApproveRequestsFlowTests: XCTestCase {
 
     /// Acting on one request must not wipe the error another row is
     /// still showing — the whole reason the error is keyed at all.
+    /// An error is otherwise only cleared by acting on that same request
+    /// again — so a request that disappears while showing a failure
+    /// (retention sweep, or approved from another device) left its entry
+    /// behind for the life of the process.
+    func test_errorsAreDroppedWhenTheirRequestStopsBeingPending() async throws {
+        let stub = StubApprover()
+        let flow = ApproveRequestsFlow(approver: stub)
+        await stub.emit([Self.makeRequest(id: "req-gone", alias: "Ann")])
+        await flow.start()
+        try await waitFor { flow.pending.count == 1 }
+
+        await stub.setNextOutcome(.anchorRejected("test"))
+        flow.approve("req-gone")
+        try await waitFor { flow.error(for: "req-gone") != nil }
+
+        // The request goes away without anyone acting on it.
+        await stub.emit([])
+        try await waitFor { flow.pending.isEmpty }
+
+        try await waitFor { flow.error(for: "req-gone") == nil }
+        XCTAssertTrue(flow.errors.isEmpty)
+    }
+
     func test_approvingOneRequest_leavesAnotherRequestsErrorIntact() async throws {
         let stub = StubApprover()
         let flow = ApproveRequestsFlow(approver: stub)

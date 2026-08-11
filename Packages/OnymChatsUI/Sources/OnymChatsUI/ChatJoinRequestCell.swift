@@ -16,10 +16,6 @@ struct ChatJoinRequestDisplay: Equatable {
     /// self-asserted by the joiner and nothing stops them typing someone
     /// else's name.
     let fingerprint: String
-    /// Approve is blocked when the request names a group this device
-    /// doesn't have — approving would fail anyway. Decline stays live so
-    /// the row can still be cleared.
-    let canAccept: Bool
     /// A call is in flight: spinner on, both buttons disabled.
     let isInFlight: Bool
     /// Last failure for this request, if any.
@@ -180,31 +176,13 @@ final class ChatJoinRequestCell: UITableViewCell {
         )
         accept.showsActivityIndicator = display.isInFlight
         acceptButton.configuration = accept
-        acceptButton.isEnabled = display.canAccept && !display.isInFlight
-
-        // Decline stays live when the group is merely unknown to this
-        // device — the founder still needs a way to clear the row.
+        acceptButton.isEnabled = !display.isInFlight
         declineButton.isEnabled = !display.isInFlight
 
-        // A disabled Accept with no explanation is the worst of both.
-        // The state should be unreachable (the row only renders inside a
-        // group's own thread), but if it ever is reached, say why and
-        // point at the way out — the copy the deleted modal carried.
-        // In-flight wins. Both states at once should be unreachable —
-        // an un-acceptable request can't be in flight — but if it
-        // happens, the spinner is what the founder is looking at, and
-        // explaining a button they just pressed as unavailable would be
-        // the wrong caption for it.
-        if display.isInFlight {
-            hintLabel.text = String(
-                localized: "Generating proof and updating the on-chain commitment. This usually takes a few seconds."
-            )
-        } else {
-            hintLabel.text = String(
-                localized: "This request is for a group that isn’t on this device. Decline to clear it."
-            )
-        }
-        hintLabel.isHidden = display.canAccept && !display.isInFlight
+        // The on-chain admit is a PLONK proof plus a relayer round-trip
+        // plus a Stellar confirmation — several seconds of apparent
+        // nothing — so say what is happening while it runs.
+        hintLabel.isHidden = !display.isInFlight
 
         errorLabel.text = display.errorText
         errorLabel.isHidden = display.errorText == nil

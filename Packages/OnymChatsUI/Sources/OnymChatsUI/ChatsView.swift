@@ -501,18 +501,20 @@ private struct ChatsRow: View {
         .accessibilityIdentifier("chats.row.\(group.id)")
     }
 
-    /// Latest message preview when the group has messages; otherwise the
-    /// governance + member-count metadata (so a brand-new chat still shows
-    /// something meaningful).
-    /// Replaces the subtitle while requests are outstanding, so the
-    /// founder can see there's something to act on without opening the
-    /// thread.
+    /// Prefixed to the subtitle line while requests are outstanding,
+    /// ahead of the message preview rather than in place of it (the row
+    /// renders both, separated by a `·`). The founder can see there is
+    /// something to act on without opening the thread, and the chat
+    /// doesn't lose its last message to say so.
     private var joinRequestSubtitle: String {
         joinRequestCount == 1
             ? String(localized: "Someone wants to join")
             : String(localized: "\(joinRequestCount) people want to join")
     }
 
+    /// Latest message preview when the group has messages; otherwise the
+    /// governance + member-count metadata (so a brand-new chat still shows
+    /// something meaningful).
     private var subtitle: String {
         if let preview = item.latestPreview, !preview.isEmpty {
             return preview
@@ -529,7 +531,6 @@ private struct ChatsRow: View {
     }
 }
 
-/// Red pill showing the unread-message count on a chat row (caps at 99+).
 /// Accent-coloured counterpart to `UnreadBadge` for pending join
 /// requests. Deliberately not red: this is an invitation to act, not a
 /// backlog of unread messages, and a founder should be able to tell the
@@ -564,6 +565,7 @@ private struct JoinRequestBadge: View {
     }
 }
 
+/// Red pill showing the unread-message count on a chat row (caps at 99+).
 private struct UnreadBadge: View {
     let count: Int
 

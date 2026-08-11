@@ -982,7 +982,6 @@ final class ChatThreadViewControllerTests: XCTestCase {
             requestID: id,
             alias: alias,
             fingerprint: "ab12cd34",
-            canAccept: true,
             isInFlight: isInFlight,
             errorText: errorText
         )

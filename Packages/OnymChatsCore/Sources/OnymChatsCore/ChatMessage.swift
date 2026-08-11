@@ -213,13 +213,6 @@ public enum ChatSystemEvent: Equatable, Sendable, Codable {
     /// instead of rendering blank.
     case youJoined(groupName: String)
 
-    /// The one rendering of this event, used by both the thread's notice
-    /// cell and the chat-list subtitle. Localized here rather than in the
-    /// UI layer because `chatListPreview` is a Core-level computed
-    /// property with no view in scope, and having the cell assemble its
-    /// own copy of these sentences meant a re-word in one place silently
-    /// diverged from the other. The strings live in the app's catalog;
-    /// package sources resolve against `Bundle.main`.
     /// The fallback for a value that arrived empty, applied here rather
     /// than at record time.
     ///
@@ -235,6 +228,13 @@ public enum ChatSystemEvent: Equatable, Sendable, Codable {
         return trimmed.isEmpty ? String(localized: "(unnamed)") : trimmed
     }
 
+    /// The one rendering of this event, used by both the thread's notice
+    /// cell and the chat-list subtitle. Localized here rather than in the
+    /// UI layer because `chatListPreview` is a Core-level computed
+    /// property with no view in scope, and having the cell assemble its
+    /// own copy of these sentences meant a re-word in one place silently
+    /// diverged from the other. The strings live in the app's catalog;
+    /// package sources resolve against `Bundle.main`.
     public var localizedText: String {
         switch self {
         case .memberJoined(let alias):

@@ -59,6 +59,13 @@ public final class ApproveRequestsFlow {
             for await snapshot in stream {
                 guard let self else { break }
                 self.pending = snapshot
+                // Drop errors for requests that are no longer pending.
+                // An entry is otherwise only cleared by acting on that
+                // same request again, so one removed by the retention
+                // sweep — or approved from another device — left its
+                // failure behind for the process lifetime.
+                let live = Set(snapshot.map(\.id))
+                self.errors = self.errors.filter { live.contains($0.key) }
             }
         }
     }
