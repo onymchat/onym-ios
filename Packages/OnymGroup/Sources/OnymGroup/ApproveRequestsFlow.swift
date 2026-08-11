@@ -172,6 +172,15 @@ public final class ApproveRequestsFlow {
             )
         case .proofFailed(let reason):
             return String(localized: "Couldn’t generate proof: \(reason)")
+        case .groupNotAnchoredYet:
+            // Not a failure the founder can do anything about except
+            // wait a moment: the group's own create transaction is still
+            // being included in a ledger. Says "try again" because that
+            // is literally the fix, and gives a duration so it doesn't
+            // read as "retry forever".
+            return String(
+                localized: "This group isn’t on the chain yet. Give it a few seconds and tap Accept again."
+            )
         case .anchorRejected(let reason):
             return String(localized: "Chain rejected the proof: \(reason)")
         }

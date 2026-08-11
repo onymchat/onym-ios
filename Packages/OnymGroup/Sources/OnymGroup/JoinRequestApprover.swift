@@ -124,6 +124,14 @@ public actor JoinRequestApprover: JoinRequestApproving {
         /// Relayer accepted the POST but the contract rejected the
         /// proof (admin pubkey mismatch, replay, etc.).
         case anchorRejected(String)
+        /// The contract has no record of this group yet
+        /// (`GroupNotFound`). Almost always a race rather than a fault:
+        /// the group's own `create_group` transaction is still waiting
+        /// to be included in a ledger, and the admin approved a joiner
+        /// within those few seconds. Retrying shortly succeeds, so this
+        /// is separated from `anchorRejected` — which means "the chain
+        /// looked at this and said no" and is not worth retrying.
+        case groupNotAnchoredYet
     }
 
     private let identity: IdentityRepository
@@ -528,10 +536,25 @@ public actor JoinRequestApprover: JoinRequestApproving {
         do {
             response = try await client.updateCommitmentTyranny(payload)
         } catch {
+            // A refused call arrives as a non-2xx whose body carries the
+            // simulation output, so the contract's own error number is
+            // in there rather than in a structured field.
+            if let sepError = error as? SEPError,
+               sepError.contractErrorCode == SEPContractErrorCode.groupNotFound.rawValue {
+                return .failed(.groupNotAnchoredYet)
+            }
             return .failed(.transportFailed("anchor: \(error)"))
         }
         guard response.accepted else {
-            return .failed(.anchorRejected(response.message ?? "(no message)"))
+            // The same condition can also come back as a 200 with
+            // `accepted: false`, depending on where the relayer catches
+            // it — so both paths check.
+            let message = response.message ?? "(no message)"
+            if SEPContractErrorCode.parse(fromDiagnostics: message)
+                == SEPContractErrorCode.groupNotFound.rawValue {
+                return .failed(.groupNotAnchoredYet)
+            }
+            return .failed(.anchorRejected(message))
         }
 
         // Build the updated local ChatGroup. `commitment` becomes

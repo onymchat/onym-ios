@@ -300,4 +300,56 @@ public enum SEPError: Error, LocalizedError, Equatable, Sendable {
             return "Decode failure: \(message)"
         }
     }
+
+    /// The contract's own error number, when this failure carries one.
+    ///
+    /// A refused call comes back two different ways — a non-2xx whose
+    /// body holds the simulation output, or a 200 with
+    /// `accepted: false` and a message — and both embed the same
+    /// `Error(Contract, #N)` from the host. Reading the number turns
+    /// "the chain said no" into something a caller can act on.
+    public var contractErrorCode: UInt32? {
+        guard case let .invalidResponse(_, body) = self else { return nil }
+        return SEPContractErrorCode.parse(fromDiagnostics: body)
+    }
+}
+
+/// Error numbers the SEP contracts return, as they appear in a Soroban
+/// `HostError`. Mirrors the `#[contracterror] enum Error` in
+/// `onym-contracts`; the raw values are the wire contract and only grow.
+///
+/// Only the cases a client can say something useful about are named —
+/// the rest stay numbers, because inventing friendly copy for a
+/// condition we can't explain is worse than showing the diagnostic.
+public enum SEPContractErrorCode: UInt32, Sendable {
+    case notInitialized = 1
+    case alreadyInitialized = 2
+    case groupAlreadyExists = 4
+    /// The contract has no record of this group. Reached most often not
+    /// because something is broken but because it is *early*: the
+    /// `create_group` transaction has been submitted and has not yet
+    /// been included in a ledger, and the next call raced it.
+    case groupNotFound = 5
+    case invalidProof = 7
+    case invalidTier = 8
+    case publicInputsMismatch = 10
+    case invalidEpoch = 11
+    case proofReplay = 12
+    case tierGroupLimitReached = 13
+    case adminOnly = 14
+    case invalidCommitmentEncoding = 15
+
+    /// Pull the code out of a Soroban diagnostic blob.
+    ///
+    /// The body is a JSON-escaped dump of the host's event log, so this
+    /// scans for the `Error(Contract, #N)` marker rather than trying to
+    /// parse it. Text-matching a diagnostic is inherently best-effort:
+    /// a miss returns `nil` and the caller falls back to showing the
+    /// raw message, which is no worse than today.
+    public static func parse(fromDiagnostics body: String) -> UInt32? {
+        let marker = "Error(Contract, #"
+        guard let start = body.range(of: marker) else { return nil }
+        let digits = body[start.upperBound...].prefix { $0.isNumber }
+        return digits.isEmpty ? nil : UInt32(digits)
+    }
 }
