@@ -49,11 +49,12 @@ final class SwiftDataIntroRequestStoreTests: XCTestCase {
 
     func test_current_isNewestFirst() async {
         let store = SwiftDataIntroRequestStore.inMemory()
+        let now = Date()
         _ = await store.record(
-            makeRequest(id: "old", receivedAt: Date(timeIntervalSince1970: 1_000))
+            makeRequest(id: "old", receivedAt: now.addingTimeInterval(-3600))
         )
         _ = await store.record(
-            makeRequest(id: "new", receivedAt: Date(timeIntervalSince1970: 2_000))
+            makeRequest(id: "new", receivedAt: now.addingTimeInterval(-60))
         )
 
         let current = await store.current()
@@ -73,11 +74,44 @@ final class SwiftDataIntroRequestStoreTests: XCTestCase {
         XCTAssertEqual(replayed?.map(\.id), ["evt-replay"])
     }
 
+    /// Persistence closed the "force-quit loses the request" hole but
+    /// opened a slower one: a request whose group was deleted locally can
+    /// no longer be rendered by any surface (the old cross-group modal is
+    /// gone), so nothing ever calls `consume` on it. Retention is what
+    /// keeps those from accumulating on disk forever.
+    func test_requestsOlderThanRetention_areDropped() async {
+        let store = SwiftDataIntroRequestStore.inMemory()
+        let now = Date()
+        let stale = now.addingTimeInterval(-SwiftDataIntroRequestStore.retention - 60)
+        let fresh = now.addingTimeInterval(-60)
+
+        _ = await store.record(makeRequest(id: "evt-stale", receivedAt: stale))
+        _ = await store.record(makeRequest(id: "evt-fresh", receivedAt: fresh))
+
+        let current = await store.current()
+        XCTAssertEqual(current.map(\.id), ["evt-fresh"],
+                       "a request past the retention window must be swept")
+    }
+
+    func test_requestJustInsideRetention_isKept() async {
+        let store = SwiftDataIntroRequestStore.inMemory()
+        let justInside = Date()
+            .addingTimeInterval(-SwiftDataIntroRequestStore.retention + 3600)
+
+        _ = await store.record(makeRequest(id: "evt-edge", receivedAt: justInside))
+
+        let current = await store.current()
+        XCTAssertEqual(current.map(\.id), ["evt-edge"])
+    }
+
     // MARK: - Helpers
 
+    /// Relative to now, not a fixed epoch: the store sweeps rows past
+    /// `retention`, so a hardcoded past date would age out from under
+    /// these tests as the wall clock moves.
     private func makeRequest(
         id: String,
-        receivedAt: Date = Date(timeIntervalSince1970: 1_700_000_000)
+        receivedAt: Date = Date()
     ) -> IntroRequest {
         IntroRequest(
             id: id,

@@ -77,10 +77,16 @@ public actor SwiftDataIntroRequestStore: IntroRequestStore {
 
     // MARK: - IntroRequestStore
 
+    /// Returns `true` when a new row was written. `false` covers both
+    /// "already present" (the common case — relays replay the inbox on
+    /// every reconnect) and "couldn't be written", matching the
+    /// protocol's `Bool` contract; the sole caller
+    /// (`IntroInboxPump`) discards the result either way, and the two
+    /// cases call for the same thing from it — nothing.
     @discardableResult
     public func record(_ request: IntroRequest) async -> Bool {
-        // Dedup on the Nostr event id. Every relay reconnect replays the
-        // inbox, so this is the common path, not the edge case.
+        pruneExpired()
+
         let id = request.id
         let existing = FetchDescriptor<PersistedIntroRequest>(
             predicate: #Predicate { $0.id == id }
@@ -89,7 +95,17 @@ public actor SwiftDataIntroRequestStore: IntroRequestStore {
 
         guard let row = try? Self.encode(request) else { return false }
         context.insert(row)
-        guard (try? context.save()) != nil else { return false }
+        do {
+            try context.save()
+        } catch {
+            // Roll the orphaned in-memory insert back out. Without this
+            // the half-inserted object survives in the context and a
+            // later `consume()`'s `save()` would commit it — a row that
+            // never published, appearing from nowhere on the next read.
+            // Same handling as `SwiftDataMessageStore.insertOrUpdate`.
+            context.delete(row)
+            return false
+        }
         publish()
         return true
     }
@@ -136,11 +152,44 @@ public actor SwiftDataIntroRequestStore: IntroRequestStore {
         for cont in continuations.values { cont.yield(snap) }
     }
 
+    /// How long an unanswered request is kept before it's dropped.
+    ///
+    /// Persistence closed the "force-quit loses the request" hole, but it
+    /// opened a slower one: nothing else deletes these rows. A request
+    /// is only `consume`d when the founder acts on it, and there are
+    /// paths where that never happens — the founder deletes the group
+    /// locally while its invite link is still live (the request keeps
+    /// arriving for a group that no longer exists, so no thread can
+    /// render it), or an approve fails permanently at the transport leg
+    /// and is never retried. Before persistence, process death swept
+    /// those up. This is what replaces it.
+    ///
+    /// A week is well past the point where a joiner staring at "Waiting
+    /// for the host to approve…" has given up and re-shared, and the
+    /// intro key stays valid until revoked, so an expired request costs
+    /// the joiner one more tap rather than locking them out.
+    public static let retention: TimeInterval = 7 * 24 * 60 * 60
+
+    /// Drop requests older than `retention`. Called on the read and
+    /// write paths rather than on a timer: the store is only interesting
+    /// while the app is running, and a sweep here is a single indexed
+    /// delete over a table that holds a handful of rows.
+    private func pruneExpired(now: Date = Date()) {
+        let cutoff = now.addingTimeInterval(-Self.retention)
+        let descriptor = FetchDescriptor<PersistedIntroRequest>(
+            predicate: #Predicate { $0.receivedAt < cutoff }
+        )
+        guard let stale = try? context.fetch(descriptor), !stale.isEmpty else { return }
+        for row in stale { context.delete(row) }
+        try? context.save()
+    }
+
     /// Newest-first, matching `InMemoryIntroRequestStore.current()`.
     /// Rows that fail to decrypt are skipped rather than failing the
     /// whole read — a single corrupted row shouldn't hide every other
     /// pending request.
     private func loadAll() -> [IntroRequest] {
+        pruneExpired()
         let descriptor = FetchDescriptor<PersistedIntroRequest>(
             sortBy: [SortDescriptor(\.receivedAt, order: .reverse)]
         )

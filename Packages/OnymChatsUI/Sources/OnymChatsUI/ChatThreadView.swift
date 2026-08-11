@@ -416,11 +416,10 @@ public struct ChatThreadView: View {
     private func sendReadReceipts(for snapshot: [ChatMessage]) async {
         guard ReadReceiptsPreference.isEnabled else { return }
         guard let group = chatsFlow.groups.first(where: { $0.id == groupID }) else { return }
-        var bySender: [String: [UUID]] = [:]
-        for message in snapshot
-        where message.direction == .incoming && !ackedReadIDs.contains(message.id) {
-            bySender[message.senderBlsPubkeyHex, default: []].append(message.id)
-        }
+        let bySender = ChatReadReceiptTargets.unacked(
+            in: snapshot,
+            alreadyAcked: ackedReadIDs
+        )
         guard !bySender.isEmpty else { return }
         for (senderHex, ids) in bySender {
             guard let inbox = group.memberProfiles[senderHex]?.inboxPublicKey else { continue }
@@ -590,8 +589,18 @@ public struct ChatThreadView: View {
                         .prefix(8)
                         .map { String(format: "%02x", $0) }
                         .joined() + "\u{2026}",
-                    // A request naming a group this device doesn't have
-                    // can't be approved; Decline still clears it.
+                    // In practice always true here: the row only renders
+                    // inside the thread of a group found above, and
+                    // `groupName` is nil precisely when no such local
+                    // group exists. Kept as a guard rather than dropped
+                    // because it's the approver's own precondition —
+                    // approving without a local group returns
+                    // `.unknownGroup`. A request whose group *has* been
+                    // deleted locally can no longer be surfaced at all
+                    // (the old modal was the only place that listed
+                    // requests across groups); it now ages out via
+                    // `SwiftDataIntroRequestStore.retention` instead of
+                    // sitting on disk forever.
                     canAccept: request.groupName != nil,
                     isInFlight: approveRequestsFlow.isInFlight(request.id),
                     // Only the row that actually failed shows the error.

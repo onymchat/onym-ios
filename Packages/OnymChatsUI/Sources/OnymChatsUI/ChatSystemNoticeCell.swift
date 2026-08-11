@@ -58,16 +58,12 @@ final class ChatSystemNoticeCell: UITableViewCell {
         ])
     }
 
-    /// The sentence is assembled here, not in Core, so it goes through
-    /// the app's string catalog. `ChatSystemEvent` carries only the
-    /// structured pieces.
+    /// Reads the event's own `localizedText` rather than re-deriving the
+    /// sentence: the chat-list subtitle renders the same string, and a
+    /// second copy here meant re-wording one silently diverged from the
+    /// other.
     func configure(event: ChatSystemEvent) {
-        switch event {
-        case .memberJoined(let alias):
-            label.text = String(localized: "\(alias) joined")
-        case .youJoined(let groupName):
-            label.text = String(localized: "You joined \(groupName)")
-        }
+        label.text = event.localizedText
         accessibilityIdentifier = "chat.system_notice"
         isAccessibilityElement = true
         accessibilityLabel = label.text

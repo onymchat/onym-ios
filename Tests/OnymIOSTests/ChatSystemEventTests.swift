@@ -241,10 +241,19 @@ final class ChatSystemEventTests: XCTestCase {
         XCTAssertEqual(listed.count, 1)
     }
 
-    /// Two identities on one device can both be in the same group; each
-    /// keeps its own thread, so the same join must produce a notice in
-    /// each of them rather than one shared row.
-    func test_recordMemberJoined_isPerOwner() async {
+    /// The *recorder* scopes rows per owner: two identities in the same
+    /// group each get their own notice rather than sharing one row.
+    ///
+    /// Scope note — this asserts the recorder, not end-to-end delivery.
+    /// `IncomingMessageDispatcher.applyAnnouncement` resolves the target
+    /// with `groups.first(where: { $0.groupIDData == ... })`, so when two
+    /// local identities are both in one group only the first is updated
+    /// and only it gets a notice. That's a pre-existing dispatcher
+    /// limitation — it truncates the roster update (`memberProfiles`) the
+    /// same way — and is out of scope here; this test deliberately
+    /// exercises `ChatSystemEventRecorder` directly so it isn't read as
+    /// coverage for a delivery guarantee that doesn't hold.
+    func test_recordMemberJoined_scopesRowsPerOwner() async {
         let groupID = String(repeating: "cd", count: 32)
         let ownerA = IdentityID()
         let ownerB = IdentityID()

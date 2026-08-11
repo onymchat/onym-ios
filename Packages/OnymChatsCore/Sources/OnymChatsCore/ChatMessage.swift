@@ -132,7 +132,7 @@ public struct ChatMessage: Equatable, Sendable, Identifiable {
     /// "You: " prefix — "You: Alice joined" would read as if the user
     /// had said it.
     public var chatListPreview: String {
-        if let systemEvent { return systemEvent.previewText }
+        if let systemEvent { return systemEvent.localizedText }
         let content: String
         if voiceAttachment != nil {
             content = "Voice message"
@@ -191,12 +191,15 @@ public struct ChatMessage: Equatable, Sendable, Identifiable {
 /// the membership events every member should see without anyone having
 /// to type them.
 ///
-/// Cases carry **structured data, not prose**. The user-facing sentence
-/// is assembled in the UI layer via `String(localized:)` so it goes
-/// through the string catalog; `SendFailureReason.explanation` above is
-/// the counter-example (raw English hardcoded in Core) and shouldn't be
-/// copied. `previewText` is the one deliberate exception — the chat-list
-/// subtitle needs a string from a non-UI context — and is marked below.
+/// Cases carry **structured data, not prose** — the stored row holds an
+/// alias and a group name, never a rendered sentence, so re-wording the
+/// copy doesn't require a migration.
+///
+/// The sentence itself lives in exactly one place: `localizedText`. Both
+/// the thread's notice cell and the chat-list subtitle read it, so they
+/// cannot drift apart. It resolves through the app's string catalog
+/// rather than hardcoding English the way `SendFailureReason.explanation`
+/// above does.
 ///
 /// Raw values are a persistence format (`kind`): stable forever.
 public enum ChatSystemEvent: Equatable, Sendable, Codable {
@@ -210,11 +213,14 @@ public enum ChatSystemEvent: Equatable, Sendable, Codable {
     /// instead of rendering blank.
     case youJoined(groupName: String)
 
-    /// Chat-list subtitle text. Localized here rather than in the UI
-    /// because `chatListPreview` is a Core-level computed property with
-    /// no view in scope. The strings live in the app's catalog; package
-    /// sources resolve against `Bundle.main`.
-    var previewText: String {
+    /// The one rendering of this event, used by both the thread's notice
+    /// cell and the chat-list subtitle. Localized here rather than in the
+    /// UI layer because `chatListPreview` is a Core-level computed
+    /// property with no view in scope, and having the cell assemble its
+    /// own copy of these sentences meant a re-word in one place silently
+    /// diverged from the other. The strings live in the app's catalog;
+    /// package sources resolve against `Bundle.main`.
+    public var localizedText: String {
         switch self {
         case .memberJoined(let alias):
             return String(localized: "\(alias) joined")

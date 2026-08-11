@@ -332,10 +332,20 @@ final class ChatThreadViewController: UIViewController {
     /// swaps the button to its spinner without the card animating out
     /// and back in.
     func update(joinRequests: [ChatJoinRequestDisplay]) {
-        let ids = joinRequests.map { Self.rowID(forRequestID: $0.requestID) }
-        let byID = Dictionary(
-            uniqueKeysWithValues: zip(ids, joinRequests)
-        )
+        // A repeated request id would trap twice over: in the dictionary
+        // build, and again in `appendItems` (a diffable snapshot rejects
+        // duplicate identifiers). The approver already collapses
+        // duplicates, so this shouldn't happen — but dropping the repeat
+        // beats crashing the thread if it ever does.
+        var seen = Set<UUID>()
+        var ids: [UUID] = []
+        var byID: [UUID: ChatJoinRequestDisplay] = [:]
+        for request in joinRequests {
+            let id = Self.rowID(forRequestID: request.requestID)
+            guard seen.insert(id).inserted else { continue }
+            ids.append(id)
+            byID[id] = request
+        }
         guard byID != joinRequestsByID || ids != orderedJoinRequestIDs else { return }
 
         let changed = ids.filter { id in
