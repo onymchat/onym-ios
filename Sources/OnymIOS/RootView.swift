@@ -85,7 +85,22 @@ struct RootView: View {
         }
         .task { dependencies.moderationGateFlow.start() }
         .onChange(of: dependencies.moderationGateFlow.gate) { _, gate in
-            consentPresentation = Self.presentation(for: gate)
+            let next = Self.presentation(for: gate)
+            guard next?.id != consentPresentation?.id else { return }
+            guard consentPresentation != nil, next != nil else {
+                consentPresentation = next
+                return
+            }
+            // One gate replacing another while a cover is already up
+            // (terms change, then the authority leaves the directory).
+            // `fullScreenCover(item:)` is not dependable about
+            // re-presenting on an identity change alone, and the failure
+            // is silent — the old reason and old flow stay on screen.
+            // Dismissing first makes the swap explicit.
+            consentPresentation = nil
+            Task { @MainActor in
+                consentPresentation = next
+            }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {

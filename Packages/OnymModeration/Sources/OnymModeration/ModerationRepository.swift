@@ -339,12 +339,14 @@ public actor ModerationRepository {
 
     private func performTermsCheck() async {
         guard let record = activeMandateRecord() else { return }
-        if fetchStatus != .success {
-            // The directory names the operator key each manifest is
-            // pinned against, so there is no authenticated fetch
-            // without it.
-            try? await refresh()
-        }
+        // Always re-read the directory, not just when it has never
+        // loaded. It is what says the authority is still designated,
+        // and it carries the operator key the manifest below is
+        // authenticated against — a cached copy makes delisting a
+        // cold-start-only discovery and pins the check to a key that
+        // may since have rotated. Callers share one fetch, so a
+        // foreground that races the launch check costs nothing.
+        try? await refresh()
         guard fetchStatus == .success else { return }
 
         guard let listing = authorities.first(where: {
@@ -355,6 +357,13 @@ public actor ModerationRepository {
             noteAuthorityDelisted(record.mandate.authority)
             return
         }
+        // Presence in the directory is the same quality of answer as
+        // absence from it, so it retires the delisting here rather than
+        // hostage to the manifest fetch below. Otherwise a relisted
+        // authority whose manifest momentarily fails to fetch keeps
+        // showing "Authority Unavailable", whose only offered remedy is
+        // switching away from an authority that is in fact listed.
+        noteAuthorityListed(listing.componentId)
 
         let published: SignedManifest
         do {
@@ -404,6 +413,13 @@ public actor ModerationRepository {
         let before = termsCurrency
         publishedManifest = (authority: authority, hash: hash)
         if delistedAuthority == authority { delistedAuthority = nil }
+        if termsCurrency != before { publish() }
+    }
+
+    private func noteAuthorityListed(_ authority: String) {
+        guard delistedAuthority == authority else { return }
+        let before = termsCurrency
+        delistedAuthority = nil
         if termsCurrency != before { publish() }
     }
 
@@ -493,12 +509,26 @@ public actor ModerationRepository {
 
         // These bytes were fetched, authenticated, and validated moments
         // ago, so they are the freshest observation this repository has
-        // of what the authority publishes. Recording it here — before
+        // of what this authority publishes. Recording it here — before
         // any of the paths below activate a record — is what lets
         // currency stay derived: whichever record ends up active is
         // compared against this, and consenting to current terms comes
         // out `.current` without anyone having to say so.
-        notePublishedManifest(signedManifest.manifestHash, for: listing.componentId)
+        //
+        // Only for the authority the active mandate already names. The
+        // other remedy the re-consent copy offers is moving to a
+        // different authority, and an observation about *that* one
+        // makes the derived currency `.unknown` — dropping the
+        // undismissable gate while this method is still enrolling and
+        // signing. A failure after that point would return the user to
+        // the app under the stale mandate, ungated, without ever
+        // showing the signing error. The gate must stay up until a new
+        // record is actually active, and with the observation withheld
+        // it does: currency keeps reading the old record against the
+        // old authority's published hash.
+        if listing.componentId == activeMandateRecord()?.mandate.authority {
+            notePublishedManifest(signedManifest.manifestHash, for: listing.componentId)
+        }
 
         // Resolve every older ambiguous registration for this Authority
         // before minting under newly reviewed terms. A manifest rotation

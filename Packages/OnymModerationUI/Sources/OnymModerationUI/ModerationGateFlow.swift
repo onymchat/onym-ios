@@ -111,7 +111,12 @@ public final class ModerationGateFlow {
     /// while the app was away get noticed.
     public func appForegrounded() {
         Task { await gateCheck.checkNow() }
-        Task { await moderation.refreshActiveTerms() }
+        // Same handle as the launch check: the repository coalesces
+        // overlapping checks anyway, so this only keeps `stop()` able to
+        // drop the flow's interest in the newest one.
+        termsTask = Task { [weak self] in
+            await self?.moderation.refreshActiveTerms()
+        }
     }
 
     // MARK: - Private
