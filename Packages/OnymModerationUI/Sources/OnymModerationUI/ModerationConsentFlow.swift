@@ -47,6 +47,13 @@ public final class ModerationConsentFlow {
         /// the list, and hiding which is which would make re-signing
         /// look like switching.
         public var currentAuthorityId: String?
+        /// The hash the current mandate pins, and the one its authority
+        /// publishes now. Shown side by side on the re-consent surface:
+        /// "the terms changed" is a claim about two specific documents,
+        /// and the user is entitled to see which two — the same hash
+        /// `ModerationSettingsView` already shows for the mandate.
+        public var pinnedManifestHash: String?
+        public var publishedManifestHash: String?
     }
 
     public let mode: Mode
@@ -80,6 +87,12 @@ public final class ModerationConsentFlow {
                 self.state.authorities = snapshot.authorities
                 self.state.fetchStatus = snapshot.fetchStatus
                 self.state.currentAuthorityId = snapshot.activeMandate?.mandate.authority
+                self.state.pinnedManifestHash = snapshot.activeMandate?.mandate.manifestHash
+                if case .superseded(let published) = snapshot.termsCurrency {
+                    self.state.publishedManifestHash = published
+                } else {
+                    self.state.publishedManifestHash = nil
+                }
                 if self.state.step == .loadingDirectory {
                     switch snapshot.fetchStatus {
                     case .success, .failed:

@@ -43,6 +43,7 @@ public final class ModerationGateFlow {
     private let gateCheck: GateCheckRepository
     private var moderationTask: Task<Void, Never>?
     private var gateTask: Task<Void, Never>?
+    private var termsTask: Task<Void, Never>?
 
     private var hasMandate: Bool?
     private var authoritiesAvailable = false
@@ -67,8 +68,12 @@ public final class ModerationGateFlow {
             }
         }
         // App open is the first of the two moments the terms check
-        // runs; `appForegrounded` is the other.
-        Task { await moderation.refreshActiveTerms() }
+        // runs; `appForegrounded` is the other. Tracked like the two
+        // drains above so `stop()` cancels it and a repeated `start()`
+        // doesn't re-fire it.
+        termsTask = Task { [weak self] in
+            await self?.moderation.refreshActiveTerms()
+        }
         gateTask = Task { [weak self] in
             guard let self else { return }
             for await status in self.gateCheck.snapshots {
@@ -83,6 +88,8 @@ public final class ModerationGateFlow {
         moderationTask = nil
         gateTask?.cancel()
         gateTask = nil
+        termsTask?.cancel()
+        termsTask = nil
     }
 
     // MARK: - Intents

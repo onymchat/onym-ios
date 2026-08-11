@@ -95,6 +95,8 @@ public struct ModerationConsentView: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 16)
 
+        supersededHashes
+
         switch flow.state.fetchStatus {
         case .failed(let message):
             SettingsCard {
@@ -145,6 +147,38 @@ public struct ModerationConsentView: View {
         }
     }
 
+    /// The two documents the "terms have changed" claim is about. Only
+    /// on the re-consent surface, and only once both are known — on
+    /// every other path there is no prior hash to contrast.
+    @ViewBuilder
+    private var supersededHashes: some View {
+        if case .reconsent(.termsChanged) = flow.mode,
+           let pinned = flow.state.pinnedManifestHash,
+           let published = flow.state.publishedManifestHash {
+            SettingsSectionLabel("WHAT CHANGED")
+            SettingsCard {
+                VStack(alignment: .leading, spacing: 10) {
+                    hashRow("Terms you signed", pinned)
+                    hashRow("Published now", published)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(16)
+            }
+        }
+    }
+
+    private func hashRow(_ label: LocalizedStringKey, _ hash: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(OnymTokens.text)
+            Text(hash)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(OnymTokens.text2)
+                .textSelection(.enabled)
+        }
+    }
+
     private var pickerTitle: LocalizedStringKey {
         switch flow.mode {
         case .onboarding, .switching:
@@ -168,7 +202,7 @@ public struct ModerationConsentView: View {
         case .reconsent(.termsChanged):
             return "Your authority now publishes terms that differ from the ones you signed. The mandate you hold is untouched — anything already under way is still judged by the terms you agreed to, and no one can edit them. Onym won't keep running on consent that no longer matches what's published, so read the new terms and sign them, or move to another authority."
         case .reconsent(.authorityDelisted):
-            return "The authority your mandate names is no longer designated, so it can't publish terms or answer for you any more. Choose an authority below to review its terms and sign a fresh mandate."
+            return "The authority your mandate names is no longer a designated authority here. It remains bound by the mandate you signed — what has changed is that Onym no longer routes anything through it, so reports and cases can't reach it from this app. Choose an authority below to review its terms and sign a fresh mandate."
         }
     }
 

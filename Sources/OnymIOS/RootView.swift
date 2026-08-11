@@ -33,17 +33,25 @@ struct RootView: View {
     /// reason attached, and anything else dismisses it.
     @State private var consentPresentation: ConsentPresentation?
 
-    /// `fullScreenCover(item:)` needs identity. The mode *is* the
-    /// identity here — swapping between onboarding and re-consent
-    /// should rebuild the flow, not reuse it.
+    /// `fullScreenCover(item:)` needs identity, and the two consent
+    /// gates the root can host are exactly "no mandate yet" and "the
+    /// mandate is stale, for this reason" — switching is a Settings
+    /// task with its own cover and is deliberately not expressible
+    /// here. Changing between them rebuilds the flow rather than
+    /// reusing it.
     private struct ConsentPresentation: Identifiable, Equatable {
-        let mode: ModerationConsentFlow.Mode
+        /// `nil` when there is no mandate at all.
+        let reason: ReconsentReason?
+
+        var mode: ModerationConsentFlow.Mode {
+            reason.map { .reconsent($0) } ?? .onboarding
+        }
+
         var id: String {
-            switch mode {
-            case .onboarding: return "onboarding"
-            case .switching: return "switching"
-            case .reconsent(.termsChanged): return "reconsent.termsChanged"
-            case .reconsent(.authorityDelisted): return "reconsent.authorityDelisted"
+            switch reason {
+            case nil: return "onboarding"
+            case .termsChanged: return "reconsent.termsChanged"
+            case .authorityDelisted: return "reconsent.authorityDelisted"
             }
         }
     }
@@ -99,9 +107,9 @@ struct RootView: View {
     ) -> ConsentPresentation? {
         switch gate {
         case .needsConsent:
-            return ConsentPresentation(mode: .onboarding)
+            return ConsentPresentation(reason: nil)
         case .needsReconsent(let reason):
-            return ConsentPresentation(mode: .reconsent(reason))
+            return ConsentPresentation(reason: reason)
         case .checking, .banned, .gateCheckRequired, .operational:
             return nil
         }
