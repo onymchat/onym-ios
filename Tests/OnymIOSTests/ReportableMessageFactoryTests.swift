@@ -110,20 +110,101 @@ final class ReportableMessageFactoryTests: XCTestCase {
         ))
     }
 
-    func test_mediaMessage_isNotReportable() throws {
-        let image = ChatImageAttachment(
-            sha256: String(repeating: "cd", count: 32),
-            mimeType: "image/jpeg",
-            byteSize: 1234,
-            width: 10,
-            height: 10,
-            encKey: Data(repeating: 7, count: 32),
-            blurhash: "LEHV6nWB2yk8",
-            server: "https://blossom.onym.app"
-        )
-        let message = try signedMessage(imageAttachment: image)
+    // MARK: - Photos
+
+    /// The happy path: a received photo whose bytes hash to the digest
+    /// its sender signed.
+    func test_receivedPhoto_isReportable() throws {
+        let bytes = Data("the exact jpeg bytes that travelled".utf8)
+        let (message, attachment) = try signedPhotoMessage(bytes: bytes)
+
+        let reportable = try XCTUnwrap(ReportableMessageFactory.make(
+            from: message,
+            memberProfiles: profiles(),
+            groupSecret: groupSecret,
+            attachmentBytes: bytes
+        ))
+
+        XCTAssertEqual(reportable.images.count, 1)
+        XCTAssertEqual(reportable.images[0].bytes, bytes)
+        XCTAssertEqual(reportable.images[0].sha256, ChatImageCrypto.sha256Hex(bytes))
+        XCTAssertEqual(reportable.images[0].width, attachment.width)
+        // And the disclosed content is the v2 preimage the sender
+        // signed, verifying exactly as the Authority will check it.
+        let signature = try XCTUnwrap(Data(base64Encoded: reportable.authenticityProof))
+        XCTAssertTrue(senderKey.publicKey.isValidSignature(
+            signature, for: Data(reportable.disclosedContent.utf8)
+        ))
+        XCTAssertTrue(reportable.disclosedContent.contains("\"proof_version\":2"))
+    }
+
+    /// One flipped byte and this is a different picture, which the
+    /// sender never signed. Catching it here keeps the menu from
+    /// offering a report that could only fail at the Authority.
+    func test_photoWhoseBytesDoNotMatchTheCommitment_isNotReportable() throws {
+        let (message, _) = try signedPhotoMessage(bytes: Data("original".utf8))
+
+        XCTAssertNil(ReportableMessageFactory.make(
+            from: message,
+            memberProfiles: profiles(),
+            groupSecret: groupSecret,
+            attachmentBytes: Data("tampered".utf8)
+        ))
+    }
+
+    /// Without the decrypted bytes there is nothing to verify against,
+    /// so there is nothing to disclose.
+    func test_photoWithoutItsBytes_isNotReportable() throws {
+        let (message, _) = try signedPhotoMessage(bytes: Data("the bytes".utf8))
+
         XCTAssertNil(ReportableMessageFactory.make(
             from: message, memberProfiles: profiles(), groupSecret: groupSecret
+        ))
+    }
+
+    /// A photo sent before proof v2 carries a v1 signature that commits
+    /// to the caption alone. It cannot be authenticated, ever.
+    func test_photoSignedBeforeMediaCommitmentsExisted_isNotReportable() throws {
+        let bytes = Data("the bytes".utf8)
+        let image = attachment(for: bytes)
+        // `signedMessage` signs a v1 preimage — exactly what a client
+        // shipped before this feature produced.
+        let message = try signedMessage(body: "caption", imageAttachment: image)
+
+        XCTAssertNil(ReportableMessageFactory.make(
+            from: message,
+            memberProfiles: profiles(),
+            groupSecret: groupSecret,
+            attachmentBytes: bytes
+        ))
+    }
+
+    /// The menu predicate may be optimistic about photos — it cannot
+    /// await the bytes — but it must never be optimistic about a kind
+    /// of message the disclosure path would refuse outright.
+    func test_eligibilityNeverOffersWhatDisclosureWouldRefuse() throws {
+        let voice = ChatVoiceAttachment(
+            sha256: String(repeating: "cd", count: 32),
+            mimeType: "audio/mp4",
+            byteSize: 1234,
+            durationSeconds: 2,
+            encKey: Data(repeating: 7, count: 32),
+            waveform: [1, 2, 3],
+            server: "https://blossom.onym.app"
+        )
+        for message in [
+            try signedMessage(direction: .outgoing),
+            try signedMessage(proofOverride: .some(nil)),
+            try signedMessage(voiceAttachment: voice),
+        ] {
+            XCTAssertFalse(ReportableMessageFactory.isReportable(
+                from: message, memberProfiles: profiles(), groupSecret: groupSecret
+            ))
+        }
+        // And a photo, which it cannot fully check, is offered.
+        let (photo, _) = try signedPhotoMessage(bytes: Data("bytes".utf8))
+        XCTAssertTrue(ReportableMessageFactory.isReportable(
+            from: photo, memberProfiles: profiles(), groupSecret: groupSecret
         ))
     }
 
@@ -157,6 +238,62 @@ final class ReportableMessageFactoryTests: XCTestCase {
     /// signature by `senderKey`, unless overridden. `proofOverride`
     /// distinguishes "leave the valid proof" (nil) from "force this
     /// value, including no proof at all" (.some).
+    /// The attachment descriptor a sender would build for `bytes`.
+    private func attachment(for bytes: Data) -> ChatImageAttachment {
+        ChatImageAttachment(
+            sha256: String(repeating: "cd", count: 32),
+            mimeType: "image/jpeg",
+            byteSize: bytes.count + 28,
+            width: 10,
+            height: 10,
+            encKey: Data(repeating: 7, count: 32),
+            blurhash: "LEHV6nWB2yk8",
+            server: "https://blossom.onym.app"
+        )
+    }
+
+    /// An incoming photo message whose proof is a v2 preimage
+    /// committing to `bytes` — what a post-proof-v2 sender produces.
+    private func signedPhotoMessage(
+        bytes: Data,
+        body: String = ""
+    ) throws -> (ChatMessage, ChatImageAttachment) {
+        let image = attachment(for: bytes)
+        let id = UUID()
+        let sentAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let preimage = try ChatModerationProof.signedContent(
+            messageID: id,
+            groupID: groupID,
+            groupSecret: groupSecret,
+            sentAtMillis: ChatModerationProof.sentAtMillis(from: sentAt),
+            body: body,
+            media: [ChatModerationProof.MediaCommitment(
+                blobSha256: image.sha256,
+                mimeType: image.mimeType,
+                plaintextSha256: ChatImageCrypto.sha256Hex(bytes),
+                plaintextByteLength: bytes.count,
+                width: image.width,
+                height: image.height
+            )]
+        )
+        let message = ChatMessage(
+            id: id,
+            groupID: groupID,
+            ownerIdentityID: IdentityID(),
+            senderBlsPubkeyHex: senderHex,
+            body: body,
+            sentAt: sentAt,
+            direction: .incoming,
+            status: .received,
+            replyToMessageID: nil,
+            groupType: .tyranny,
+            moderationAuthenticityProof: try senderKey
+                .signature(for: Data(preimage.utf8)).base64EncodedString(),
+            imageAttachment: image
+        )
+        return (message, image)
+    }
+
     private func signedMessage(
         body: String = "prohibited content",
         direction: MessageDirection = .incoming,

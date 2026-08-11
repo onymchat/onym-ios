@@ -46,6 +46,26 @@ public actor ChatImageLoader {
         return image
     }
 
+    /// The **exact** decrypted bytes of `attachment`.
+    ///
+    /// Distinct from `image(for:)` on purpose. A `UIImage` is a decoded
+    /// bitmap, and re-encoding one produces different bytes with a
+    /// different digest — which is precisely the value that
+    /// authenticates a reported photo against the sender's signature.
+    /// Anything disclosing evidence must take the bytes from here and
+    /// never round-trip them through an image.
+    ///
+    /// The disk cache already holds the plaintext verbatim, so a photo
+    /// the user has looked at costs nothing to re-read.
+    public func plaintext(for attachment: ChatImageAttachment) async throws -> Data {
+        let key = attachment.sha256
+        if let cached = try? Data(contentsOf: fileURL(key)) { return cached }
+        let plaintext = try await downloadAndDecrypt(attachment)
+        writeDisk(key, plaintext)
+        if let image = UIImage(data: plaintext) { memory[key] = image }
+        return plaintext
+    }
+
     /// Sender-side warm cache: after uploading, prime the decrypted
     /// image so the sender renders instantly without re-downloading.
     func prime(sha256: String, plaintext: Data) {

@@ -1215,7 +1215,7 @@ public actor ModerationRepository {
                     reportId: existing.report.reportId
                 )
             }
-            return try await submitReport(existing, to: listing)
+            return try await submitReport(existing, to: listing, images: message.images)
         }
 
         var report = Report(
@@ -1250,14 +1250,29 @@ public actor ModerationRepository {
             }
             throw error
         }
-        return try await submitReport(record, to: listing)
+        return try await submitReport(record, to: listing, images: message.images)
     }
 
     private func submitReport(
         _ record: ReportFilingRecord,
-        to listing: AuthorityListing
+        to listing: AuthorityListing,
+        images: [ReportableMessage.Image]
     ) async throws -> ReportReceipt {
         let client = authorityClients.client(for: listing)
+
+        // Bytes first, then the report that names them.
+        //
+        // The other order would leave a filed report pointing at an
+        // image the Authority does not hold — a case opened, and a mark
+        // set, on evidence nobody can look at. Uploading is idempotent
+        // (the digest is the address), so a retry after a partial
+        // upload re-sends the same bytes rather than creating anything
+        // new, and an upload that never gets referenced expires on the
+        // Authority's own sweep.
+        for image in images {
+            try await client.uploadEvidenceImage(sha256: image.sha256, bytes: image.bytes)
+        }
+
         let receipt: ReportReceipt
         do {
             receipt = try await client.fileReport(record.report)

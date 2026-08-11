@@ -171,9 +171,13 @@ public struct ChatThreadView: View {
                     await interactor.retry(groupID: groupID, messageID: messageID)
                 }
             },
-            canReportMessage: { makeReportableMessage(from: $0) != nil },
+            canReportMessage: { isReportable($0) },
             onReportRequested: { message in
-                reportableMessage = makeReportableMessage(from: message)
+                // A photo's disclosure needs its decrypted bytes, which
+                // come from an actor, so this is async even though the
+                // menu predicate above is not. Nothing is presented
+                // until the bytes verify against what the sender signed.
+                Task { reportableMessage = await makeReportableMessage(from: message) }
             },
             imageLoader: imageLoader,
             scrollToMessageID: scrollToMessageID,
@@ -462,14 +466,33 @@ public struct ChatThreadView: View {
         chatsFlow.groups.first { $0.id == groupID }?.invitationMessage
     }
 
-    private func makeReportableMessage(from message: ChatMessage) -> ReportableMessage? {
+    private func isReportable(_ message: ChatMessage) -> Bool {
+        guard let group = chatsFlow.groups.first(where: { $0.id == groupID }) else {
+            return false
+        }
+        return ReportableMessageFactory.isReportable(
+            from: message,
+            memberProfiles: currentMemberProfiles,
+            groupSecret: group.groupSecret
+        )
+    }
+
+    private func makeReportableMessage(from message: ChatMessage) async -> ReportableMessage? {
         guard let group = chatsFlow.groups.first(where: { $0.id == groupID }) else {
             return nil
+        }
+        // The exact plaintext, never a re-encoded `UIImage`: the digest
+        // of these bytes is what the sender signed, and a re-encode
+        // would authenticate nothing.
+        var attachmentBytes: Data?
+        if let attachment = message.imageAttachment {
+            attachmentBytes = try? await imageLoader.plaintext(for: attachment)
         }
         return ReportableMessageFactory.make(
             from: message,
             memberProfiles: currentMemberProfiles,
-            groupSecret: group.groupSecret
+            groupSecret: group.groupSecret,
+            attachmentBytes: attachmentBytes
         )
     }
 }

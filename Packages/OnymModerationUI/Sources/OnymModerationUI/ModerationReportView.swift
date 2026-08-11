@@ -71,15 +71,37 @@ public struct ModerationReportView: View {
     private var reportForm: some View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("MESSAGE TO DISCLOSE")
+                Text(flow.message.images.isEmpty ? "MESSAGE TO DISCLOSE" : "PHOTO TO DISCLOSE")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                Text(flow.message.displayBody)
-                    .font(.body)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(16)
-                    .background(.background, in: RoundedRectangle(cornerRadius: 14))
-                    .textSelection(.enabled)
+                // The exact photo, rendered from the very bytes that
+                // will be uploaded — not a thumbnail or a re-fetch.
+                // What the reporter agrees to disclose and what leaves
+                // the device must be the same thing.
+                ForEach(Array(flow.message.images.enumerated()), id: \.element.sha256) { _, image in
+                    if let rendered = UIImage(data: image.bytes) {
+                        Image(uiImage: rendered)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: .infinity, maxHeight: 260)
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
+                            .accessibilityLabel("The photo you are disclosing")
+                            .accessibilityIdentifier("moderation.report.photo")
+                    }
+                }
+                if !flow.message.displayBody.isEmpty || flow.message.images.isEmpty {
+                    Text(flow.message.displayBody)
+                        .font(.body)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                        .background(.background, in: RoundedRectangle(cornerRadius: 14))
+                        .textSelection(.enabled)
+                }
+                if !flow.message.images.isEmpty {
+                    Text("This photo is sent to your authority so a moderator and its model can review it. Nothing else from this conversation is shared.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             VStack(alignment: .leading, spacing: 8) {
