@@ -66,4 +66,27 @@ public actor CachingChainStateReader: ChainStateReading {
         }
         throw lastError ?? ChainReadError.noActiveRelayer
     }
+
+    /// Archived entries are immutable once written — an epoch's
+    /// commitment never changes — so unlike `tyrannyCommitment` there is
+    /// nothing to go stale and no TTL to manage. Retries still apply:
+    /// this runs on the same throttled relayer.
+    public func tyrannyHistory(
+        groupID: Data,
+        maxEntries: UInt32
+    ) async throws -> [SEPCommitmentEntry] {
+        var lastError: Error?
+        for attempt in 0..<maxAttempts {
+            do {
+                return try await inner.tyrannyHistory(groupID: groupID, maxEntries: maxEntries)
+            } catch {
+                lastError = error
+                if attempt < maxAttempts - 1, baseRetryDelayMillis > 0 {
+                    let delay = baseRetryDelayMillis * UInt64(attempt + 1)
+                    try? await Task.sleep(nanoseconds: delay * 1_000_000)
+                }
+            }
+        }
+        throw lastError ?? ChainReadError.noActiveRelayer
+    }
 }

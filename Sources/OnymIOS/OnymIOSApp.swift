@@ -890,6 +890,18 @@ struct OnymIOSApp: App {
                         ),
                         readReceiptsEnabled: { ReadReceiptsPreference.isEnabled }
                     )
+                    // Close the loop for the Retry on a snapshot parked
+                    // because *this* device couldn't read the chain. The
+                    // dispatcher owns verification and holds the
+                    // verifier, so the back-reference is installed here
+                    // rather than threaded through both initializers.
+                    await groupStateVerifier.setReverify { invitation, owner, signer in
+                        await dispatcher.reverify(
+                            invitation: invitation,
+                            ownerIdentityID: owner,
+                            senderEd25519PublicKey: signer
+                        )
+                    }
                     let fanout = InboxFanoutInteractor(
                         inboxTransport: inboxTransport,
                         identityRepository: identityRepository,

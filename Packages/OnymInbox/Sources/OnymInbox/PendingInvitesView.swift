@@ -112,8 +112,28 @@ struct PendingInvitesView: View {
                         .font(.system(size: 13))
                         .foregroundStyle(OnymTokens.text2)
                 }
-            case .unreachable:
-                Text("Couldn\u{2019}t verify \u{2014} the admin is offline. The group stays hidden until it can be verified on chain.")
+            case .chainSettling:
+                // Not stuck — early. No Retry button: this clears
+                // itself, and offering an action implies the user is
+                // holding it up.
+                HStack(spacing: 8) {
+                    ProgressView().scaleEffect(0.8)
+                    Text("Waiting for the group to be confirmed on chain\u{2026} This usually takes a few seconds.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(OnymTokens.text2)
+                }
+            case .unreachable, .chainUnreachable:
+                // The two failures name different parties, because they
+                // have different remedies: one is the admin's phone
+                // being asleep, the other is this device's own network
+                // or anchor settings. Saying "the admin is offline" for
+                // both sent people to wait on someone who could not have
+                // helped.
+                Text(
+                    entry.status == .chainUnreachable
+                        ? "Couldn\u{2019}t reach the chain to verify this group. Check your connection, and that a relayer and Founder contract are set in Settings \u{2192} Network."
+                        : "Couldn\u{2019}t verify \u{2014} the admin is offline. The group stays hidden until it can be verified on chain."
+                )
                     .font(.system(size: 13))
                     .foregroundStyle(OnymTokens.text2)
                 Button {

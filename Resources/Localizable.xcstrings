@@ -4728,6 +4728,40 @@
           }
         }
       }
+    },
+    "Waiting for the group to be confirmed on chain… This usually takes a few seconds.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting for the group to be confirmed on chain… This usually takes a few seconds."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ожидаем подтверждения группы в сети… Обычно это занимает несколько секунд."
+          }
+        }
+      }
+    },
+    "Couldn’t reach the chain to verify this group. Check your connection, and that a relayer and Founder contract are set in Settings → Network.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t reach the chain to verify this group. Check your connection, and that a relayer and Founder contract are set in Settings → Network."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не удалось обратиться к сети для проверки группы. Проверьте подключение и то, что в «Настройки → Сеть» указаны ретранслятор и контракт Founder."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

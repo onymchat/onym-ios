@@ -239,6 +239,22 @@ struct GetCommitmentPayload: Encodable, Equatable, Sendable {
     }
 }
 
+/// Arguments for `get_history`.
+///
+/// The contract archives every superseded `CommitmentEntry` and keeps
+/// the most recent `HISTORY_WINDOW` (64) of them, so a snapshot the
+/// chain has already moved past is still checkable against what was
+/// actually committed at its epoch.
+struct GetHistoryPayload: Encodable, Equatable, Sendable {
+    let groupID: Data
+    let maxEntries: UInt32
+
+    enum CodingKeys: String, CodingKey {
+        case groupID = "group_id"
+        case maxEntries = "max_entries"
+    }
+}
+
 /// On-chain state returned by `get_commitment`. The contract-side
 /// `CommitmentEntry` shape varies per governance type — only
 /// `commitment` and `epoch` are present in every variant. The rest

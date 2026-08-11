@@ -1437,9 +1437,222 @@ final class IncomingMessageDispatcherTests: XCTestCase {
 
         let after = await groups.currentGroups()
         XCTAssertTrue(after.isEmpty, "unverifiable-now invitation must not materialize")
+        // Still never rejected — but no longer routed to the admin.
+        // A chain read this device couldn't make is not something the
+        // admin can answer; asking them produced a reply, changed
+        // nothing, and told the user "the admin is offline".
         let deferred = await refresher.deferredGroupIDs()
-        XCTAssertEqual(deferred, [groupID],
-                       "a chain-read failure must defer (retry), not reject+drop")
+        XCTAssertTrue(deferred.isEmpty,
+                      "a local read failure must not send a refresh request to the admin")
+        let local = await refresher.locallyDeferred()
+        XCTAssertEqual(local.map(\.groupID), [groupID],
+                       "a chain-read failure must defer locally (retry), not reject+drop")
+        XCTAssertEqual(local.map(\.status), [.chainUnreachable])
+    }
+
+    /// The admin admitted somebody else before this joiner opened the
+    /// app, so the chain has moved past the snapshot's epoch. The
+    /// contract archives the last 64 entries, so the snapshot is still
+    /// checkable against what was committed at *its* epoch — no
+    /// round-trip to a phone that may be asleep.
+    func test_invitation_tyranny_chainAhead_verifiesAgainstArchivedHistory() async throws {
+        let groupID = Data(repeating: 0x42, count: 32)
+        let salt = Data(repeating: 0x66, count: 32)
+        let realCommitment = try Self.makeRealTyrannyCommitment(
+            members: [], epoch: 1, salt: salt, tier: .small
+        )
+        // Chain is two epochs ahead of the invitation…
+        chainState.setNext(commitment: Data(repeating: 0x09, count: 32), epoch: 3)
+        // …but epoch 1 is still in the archive, with the same commitment.
+        chainState.setHistory([
+            (commitment: Data(repeating: 0x08, count: 32), epoch: 0),
+            (commitment: realCommitment, epoch: 1),
+            (commitment: Data(repeating: 0x07, count: 32), epoch: 2)
+        ])
+        let payload = GroupInvitationPayload(
+            version: 1,
+            groupID: groupID,
+            groupSecret: Data(repeating: 0x55, count: 32),
+            name: "Family",
+            members: [],
+            epoch: 1,
+            salt: salt,
+            commitment: realCommitment,
+            tierRaw: SEPTier.small.rawValue,
+            groupTypeRaw: SEPGroupType.tyranny.rawValue,
+            adminPubkeyHex: nil
+        )
+        let plaintext = try JSONEncoder().encode(payload)
+        let decrypter = FakeInvitationEnvelopeDecrypter(
+            mode: .fixed(plaintext),
+            senderEd25519PublicKey: Data(repeating: 0xED, count: 32)
+        )
+        let refresher = SpyGroupStateRefresher()
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory()),
+            groupStateRefresher: refresher
+        )
+
+        await dispatcher.dispatch(messageID: "mat-ahead", ownerIdentityID: owner,
+                                  payload: Data("envelope".utf8), receivedAt: Date())
+
+        let after = await groups.currentGroups()
+        XCTAssertEqual(after.count, 1, "an archived exact-epoch match verifies")
+        let deferred = await refresher.deferredGroupIDs()
+        XCTAssertTrue(deferred.isEmpty, "the admin must not be asked when history answers")
+    }
+
+    /// The same anti-forgery bar as the exact-epoch path: a snapshot
+    /// whose commitment doesn't match what was archived at its epoch is
+    /// a forgery, not a stale read.
+    func test_invitation_tyranny_archivedEpochMismatch_isRejected() async throws {
+        let groupID = Data(repeating: 0x42, count: 32)
+        let salt = Data(repeating: 0x66, count: 32)
+        let realCommitment = try Self.makeRealTyrannyCommitment(
+            members: [], epoch: 1, salt: salt, tier: .small
+        )
+        chainState.setNext(commitment: Data(repeating: 0x09, count: 32), epoch: 3)
+        chainState.setHistory([
+            (commitment: Data(repeating: 0xAA, count: 32), epoch: 1)  // different
+        ])
+        let payload = GroupInvitationPayload(
+            version: 1,
+            groupID: groupID,
+            groupSecret: Data(repeating: 0x55, count: 32),
+            name: "Family",
+            members: [],
+            epoch: 1,
+            salt: salt,
+            commitment: realCommitment,
+            tierRaw: SEPTier.small.rawValue,
+            groupTypeRaw: SEPGroupType.tyranny.rawValue,
+            adminPubkeyHex: nil
+        )
+        let plaintext = try JSONEncoder().encode(payload)
+        let decrypter = FakeInvitationEnvelopeDecrypter(
+            mode: .fixed(plaintext),
+            senderEd25519PublicKey: Data(repeating: 0xED, count: 32)
+        )
+        let refresher = SpyGroupStateRefresher()
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory()),
+            groupStateRefresher: refresher
+        )
+
+        await dispatcher.dispatch(messageID: "mat-forge", ownerIdentityID: owner,
+                                  payload: Data("envelope".utf8), receivedAt: Date())
+
+        let after = await groups.currentGroups()
+        XCTAssertTrue(after.isEmpty, "a commitment that never was must not materialize")
+        let local = await refresher.locallyDeferred()
+        XCTAssertTrue(local.isEmpty, "a forgery is dropped, not parked for retry")
+    }
+
+    /// Older than the archive window: now the admin genuinely is the
+    /// only source of current state, so the refresh request goes out.
+    func test_invitation_tyranny_beyondHistoryWindow_asksTheAdmin() async throws {
+        let groupID = Data(repeating: 0x42, count: 32)
+        let salt = Data(repeating: 0x66, count: 32)
+        let realCommitment = try Self.makeRealTyrannyCommitment(
+            members: [], epoch: 1, salt: salt, tier: .small
+        )
+        chainState.setNext(commitment: Data(repeating: 0x09, count: 32), epoch: 400)
+        chainState.setHistory([])  // epoch 1 long since evicted
+        let payload = GroupInvitationPayload(
+            version: 1,
+            groupID: groupID,
+            groupSecret: Data(repeating: 0x55, count: 32),
+            name: "Family",
+            members: [],
+            epoch: 1,
+            salt: salt,
+            commitment: realCommitment,
+            tierRaw: SEPTier.small.rawValue,
+            groupTypeRaw: SEPGroupType.tyranny.rawValue,
+            adminPubkeyHex: nil
+        )
+        let plaintext = try JSONEncoder().encode(payload)
+        let decrypter = FakeInvitationEnvelopeDecrypter(
+            mode: .fixed(plaintext),
+            senderEd25519PublicKey: Data(repeating: 0xED, count: 32)
+        )
+        let refresher = SpyGroupStateRefresher()
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory()),
+            groupStateRefresher: refresher
+        )
+
+        await dispatcher.dispatch(messageID: "mat-old", ownerIdentityID: owner,
+                                  payload: Data("envelope".utf8), receivedAt: Date())
+
+        let deferred = await refresher.deferredGroupIDs()
+        XCTAssertEqual(deferred, [groupID], "past the window, only the admin can answer")
+    }
+
+    /// The joiner-side twin of the approve-side race: the group's own
+    /// `create_group` hasn't settled. Says "settling", not "the admin is
+    /// offline" — the admin is fine and can do nothing about it.
+    func test_invitation_tyranny_groupNotOnChainYet_saysSettling() async throws {
+        let groupID = Data(repeating: 0x42, count: 32)
+        let salt = Data(repeating: 0x66, count: 32)
+        let realCommitment = try Self.makeRealTyrannyCommitment(
+            members: [], epoch: 0, salt: salt, tier: .small
+        )
+        chainState.setNextThrows(SEPError.invalidResponse(
+            statusCode: 502,
+            body: "HostError: Error(Contract, #5)"
+        ))
+        let payload = GroupInvitationPayload(
+            version: 1,
+            groupID: groupID,
+            groupSecret: Data(repeating: 0x55, count: 32),
+            name: "Family",
+            members: [],
+            epoch: 0,
+            salt: salt,
+            commitment: realCommitment,
+            tierRaw: SEPTier.small.rawValue,
+            groupTypeRaw: SEPGroupType.tyranny.rawValue,
+            adminPubkeyHex: nil
+        )
+        let plaintext = try JSONEncoder().encode(payload)
+        let decrypter = FakeInvitationEnvelopeDecrypter(
+            mode: .fixed(plaintext),
+            senderEd25519PublicKey: Data(repeating: 0xED, count: 32)
+        )
+        let refresher = SpyGroupStateRefresher()
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: decrypter,
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory()),
+            groupStateRefresher: refresher
+        )
+
+        await dispatcher.dispatch(messageID: "mat-early", ownerIdentityID: owner,
+                                  payload: Data("envelope".utf8), receivedAt: Date())
+
+        let deferred = await refresher.deferredGroupIDs()
+        XCTAssertTrue(deferred.isEmpty, "nobody to ask — the group simply isn't anchored yet")
+        let local = await refresher.locallyDeferred()
+        XCTAssertEqual(local.map(\.status), [.chainSettling])
     }
 
     func test_invitation_tyranny_chainBehind_defersInsteadOfReject() async throws {
@@ -1489,8 +1702,12 @@ final class IncomingMessageDispatcherTests: XCTestCase {
         let after = await groups.currentGroups()
         XCTAssertTrue(after.isEmpty, "chain-behind snapshot must not materialize unverified")
         let deferred = await refresher.deferredGroupIDs()
-        XCTAssertEqual(deferred, [groupID],
+        XCTAssertTrue(deferred.isEmpty,
+                      "a lagging read resolves by re-reading, not by asking the admin")
+        let local = await refresher.locallyDeferred()
+        XCTAssertEqual(local.map(\.groupID), [groupID],
                        "chain-behind must defer (lagging read), not reject+drop")
+        XCTAssertEqual(local.map(\.status), [.chainSettling])
     }
 
     func test_announcement_tyranny_knownMember_skipsChainRead() async throws {
@@ -1602,8 +1819,21 @@ private actor SpyPendingInvites: PendingInvitesRecording {
 private actor SpyGroupStateRefresher: GroupStateRefreshing {
     private var deferred: [Data] = []
     private var handled: [Data] = []
+    /// Snapshots parked without asking the admin, with the reason. The
+    /// distinction is the point of the split: a refresh request that
+    /// goes out for a failure the admin can't fix is the bug.
+    private var deferredLocally: [(groupID: Data, status: PendingGroupVerification.Status)] = []
+
     func deferVerification(invitation: GroupInvitationPayload, ownerIdentityID: IdentityID) async {
         deferred.append(invitation.groupID)
+    }
+    func deferLocally(
+        invitation: GroupInvitationPayload,
+        ownerIdentityID: IdentityID,
+        senderEd25519PublicKey: Data?,
+        status: PendingGroupVerification.Status
+    ) async {
+        deferredLocally.append((invitation.groupID, status))
     }
     func handleRefreshRequest(
         _ request: GroupStateRefreshRequest,
@@ -1614,6 +1844,9 @@ private actor SpyGroupStateRefresher: GroupStateRefreshing {
     }
     func deferredGroupIDs() -> [Data] { deferred }
     func handledRefreshGroupIDs() -> [Data] { handled }
+    func locallyDeferred() -> [(groupID: Data, status: PendingGroupVerification.Status)] {
+        deferredLocally
+    }
 }
 
 // MARK: - String / hex helpers (test scope)
@@ -1709,6 +1942,37 @@ final class DispatcherStubChainState: ChainStateReading, @unchecked Sendable {
         let result: Result<SEPCommitmentEntry, Error> = lock.withLock {
             _calls.append(groupID)
             return _nextResult
+        }
+        return try result.get()
+    }
+
+    private var _history: Result<[SEPCommitmentEntry], Error> = .success([])
+    private var _historyCalls: [Data] = []
+
+    var historyCalls: [Data] { lock.withLock { _historyCalls } }
+
+    /// Archived entries the contract would return for superseded epochs.
+    func setHistory(_ entries: [(commitment: Data, epoch: UInt64)]) {
+        let mapped = entries.map {
+            SEPCommitmentEntry(
+                commitment: $0.commitment,
+                epoch: $0.epoch,
+                timestamp: 0,
+                tier: 0,
+                active: nil
+            )
+        }
+        lock.withLock { _history = .success(mapped) }
+    }
+
+    func setHistoryThrows(_ error: Error) {
+        lock.withLock { _history = .failure(error) }
+    }
+
+    func tyrannyHistory(groupID: Data, maxEntries: UInt32) async throws -> [SEPCommitmentEntry] {
+        let result: Result<[SEPCommitmentEntry], Error> = lock.withLock {
+            _historyCalls.append(groupID)
+            return _history
         }
         return try result.get()
     }
