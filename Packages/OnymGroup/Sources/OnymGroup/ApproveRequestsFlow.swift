@@ -3,9 +3,11 @@ import Observation
 
 /// `@Observable @MainActor` view-model for the approver UI. Mirrors
 /// `IdentitiesFlow`'s posture — one shared instance lives in
-/// `AppDependencies`, the toolbar badge on `ChatsView` watches
-/// `pending.count`, and the modal `ApproveRequestsView` consumes the
-/// full list + dispatches Approve / Decline taps.
+/// `AppDependencies`. `ChatsView` reads `pending` for the per-group
+/// chat-list signal, and each group's `ChatThreadView` renders its own
+/// slice of the list as in-thread rows that dispatch Accept / Decline.
+/// (Both surfaces used to be one modal + toolbar badge; the requests
+/// moved into the thread because nobody found the badge.)
 ///
 /// Purely a thin wrapper over `JoinRequestApprover` — no UI logic
 /// beyond mapping `ApproveOutcome` to a user-facing reason string.
@@ -85,8 +87,12 @@ public final class ApproveRequestsFlow {
                 // No success banner: the confirmation is now the "X
                 // joined" system message the approval itself writes into
                 // the thread, right where the request row was.
-                self.lastError = nil
-                self.lastErrorRequestID = nil
+                //
+                // Only clears the error if it belonged to *this* request.
+                // The whole point of keying it was that the thread shows
+                // one row per request — wiping unconditionally would make
+                // approving A erase the failure still displayed under B.
+                self.clearErrorIfOwned(by: id)
             default:
                 self.lastError = Self.failureReason(for: outcome)
                 self.lastErrorRequestID = id
@@ -101,9 +107,16 @@ public final class ApproveRequestsFlow {
         Task { @MainActor [weak self] in
             await approver.decline(requestId: id)
             self?.inFlightRequestIDs.remove(id)
-            self?.lastError = nil
-            self?.lastErrorRequestID = nil
+            self?.clearErrorIfOwned(by: id)
         }
+    }
+
+    /// Drop `lastError` only when it belongs to `id`. Acting on one
+    /// request must not clear the error another row is still showing.
+    private func clearErrorIfOwned(by id: String) {
+        guard lastErrorRequestID == id || lastErrorRequestID == nil else { return }
+        lastError = nil
+        lastErrorRequestID = nil
     }
 
     public func dismissError() {

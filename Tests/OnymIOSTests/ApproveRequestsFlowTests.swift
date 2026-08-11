@@ -123,6 +123,52 @@ final class ApproveRequestsFlowTests: XCTestCase {
                        "the error must be attributed to the request that failed")
     }
 
+    /// Acting on one request must not wipe the error another row is
+    /// still showing — the whole reason the error is keyed at all.
+    func test_approvingOneRequest_leavesAnotherRequestsErrorIntact() async throws {
+        let stub = StubApprover()
+        let flow = ApproveRequestsFlow(approver: stub)
+        await stub.emit([
+            Self.makeRequest(id: "req-ok", alias: "Ann"),
+            Self.makeRequest(id: "req-bad", alias: "Bob")
+        ])
+        await flow.start()
+        try await waitFor { flow.pending.count == 2 }
+
+        await stub.setNextOutcome(.anchorRejected("test"))
+        flow.approve("req-bad")
+        try await waitFor { flow.lastErrorRequestID == "req-bad" }
+
+        await stub.setNextOutcome(.sent)
+        flow.approve("req-ok")
+        try await waitFor { !flow.isInFlight("req-ok") }
+
+        XCTAssertEqual(flow.lastErrorRequestID, "req-bad",
+                       "approving one request must not clear another's error")
+        XCTAssertNotNil(flow.lastError)
+    }
+
+    func test_decliningOneRequest_leavesAnotherRequestsErrorIntact() async throws {
+        let stub = StubApprover()
+        let flow = ApproveRequestsFlow(approver: stub)
+        await stub.emit([
+            Self.makeRequest(id: "req-keep", alias: "Ann"),
+            Self.makeRequest(id: "req-err", alias: "Bob")
+        ])
+        await flow.start()
+        try await waitFor { flow.pending.count == 2 }
+
+        await stub.setNextOutcome(.anchorRejected("test"))
+        flow.approve("req-err")
+        try await waitFor { flow.lastErrorRequestID == "req-err" }
+
+        flow.decline("req-keep")
+        try await waitFor { !flow.isInFlight("req-keep") }
+
+        XCTAssertEqual(flow.lastErrorRequestID, "req-err",
+                       "declining one request must not clear another's error")
+    }
+
     func test_declineClearsAttributedError() async throws {
         let stub = StubApprover()
         let flow = ApproveRequestsFlow(approver: stub)

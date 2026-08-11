@@ -376,7 +376,16 @@ final class ChatThreadViewController: UIViewController {
             // A brand-new group whose founder hasn't sent anything yet —
             // precisely when the first join request lands — would
             // otherwise render the row invisibly.
-            if !ids.isEmpty, self.tableView.alpha == 0 { self.tableView.alpha = 1 }
+            if !ids.isEmpty, self.tableView.alpha == 0 {
+                self.tableView.alpha = 1
+                // Latch the cold open too. Revealing without this left
+                // `isFirstApply` true, so the next message snapshot —
+                // usually the "X joined" notice landing seconds later,
+                // right after Accept — would take the cold-open branch
+                // and hard-jump a table the user is already looking at,
+                // instead of animating the append.
+                self.hasAppliedFirstSnapshot = true
+            }
             guard gainedRequest, wasNearBottom else { return }
             self.scrollToBottom(animated: true)
         }

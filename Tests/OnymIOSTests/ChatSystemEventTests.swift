@@ -281,6 +281,66 @@ final class ChatSystemEventTests: XCTestCase {
         }
     }
 
+    // MARK: - Alias sanitising
+
+    /// Aliases are self-asserted and arrive unchecked. The request row
+    /// trims before rendering, but a notice is written into *permanent*
+    /// history — an empty alias would leave " joined" in the thread with
+    /// no way to correct it.
+    func test_blankAlias_fallsBackRatherThanRenderingAsSpace() async {
+        let owner = IdentityID()
+        let groupID = String(repeating: "de", count: 32)
+        let recorder = ChatSystemEventRecorder(
+            messageRepository: MessageRepository(store: store)
+        )
+
+        await recorder.recordMemberJoined(
+            groupID: groupID,
+            ownerIdentityID: owner,
+            groupType: .tyranny,
+            joinerBlsPubkeyHex: String(repeating: "66", count: 48),
+            alias: "   ",
+            at: Date()
+        )
+
+        let listed = await store.list(
+            groupID: groupID,
+            ownerIDString: owner.rawValue.uuidString
+        )
+        guard case .memberJoined(let alias)? = listed.first?.systemEvent else {
+            return XCTFail("expected a memberJoined notice")
+        }
+        XCTAssertFalse(alias.trimmingCharacters(in: .whitespaces).isEmpty,
+                       "a blank alias must not persist as whitespace")
+        XCTAssertFalse(listed.first?.chatListPreview.hasPrefix(" ") == true)
+    }
+
+    func test_blankGroupName_fallsBack() async {
+        let owner = IdentityID()
+        let groupID = String(repeating: "ef", count: 32)
+        let recorder = ChatSystemEventRecorder(
+            messageRepository: MessageRepository(store: store)
+        )
+
+        await recorder.recordYouJoined(
+            groupID: groupID,
+            ownerIdentityID: owner,
+            groupType: .tyranny,
+            groupName: "",
+            ownBlsPubkeyHex: String(repeating: "77", count: 48),
+            at: Date()
+        )
+
+        let listed = await store.list(
+            groupID: groupID,
+            ownerIDString: owner.rawValue.uuidString
+        )
+        guard case .youJoined(let name)? = listed.first?.systemEvent else {
+            return XCTFail("expected a youJoined notice")
+        }
+        XCTAssertFalse(name.isEmpty)
+    }
+
     // MARK: - Helpers
 
     private func makeSystemMessage(

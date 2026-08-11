@@ -64,8 +64,11 @@ final class ChatSystemNoticeCell: UITableViewCell {
     /// other.
     func configure(event: ChatSystemEvent) {
         label.text = event.localizedText
-        accessibilityIdentifier = "chat.system_notice"
-        isAccessibilityElement = true
-        accessibilityLabel = label.text
+        // Identify the *label*, not the cell, and don't set
+        // `isAccessibilityElement` on the cell — that collapses the
+        // subtree and the text stops being exposed as a static text.
+        // `ChatBubbleCell` leaves its labels exposed for the same
+        // reason: the UI tests locate thread content by its text.
+        label.accessibilityIdentifier = "chat.system_notice"
     }
 }

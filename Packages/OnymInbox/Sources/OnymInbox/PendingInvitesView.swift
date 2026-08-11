@@ -2,10 +2,12 @@ import SwiftUI
 import OnymDesign
 
 /// Invitee-side "you've been invited" list — the push counterpart to
-/// the deeplink `JoinView`. Mirrors `ApproveRequestsView`: a modal of
-/// cards, each offering Accept (ship a join request) or Dismiss. Accept
-/// is the explicit step; the group only appears once the admin approves
-/// the resulting request on chain.
+/// the deeplink `JoinView`. A modal of cards, each offering Accept (ship
+/// a join request) or Dismiss. Accept is the explicit step; the group
+/// only appears once the admin approves the resulting request on chain.
+///
+/// (The admin-side approval modal this once mirrored is gone — those
+/// requests now render inside the group's chat thread.)
 struct PendingInvitesView: View {
     @Bindable var flow: PendingInvitesFlow
     let onClose: () -> Void

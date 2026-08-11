@@ -186,7 +186,20 @@ final class ChatJoinRequestCell: UITableViewCell {
         // device — the founder still needs a way to clear the row.
         declineButton.isEnabled = !display.isInFlight
 
-        hintLabel.isHidden = !display.isInFlight
+        // A disabled Accept with no explanation is the worst of both.
+        // The state should be unreachable (the row only renders inside a
+        // group's own thread), but if it ever is reached, say why and
+        // point at the way out — the copy the deleted modal carried.
+        if !display.canAccept {
+            hintLabel.text = String(
+                localized: "This request is for a group that isn’t on this device. Decline to clear it."
+            )
+        } else {
+            hintLabel.text = String(
+                localized: "Generating proof and updating the on-chain commitment. This usually takes a few seconds."
+            )
+        }
+        hintLabel.isHidden = display.canAccept && !display.isInFlight
 
         errorLabel.text = display.errorText
         errorLabel.isHidden = display.errorText == nil

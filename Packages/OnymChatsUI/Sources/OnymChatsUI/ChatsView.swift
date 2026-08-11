@@ -97,14 +97,15 @@ public struct ChatsView: View {
             }
             // Join requests used to live behind a badged button here,
             // opening a modal list. New users never found it — nothing
-            // in the conversation told them someone was waiting. The
-            // request now renders as a row inside the group's own
-            // thread, so there is no separate surface to discover.
+            // in the conversation told them someone was waiting. They now
+            // render as a row inside the group's own thread, surfaced on
+            // the list row itself (see `pendingJoinRequestCounts`), so
+            // there is no separate surface to discover.
             // `approveRequestsFlow` is still started below: it collects
-            // the requests the thread renders.
-            //
-            // Invitations received by this identity (push offers). Same
-            // always-rendered + badge-on-nonempty treatment.
+            // the requests both of those read.
+
+            // Invitations received by this identity (push offers).
+            // Always-rendered + badge-on-nonempty.
             ToolbarItem(placement: .topBarTrailing) {
                 PendingInvitesToolbarButton(flow: pendingInvitesFlow)
             }
@@ -293,10 +294,37 @@ public struct ChatsView: View {
 
     // MARK: - Populated list
 
+    /// Pending join requests per group id, for the chat-list signal.
+    ///
+    /// Removing the toolbar badge took away the *only* ambient hint that
+    /// someone was waiting. A request isn't a `ChatMessage`, so it moves
+    /// no `chatListPreview`, and the "X joined" notice it eventually
+    /// becomes is deliberately excluded from `unreadCount` — so without
+    /// this a founder who never opens that particular thread would see
+    /// nothing at all, and the request would age out under
+    /// `SwiftDataIntroRequestStore.retention` while the joiner waited.
+    /// That's the same discoverability failure this PR set out to fix,
+    /// one screen further in.
+    ///
+    /// Keyed by hex group id to match `ChatListItem.id`. Only the admin's
+    /// device ever has entries: a request is sealed to an intro key no
+    /// one else holds.
+    private var pendingJoinRequestCounts: [String: Int] {
+        var counts: [String: Int] = [:]
+        for request in approveRequestsFlow.pending {
+            let hex = request.groupId.map { String(format: "%02x", $0) }.joined()
+            counts[hex, default: 0] += 1
+        }
+        return counts
+    }
+
     private var groupList: some View {
         List(flow.items) { item in
             NavigationLink(value: item.group.id) {
-                ChatsRow(item: item)
+                ChatsRow(
+                    item: item,
+                    joinRequestCount: pendingJoinRequestCounts[item.group.id] ?? 0
+                )
             }
             .listRowSeparator(.visible)
             // Swipe-to-delete with confirmation. Full-swipe is disabled so
@@ -360,6 +388,10 @@ public struct ChatsView: View {
 
 private struct ChatsRow: View {
     let item: ChatListItem
+    /// Join requests waiting in this group's thread. Drives the row's
+    /// "someone wants in" signal — the replacement for the toolbar badge
+    /// this change removed.
+    var joinRequestCount: Int = 0
 
     private var group: ChatGroup { item.group }
 
@@ -381,24 +413,42 @@ private struct ChatsRow: View {
                     .font(.system(size: 16, weight: .semibold))
                     .lineLimit(1)
                 HStack(spacing: 6) {
-                    if item.latestPreview == nil {
-                        Image(systemName: "lock.fill")
+                    if joinRequestCount > 0 {
+                        // Takes the subtitle outright rather than sitting
+                        // beside the last message: it's the only line in
+                        // the row that needs an action, and a small badge
+                        // alone was what nobody noticed on the toolbar.
+                        Image(systemName: "person.crop.circle.badge.plus")
                             .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(OnymAccent.blue.color)
+                        Text(joinRequestSubtitle)
+                            .font(.caption)
+                            .foregroundStyle(OnymAccent.blue.color)
+                            .lineLimit(1)
+                            .accessibilityIdentifier("chats.row.join_request.\(group.id)")
+                    } else {
+                        if item.latestPreview == nil {
+                            Image(systemName: "lock.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Text(subtitle)
+                            .font(.caption)
+                            // Unread rows read a touch stronger than the muted
+                            // "no messages / metadata" line.
+                            .foregroundStyle(item.unreadCount > 0 ? .primary : .secondary)
+                            .lineLimit(1)
+                            .accessibilityIdentifier("chats.row.subtitle.\(group.id)")
                     }
-                    Text(subtitle)
-                        .font(.caption)
-                        // Unread rows read a touch stronger than the muted
-                        // "no messages / metadata" line.
-                        .foregroundStyle(item.unreadCount > 0 ? .primary : .secondary)
-                        .lineLimit(1)
-                        .accessibilityIdentifier("chats.row.subtitle.\(group.id)")
                 }
             }
 
             Spacer(minLength: 0)
 
-            if item.unreadCount > 0 {
+            if joinRequestCount > 0 {
+                JoinRequestBadge(count: joinRequestCount)
+                    .accessibilityIdentifier("chats.row.join_request_badge.\(group.id)")
+            } else if item.unreadCount > 0 {
                 UnreadBadge(count: item.unreadCount)
                     .accessibilityIdentifier("chats.row.unread.\(group.id)")
             } else if group.isPublishedOnChain {
@@ -415,6 +465,15 @@ private struct ChatsRow: View {
     /// Latest message preview when the group has messages; otherwise the
     /// governance + member-count metadata (so a brand-new chat still shows
     /// something meaningful).
+    /// Replaces the subtitle while requests are outstanding, so the
+    /// founder can see there's something to act on without opening the
+    /// thread.
+    private var joinRequestSubtitle: String {
+        joinRequestCount == 1
+            ? String(localized: "Someone wants to join")
+            : String(localized: "\(joinRequestCount) people want to join")
+    }
+
     private var subtitle: String {
         if let preview = item.latestPreview, !preview.isEmpty {
             return preview
@@ -432,6 +491,28 @@ private struct ChatsRow: View {
 }
 
 /// Red pill showing the unread-message count on a chat row (caps at 99+).
+/// Accent-coloured counterpart to `UnreadBadge` for pending join
+/// requests. Deliberately not red: this is an invitation to act, not a
+/// backlog of unread messages, and a founder should be able to tell the
+/// two apart at a glance down the list.
+private struct JoinRequestBadge: View {
+    let count: Int
+
+    var body: some View {
+        Image(systemName: count > 1 ? "person.2.badge.plus" : "person.crop.circle.badge.plus")
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(OnymTokens.onAccent)
+            .padding(.horizontal, 7)
+            .frame(minHeight: 20)
+            .background(OnymAccent.blue.color, in: Capsule())
+            .accessibilityLabel(
+                count == 1
+                    ? String(localized: "1 join request")
+                    : String(localized: "\(count) join requests")
+            )
+    }
+}
+
 private struct UnreadBadge: View {
     let count: Int
 

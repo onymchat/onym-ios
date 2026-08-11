@@ -49,7 +49,7 @@ public struct ChatSystemEventRecorder: GroupSystemEventRecording {
         at: Date
     ) async {
         await record(
-            event: .memberJoined(alias: alias),
+            event: .memberJoined(alias: Self.displayAlias(alias)),
             discriminator: "member-joined:\(joinerBlsPubkeyHex.lowercased())",
             groupID: groupID,
             ownerIdentityID: ownerIdentityID,
@@ -73,7 +73,14 @@ public struct ChatSystemEventRecorder: GroupSystemEventRecording {
         at: Date
     ) async {
         await record(
-            event: .youJoined(groupName: groupName),
+            // Same reasoning as the alias: a group created without a
+            // name would otherwise write "You joined " into history.
+            // "(Unnamed)" matches how the chat list renders one.
+            event: .youJoined(
+                groupName: groupName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? String(localized: "(Unnamed)")
+                    : groupName
+            ),
             discriminator: "you-joined",
             groupID: groupID,
             ownerIdentityID: ownerIdentityID,
@@ -84,6 +91,20 @@ public struct ChatSystemEventRecorder: GroupSystemEventRecording {
     }
 
     // MARK: - Private
+
+    /// Aliases are self-asserted by the joiner and reach here unchecked
+    /// from `JoinRequestPayload.joinerDisplayLabel` (admin side) and
+    /// `MemberAnnouncementPayload.newMember.alias` (member side).
+    ///
+    /// The request row already trims and falls back before rendering, but
+    /// a notice is written into *permanent history* — an empty or
+    /// whitespace-only alias would leave " joined" sitting in the thread
+    /// forever, with no way to correct it. Same trim + `(unnamed)`
+    /// fallback the request row uses, applied before the row is stored.
+    static func displayAlias(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? String(localized: "(unnamed)") : trimmed
+    }
 
     private func record(
         event: ChatSystemEvent,

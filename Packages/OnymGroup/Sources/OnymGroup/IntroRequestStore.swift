@@ -1,13 +1,17 @@
 import Foundation
 
-/// In-memory sink for inbound intro requests. Process-lifetime —
-/// the request approval flow (PR-4) is interactive; if the user
-/// doesn't act before the process dies, the joiner re-shares.
+/// Sink for inbound intro requests.
 ///
-/// Mirrors the shape of `IncomingInvitationsRepository` — identical
-/// posture for the V1 receive-side (interactive UI consumes the
-/// stream; persistence lands later if we need durability across
-/// restarts).
+/// Two conformers: `SwiftDataIntroRequestStore` (production — durable,
+/// with a retention sweep) and `InMemoryIntroRequestStore` (tests, and
+/// the launch fallback when the on-disk container can't be opened).
+///
+/// Durability became a requirement when the approval surface moved from
+/// a modal into the chat thread: a request that vanished on force-quit
+/// reads as a message the app lost, while the joiner is still sitting on
+/// "Waiting for the host to approve…".
+///
+/// Mirrors the shape of `IncomingInvitationsRepository`.
 public protocol IntroRequestStore: Sendable {
     /// Hot stream of pending requests. Sorted newest-first by
     /// `receivedAt`. UI subscribes here.
@@ -27,6 +31,10 @@ public protocol IntroRequestStore: Sendable {
     func current() async -> [IntroRequest]
 }
 
+/// Process-lifetime conformer. Used by tests, and as the launch fallback
+/// when the SwiftData container can't be opened — a storage failure
+/// degrades to "requests don't survive a relaunch" rather than blocking
+/// launch outright.
 public actor InMemoryIntroRequestStore: IntroRequestStore {
 
     public init() {}

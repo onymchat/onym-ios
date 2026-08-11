@@ -85,8 +85,9 @@ public actor SwiftDataIntroRequestStore: IntroRequestStore {
     /// cases call for the same thing from it — nothing.
     @discardableResult
     public func record(_ request: IntroRequest) async -> Bool {
-        pruneExpired()
-
+        // No sweep here: the `publish()` below reads through `loadAll()`,
+        // which prunes. Calling it on entry too meant two fetch+delete
+        // passes per insert.
         let id = request.id
         let existing = FetchDescriptor<PersistedIntroRequest>(
             predicate: #Predicate { $0.id == id }
