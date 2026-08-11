@@ -113,7 +113,9 @@ public final class ModerationGateFlow {
         Task { await gateCheck.checkNow() }
         // Same handle as the launch check: the repository coalesces
         // overlapping checks anyway, so this only keeps `stop()` able to
-        // drop the flow's interest in the newest one.
+        // drop the flow's interest in the newest one. Cancel before
+        // replacing rather than dropping the old handle on the floor.
+        termsTask?.cancel()
         termsTask = Task { [weak self] in
             await self?.moderation.refreshActiveTerms()
         }
@@ -158,7 +160,13 @@ public final class ModerationGateFlow {
             // thing a cold launch shows on a flaky network.
             switch termsCurrency {
             case .superseded:
-                gate = .needsReconsent(.termsChanged)
+                // Same softening as every other blocking branch: with
+                // nobody in the directory the re-consent picker has no
+                // row to offer and no dismiss, so it would be a dead
+                // end rather than a gate.
+                gate = authoritiesAvailable
+                    ? .needsReconsent(.termsChanged)
+                    : .operational(openCases: openCases)
             case .authorityDelisted:
                 // A directory that lists nobody leaves the user no move
                 // to make; the same reasoning that keeps consent from

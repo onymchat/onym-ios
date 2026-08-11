@@ -131,6 +131,10 @@ public struct ModerationConsentView: View {
                         SettingsRow(
                             titleText: listing.name,
                             subtitle: rowSubtitle(for: listing),
+                            // The re-consent marker is prepended to the
+                            // component id, which already fills the
+                            // single default line on its own.
+                            subtitleLineLimit: 2,
                             last: idx == flow.state.authorities.count - 1
                         ) {
                             SettingsIconTile(symbol: "checkmark.shield", bg: SettingsTile.indigo)

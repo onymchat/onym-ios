@@ -99,7 +99,14 @@ struct RootView: View {
             // Dismissing first makes the swap explicit.
             consentPresentation = nil
             Task { @MainActor in
-                consentPresentation = next
+                // Re-derive rather than replaying the captured value:
+                // the gate can move again before this turn runs (the
+                // stale mandate resolving, a swap back), and applying a
+                // superseded decision would put an undismissable cover
+                // back over an app that no longer needs one.
+                consentPresentation = Self.presentation(
+                    for: dependencies.moderationGateFlow.gate
+                )
             }
         }
         .onChange(of: scenePhase) { _, phase in

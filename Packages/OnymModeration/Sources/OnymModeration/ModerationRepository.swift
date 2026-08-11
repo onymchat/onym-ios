@@ -209,9 +209,13 @@ public actor ModerationRepository {
     private var caseAppealTasks: [CaseSubmissionKey: Task<AppealReceipt, Error>] = [:]
     private var refreshTask: Task<Void, Error>?
     private var termsCheckTask: Task<Void, Never>?
-    /// Last authenticated, consentable manifest seen for an authority.
+    /// Last authenticated, consentable manifest seen for an authority,
+    /// and the authority the directory has stopped listing. Each holds
+    /// one authority, not a table: they are observations about the one
+    /// the active mandate names, and are only ever read through
+    /// `termsCurrency`, which discards them when they describe anyone
+    /// else. Reading either directly would need that check restated.
     private var publishedManifest: (authority: String, hash: String)?
-    /// Authority the directory has stopped listing, if any.
     private var delistedAuthority: String?
 
     public init(
@@ -298,7 +302,25 @@ public actor ModerationRepository {
             throw error
         }
         refreshTask = nil
+        // Every successful directory read is evidence about the active
+        // mandate's authority, wherever it was asked for. The consent
+        // flow refreshes on appear and on its retry button without ever
+        // going through the terms check, so leaving reconciliation
+        // there let a stale `publishedManifest` outlive the listing it
+        // came from — an undismissable "these terms have changed" over
+        // a picker reading "No authorities are published yet", with no
+        // remedy on screen.
+        reconcileDirectoryWithActiveMandate()
         publish()
+    }
+
+    private func reconcileDirectoryWithActiveMandate() {
+        guard let record = activeMandateRecord() else { return }
+        if authorities.contains(where: { $0.componentId == record.mandate.authority }) {
+            noteAuthorityListed(record.mandate.authority)
+        } else {
+            noteAuthorityDelisted(record.mandate.authority)
+        }
     }
 
     // MARK: - Terms currency
@@ -319,6 +341,12 @@ public actor ModerationRepository {
     /// first foreground notification) share one check.
     public func refreshActiveTerms() async {
         if let task = termsCheckTask {
+            // A foreground arriving mid-check takes that check's answer
+            // even though its fetches may predate the backgrounding. A
+            // deliberate gap: the alternative is queueing a second full
+            // round of fetches behind every one already running, and
+            // the verdict this returns is at worst one foreground
+            // stale, which the next one corrects.
             await task.value
             return
         }
@@ -349,21 +377,17 @@ public actor ModerationRepository {
         try? await refresh()
         guard fetchStatus == .success else { return }
 
+        // Listing and delisting were both settled by the refresh above,
+        // which reconciles them for every caller. Presence is the same
+        // quality of answer as absence and is recorded the moment the
+        // directory lands — never held hostage to the manifest fetch
+        // below, which would leave a relisted authority whose manifest
+        // momentarily fails to fetch showing "Authority Unavailable",
+        // offering only the remedy of switching away from an authority
+        // the directory does list.
         guard let listing = authorities.first(where: {
             $0.componentId == record.mandate.authority
-        }) else {
-            // A published directory that no longer lists this authority
-            // is a definitive answer, not a fetch failure.
-            noteAuthorityDelisted(record.mandate.authority)
-            return
-        }
-        // Presence in the directory is the same quality of answer as
-        // absence from it, so it retires the delisting here rather than
-        // hostage to the manifest fetch below. Otherwise a relisted
-        // authority whose manifest momentarily fails to fetch keeps
-        // showing "Authority Unavailable", whose only offered remedy is
-        // switching away from an authority that is in fact listed.
-        noteAuthorityListed(listing.componentId)
+        }) else { return }
 
         let published: SignedManifest
         do {
