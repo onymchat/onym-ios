@@ -149,6 +149,7 @@ struct RootView: View {
                             videoLoader: dependencies.videoLoader,
                             voiceLoader: dependencies.voiceLoader,
                             makeModerationReportView: dependencies.makeModerationReportView,
+                            approveRequestsFlow: dependencies.approveRequestsFlow,
                             scrollToMessageID: result.messageID
                         )
                     }

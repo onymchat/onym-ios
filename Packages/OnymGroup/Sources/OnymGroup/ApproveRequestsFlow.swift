@@ -19,15 +19,13 @@ public final class ApproveRequestsFlow {
     /// Last failed-approve reason, or nil. Cleared on the next
     /// successful Approve / Decline / dismiss.
     public internal(set) var lastError: String?
-    /// Brief success banner copy after a `.sent` approval. Auto-
-    /// dismisses ~3s after being set so the admin gets a positive
-    /// confirmation without having to manually clear it. The row
-    /// disappearing is also feedback, but explicit "Approved on
-    /// chain" makes the on-chain step visible.
-    public internal(set) var lastSuccessMessage: String?
+    /// Which request `lastError` belongs to. The thread renders each
+    /// pending request as its own row, so an un-keyed error would paint
+    /// a failure from one request onto every other row on screen.
+    public internal(set) var lastErrorRequestID: String?
     /// Request IDs whose Approve / Decline call is currently in
     /// flight. Drives the per-row spinner + disabled-buttons state
-    /// in `ApproveRequestsView`. Necessary because PR 13a turned
+    /// in the thread's join-request row. Necessary because PR 13a turned
     /// `approve` into a multi-second flow (PLONK prove +
     /// `update_commitment` HTTP roundtrip + Stellar tx wait) — without
     /// this signal the UI looks frozen while the proof generates.
@@ -78,39 +76,20 @@ public final class ApproveRequestsFlow {
         guard !inFlightRequestIDs.contains(id) else { return }
         inFlightRequestIDs.insert(id)
         let approver = self.approver
-        // Capture joiner alias before firing — used for the success
-        // banner. Falls back to "this person" if the row was already
-        // removed somehow.
-        let joinerAlias = pending.first { $0.id == id }?.joinerDisplayLabel
         Task { @MainActor [weak self] in
             let outcome = await approver.approve(requestId: id)
             guard let self else { return }
             self.inFlightRequestIDs.remove(id)
             switch outcome {
             case .sent:
+                // No success banner: the confirmation is now the "X
+                // joined" system message the approval itself writes into
+                // the thread, right where the request row was.
                 self.lastError = nil
-                let alias = joinerAlias?.trimmingCharacters(in: .whitespacesAndNewlines)
-                let label = (alias?.isEmpty ?? true) ? "this person" : alias!
-                self.lastSuccessMessage = "\(label) is now in the group."
-                self.scheduleSuccessDismiss()
+                self.lastErrorRequestID = nil
             default:
-                self.lastSuccessMessage = nil
                 self.lastError = Self.failureReason(for: outcome)
-            }
-        }
-    }
-
-    /// Auto-clear the success banner after ~3s. Cancelled implicitly
-    /// when a fresh approval overwrites `lastSuccessMessage` — the
-    /// detached Task only zeroes the field if it's still the same
-    /// content it set.
-    private func scheduleSuccessDismiss() {
-        let snapshot = lastSuccessMessage
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
-            guard let self else { return }
-            if self.lastSuccessMessage == snapshot {
-                self.lastSuccessMessage = nil
+                self.lastErrorRequestID = id
             }
         }
     }
@@ -123,10 +102,14 @@ public final class ApproveRequestsFlow {
             await approver.decline(requestId: id)
             self?.inFlightRequestIDs.remove(id)
             self?.lastError = nil
+            self?.lastErrorRequestID = nil
         }
     }
 
-    public func dismissError() { lastError = nil }
+    public func dismissError() {
+        lastError = nil
+        lastErrorRequestID = nil
+    }
 
     private static func failureReason(
         for outcome: JoinRequestApprover.ApproveOutcome

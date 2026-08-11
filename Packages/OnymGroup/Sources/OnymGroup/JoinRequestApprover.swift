@@ -136,6 +136,12 @@ public actor JoinRequestApprover: JoinRequestApproving {
     private let networkPreference: any NetworkPreferenceProviding
     private let proofGenerator: any GroupProofGenerator
     private let makeContractTransport: @Sendable (URL) -> any SEPContractTransport
+    /// Appends the "X joined" notice to the admin's own copy of the
+    /// thread once an approval lands. Every other member gets theirs
+    /// from the fanned-out `MemberAnnouncementPayload`; the admin never
+    /// receives that (it's the sender), so this is the admin's only
+    /// source for the row.
+    private let systemEvents: any GroupSystemEventRecording
 
     private var pendingValue: [PendingRequest] = []
     private var pendingContinuations: [UUID: AsyncStream<[PendingRequest]>.Continuation] = [:]
@@ -167,7 +173,8 @@ public actor JoinRequestApprover: JoinRequestApproving {
                 endpoint: url,
                 authToken: RelayerSecrets.authToken
             )
-        }
+        },
+        systemEvents: any GroupSystemEventRecording = NoopGroupSystemEventRecorder()
     ) {
         self.identity = identity
         self.introKeyStore = introKeyStore
@@ -179,6 +186,7 @@ public actor JoinRequestApprover: JoinRequestApproving {
         self.networkPreference = networkPreference
         self.proofGenerator = proofGenerator
         self.makeContractTransport = makeContractTransport
+        self.systemEvents = systemEvents
     }
 
     /// Hot stream of decoded pending requests. Replays the current
@@ -369,6 +377,17 @@ public actor JoinRequestApprover: JoinRequestApproving {
                 joinerInboxPub: req.joinerInboxPublicKey,
                 joinerSendingPub: req.joinerSendingPublicKey,
                 joinerAlias: req.joinerDisplayLabel
+            )
+            // The admin's own "X joined" row. Everyone else derives
+            // theirs from the announcement fanned out just above, which
+            // the admin — as its sender — never receives.
+            await systemEvents.recordMemberJoined(
+                groupID: anchored.id,
+                ownerIdentityID: anchored.ownerIdentityID,
+                groupType: anchored.groupType,
+                joinerBlsPubkeyHex: blsPub.map { String(format: "%02x", $0) }.joined(),
+                alias: req.joinerDisplayLabel,
+                at: Date()
             )
         }
         // Best-effort cleanup.

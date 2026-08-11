@@ -93,6 +93,13 @@ public actor SwiftDataMessageStore: MessageStore {
 
     public func unreadCount(groupID: String, ownerIDString: String, since: Date) -> Int {
         // Plain columns only (direction + sentAt) → no decryption needed.
+        // The system-event exclusion is a nil check on the stored column,
+        // not a read of its contents, so this stays a cheap `fetchCount`.
+        //
+        // System notices are deliberately not unread-worthy: "Alice
+        // joined" lands on every member's device at once, and counting it
+        // would light up an unread badge on a chat nobody actually said
+        // anything in.
         let incoming = MessageDirection.incoming.rawValue
         let descriptor = FetchDescriptor<PersistedMessage>(
             predicate: #Predicate {
@@ -100,6 +107,7 @@ public actor SwiftDataMessageStore: MessageStore {
                     && $0.ownerIdentityIDString == ownerIDString
                     && $0.directionRaw == incoming
                     && $0.sentAt > since
+                    && $0.encryptedSystemEventJSON == nil
             }
         )
         return (try? context.fetchCount(descriptor)) ?? 0
@@ -288,6 +296,9 @@ public actor SwiftDataMessageStore: MessageStore {
         let encryptedVoice = try message.voiceAttachment.map { attachment in
             try StorageEncryption.encrypt(JSONEncoder().encode(attachment))
         }
+        let encryptedSystemEvent = try message.systemEvent.map { event in
+            try StorageEncryption.encrypt(JSONEncoder().encode(event))
+        }
         return PersistedMessage(
             id: message.id.uuidString,
             groupID: message.groupID,
@@ -306,7 +317,8 @@ public actor SwiftDataMessageStore: MessageStore {
             encryptedAttachmentJSON: encryptedAttachment,
             encryptedVideoAttachmentJSON: encryptedVideoAttachment,
             encryptedAlbumJSON: encryptedAlbum,
-            encryptedVoiceAttachmentJSON: encryptedVoice
+            encryptedVoiceAttachmentJSON: encryptedVoice,
+            encryptedSystemEventJSON: encryptedSystemEvent
         )
     }
 
@@ -338,6 +350,9 @@ public actor SwiftDataMessageStore: MessageStore {
             .flatMap { try? JSONDecoder().decode(ChatVoiceAttachment.self, from: $0) }
         let moderationAuthenticityProof = row.encryptedModerationAuthenticityProof
             .flatMap { try? StorageEncryption.decryptString($0) }
+        let systemEvent: ChatSystemEvent? = row.encryptedSystemEventJSON
+            .flatMap { try? StorageEncryption.decrypt($0) }
+            .flatMap { try? JSONDecoder().decode(ChatSystemEvent.self, from: $0) }
         return ChatMessage(
             id: id,
             groupID: row.groupID,
@@ -354,7 +369,8 @@ public actor SwiftDataMessageStore: MessageStore {
             imageAttachment: imageAttachment,
             videoAttachment: videoAttachment,
             albumAttachments: albumAttachments,
-            voiceAttachment: voiceAttachment
+            voiceAttachment: voiceAttachment,
+            systemEvent: systemEvent
         )
     }
 }

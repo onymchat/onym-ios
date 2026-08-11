@@ -67,6 +67,12 @@ public struct ChatThreadView: View {
     /// an opaque view factory so the chats layer stays moderation-UI-
     /// agnostic (OnymChatsUI does not depend on OnymModerationUI).
     let makeModerationReportView: @MainActor (ReportableMessage) -> AnyView
+    /// Drives the in-thread join-request rows. This replaced the separate
+    /// "Join requests" screen: the founder now accepts or declines from
+    /// inside the conversation the request is about, because a badged
+    /// toolbar button on another screen was not something new users ever
+    /// found.
+    @Bindable var approveRequestsFlow: ApproveRequestsFlow
     /// When non-nil (opened from Search), the thread cold-opens scrolled
     /// to this message and flashes it, instead of opening at the bottom.
     var scrollToMessageID: UUID? = nil
@@ -85,6 +91,7 @@ public struct ChatThreadView: View {
         videoLoader: ChatVideoLoader,
         voiceLoader: ChatVoiceLoader,
         makeModerationReportView: @escaping @MainActor (ReportableMessage) -> AnyView,
+        approveRequestsFlow: ApproveRequestsFlow,
         scrollToMessageID: UUID? = nil
     ) {
         self.groupID = groupID
@@ -100,6 +107,7 @@ public struct ChatThreadView: View {
         self.videoLoader = videoLoader
         self.voiceLoader = voiceLoader
         self.makeModerationReportView = makeModerationReportView
+        self.approveRequestsFlow = approveRequestsFlow
         self.scrollToMessageID = scrollToMessageID
     }
 
@@ -227,7 +235,13 @@ public struct ChatThreadView: View {
             voiceLoader: voiceLoader,
             pendingMedia: pendingMedia.map { (id: $0.id, thumbnail: $0.thumbnail) },
             onSendMedia: { handleSendPendingMedia() },
-            onRemovePendingMedia: { id in pendingMedia.removeAll { $0.id == id } }
+            onRemovePendingMedia: { id in pendingMedia.removeAll { $0.id == id } },
+            joinRequests: currentJoinRequests,
+            // Fire-and-forget, like send and retry: the flow owns the
+            // in-flight flag and the error, and both come back through
+            // `currentJoinRequests` on the next render.
+            onJoinRequestAccepted: { approveRequestsFlow.approve($0) },
+            onJoinRequestDeclined: { approveRequestsFlow.decline($0) }
         )
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if let bottomAccessory {
@@ -510,7 +524,12 @@ public struct ChatThreadView: View {
     }
 
     private func isReportable(_ message: ChatMessage) -> Bool {
-        guard let group = chatsFlow.groups.first(where: { $0.id == groupID }) else {
+        // A system notice has no author to report and isn't evidence of
+        // anything — it never carries a moderation proof either, so this
+        // is belt-and-braces with `ReportableMessageFactory`.
+        guard !message.isSystem,
+              let group = chatsFlow.groups.first(where: { $0.id == groupID })
+        else {
             return false
         }
         return ReportableMessageFactory.isReportable(
@@ -518,6 +537,69 @@ public struct ChatThreadView: View {
             memberProfiles: currentMemberProfiles,
             groupSecret: group.groupSecret
         )
+    }
+
+    /// Whether the active identity is this group's admin, and so the
+    /// person who can act on a join request.
+    ///
+    /// Requests are already founder-only by construction — they arrive
+    /// sealed to an intro private key that only the inviting device
+    /// holds, so a non-founder's `pending` list is simply empty. This
+    /// check is the belt to that braces: if a device ever ends up
+    /// holding an intro key for a group it doesn't administer, the row
+    /// still doesn't render, because approving would fail on chain with
+    /// `.notAdminOfThisGroup` anyway.
+    ///
+    /// Same derivation as `ChatMembersView.canShareInvite` — compare the
+    /// active identity's BLS pubkey against the group's stored admin
+    /// pubkey, rather than trusting `ownerIdentityID` (which is "who on
+    /// this device holds the thread", true for every joiner too).
+    private var isGroupAdmin: Bool {
+        guard
+            let group = chatsFlow.groups.first(where: { $0.id == groupID }),
+            let storedAdminHex = group.adminPubkeyHex?.lowercased(),
+            let activeID = identitiesFlow.currentID,
+            let activeSummary = identitiesFlow.identities.first(where: { $0.id == activeID })
+        else { return false }
+        let activeHex = activeSummary.blsPublicKey
+            .map { String(format: "%02x", $0) }.joined()
+            .lowercased()
+        return activeHex == storedAdminHex
+    }
+
+    /// Pending join requests belonging to *this* group, shaped for the
+    /// thread's row. Empty for non-admins and for groups with nothing
+    /// outstanding.
+    private var currentJoinRequests: [ChatJoinRequestDisplay] {
+        guard isGroupAdmin,
+              let group = chatsFlow.groups.first(where: { $0.id == groupID })
+        else { return [] }
+        return approveRequestsFlow.pending
+            .filter { $0.groupId == group.groupIDData }
+            // The flow hands them back newest-first (matching the old
+            // modal list); the thread reads oldest-at-top like every
+            // other row.
+            .reversed()
+            .map { request in
+                let alias = request.joinerDisplayLabel
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                return ChatJoinRequestDisplay(
+                    requestID: request.id,
+                    alias: alias.isEmpty ? String(localized: "(unnamed)") : alias,
+                    fingerprint: request.joinerInboxPublicKey
+                        .prefix(8)
+                        .map { String(format: "%02x", $0) }
+                        .joined() + "\u{2026}",
+                    // A request naming a group this device doesn't have
+                    // can't be approved; Decline still clears it.
+                    canAccept: request.groupName != nil,
+                    isInFlight: approveRequestsFlow.isInFlight(request.id),
+                    // Only the row that actually failed shows the error.
+                    errorText: approveRequestsFlow.lastErrorRequestID == request.id
+                        ? approveRequestsFlow.lastError
+                        : nil
+                )
+            }
     }
 
     private func makeReportableMessage(from message: ChatMessage) async -> ReportableMessage? {
@@ -560,6 +642,11 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
     let pendingMedia: [(id: UUID, thumbnail: UIImage)]
     let onSendMedia: () -> Void
     let onRemovePendingMedia: (UUID) -> Void
+    /// Founder-only join-request rows for this group, already filtered
+    /// and authorized by the host.
+    let joinRequests: [ChatJoinRequestDisplay]
+    let onJoinRequestAccepted: (String) -> Void
+    let onJoinRequestDeclined: (String) -> Void
 
     func makeUIViewController(context: Context) -> ChatThreadViewController {
         let vc = ChatThreadViewController()
@@ -582,12 +669,15 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         vc.voiceLoader = voiceLoader
         vc.onSendMedia = onSendMedia
         vc.onRemovePendingMedia = onRemovePendingMedia
+        vc.onJoinRequestAccepted = onJoinRequestAccepted
+        vc.onJoinRequestDeclined = onJoinRequestDeclined
         vc.loadViewIfNeeded()
         // Profiles before messages — the first sender-display build
         // reads the profiles to resolve names.
         vc.update(memberProfiles: memberProfiles)
         vc.update(invitationMessage: invitationMessage)
         vc.update(messages: messages)
+        vc.update(joinRequests: joinRequests)
         vc.setPendingMedia(pendingMedia)
         return vc
     }
@@ -611,9 +701,14 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         vc.voiceLoader = voiceLoader
         vc.onSendMedia = onSendMedia
         vc.onRemovePendingMedia = onRemovePendingMedia
+        vc.onJoinRequestAccepted = onJoinRequestAccepted
+        vc.onJoinRequestDeclined = onJoinRequestDeclined
         vc.update(memberProfiles: memberProfiles)
         vc.update(invitationMessage: invitationMessage)
         vc.update(messages: messages)
+        // After `update(messages:)`: the request rows are appended below
+        // the messages, so the message list has to be current first.
+        vc.update(joinRequests: joinRequests)
         vc.setPendingMedia(pendingMedia)
     }
 }

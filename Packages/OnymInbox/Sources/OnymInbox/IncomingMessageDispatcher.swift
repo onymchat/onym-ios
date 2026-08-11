@@ -80,6 +80,16 @@ public struct IncomingMessageDispatcher: Sendable {
     /// receipts. Defaulted to `true` (the shipping default).
     let readReceiptsEnabled: @Sendable () -> Bool
 
+    /// Mints the membership notices this device is entitled to render:
+    /// "X joined" off a verified announcement, "You joined X" off a
+    /// verified invitation. Derived from `messageRepository` rather than
+    /// injected — it is a thin, stateless wrapper over the same
+    /// repository, and every existing test construction of the
+    /// dispatcher gets the behaviour without a new parameter.
+    private var systemEvents: ChatSystemEventRecorder {
+        ChatSystemEventRecorder(messageRepository: messageRepository)
+    }
+
     public init(
         envelopeDecrypter: any InvitationEnvelopeDecrypting,
         identities: any IdentitiesProviding,
@@ -396,7 +406,30 @@ public struct IncomingMessageDispatcher: Sendable {
             // The group's invitation/intro, as the sender wrote it.
             invitationMessage: invitation.invitationMessage
         )
+
+        // Was this thread already on the device? Relays replay the
+        // inbox on every reconnect, so a re-delivered invitation is
+        // routine — only the first one is a "you joined" moment.
+        let existing = await groupRepository.currentGroups().contains {
+            $0.id == groupIDHex && $0.ownerIdentityID == ownerIdentityID
+        }
+
         await groupRepository.insert(group)
+
+        // Open the joiner's brand-new thread with a line explaining
+        // what it is, instead of a blank screen, once the invitation has
+        // cleared verification above.
+        guard !existing,
+              let selfEntry = await selfMemberProfileEntry(for: ownerIdentityID)
+        else { return }
+        await systemEvents.recordYouJoined(
+            groupID: groupIDHex,
+            ownerIdentityID: ownerIdentityID,
+            groupType: groupType,
+            groupName: invitation.name,
+            ownBlsPubkeyHex: selfEntry.key,
+            at: Date()
+        )
     }
 
     /// PR 13b: validate a Tyranny invitation's commitment against
@@ -686,6 +719,21 @@ public struct IncomingMessageDispatcher: Sendable {
             sendingPubkey: payload.newMember.sendingPub
         )
         await groupRepository.insert(updated)
+
+        // "X joined", for every existing member. Reached only past the
+        // dedup guard above (`memberProfiles[key] != nil`), the admin
+        // signature check, and the on-chain commitment check — so a
+        // relay replaying this announcement on each reconnect can't
+        // append a second notice, and an unverified announcement can't
+        // append one at all.
+        await systemEvents.recordMemberJoined(
+            groupID: updated.id,
+            ownerIdentityID: updated.ownerIdentityID,
+            groupType: updated.groupType,
+            joinerBlsPubkeyHex: key,
+            alias: payload.newMember.alias,
+            at: Date()
+        )
     }
 
     /// Apply an inbound group-photo update to the matching local group.

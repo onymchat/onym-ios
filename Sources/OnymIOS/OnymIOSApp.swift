@@ -404,9 +404,16 @@ struct OnymIOSApp: App {
         let introKeyStore = KeychainIntroKeyStore()
         let inviteIntroducer = InviteIntroducer(store: introKeyStore)
         self.introKeyStore = introKeyStore
-        // Process-lifetime sink for inbound "request to join"
-        // envelopes. The sender-approval UI (PR-5+) consumes this.
-        self.introRequestStore = InMemoryIntroRequestStore()
+        // Durable sink for inbound "request to join" envelopes. The
+        // request now renders as a row inside the founder's chat
+        // thread, so it has to survive a relaunch the way any other
+        // message does — an in-memory store would silently drop it on
+        // force-quit while the joiner sat on "Waiting for the host to
+        // approve…". Falls back to the in-memory store if the on-disk
+        // container can't be opened, so a storage failure degrades to
+        // the old behaviour instead of blocking launch.
+        self.introRequestStore = (try? SwiftDataIntroRequestStore())
+            ?? InMemoryIntroRequestStore()
 
         // Single shared IdentitiesFlow so the toolbar picker on Chats
         // and the Settings → Identities screen observe the same state.
@@ -426,7 +433,11 @@ struct OnymIOSApp: App {
             inboxTransport: inboxTransport,
             relayers: relayerRepository,
             contracts: contractsRepository,
-            makeContractTransport: contractTransportFactory
+            makeContractTransport: contractTransportFactory,
+            // Gives the admin its own "X joined" row on approve. Every
+            // other member's copy comes from the fanned-out
+            // announcement, which the admin never receives.
+            systemEvents: ChatSystemEventRecorder(messageRepository: messageRepository)
         )
         let approveRequestsFlow = ApproveRequestsFlow(approver: joinRequestApprover)
 

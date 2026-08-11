@@ -95,12 +95,14 @@ public struct ChatsView: View {
             ToolbarItem(placement: .topBarLeading) {
                 IdentityPickerMenu(flow: identitiesFlow)
             }
-            // Pending join requests — always rendered so the surface
-            // is discoverable even before the first request lands;
-            // the badge only appears when `pending.count > 0`.
-            ToolbarItem(placement: .topBarTrailing) {
-                ApproveRequestsToolbarButton(flow: approveRequestsFlow)
-            }
+            // Join requests used to live behind a badged button here,
+            // opening a modal list. New users never found it — nothing
+            // in the conversation told them someone was waiting. The
+            // request now renders as a row inside the group's own
+            // thread, so there is no separate surface to discover.
+            // `approveRequestsFlow` is still started below: it collects
+            // the requests the thread renders.
+            //
             // Invitations received by this identity (push offers). Same
             // always-rendered + badge-on-nonempty treatment.
             ToolbarItem(placement: .topBarTrailing) {
@@ -349,7 +351,8 @@ public struct ChatsView: View {
                 imageLoader: imageLoader,
                 videoLoader: videoLoader,
                 voiceLoader: voiceLoader,
-                makeModerationReportView: makeModerationReportView
+                makeModerationReportView: makeModerationReportView,
+                approveRequestsFlow: approveRequestsFlow
             )
         }
     }

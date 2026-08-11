@@ -97,39 +97,45 @@ final class ApproveRequestsFlowTests: XCTestCase {
         await stub.releaseApprove()
         try await waitFor { !flow.isInFlight("req-flight") }
         XCTAssertNil(flow.lastError, ".sent outcome must clear lastError")
-        // PR 15: success banner shows the joiner's alias.
-        XCTAssertEqual(flow.lastSuccessMessage, "Bob is now in the group.")
+        // The success confirmation is no longer a banner on a modal —
+        // it's the "Bob joined" system message the approve path writes
+        // into the thread, exactly where the request row was.
     }
 
-    func test_approve_successBanner_autoDismissesAfter3s() async throws {
+    /// The thread renders one row per pending request, so an error has
+    /// to say *which* request it belongs to — otherwise a failure on one
+    /// request paints red text under every other row on screen.
+    func test_approve_failure_attributesErrorToThatRequest() async throws {
         let stub = StubApprover()
         let flow = ApproveRequestsFlow(approver: stub)
-        await stub.setNextOutcome(.sent)
-        await stub.emit([Self.makeRequest(id: "req-toast", alias: "Bob")])
+        await stub.emit([
+            Self.makeRequest(id: "req-a", alias: "Ann"),
+            Self.makeRequest(id: "req-b", alias: "Bob")
+        ])
         await flow.start()
-        try await waitFor { flow.pending.map(\.id).contains("req-toast") }
-
-        flow.approve("req-toast")
-        try await waitFor { flow.lastSuccessMessage != nil }
-        // Wait a touch over 3s for the auto-dismiss task.
-        try await Task.sleep(nanoseconds: 3_200_000_000)
-        XCTAssertNil(flow.lastSuccessMessage,
-                     "success banner must auto-dismiss after ~3s")
-    }
-
-    func test_approve_failureClearsAnyPriorSuccessBanner() async throws {
-        let stub = StubApprover()
-        let flow = ApproveRequestsFlow(approver: stub)
-        flow.lastSuccessMessage = "stale success"
-        await stub.emit([Self.makeRequest(id: "req-fail-bus", alias: "Bob")])
-        await flow.start()
-        try await waitFor { flow.pending.map(\.id).contains("req-fail-bus") }
+        try await waitFor { flow.pending.count == 2 }
         await stub.setNextOutcome(.anchorRejected("test"))
 
-        flow.approve("req-fail-bus")
+        flow.approve("req-b")
         try await waitFor { flow.lastError != nil }
-        XCTAssertNil(flow.lastSuccessMessage,
-                     "failure must clear any leftover success banner")
+
+        XCTAssertEqual(flow.lastErrorRequestID, "req-b",
+                       "the error must be attributed to the request that failed")
+    }
+
+    func test_declineClearsAttributedError() async throws {
+        let stub = StubApprover()
+        let flow = ApproveRequestsFlow(approver: stub)
+        await stub.emit([Self.makeRequest(id: "req-c", alias: "Cal")])
+        await flow.start()
+        try await waitFor { flow.pending.map(\.id).contains("req-c") }
+        await stub.setNextOutcome(.anchorRejected("test"))
+        flow.approve("req-c")
+        try await waitFor { flow.lastErrorRequestID != nil }
+
+        flow.decline("req-c")
+        try await waitFor { flow.lastErrorRequestID == nil }
+        XCTAssertNil(flow.lastError)
     }
 
     func test_approve_secondTapWhileInFlight_isNoop() async throws {

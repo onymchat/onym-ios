@@ -97,6 +97,24 @@ public struct ChatMessage: Equatable, Sendable, Identifiable {
     /// messages that this first reporting surface cannot file.
     public let moderationAuthenticityProof: String?
 
+    /// Non-nil when this row is a locally-minted system notice ("Alice
+    /// joined") rather than something a person typed. `nil` is the
+    /// overwhelmingly common case and means "ordinary message".
+    ///
+    /// Deliberately absent from `ChatMessagePayload`: system rows are
+    /// **never** carried on the wire. Each device mints its own copy
+    /// from an event it independently verified (the admin from its own
+    /// approve, members from a signature-checked
+    /// `MemberAnnouncementPayload`, the joiner from its materialized
+    /// invitation). A wire field here would let any peer forge
+    /// "X joined" history.
+    public let systemEvent: ChatSystemEvent?
+
+    /// True for locally-minted system notices. Reads better than
+    /// `systemEvent != nil` at the several call sites that only care
+    /// whether the row is a notice, not which kind.
+    public var isSystem: Bool { systemEvent != nil }
+
     /// Canonical media list for rendering: the album when present, else
     /// the single image/video wrapped in a one-element list, else empty.
     public var media: [ChatMediaAttachment] {
@@ -109,7 +127,12 @@ public struct ChatMessage: Equatable, Sendable, Identifiable {
     /// One-line preview for the chat-list row subtitle. Media messages
     /// (which carry no/empty body) render a label; text renders its body.
     /// Own messages get a "You: " prefix to disambiguate in a group.
+    ///
+    /// System notices render their own sentence and never take the
+    /// "You: " prefix — "You: Alice joined" would read as if the user
+    /// had said it.
     public var chatListPreview: String {
+        if let systemEvent { return systemEvent.previewText }
         let content: String
         if voiceAttachment != nil {
             content = "Voice message"
@@ -141,7 +164,8 @@ public struct ChatMessage: Equatable, Sendable, Identifiable {
         imageAttachment: ChatImageAttachment? = nil,
         videoAttachment: ChatVideoAttachment? = nil,
         albumAttachments: [ChatMediaAttachment]? = nil,
-        voiceAttachment: ChatVoiceAttachment? = nil
+        voiceAttachment: ChatVoiceAttachment? = nil,
+        systemEvent: ChatSystemEvent? = nil
     ) {
         self.id = id
         self.groupID = groupID
@@ -159,6 +183,80 @@ public struct ChatMessage: Equatable, Sendable, Identifiable {
         self.videoAttachment = videoAttachment
         self.albumAttachments = albumAttachments
         self.voiceAttachment = voiceAttachment
+        self.systemEvent = systemEvent
+    }
+}
+
+/// A locally-minted, non-conversational notice rendered in the thread —
+/// the membership events every member should see without anyone having
+/// to type them.
+///
+/// Cases carry **structured data, not prose**. The user-facing sentence
+/// is assembled in the UI layer via `String(localized:)` so it goes
+/// through the string catalog; `SendFailureReason.explanation` above is
+/// the counter-example (raw English hardcoded in Core) and shouldn't be
+/// copied. `previewText` is the one deliberate exception — the chat-list
+/// subtitle needs a string from a non-UI context — and is marked below.
+///
+/// Raw values are a persistence format (`kind`): stable forever.
+public enum ChatSystemEvent: Equatable, Sendable, Codable {
+    /// Someone else was admitted. Rendered to the admin (who approved)
+    /// and to every existing member (via `MemberAnnouncementPayload`).
+    /// `alias` is self-asserted by the joiner — same trust caveat as
+    /// everywhere else aliases are shown.
+    case memberJoined(alias: String)
+    /// This device's own identity was admitted — the first row in a
+    /// freshly materialized thread, so a brand-new chat explains itself
+    /// instead of rendering blank.
+    case youJoined(groupName: String)
+
+    /// Chat-list subtitle text. Localized here rather than in the UI
+    /// because `chatListPreview` is a Core-level computed property with
+    /// no view in scope. The strings live in the app's catalog; package
+    /// sources resolve against `Bundle.main`.
+    var previewText: String {
+        switch self {
+        case .memberJoined(let alias):
+            return String(localized: "\(alias) joined")
+        case .youJoined(let groupName):
+            return String(localized: "You joined \(groupName)")
+        }
+    }
+
+    // MARK: - Codable
+
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case alias
+        case groupName = "group_name"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        switch try c.decode(String.self, forKey: .kind) {
+        case "member_joined":
+            self = .memberJoined(alias: try c.decode(String.self, forKey: .alias))
+        case "you_joined":
+            self = .youJoined(groupName: try c.decode(String.self, forKey: .groupName))
+        case let other:
+            throw DecodingError.dataCorruptedError(
+                forKey: .kind,
+                in: c,
+                debugDescription: "Unknown system-event kind '\(other)'"
+            )
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .memberJoined(let alias):
+            try c.encode("member_joined", forKey: .kind)
+            try c.encode(alias, forKey: .alias)
+        case .youJoined(let groupName):
+            try c.encode("you_joined", forKey: .kind)
+            try c.encode(groupName, forKey: .groupName)
+        }
     }
 }
 
