@@ -192,6 +192,21 @@ jobs:
             -resultBundlePath /tmp/onym-ios-unit.xcresult \
             -only-testing:OnymIOSTests
 
+      - name: xcodebuild test (OnymDiscovery package)
+        # The OnymDiscovery test bundle is a SwiftPM package target, so
+        # `-only-testing:OnymIOSTests` above never runs it. Run the
+        # package's own scheme from the package directory to gate its
+        # conformance/trust suite here. Same pre-clean rationale as the
+        # unit step.
+        working-directory: Packages/OnymDiscovery
+        run: |
+          rm -rf /tmp/onym-discovery-tests /tmp/onym-discovery.xcresult
+          xcodebuild test \
+            -scheme OnymDiscovery \
+            -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }},OS=latest" \
+            -derivedDataPath /tmp/onym-discovery-tests \
+            -resultBundlePath /tmp/onym-discovery.xcresult
+
       - name: Upload unit test xcresult
         # `always()` so `report-to-issue` can parse green runs too —
         # not just failures.

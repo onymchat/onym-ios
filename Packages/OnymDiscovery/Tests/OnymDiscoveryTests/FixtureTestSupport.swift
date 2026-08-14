@@ -6,6 +6,16 @@ import XCTest
 /// `onym-discovery/tests/fixtures` — the cross-language vectors every
 /// consuming client must pass identically (profile §10).
 enum Fixture {
+    /// A fixture that should be in the bundle but is not. A **failure**,
+    /// never an `XCTSkip`: skipping would let the §10 conformance suite
+    /// pass vacuously with the vectors missing.
+    struct MissingFixtureError: Error, CustomStringConvertible {
+        let name: String
+        var description: String {
+            "missing conformance fixture \(name) — the suite must not pass without its vectors"
+        }
+    }
+
     static func bytes(_ name: String) throws -> Data {
         let parts = name.split(separator: ".")
         guard let url = Bundle.module.url(
@@ -13,7 +23,7 @@ enum Fixture {
             withExtension: String(parts.last ?? ""),
             subdirectory: "Fixtures"
         ) else {
-            throw XCTSkip("missing fixture \(name)")
+            throw MissingFixtureError(name: name)
         }
         return try Data(contentsOf: url)
     }

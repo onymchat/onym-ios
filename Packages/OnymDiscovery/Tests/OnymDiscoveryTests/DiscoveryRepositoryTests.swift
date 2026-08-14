@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import XCTest
 @testable import OnymDiscovery
@@ -39,12 +40,64 @@ private final class MemoryStore: DiscoveryStore, @unchecked Sendable {
         lock.withLock { snapshots[providerId + "|" + catalogId] = raw }
     }
 
-    func removeRetainedSnapshots(providerId: String, catalogIds: [String]) {
+    func removeRetainedSnapshots(providerId: String) {
         lock.withLock {
-            for catalogId in catalogIds {
-                snapshots.removeValue(forKey: providerId + "|" + catalogId)
-            }
+            snapshots = snapshots.filter { !$0.key.hasPrefix(providerId + "|") }
         }
+    }
+
+    /// Every stored (providerId|catalogId) key — for orphan assertions.
+    var storedSnapshotKeys: [String] {
+        lock.withLock { Array(snapshots.keys) }
+    }
+}
+
+/// Builds documents signed with the conformance fixtures' deterministic
+/// operator seed (`onym-discovery` `tests/conformance.rs` `SEED_HEX`),
+/// for repository-behavior tests that need document shapes the
+/// byte-pinned fixture set does not carry (e.g. a two-catalog
+/// manifest). Conformance tests keep using the pinned fixture bytes.
+private enum SignedFixtureFactory {
+    static let seedHex = String(repeating: "07", count: 32)
+
+    static var operatorKeyHex: String {
+        let key = try! Curve25519.Signing.PrivateKey(
+            rawRepresentation: Data(lowercaseHex: seedHex)!
+        )
+        return key.publicKey.rawRepresentation.map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Re-serialize `object` with a fresh signature over its §3
+    /// canonical bytes.
+    static func resign(_ object: [String: Any]) throws -> Data {
+        var object = object
+        object["signature"] = ""
+        let unsigned = try JSONSerialization.data(withJSONObject: object)
+        let signingBytes = try DiscoveryCanonical.signingBytes(of: unsigned)
+        let key = try Curve25519.Signing.PrivateKey(
+            rawRepresentation: Data(lowercaseHex: seedHex)!
+        )
+        object["signature"] = try key.signature(for: signingBytes).base64EncodedString()
+        return try JSONSerialization.data(withJSONObject: object)
+    }
+
+    /// The pinned `provider-manifest.json` fixture with a second
+    /// catalog descriptor appended, re-signed.
+    static func twoCatalogManifest(
+        secondCatalogId: String,
+        secondSnapshotURL: String
+    ) throws -> Data {
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Fixture.bytes("provider-manifest.json"))
+                as? [String: Any]
+        )
+        var catalogs = try XCTUnwrap(object["catalogs"] as? [[String: Any]])
+        var second = try XCTUnwrap(catalogs.first)
+        second["catalogId"] = secondCatalogId
+        second["snapshot"] = secondSnapshotURL
+        catalogs.append(second)
+        object["catalogs"] = catalogs
+        return try resign(object)
     }
 }
 
@@ -207,5 +260,76 @@ final class DiscoveryRepositoryTests: XCTestCase {
         XCTAssertEqual(saved.sources.count, 1)
         XCTAssertEqual(saved.sources.first?.pinnedOperatorKeyHex, Fixture.operatorKeyHex)
         XCTAssertTrue(saved.hasUserInteracted)
+    }
+
+    func testPartialCatalogFailureKeepsEarlierCatalogsAcceptance() async throws {
+        // Two catalogs; the first's snapshot verifies, the second's
+        // fetch 404s. The failure must surface on the source WITHOUT
+        // discarding the first catalog's accepted record — the next
+        // refresh's chain check depends on it.
+        XCTAssertEqual(
+            SignedFixtureFactory.operatorKeyHex, Fixture.operatorKeyHex,
+            "factory seed must derive the fixtures' operator key"
+        )
+        let betaURL = URL(string: "https://discovery.onym.app/catalogs/beta-seats.json")!
+        let manifest = try SignedFixtureFactory.twoCatalogManifest(
+            secondCatalogId: "beta-seats",
+            secondSnapshotURL: betaURL.absoluteString
+        )
+        let store = MemoryStore()
+        store.saveConfiguration(pinnedConfiguration())
+        let fetcher = FakeFetcher(responses: [
+            manifestURL: manifest,
+            snapshotURL: try Fixture.bytes("snapshot-1.json"),
+            // betaURL absent → 404 from the fake.
+        ])
+        let repository = DiscoveryRepository(fetcher: fetcher, store: store) { Fixture.now }
+
+        await repository.refresh()
+        let state = await repository.currentState()
+
+        let source = try XCTUnwrap(state.sources.first)
+        XCTAssertNotNil(source.lastError, "the failing catalog must surface on the source")
+        XCTAssertEqual(
+            source.source.lastAccepted["public-all-seats"]?.sequence, 1,
+            "the accepted catalog's record must be persisted despite the sibling failure"
+        )
+        XCTAssertNil(source.source.lastAccepted["beta-seats"])
+        XCTAssertEqual(state.aggregate.count, 1, "the accepted catalog keeps serving")
+
+        // And the persisted record feeds the next refresh's chain
+        // check: snapshot 2 must verify as the successor, not as a
+        // first acceptance.
+        let fetcher2 = FakeFetcher(responses: [
+            manifestURL: manifest,
+            snapshotURL: try Fixture.bytes("snapshot-2.json"),
+        ])
+        let second = DiscoveryRepository(fetcher: fetcher2, store: store) { Fixture.now }
+        await second.refresh()
+        let secondState = await second.currentState()
+        XCTAssertEqual(
+            secondState.sources.first?.source.lastAccepted["public-all-seats"]?.sequence, 2
+        )
+    }
+
+    func testRemoveSourcePurgesOrphanedSnapshotBlobs() async throws {
+        // A blob the store retains but lastAccepted no longer lists
+        // (dropped catalog / partial refresh) must not survive removal
+        // and poison a re-add.
+        let store = MemoryStore()
+        store.saveConfiguration(pinnedConfiguration())
+        store.saveRetainedSnapshot(
+            Data("{\"stale\":true}".utf8),
+            providerId: providerId,
+            catalogId: "orphaned-catalog"
+        )
+        let repository = DiscoveryRepository(fetcher: FakeFetcher(responses: [:]), store: store) { Fixture.now }
+
+        await repository.removeSource(providerId: providerId)
+
+        XCTAssertTrue(
+            store.storedSnapshotKeys.filter { $0.hasPrefix(providerId + "|") }.isEmpty,
+            "removal must purge every retained blob of the provider, orphans included"
+        )
     }
 }

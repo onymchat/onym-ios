@@ -248,55 +248,68 @@ public actor DiscoveryRepository {
             notes.append(String(localized: "\(signedManifest.manifest.audienceSkippedCatalogCount) non-public catalog(s) were skipped."))
         }
 
+        // Catalogs are refreshed independently: a failing catalog is
+        // recorded and skipped, never allowed to discard the records
+        // (and retained bytes) of catalogs this same pass already
+        // accepted — those must feed the next refresh's chain check.
         var updated = source
+        var firstCatalogError: Error?
         for catalog in signedManifest.manifest.catalogs {
             guard let snapshotURL = catalog.snapshotURL else { continue }
-            let snapshotBytes = try await fetcher.fetchSnapshot(url: snapshotURL)
-            // §8 retained state: last accepted digest + sequence, and
-            // the previous manifest's policy declaration for the §4.2
-            // transition grace.
-            let retained = source.lastAccepted[catalog.catalogId].map {
-                RetainedCatalogAcceptance(
-                    sequence: $0.sequence,
-                    digest: $0.digest,
-                    previousPolicyDigest: $0.policyDigest
+            do {
+                let snapshotBytes = try await fetcher.fetchSnapshot(url: snapshotURL)
+                // §8 retained state: last accepted digest + sequence, and
+                // the previous manifest's policy declaration for the §4.2
+                // transition grace.
+                let retained = updated.lastAccepted[catalog.catalogId].map {
+                    RetainedCatalogAcceptance(
+                        sequence: $0.sequence,
+                        digest: $0.digest,
+                        previousPolicyDigest: $0.policyDigest
+                    )
+                }
+                let accepted = try DiscoveryTrust.verifySnapshot(
+                    raw: snapshotBytes,
+                    manifest: signedManifest,
+                    retained: retained,
+                    now: now()
                 )
-            }
-            let accepted = try DiscoveryTrust.verifySnapshot(
-                raw: snapshotBytes,
-                manifest: signedManifest,
-                retained: retained,
-                now: now()
-            )
-            store.saveRetainedSnapshot(
-                accepted.rawBytes,
-                providerId: source.providerId,
-                catalogId: catalog.catalogId
-            )
-            updated = updated.withLastAccepted(
-                AcceptedSnapshotRecord(
-                    digest: accepted.digest,
-                    sequence: accepted.snapshot.sequence,
-                    acceptedAt: now(),
-                    policyDigest: catalog.policy
-                ),
-                forCatalog: catalog.catalogId
-            )
-            if case let .forwardJump(missed) = accepted.outcome {
-                notes.append(String(localized: "Catalog \(catalog.catalogId): \(missed) intermediate publication(s) could not be verified."))
-            }
-            if accepted.policyTransition {
-                notes.append(String(localized: "Catalog \(catalog.catalogId): the provider is transitioning to a new policy."))
-            }
-            if accepted.snapshot.skippedEntryCount > 0 {
-                // §9 result_incomplete: the shrunken set must never be
-                // presented as the whole catalog.
-                notes.append(String(localized: "Catalog \(catalog.catalogId): \(accepted.snapshot.skippedEntryCount) listing(s) could not be read and were skipped."))
+                store.saveRetainedSnapshot(
+                    accepted.rawBytes,
+                    providerId: source.providerId,
+                    catalogId: catalog.catalogId
+                )
+                updated = updated.withLastAccepted(
+                    AcceptedSnapshotRecord(
+                        digest: accepted.digest,
+                        sequence: accepted.snapshot.sequence,
+                        acceptedAt: now(),
+                        policyDigest: catalog.policy
+                    ),
+                    forCatalog: catalog.catalogId
+                )
+                if case let .forwardJump(missed) = accepted.outcome {
+                    notes.append(String(localized: "Catalog \(catalog.catalogId): \(missed) intermediate publication(s) could not be verified."))
+                }
+                if accepted.policyTransition {
+                    notes.append(String(localized: "Catalog \(catalog.catalogId): the provider is transitioning to a new policy."))
+                }
+                if accepted.snapshot.skippedEntryCount > 0 {
+                    // §9 result_incomplete: the shrunken set must never be
+                    // presented as the whole catalog.
+                    notes.append(String(localized: "Catalog \(catalog.catalogId): \(accepted.snapshot.skippedEntryCount) listing(s) could not be read and were skipped."))
+                }
+            } catch {
+                if firstCatalogError == nil { firstCatalogError = error }
             }
         }
 
         lastNotes[source.providerId] = notes
         replaceSource(updated)
+        // Thrown only after the accepted catalogs were persisted: the
+        // failure surfaces on the source's status while its partial
+        // results stay retained.
+        if let firstCatalogError { throw firstCatalogError }
     }
 
     // MARK: - Source management
@@ -345,13 +358,14 @@ public actor DiscoveryRepository {
     /// deleted, and its providerId joins `removedDefaultProviderIds`
     /// so no future seeding brings it back.
     public func removeSource(providerId: String) {
-        guard let source = configuration.sources.first(where: { $0.providerId == providerId }) else {
+        guard configuration.sources.contains(where: { $0.providerId == providerId }) else {
             return
         }
-        store.removeRetainedSnapshots(
-            providerId: providerId,
-            catalogIds: Array(source.lastAccepted.keys)
-        )
+        // Prefix removal in the store: every retained blob of the
+        // provider goes, including any not listed in `lastAccepted`
+        // (orphans from dropped catalogs or partial refreshes), so a
+        // later re-add starts from a clean chain state.
+        store.removeRetainedSnapshots(providerId: providerId)
         lastErrors[providerId] = nil
         lastNotes[providerId] = nil
         applyConfiguration(DiscoverySourcesConfiguration(

@@ -22,7 +22,9 @@ public protocol DiscoveryFetching: Sendable {
 }
 
 /// Production `DiscoveryFetching`. Plain `URLSession` GETs with the
-/// profile's §7 bounds: size caps enforced after download, a 60 s
+/// profile's §7 bounds: size caps enforced **while streaming** (the
+/// transfer is aborted as soon as the body crosses the bound, so an
+/// oversized or endless response is never fully buffered), a 60 s
 /// per-request timeout, and a redirect policy of at most 3 redirects,
 /// HTTPS-to-HTTPS only, refusing IP-literal (and other URI-rule
 /// violating) targets. A refused redirect stops the chain, so the
@@ -48,7 +50,7 @@ public struct URLSessionDiscoveryFetcher: DiscoveryFetching {
     private func fetch(url: URL, maxBytes: Int) async throws -> Data {
         var request = URLRequest(url: url)
         request.timeoutInterval = Self.requestTimeoutSeconds
-        let (data, response) = try await session.data(
+        let (bytes, response) = try await session.bytes(
             for: request,
             delegate: RedirectPolicy()
         )
@@ -57,7 +59,21 @@ public struct URLSessionDiscoveryFetcher: DiscoveryFetching {
         guard (200..<300).contains(status) else {
             throw DiscoveryFetchError.badStatus(status)
         }
-        guard data.count <= maxBytes else { throw DiscoveryFetchError.oversize }
+        // A declared oversize body is refused before reading a byte;
+        // an undeclared (or lying) one is cut off at the cap below —
+        // throwing out of the iteration cancels the transfer.
+        if response.expectedContentLength > Int64(maxBytes) {
+            throw DiscoveryFetchError.oversize
+        }
+        var data = Data()
+        data.reserveCapacity(min(
+            maxBytes,
+            response.expectedContentLength > 0 ? Int(response.expectedContentLength) : 0
+        ))
+        for try await byte in bytes {
+            guard data.count < maxBytes else { throw DiscoveryFetchError.oversize }
+            data.append(byte)
+        }
         return data
     }
 
