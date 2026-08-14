@@ -24,7 +24,7 @@ import os.log
 /// §4.1 provider manifest. Signed by the operator key it names.
 public struct DiscoveryProviderManifest: Decodable, Equatable, Sendable {
     public let version: Int
-    public let implementationProfile: String
+    public let implementationProfileId: String
     public let providerId: String
     /// `onym:key:<64-lowercase-hex Ed25519 public key>`. Property named
     /// `operatorKey` because `operator` is a Swift keyword.
@@ -40,13 +40,13 @@ public struct DiscoveryProviderManifest: Decodable, Equatable, Sendable {
 
     /// The exact key set a conforming manifest may carry at top level.
     static let allowedTopLevelKeys: Set<String> = [
-        "version", "implementationProfile", "providerId", "operator",
+        "version", "implementationProfileId", "providerId", "operator",
         "seat", "catalogs", "capabilities", "privacyProfile",
         "privacyProfileUri", "offers", "validUntil", "signature",
     ]
 
     private enum CodingKeys: String, CodingKey {
-        case version, implementationProfile, providerId
+        case version, implementationProfileId, providerId
         case operatorKey = "operator"
         case seat, catalogs, capabilities, privacyProfile
         case privacyProfileUri, offers, validUntil, signature
@@ -67,7 +67,7 @@ public struct DiscoveryProviderManifest: Decodable, Equatable, Sendable {
         }
         let c = try decoder.container(keyedBy: CodingKeys.self)
         version = try c.decode(Int.self, forKey: .version)
-        implementationProfile = try c.decode(String.self, forKey: .implementationProfile)
+        implementationProfileId = try c.decode(String.self, forKey: .implementationProfileId)
         providerId = try c.decode(String.self, forKey: .providerId)
         operatorKey = try c.decode(String.self, forKey: .operatorKey)
         seat = try c.decode(String.self, forKey: .seat)
@@ -115,7 +115,7 @@ public struct DiscoveryOffer: Decodable, Equatable, Sendable {
 /// provider manifest that declared it.
 public struct CatalogSnapshot: Decodable, Equatable, Sendable {
     public let version: Int
-    public let implementationProfile: String
+    public let implementationProfileId: String
     public let catalogId: String
     public let providerId: String
     /// Starts at 1; increases by exactly 1 per published snapshot.
@@ -135,13 +135,13 @@ public struct CatalogSnapshot: Decodable, Equatable, Sendable {
     public let skippedEntryCount: Int
 
     static let allowedTopLevelKeys: Set<String> = [
-        "version", "implementationProfile", "catalogId", "providerId",
+        "version", "implementationProfileId", "catalogId", "providerId",
         "sequence", "previousDigest", "policyDigest", "generatedAt",
         "expiresAt", "entries", "signature",
     ]
 
     private enum CodingKeys: String, CodingKey {
-        case version, implementationProfile, catalogId, providerId
+        case version, implementationProfileId, catalogId, providerId
         case sequence, previousDigest, policyDigest, generatedAt
         case expiresAt, entries, signature
     }
@@ -158,7 +158,7 @@ public struct CatalogSnapshot: Decodable, Equatable, Sendable {
         }
         let c = try decoder.container(keyedBy: CodingKeys.self)
         version = try c.decode(Int.self, forKey: .version)
-        implementationProfile = try c.decode(String.self, forKey: .implementationProfile)
+        implementationProfileId = try c.decode(String.self, forKey: .implementationProfileId)
         catalogId = try c.decode(String.self, forKey: .catalogId)
         providerId = try c.decode(String.self, forKey: .providerId)
         sequence = try c.decode(Int.self, forKey: .sequence)
@@ -400,7 +400,7 @@ struct AnyCodingKey: CodingKey {
 
 /// Identifier / digest / URI syntax from §2 and §7 of the profile.
 enum DiscoveryFormat {
-    static let implementationProfile = "onym:discovery-implementation:static-ed25519-v1"
+    static let implementationProfileId = "onym:discovery-implementation:static-ed25519-v1"
 
     /// `onym:key:<64-lowercase-hex>` → the hex, or nil.
     static func operatorKeyHex(_ value: String) -> String? {

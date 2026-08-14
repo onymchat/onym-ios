@@ -15,7 +15,7 @@ final class DiscoveryModelsTests: XCTestCase {
 
     private func snapshotJSON(entries: [String]) -> Data {
         Data("""
-        {"version":1,"implementationProfile":"onym:discovery-implementation:static-ed25519-v1",\
+        {"version":1,"implementationProfileId":"onym:discovery-implementation:static-ed25519-v1",\
         "catalogId":"c","providerId":"onym:component:p","sequence":1,\
         "policyDigest":"sha256:\(String(repeating: "1", count: 64))",\
         "generatedAt":"2026-08-13T00:00:00Z","expiresAt":"2026-09-12T00:00:00Z",\

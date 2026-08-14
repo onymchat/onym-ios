@@ -62,7 +62,7 @@ final class DiscoveryTrustTests: XCTestCase {
         let raw = try Fixture.bytes("provider-manifest.json")
         var text = String(data: raw, encoding: .utf8)!
         // Flip one character inside the base64 signature value.
-        text = text.replacingOccurrences(of: "MuQpYaOY", with: "NuQpYaOY")
+        text = text.replacingOccurrences(of: "tdOfrr8u", with: "udOfrr8u")
         XCTAssertNotEqual(Data(text.utf8), raw)
         assertThrowsTrustError(try DiscoveryTrust.verifyProviderManifest(
             raw: Data(text.utf8), pinnedOperatorKeyHex: nil, now: Fixture.now
@@ -198,7 +198,7 @@ final class DiscoveryTrustTests: XCTestCase {
         let manifest = try verifiedManifest()
         let s1 = try Fixture.bytes("snapshot-1.json")
         var text = String(data: s1, encoding: .utf8)!
-        text = text.replacingOccurrences(of: "httpvIXc", with: "httpvIXd")
+        text = text.replacingOccurrences(of: "tcU3eQry", with: "tcU3eQrz")
         assertThrowsTrustError(try DiscoveryTrust.verifySnapshot(
             raw: Data(text.utf8), manifest: manifest, previousRaw: nil, now: Fixture.now
         )) {

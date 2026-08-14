@@ -83,7 +83,7 @@ public enum DiscoveryTrust {
         guard manifest.version == 1 else {
             throw DiscoveryTrustError.providerManifestInvalid(reason: "unsupported version \(manifest.version)")
         }
-        guard manifest.implementationProfile == DiscoveryFormat.implementationProfile else {
+        guard manifest.implementationProfileId == DiscoveryFormat.implementationProfileId else {
             throw DiscoveryTrustError.providerManifestInvalid(reason: "unsupported implementation profile")
         }
         guard manifest.seat == "discovery" else {
@@ -207,7 +207,7 @@ public enum DiscoveryTrust {
         guard snapshot.version == 1 else {
             throw DiscoveryTrustError.snapshotInvalid(reason: "unsupported version \(snapshot.version)")
         }
-        guard snapshot.implementationProfile == DiscoveryFormat.implementationProfile else {
+        guard snapshot.implementationProfileId == DiscoveryFormat.implementationProfileId else {
             throw DiscoveryTrustError.snapshotInvalid(reason: "unsupported implementation profile")
         }
         guard snapshot.providerId == manifest.manifest.providerId else {
