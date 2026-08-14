@@ -97,4 +97,79 @@ final class PinnedConsentStoreTests: XCTestCase {
         XCTAssertEqual(store.load(), [])
         XCTAssertNil(store.activeRecord(componentId: "onym:component:sample-notary"))
     }
+
+    // MARK: - Retention
+
+    func testHistoryIsCappedPerComponentOldestEvicted() throws {
+        // Records carry whole manifest snapshots in UserDefaults, so
+        // history is bounded: the active pin plus the last
+        // `maxInactiveRecordsPerComponent` inactive records.
+        let cap = UserDefaultsPinnedConsentStore.maxInactiveRecordsPerComponent
+        var hashes: [String] = []
+        for round in 0..<(cap + 4) {
+            let reviewed = try ManifestFactory.reviewedSample { object in
+                object["name"] = "Sample Notary rev \(round)"
+            }
+            hashes.append(reviewed.signedManifest.manifestHash)
+            store.accept(reviewed, acceptedAt: ManifestFactory.now.addingTimeInterval(Double(round)))
+        }
+
+        let records = store.load()
+        XCTAssertEqual(records.count, cap + 1, "active record plus capped history")
+        XCTAssertEqual(records.filter(\.isActive).count, 1)
+        XCTAssertEqual(records.last?.manifestHash, hashes.last)
+        // The survivors are exactly the most recent accepts; the
+        // oldest three inactive records were evicted.
+        XCTAssertEqual(records.map(\.manifestHash), Array(hashes.suffix(cap + 1)))
+    }
+
+    func testCapDoesNotTouchOtherComponentsHistory() throws {
+        let courier = try ManifestFactory.reviewedSample { object in
+            object["componentId"] = "onym:component:sample-courier"
+            object["seat"] = "courier"
+        }
+        store.accept(courier, acceptedAt: ManifestFactory.now)
+
+        let cap = UserDefaultsPinnedConsentStore.maxInactiveRecordsPerComponent
+        for round in 0..<(cap + 4) {
+            let reviewed = try ManifestFactory.reviewedSample { object in
+                object["name"] = "rev \(round)"
+            }
+            store.accept(reviewed, acceptedAt: ManifestFactory.now.addingTimeInterval(Double(round)))
+        }
+
+        XCTAssertNotNil(store.activeRecord(componentId: "onym:component:sample-courier"))
+        XCTAssertEqual(
+            store.load().filter { $0.componentId == "onym:component:sample-courier" }.count,
+            1
+        )
+    }
+
+    // MARK: - Atomicity
+
+    func testConcurrentAcceptsLoseNoRecordsAndKeepOneActivePerComponent() throws {
+        // `accept` is load-modify-save; unserialized, concurrent calls
+        // drop each other's appends or leave two actives. Six distinct
+        // components accepted from six threads must all land.
+        let reviewedManifests = try (0..<6).map { index in
+            try ManifestFactory.reviewedSample { object in
+                object["componentId"] = "onym:component:concurrent-\(index)"
+            }
+        }
+
+        DispatchQueue.concurrentPerform(iterations: reviewedManifests.count) { index in
+            store.accept(reviewedManifests[index], acceptedAt: ManifestFactory.now)
+        }
+
+        let records = store.load()
+        XCTAssertEqual(records.count, reviewedManifests.count, "no accept may be lost")
+        for index in 0..<reviewedManifests.count {
+            let componentId = "onym:component:concurrent-\(index)"
+            XCTAssertEqual(
+                records.filter { $0.componentId == componentId && $0.isActive }.count,
+                1,
+                "exactly one active record for \(componentId)"
+            )
+        }
+    }
 }

@@ -8,14 +8,42 @@ public protocol PinnedConsentStore: Sendable {
     func save(_ records: [PinnedConsentRecord])
 }
 
+/// Serializes every `accept` in the process. `accept` is a
+/// load-modify-save; without mutual exclusion two concurrent accepts
+/// read the same array and one record is silently dropped — or two
+/// records end up active for one componentId. A process-wide lock
+/// rather than an actor because the consent flows that call `accept`
+/// are synchronous (SwiftUI actions, `ModuleConsentAcceptance`), and
+/// an actor hop would force that whole path async for the same
+/// mutual exclusion. Moderation solves the same problem by keeping
+/// its flow inside `ModerationRepository`'s actor; this is the
+/// equivalent guarantee for the generic primitive.
+private enum PinnedConsentStoreSerialization {
+    static let lock = NSLock()
+}
+
 public extension PinnedConsentStore {
+    /// Inactive records kept per componentId, newest first — the
+    /// active pin plus this much history. Manifests are full snapshots
+    /// in UserDefaults, so unbounded re-consent history would grow
+    /// without limit; moderation caps its analogous ledger the same
+    /// way (`maxResolvedReportRecords = 128`, scaled down here because
+    /// each record carries whole manifest bytes).
+    internal static var maxInactiveRecordsPerComponent: Int { 8 }
+
     /// Mint and persist consent to a reviewed manifest.
     ///
     /// Takes a `ReviewedServiceManifest` — not raw bytes — so only
     /// reviewer-verified bytes can be pinned. Accepting a record for a
     /// componentId that already has one deactivates the previous
     /// record and keeps it as history (`MandateRecord` style: consent
-    /// artifacts are immutable, switching is a fresh record).
+    /// artifacts are immutable, switching is a fresh record). History
+    /// is capped at `maxInactiveRecordsPerComponent`, oldest evicted.
+    ///
+    /// Atomic: the load-modify-save is serialized process-wide, so
+    /// concurrent accepts (even through different store instances over
+    /// the same defaults) cannot drop each other's records or leave
+    /// two records active for one componentId.
     @discardableResult
     func accept(
         _ reviewed: ReviewedServiceManifest,
@@ -23,6 +51,9 @@ public extension PinnedConsentStore {
         offerId: String? = nil,
         acceptedAt: Date = Date()
     ) -> PinnedConsentRecord {
+        PinnedConsentStoreSerialization.lock.lock()
+        defer { PinnedConsentStoreSerialization.lock.unlock() }
+
         var records = load()
         let componentId = reviewed.signedManifest.componentId
         for index in records.indices where records[index].componentId == componentId {
@@ -36,6 +67,20 @@ public extension PinnedConsentStore {
             isActive: true
         )
         records.append(record)
+
+        // Retention: evict the oldest inactive records of this
+        // componentId beyond the cap. Records of other components and
+        // the just-appended active record are untouched.
+        let inactiveIndices = records.indices.filter {
+            records[$0].componentId == componentId && !records[$0].isActive
+        }
+        let excess = inactiveIndices.count - Self.maxInactiveRecordsPerComponent
+        if excess > 0 {
+            for index in inactiveIndices.prefix(excess).reversed() {
+                records.remove(at: index)
+            }
+        }
+
         save(records)
         return record
     }

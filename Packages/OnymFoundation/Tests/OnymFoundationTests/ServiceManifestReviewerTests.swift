@@ -109,10 +109,29 @@ final class ServiceManifestReviewerTests: XCTestCase {
         }
     }
 
-    func testMalformedExpectedDigestIsRejected() throws {
+    func testMalformedExpectedDigestIsRejectedAsPinMalformedNotMismatch() throws {
+        // "caller passed garbage" and "bytes were swapped" are
+        // different failures; conflating them makes catalog bugs look
+        // like attacks. The specific case is asserted, not just "throws".
         let (raw, _) = try ManifestFactory.signedSample()
         XCTAssertThrowsError(
             try reviewer.review(raw: raw, expectedDigest: "not-a-digest", now: ManifestFactory.now)
+        ) { error in
+            guard case let ServiceManifestError.digestPinMalformed(value) = error else {
+                return XCTFail("expected digestPinMalformed, got \(error)")
+            }
+            XCTAssertEqual(value, "not-a-digest")
+        }
+    }
+
+    func testUppercaseExpectedDigestIsNormalizedAndAccepted() throws {
+        // Digests copied out of catalogs or chat come uppercased often
+        // enough; the same pin must not read as a mismatch.
+        let (raw, _) = try ManifestFactory.signedSample()
+        let digest = ServiceManifestFormat.sha256Digest(of: raw)
+        let uppercased = "sha256:" + digest.dropFirst("sha256:".count).uppercased()
+        XCTAssertNoThrow(
+            try reviewer.review(raw: raw, expectedDigest: uppercased, now: ManifestFactory.now)
         )
     }
 
@@ -188,6 +207,19 @@ final class ServiceManifestReviewerTests: XCTestCase {
         // Unknown models are preserved verbatim and gate as not-free.
         XCTAssertEqual(offers[2].model, "some-future-model")
         XCTAssertFalse(offers[2].isFree)
+    }
+
+    // MARK: - Format helpers
+
+    func testBase64DecodeAcceptsUnpaddedInput() {
+        // The spec accepts padded or unpadded base64 signatures; the
+        // unpadded branch strips down to the manual re-pad path.
+        let padded = ServiceManifestFormat.decodeBase64AcceptingUnpadded("aGVsbG8=")
+        let unpadded = ServiceManifestFormat.decodeBase64AcceptingUnpadded("aGVsbG8")
+        XCTAssertEqual(padded, Data("hello".utf8))
+        XCTAssertEqual(unpadded, Data("hello".utf8))
+        // Not base64 at all — both branches refuse.
+        XCTAssertNil(ServiceManifestFormat.decodeBase64AcceptingUnpadded("!!!"))
     }
 
     func testAbsentOffersDecodeAsEmpty() throws {

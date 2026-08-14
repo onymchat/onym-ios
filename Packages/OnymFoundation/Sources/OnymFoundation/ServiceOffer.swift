@@ -18,10 +18,13 @@ public struct ServiceOffer: Sendable, Equatable {
     /// Billing period for recurring models (e.g. "monthly"), when
     /// published.
     public let period: String?
-    /// The offer's seat-specific `service` object, re-serialized as
-    /// compact JSON. Opaque at this layer: not signature-relevant
-    /// (signatures cover the manifest's exact `rawBytes`), just a
-    /// faithful carrier for whoever understands the seat's schema.
+    /// The offer's seat-specific `service` object, **re-encoded** as
+    /// compact JSON — never hash or verify anything against this.
+    /// `JSONSerialization` re-serialization controls neither key-sort
+    /// semantics nor number form, so these bytes are not the bytes the
+    /// operator published or signed; anything byte-sensitive must go
+    /// back to the manifest's exact `rawBytes`. Opaque at this layer:
+    /// a value-level carrier for whoever understands the seat's schema.
     public let serviceData: Data?
 
     /// Free offers are the only ones the stub entitlement layer can

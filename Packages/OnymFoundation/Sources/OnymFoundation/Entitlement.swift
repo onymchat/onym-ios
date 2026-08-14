@@ -42,6 +42,13 @@ public struct FreeTierEntitlementProvider: EntitlementProviding {
 
     /// Convenience over the consent store: resolves offers from the
     /// active pinned manifest of the component in question.
+    ///
+    /// Cost note: every check is a full store `load()` (defaults read
+    /// + JSON decode of all records) plus a manifest re-decode — by
+    /// design, so entitlement answers can never go stale against the
+    /// store. Fine for action-time checks; a UI that polls this per
+    /// frame or per row should resolve the offer once and hold it, or
+    /// supply a caching `offerLookup` instead.
     public init(consentStore: any PinnedConsentStore) {
         self.init { offerId, componentId in
             consentStore.activeRecord(componentId: componentId)?

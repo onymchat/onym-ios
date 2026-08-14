@@ -54,9 +54,17 @@ public struct ServiceManifestReviewer: Sendable {
         now: Date = Date()
     ) throws -> ReviewedServiceManifest {
         if let expectedDigest {
+            // Catalogs and users copy digests around; uppercase hex is
+            // the same pin, so normalize before comparing. A pin that
+            // is not `sha256:<64-hex>` even after normalization is the
+            // caller's bug, not a byte swap — distinct error.
+            let normalized = expectedDigest.lowercased()
+            guard ServiceManifestFormat.isDigest(normalized) else {
+                throw ServiceManifestError.digestPinMalformed(value: expectedDigest)
+            }
             let actual = ServiceManifestFormat.sha256Digest(of: raw)
-            guard ServiceManifestFormat.isDigest(expectedDigest), expectedDigest == actual else {
-                throw ServiceManifestError.digestMismatch(expected: expectedDigest, actual: actual)
+            guard normalized == actual else {
+                throw ServiceManifestError.digestMismatch(expected: normalized, actual: actual)
             }
         }
 

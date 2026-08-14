@@ -14,6 +14,10 @@ public enum ServiceManifestError: Error, Equatable, Sendable {
     /// Fetched bytes hash differently than the digest the caller
     /// pinned (e.g. a catalog entry's `manifest.digest`).
     case digestMismatch(expected: String, actual: String)
+    /// The caller's `expectedDigest` is not `sha256:<64-hex>` at all —
+    /// garbage in the pin, not swapped bytes. Distinct from
+    /// `digestMismatch` so the two failures stay diagnosable.
+    case digestPinMalformed(value: String)
 }
 
 /// A seat operator's manifest — courier, notary, authority, or any
@@ -105,24 +109,32 @@ public struct SignedServiceManifest: Sendable, Equatable {
     }
 }
 
-/// Canonical signing bytes for service manifests, matching the
-/// cross-language precedent set by the moderation seat
-/// (`ModerationCanonicalEncoder`, `authority/src/canonical.rs`):
+/// Canonical signing bytes for service manifests
+/// (`Discovery-Static-Ed25519.md` §3), matching the moderation seat's
+/// cross-language precedent (`onym-moderation` `authority/src/canonical.rs`):
 ///
 /// 1. parse the document as UTF-8 JSON; the top level must be an
 ///    object;
-/// 2. remove the `signature` field **structurally** — never by string
-///    surgery, because a planted copy of the signature elsewhere in
-///    the document would make textual removal forgeable;
+/// 2. remove the `signature` field **structurally and at the top level
+///    only** — never by string surgery, because a planted copy of the
+///    signature elsewhere in the document would make textual removal
+///    forgeable;
 /// 3. re-serialize compactly with all object keys, at every nesting
-///    level, sorted (`.sortedKeys`), without escaping `/`
-///    (`.withoutEscapingSlashes` — reference implementations sign the
-///    unescaped form, and base64 signatures and URLs are full of
-///    slashes).
+///    level, sorted by **UTF-8 byte order**, with §3's pinned string
+///    escaping and without escaping `/`.
 ///
-/// Local to OnymFoundation on purpose: seat packages depend on this
-/// package and must not gain an OnymModeration (or OnymDiscovery)
-/// dependency to verify a manifest.
+/// The serialization is implemented here rather than delegated to
+/// `JSONSerialization`, whose `.sortedKeys` sorts *case-insensitively
+/// and numerically* — `seatID`/`seatable` and `relay2`/`relay10` both
+/// come out in the wrong order — and whose number re-serialization is
+/// uncontrolled; `ModerationCanonicalEncoder` and `Report.signingBytes`
+/// document the same prohibition. This is a deliberate twin of
+/// `DiscoveryCanonical` in OnymDiscovery (fixture-proven byte-identical
+/// to the Rust serde_json reference): OnymFoundation is the bottom of
+/// the dependency stack and must not import OnymDiscovery (or
+/// OnymModeration) to verify a manifest, so the ~60 lines are
+/// duplicated by design, like the moderation twin files. Change one,
+/// change both.
 public enum ServiceManifestCanonical {
     /// The bytes a manifest's embedded Ed25519 signature is made over.
     public static func signingBytes(of raw: Data) throws -> Data {
@@ -136,10 +148,82 @@ public enum ServiceManifestCanonical {
             throw ServiceManifestError.manifestInvalid(reason: "top level is not a JSON object")
         }
         object.removeValue(forKey: "signature")
-        return try JSONSerialization.data(
-            withJSONObject: object,
-            options: [.sortedKeys, .withoutEscapingSlashes]
-        )
+        var out = ""
+        try serialize(object, into: &out)
+        return Data(out.utf8)
+    }
+
+    // MARK: - Canonical serialization (§3)
+
+    private static func serialize(_ value: Any, into out: inout String) throws {
+        switch value {
+        case let object as [String: Any]:
+            out.append("{")
+            // UTF-8 byte order, not Swift's Unicode-aware ordering and
+            // not Foundation's case-insensitive `.sortedKeys`.
+            let keys = object.keys.sorted {
+                Array($0.utf8).lexicographicallyPrecedes(Array($1.utf8))
+            }
+            var first = true
+            for key in keys {
+                if !first { out.append(",") }
+                first = false
+                appendEscaped(key, into: &out)
+                out.append(":")
+                try serialize(object[key]!, into: &out)
+            }
+            out.append("}")
+        case let array as [Any]:
+            out.append("[")
+            var first = true
+            for element in array {
+                if !first { out.append(",") }
+                first = false
+                try serialize(element, into: &out)
+            }
+            out.append("]")
+        case let string as String:
+            appendEscaped(string, into: &out)
+        case let number as NSNumber:
+            if CFGetTypeID(number) == CFBooleanGetTypeID() {
+                out.append(number.boolValue ? "true" : "false")
+            } else if CFNumberIsFloatType(number) {
+                // §3: all numbers are non-negative integers; a float
+                // has no canonical form here.
+                throw ServiceManifestError.manifestInvalid(
+                    reason: "non-integer number has no canonical form"
+                )
+            } else {
+                out.append(number.stringValue)
+            }
+        case is NSNull:
+            out.append("null")
+        default:
+            throw ServiceManifestError.manifestInvalid(
+                reason: "unsupported JSON value"
+            )
+        }
+    }
+
+    /// §3 pinned escaping: exactly `"` `\` and U+0000–U+001F are
+    /// escaped — two-character forms where defined, lowercase `\u00xx`
+    /// otherwise — and nothing else: no `/`, no non-ASCII, no U+007F.
+    private static func appendEscaped(_ string: String, into out: inout String) {
+        out.append("\"")
+        for scalar in string.unicodeScalars {
+            switch scalar.value {
+            case 0x22: out.append("\\\"")
+            case 0x5C: out.append("\\\\")
+            case 0x08: out.append("\\b")
+            case 0x0C: out.append("\\f")
+            case 0x0A: out.append("\\n")
+            case 0x0D: out.append("\\r")
+            case 0x09: out.append("\\t")
+            case 0x00...0x1F: out.append(String(format: "\\u%04x", scalar.value))
+            default: out.unicodeScalars.append(scalar)
+            }
+        }
+        out.append("\"")
     }
 }
 

@@ -11,7 +11,8 @@ let package = Package(
         .target(name: "OnymFoundation"),
         .testTarget(
             name: "OnymFoundationTests",
-            dependencies: ["OnymFoundation"]
+            dependencies: ["OnymFoundation"],
+            resources: [.copy("Fixtures")]
         ),
     ]
 )
