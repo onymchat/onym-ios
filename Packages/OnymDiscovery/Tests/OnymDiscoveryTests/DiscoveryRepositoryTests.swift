@@ -135,6 +135,37 @@ final class DiscoveryRepositoryTests: XCTestCase {
         )
     }
 
+    func testRefreshRejectsManifestForDifferentProviderId() async throws {
+        // §6 refresh identity match: the pinned source's URL now
+        // serves a (valid, correctly signed) manifest for a different
+        // providerId — provider_manifest_invalid, surfaced on the
+        // source, nothing accepted.
+        let store = MemoryStore()
+        store.saveConfiguration(DiscoverySourcesConfiguration(
+            sources: [DiscoverySource(
+                providerId: "onym:component:some-other-provider",
+                userLabel: "Other",
+                manifestURL: manifestURL,
+                pinnedOperatorKeyHex: Fixture.operatorKeyHex,
+                addedAt: Fixture.now
+            )],
+            removedDefaultProviderIds: [],
+            hasUserInteracted: true
+        ))
+        let fetcher = FakeFetcher(responses: [
+            manifestURL: try Fixture.bytes("provider-manifest.json"),
+            snapshotURL: try Fixture.bytes("snapshot-1.json"),
+        ])
+        let repository = DiscoveryRepository(fetcher: fetcher, store: store) { Fixture.now }
+
+        await repository.refresh()
+        let state = await repository.currentState()
+
+        let sourceError = try XCTUnwrap(state.sources.first?.lastError)
+        XCTAssertTrue(sourceError.contains("rejected"), sourceError)
+        XCTAssertTrue(state.aggregate.isEmpty, "identity mismatch must contribute nothing")
+    }
+
     func testStartSeedsDefaultOnceAndRemovedDefaultNeverReturns() async throws {
         let store = MemoryStore()
         let fetcher = FakeFetcher(responses: [:])

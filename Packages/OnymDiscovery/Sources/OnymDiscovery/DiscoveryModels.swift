@@ -17,7 +17,11 @@ import os.log
 ///   are rejected (`provider_manifest_invalid` / `snapshot_invalid`);
 /// - **per-entry** unknown fields cause only that `CatalogEntry` to be
 ///   skipped (lossy entry decoding, modeled on `LossyAuthorityListing`
-///   in OnymModeration).
+///   in OnymModeration);
+/// - **per-descriptor** unknown fields (or an otherwise malformed
+///   descriptor) cause only that `catalogs[]` descriptor to be skipped
+///   and counted (§4.1); a manifest with zero surviving descriptors is
+///   `provider_manifest_invalid`.
 
 // MARK: - Provider manifest
 
@@ -30,13 +34,20 @@ public struct DiscoveryProviderManifest: Decodable, Equatable, Sendable {
     /// `operatorKey` because `operator` is a Swift keyword.
     public let operatorKey: String
     public let seat: String
+    /// Descriptors that survived lossy per-descriptor decoding (§4.1).
+    /// Malformed descriptors are skipped, not defaulted
+    /// (`skippedCatalogCount` says how many).
     public let catalogs: [CatalogDescriptor]
     public let capabilities: [String]
-    public let privacyProfile: String?
-    public let privacyProfileUri: String?
+    public let privacyProfile: String
+    public let privacyProfileUri: String
     public let offers: [DiscoveryOffer]
     public let validUntil: Date
     public let signature: String
+    /// How many `catalogs[]` descriptors failed lossy decoding and were
+    /// dropped. Not a wire field — surfaced so a manifest whose
+    /// catalogs were partly skipped never reads as the whole set.
+    public let skippedCatalogCount: Int
 
     /// The exact key set a conforming manifest may carry at top level.
     static let allowedTopLevelKeys: Set<String> = [
@@ -71,10 +82,12 @@ public struct DiscoveryProviderManifest: Decodable, Equatable, Sendable {
         providerId = try c.decode(String.self, forKey: .providerId)
         operatorKey = try c.decode(String.self, forKey: .operatorKey)
         seat = try c.decode(String.self, forKey: .seat)
-        catalogs = try c.decode([CatalogDescriptor].self, forKey: .catalogs)
+        let lossyCatalogs = try c.decode([LossyCatalogDescriptor].self, forKey: .catalogs)
+        catalogs = lossyCatalogs.compactMap(\.value)
+        skippedCatalogCount = lossyCatalogs.count - catalogs.count
         capabilities = try c.decode([String].self, forKey: .capabilities)
-        privacyProfile = try c.decodeIfPresent(String.self, forKey: .privacyProfile)
-        privacyProfileUri = try c.decodeIfPresent(String.self, forKey: .privacyProfileUri)
+        privacyProfile = try c.decode(String.self, forKey: .privacyProfile)
+        privacyProfileUri = try c.decode(String.self, forKey: .privacyProfileUri)
         offers = try c.decode([DiscoveryOffer].self, forKey: .offers)
         validUntil = try c.decode(Date.self, forKey: .validUntil)
         signature = try c.decode(String.self, forKey: .signature)
@@ -82,11 +95,14 @@ public struct DiscoveryProviderManifest: Decodable, Equatable, Sendable {
 }
 
 /// One catalog declared by a provider manifest (§4.1 `catalogs[]`).
+/// Decoding is strict *within* the descriptor — an unknown field, a
+/// malformed id/URI, or a bad digest fails this descriptor — but the
+/// failure is absorbed by `LossyCatalogDescriptor`, skipping just this
+/// descriptor.
 public struct CatalogDescriptor: Decodable, Equatable, Sendable {
     /// `[a-z0-9-]{1,64}`, unique within the manifest.
     public let catalogId: String
-    /// HTTPS URL of the snapshot file. Kept as the wire string; the
-    /// URI rules of §7 are enforced by `DiscoveryTrust`, and
+    /// HTTPS URL of the snapshot file. Kept as the wire string;
     /// `snapshotURL` projects it for fetching.
     public let snapshot: String
     public let audience: String
@@ -95,9 +111,94 @@ public struct CatalogDescriptor: Decodable, Equatable, Sendable {
     /// snapshot of this catalog must carry the same digest as its
     /// `policyDigest`.
     public let policy: String
-    public let policyUri: String?
+    public let policyUri: String
 
     public var snapshotURL: URL? { URL(string: snapshot) }
+
+    static let allowedKeys: Set<String> = [
+        "catalogId", "snapshot", "audience", "seatTypes", "policy", "policyUri",
+    ]
+
+    private enum CodingKeys: String, CodingKey {
+        case catalogId, snapshot, audience, seatTypes, policy, policyUri
+    }
+
+    public init(from decoder: Decoder) throws {
+        let probe = try decoder.container(keyedBy: AnyCodingKey.self)
+        let unknown = Set(probe.allKeys.map(\.stringValue))
+            .subtracting(Self.allowedKeys)
+        guard unknown.isEmpty else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: decoder.codingPath,
+                debugDescription: "unknown descriptor fields: \(unknown.sorted().joined(separator: ", "))"
+            ))
+        }
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        catalogId = try c.decode(String.self, forKey: .catalogId)
+        snapshot = try c.decode(String.self, forKey: .snapshot)
+        audience = try c.decode(String.self, forKey: .audience)
+        seatTypes = try c.decode([String].self, forKey: .seatTypes)
+        policy = try c.decode(String.self, forKey: .policy)
+        policyUri = try c.decode(String.self, forKey: .policyUri)
+        // Field-format checks that make a descriptor unusable: a bad
+        // catalog id, a non-conforming snapshot/policy URI, or a
+        // malformed policy digest — the descriptor is skipped at
+        // decode time (§4.1), never document-fatal.
+        guard DiscoveryFormat.isCatalogId(catalogId) else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: decoder.codingPath,
+                debugDescription: "malformed catalogId"
+            ))
+        }
+        guard DiscoveryFormat.isValidURI(snapshot) else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: decoder.codingPath,
+                debugDescription: "catalog snapshot URI violates the profile URI rules"
+            ))
+        }
+        guard DiscoveryFormat.isDigest(policy) else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: decoder.codingPath,
+                debugDescription: "malformed policy digest"
+            ))
+        }
+        guard DiscoveryFormat.isValidURI(policyUri) else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: decoder.codingPath,
+                debugDescription: "policyUri violates the profile URI rules"
+            ))
+        }
+    }
+}
+
+/// Lossy wrapper for `CatalogDescriptor` — same pattern as
+/// `LossyCatalogEntry`: a malformed descriptor decodes to `nil` (and
+/// logs) instead of sinking the provider manifest.
+struct LossyCatalogDescriptor: Decodable {
+    private static let log = Logger(
+        subsystem: "app.onym.ios",
+        category: "Discovery"
+    )
+
+    let value: CatalogDescriptor?
+
+    init(from decoder: Decoder) throws {
+        do {
+            value = try CatalogDescriptor(from: decoder)
+        } catch {
+            let catalogId = (try? decoder.container(keyedBy: DiagnosticKeys.self))
+                .flatMap { try? $0.decodeIfPresent(String.self, forKey: .catalogId) }
+                ?? "<unknown>"
+            Self.log.error(
+                "Skipping malformed catalog descriptor \(catalogId, privacy: .public): \(String(describing: error), privacy: .public)"
+            )
+            value = nil
+        }
+    }
+
+    private enum DiagnosticKeys: String, CodingKey {
+        case catalogId
+    }
 }
 
 /// Minimal offer shape. The full offers model lands with the

@@ -51,6 +51,54 @@ final class DiscoveryModelsTests: XCTestCase {
         XCTAssertEqual(snapshot.skippedEntryCount, 1)
     }
 
+    private func descriptorJSON(catalogId: String = "c", extra: String = "") -> String {
+        """
+        {"catalogId":"\(catalogId)","snapshot":"https://x.example/c.json",\
+        "audience":"public","seatTypes":["notary"],\
+        "policy":"sha256:\(String(repeating: "1", count: 64))",\
+        "policyUri":"https://x.example/policy.md"\(extra)}
+        """
+    }
+
+    private func manifestJSON(catalogs: [String]) -> Data {
+        Data("""
+        {"version":1,"implementationProfileId":"onym:discovery-implementation:static-ed25519-v1",\
+        "providerId":"onym:component:p","operator":"onym:key:\(String(repeating: "a", count: 64))",\
+        "seat":"discovery","catalogs":[\(catalogs.joined(separator: ","))],\
+        "capabilities":[],"privacyProfile":"sha256:\(String(repeating: "2", count: 64))",\
+        "privacyProfileUri":"https://x.example/privacy.md","offers":[],\
+        "validUntil":"2026-12-31T23:59:59Z","signature":"AA=="}
+        """.utf8)
+    }
+
+    func testLossyDescriptorDecodingSkipsMalformedDescriptorsAndCountsThem() throws {
+        // One valid descriptor, one with an unknown field, one missing
+        // the required policyUri: the valid one survives, the others
+        // are skipped and counted — never defaulted (§4.1).
+        let good = descriptorJSON()
+        let unknownField = descriptorJSON(catalogId: "d", extra: #","surprise":true"#)
+        let missingPolicyUri = descriptorJSON(catalogId: "e").replacingOccurrences(
+            of: #","policyUri":"https://x.example/policy.md""#, with: ""
+        )
+        let manifest = try DiscoveryJSON.decoder().decode(
+            DiscoveryProviderManifest.self,
+            from: manifestJSON(catalogs: [good, unknownField, missingPolicyUri])
+        )
+        XCTAssertEqual(manifest.catalogs.map(\.catalogId), ["c"])
+        XCTAssertEqual(manifest.skippedCatalogCount, 2)
+    }
+
+    func testManifestWithoutPrivacyProfileFailsDecoding() {
+        let stripped = String(data: manifestJSON(catalogs: [descriptorJSON()]), encoding: .utf8)!
+            .replacingOccurrences(
+                of: #""privacyProfile":"sha256:\#(String(repeating: "2", count: 64))","#,
+                with: ""
+            )
+        XCTAssertThrowsError(try DiscoveryJSON.decoder().decode(
+            DiscoveryProviderManifest.self, from: Data(stripped.utf8)
+        ))
+    }
+
     func testURIRules() {
         XCTAssertTrue(DiscoveryFormat.isValidURI("https://discovery.onym.app/manifest.json"))
         // http scheme

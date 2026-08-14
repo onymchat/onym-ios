@@ -7,14 +7,15 @@ import OnymFoundation
 /// strings are diagnostic, not part of the contract.
 public enum DiscoveryTrustError: Error, Equatable, Sendable {
     /// Signature/key-pin failure, unknown top-level field, bad
-    /// version/profile/seat, expired `validUntil`, oversize, or URI
-    /// violation in a provider manifest.
+    /// version/profile/seat, zero surviving catalog descriptors,
+    /// expired `validUntil`, oversize, or URI violation in a provider
+    /// manifest.
     case providerManifestInvalid(reason: String)
     /// Signature failure, sequence gap/repeat/rollback,
     /// `previousDigest` mismatch, duplicate `componentId`, unknown
     /// top-level field, or oversize in a snapshot.
     case snapshotInvalid(reason: String)
-    /// `expiresAt` in the past.
+    /// `expiresAt` more than the 10-minute skew allowance in the past.
     case snapshotExpired
     /// `policyUri` unreachable or bytes ≠ `policyDigest`.
     case policyUnavailable
@@ -46,6 +47,10 @@ public enum DiscoveryTrust {
     static let destinationManifestMaxBytes = 256 * 1024
     /// `expiresAt − generatedAt` bound (§4.2): 90 days.
     static let snapshotMaxValiditySeconds: TimeInterval = 90 * 86_400
+    /// §4.2/§9 clock-skew allowance on expiry: a snapshot is
+    /// `snapshot_expired` only when `expiresAt` is more than this far
+    /// in the past (a fast clock must not reject a fresh snapshot).
+    static let clockSkewSeconds: TimeInterval = 10 * 60
 
     // MARK: - Provider manifest
 
@@ -96,46 +101,28 @@ public enum DiscoveryTrust {
             throw DiscoveryTrustError.providerManifestInvalid(reason: "malformed operator key")
         }
 
+        // Descriptors decode lossily (§4.1): malformed ones were
+        // skipped and counted at decode time; zero survivors is fatal.
         guard !manifest.catalogs.isEmpty else {
-            throw DiscoveryTrustError.providerManifestInvalid(reason: "catalogs is empty")
+            throw DiscoveryTrustError.providerManifestInvalid(
+                reason: "no surviving catalog descriptors"
+            )
         }
         var seenCatalogIds = Set<String>()
         for catalog in manifest.catalogs {
-            guard DiscoveryFormat.isCatalogId(catalog.catalogId) else {
-                throw DiscoveryTrustError.providerManifestInvalid(reason: "malformed catalogId")
-            }
             guard seenCatalogIds.insert(catalog.catalogId).inserted else {
                 throw DiscoveryTrustError.providerManifestInvalid(
                     reason: "duplicate catalogId \(catalog.catalogId)"
                 )
             }
-            guard DiscoveryFormat.isValidURI(catalog.snapshot) else {
-                throw DiscoveryTrustError.providerManifestInvalid(
-                    reason: "catalog snapshot URI violates the profile URI rules"
-                )
-            }
-            guard DiscoveryFormat.isDigest(catalog.policy) else {
-                throw DiscoveryTrustError.providerManifestInvalid(reason: "malformed policy digest")
-            }
-            if let policyUri = catalog.policyUri {
-                guard DiscoveryFormat.isValidURI(policyUri) else {
-                    throw DiscoveryTrustError.providerManifestInvalid(
-                        reason: "policyUri violates the profile URI rules"
-                    )
-                }
-            }
         }
-        if let privacyProfile = manifest.privacyProfile {
-            guard DiscoveryFormat.isDigest(privacyProfile) else {
-                throw DiscoveryTrustError.providerManifestInvalid(reason: "malformed privacyProfile digest")
-            }
+        guard DiscoveryFormat.isDigest(manifest.privacyProfile) else {
+            throw DiscoveryTrustError.providerManifestInvalid(reason: "malformed privacyProfile digest")
         }
-        if let privacyProfileUri = manifest.privacyProfileUri {
-            guard DiscoveryFormat.isValidURI(privacyProfileUri) else {
-                throw DiscoveryTrustError.providerManifestInvalid(
-                    reason: "privacyProfileUri violates the profile URI rules"
-                )
-            }
+        guard DiscoveryFormat.isValidURI(manifest.privacyProfileUri) else {
+            throw DiscoveryTrustError.providerManifestInvalid(
+                reason: "privacyProfileUri violates the profile URI rules"
+            )
         }
 
         guard manifest.validUntil > now else {
@@ -222,7 +209,9 @@ public enum DiscoveryTrust {
             )
         }
 
-        guard snapshot.expiresAt > now else {
+        // Expired only when expiresAt is more than the skew allowance
+        // in the past (§4.2/§9 — symmetric 10-minute clock skew).
+        guard snapshot.expiresAt.addingTimeInterval(clockSkewSeconds) >= now else {
             throw DiscoveryTrustError.snapshotExpired
         }
         guard snapshot.generatedAt <= snapshot.expiresAt,

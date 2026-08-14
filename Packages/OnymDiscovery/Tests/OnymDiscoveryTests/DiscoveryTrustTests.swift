@@ -62,7 +62,7 @@ final class DiscoveryTrustTests: XCTestCase {
         let raw = try Fixture.bytes("provider-manifest.json")
         var text = String(data: raw, encoding: .utf8)!
         // Flip one character inside the base64 signature value.
-        text = text.replacingOccurrences(of: "tdOfrr8u", with: "udOfrr8u")
+        text = text.replacingOccurrences(of: "G3c5sbqg", with: "H3c5sbqg")
         XCTAssertNotEqual(Data(text.utf8), raw)
         assertThrowsTrustError(try DiscoveryTrust.verifyProviderManifest(
             raw: Data(text.utf8), pinnedOperatorKeyHex: nil, now: Fixture.now
@@ -88,7 +88,10 @@ final class DiscoveryTrustTests: XCTestCase {
         }
     }
 
-    func testHTTPSnapshotURIIsRejected() throws {
+    func testHTTPSnapshotURILeavesZeroSurvivingDescriptors() throws {
+        // §4.1: a malformed descriptor (here, an http snapshot URI) is
+        // skipped, not document-fatal — but a manifest whose only
+        // descriptor was skipped has zero survivors and is invalid.
         let raw = try Fixture.bytes("provider-manifest.json")
         var text = String(data: raw, encoding: .utf8)!
         text = text.replacingOccurrences(
@@ -99,8 +102,25 @@ final class DiscoveryTrustTests: XCTestCase {
             raw: Data(text.utf8), pinnedOperatorKeyHex: nil, now: Fixture.now
         )) {
             if case .providerManifestInvalid(let reason) = $0 {
-                return reason.contains("URI")
+                return reason.contains("no surviving catalog descriptors")
             }
+            return false
+        }
+    }
+
+    func testMissingPrivacyProfileIsRejected() throws {
+        // privacyProfile / privacyProfileUri are required (§4.1).
+        let raw = try Fixture.bytes("provider-manifest.json")
+        var text = String(data: raw, encoding: .utf8)!
+        text = text.replacingOccurrences(
+            of: #""privacyProfile":"sha256:3333333333333333333333333333333333333333333333333333333333333333","#,
+            with: ""
+        )
+        XCTAssertNotEqual(Data(text.utf8), raw, "removal must have matched")
+        assertThrowsTrustError(try DiscoveryTrust.verifyProviderManifest(
+            raw: Data(text.utf8), pinnedOperatorKeyHex: nil, now: Fixture.now
+        )) {
+            if case .providerManifestInvalid = $0 { return true }
             return false
         }
     }
@@ -191,6 +211,24 @@ final class DiscoveryTrustTests: XCTestCase {
         let late = Date(timeIntervalSince1970: 1_790_812_800)
         assertThrowsTrustError(try DiscoveryTrust.verifySnapshot(
             raw: s1, manifest: manifest, previousRaw: nil, now: late
+        )) { $0 == .snapshotExpired }
+    }
+
+    func testExpirySkewBoundary() throws {
+        // §4.2/§9: expired only when expiresAt is MORE than 10 minutes
+        // in the past. Fixture expiresAt is 2026-09-12T00:00:00Z.
+        let manifest = try verifiedManifest()
+        let s1 = try Fixture.bytes("snapshot-1.json")
+        let expiresAt = Date(timeIntervalSince1970: 1_789_171_200)
+        // Exactly 10 minutes past expiry: within the skew allowance.
+        XCTAssertNoThrow(try DiscoveryTrust.verifySnapshot(
+            raw: s1, manifest: manifest, previousRaw: nil,
+            now: expiresAt.addingTimeInterval(10 * 60)
+        ))
+        // One second beyond the allowance: snapshot_expired.
+        assertThrowsTrustError(try DiscoveryTrust.verifySnapshot(
+            raw: s1, manifest: manifest, previousRaw: nil,
+            now: expiresAt.addingTimeInterval(10 * 60 + 1)
         )) { $0 == .snapshotExpired }
     }
 

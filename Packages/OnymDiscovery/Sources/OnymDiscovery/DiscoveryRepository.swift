@@ -219,6 +219,16 @@ public actor DiscoveryRepository {
             pinnedOperatorKeyHex: pinnedKey,
             now: now()
         )
+        // Refresh-time identity match (§6): the URL must still serve
+        // the pinned provider. `seat` and `implementationProfileId`
+        // are already pinned to this profile's constants by
+        // `verifyProviderManifest`; `providerId` is the per-source
+        // identity that can drift.
+        guard signedManifest.manifest.providerId == source.providerId else {
+            throw DiscoveryTrustError.providerManifestInvalid(
+                reason: "providerId does not match the pinned source (the URL now serves a different provider)"
+            )
+        }
 
         var updated = source
         for catalog in signedManifest.manifest.catalogs {
