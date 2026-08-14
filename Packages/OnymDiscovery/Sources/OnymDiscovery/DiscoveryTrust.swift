@@ -76,9 +76,19 @@ public enum DiscoveryTrust {
             throw DiscoveryTrustError.providerManifestInvalid(reason: "manifest exceeds 64 KiB")
         }
 
+        // Single-parse hardening: the model is decoded from the SAME
+        // JSONSerialization tree the signature canonicalization walks
+        // (re-serialized canonically, signature retained), not from the
+        // raw bytes a second time. A document with duplicate keys can
+        // otherwise diverge between the two parsers — the signature
+        // verifying over one duplicate's value while the decoded model
+        // carries the other's. One parse, one resolution, no gap.
         let manifest: DiscoveryProviderManifest
         do {
-            manifest = try DiscoveryJSON.decoder().decode(DiscoveryProviderManifest.self, from: raw)
+            let normalized = try DiscoveryCanonical.normalizedDocumentBytes(of: raw)
+            manifest = try DiscoveryJSON.decoder().decode(DiscoveryProviderManifest.self, from: normalized)
+        } catch let error as DiscoveryTrustError {
+            throw error
         } catch {
             throw DiscoveryTrustError.providerManifestInvalid(
                 reason: "schema violation: \(shortDescription(of: error))"
@@ -128,7 +138,10 @@ public enum DiscoveryTrust {
             )
         }
 
-        guard manifest.validUntil > now else {
+        // §4.2/§9 symmetric clock skew: `validUntil` gets the same
+        // 10-minute allowance as snapshot expiry — a fast local clock
+        // must not reject a manifest that is still valid.
+        guard manifest.validUntil.addingTimeInterval(clockSkewSeconds) >= now else {
             throw DiscoveryTrustError.providerManifestInvalid(reason: "validUntil is in the past")
         }
 
@@ -167,6 +180,12 @@ public enum DiscoveryTrust {
     ///   - manifest: the verified provider manifest the snapshot URL
     ///     came from; supplies the operator key, the expected
     ///     `providerId`, and the catalog's pinned `policy` digest.
+    ///   - expectedCatalogId: the `catalogId` of the manifest descriptor
+    ///     whose URL was fetched. The snapshot must declare exactly this
+    ///     catalog — otherwise a correctly signed snapshot of catalog B
+    ///     served at catalog A's URL would verify against B's descriptor
+    ///     and then be persisted and attributed under A (cross-catalog
+    ///     substitution, clobbering A's retained chain state).
     ///   - retained: the last acceptance retained for this catalog, or
     ///     `nil` on first acceptance of the source (any sequence is
     ///     accepted then — TOFU covers trust). §6's four cases apply
@@ -177,6 +196,7 @@ public enum DiscoveryTrust {
     public static func verifySnapshot(
         raw: Data,
         manifest: SignedProviderManifest,
+        expectedCatalogId: String,
         retained: RetainedCatalogAcceptance?,
         now: Date
     ) throws -> SignedCatalogSnapshot {
@@ -184,9 +204,17 @@ public enum DiscoveryTrust {
             throw DiscoveryTrustError.snapshotInvalid(reason: "snapshot exceeds 1 MiB")
         }
 
+        // Same single-parse hardening as `verifyProviderManifest`: the
+        // model is decoded from the canonical re-serialization of the
+        // one JSONSerialization tree the signature check walks, so a
+        // duplicate-key document cannot show one value to the signature
+        // and another to the decoded model.
         let snapshot: CatalogSnapshot
         do {
-            snapshot = try DiscoveryJSON.decoder().decode(CatalogSnapshot.self, from: raw)
+            let normalized = try DiscoveryCanonical.normalizedDocumentBytes(of: raw)
+            snapshot = try DiscoveryJSON.decoder().decode(CatalogSnapshot.self, from: normalized)
+        } catch DiscoveryTrustError.providerManifestInvalid(let reason) {
+            throw DiscoveryTrustError.snapshotInvalid(reason: reason)
         } catch {
             throw DiscoveryTrustError.snapshotInvalid(
                 reason: "schema violation: \(shortDescription(of: error))"
@@ -202,7 +230,15 @@ public enum DiscoveryTrust {
         guard snapshot.providerId == manifest.manifest.providerId else {
             throw DiscoveryTrustError.snapshotInvalid(reason: "providerId does not match the manifest")
         }
-        guard let descriptor = manifest.manifest.catalogs.first(where: { $0.catalogId == snapshot.catalogId }) else {
+        // The descriptor is resolved from the EXPECTED catalog id (the
+        // one whose URL was fetched), never from the document's own
+        // claim — see `expectedCatalogId` above.
+        guard snapshot.catalogId == expectedCatalogId else {
+            throw DiscoveryTrustError.snapshotInvalid(
+                reason: "catalogId \"\(snapshot.catalogId)\" does not match the catalog being refreshed (\"\(expectedCatalogId)\") — cross-catalog substitution"
+            )
+        }
+        guard let descriptor = manifest.manifest.catalogs.first(where: { $0.catalogId == expectedCatalogId }) else {
             throw DiscoveryTrustError.snapshotInvalid(reason: "catalogId is not declared by the manifest")
         }
         // §4.2 policy-transition grace: the snapshot must cite the

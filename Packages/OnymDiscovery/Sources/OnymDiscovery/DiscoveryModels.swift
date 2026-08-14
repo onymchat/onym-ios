@@ -373,9 +373,22 @@ public struct CatalogEntry: Decodable, Equatable, Sendable {
         relationship = try c.decode(String.self, forKey: .relationship)
         placement = try c.decode(String.self, forKey: .placement)
         status = try c.decodeIfPresent(EntryStatus.self, forKey: .status)
-        // Field-format checks that make an entry unusable: a non-HTTPS
-        // manifest URI or a malformed digest can never be fetched /
-        // verified, so the entry is skipped at decode time.
+        // Field-format checks that make an entry unusable: a malformed
+        // componentId or operator key, a non-HTTPS manifest URI, or a
+        // malformed digest can never be attributed / fetched /
+        // verified, so the entry is skipped at decode time (lossy).
+        guard DiscoveryFormat.isComponentId(componentId) else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: decoder.codingPath,
+                debugDescription: "malformed componentId"
+            ))
+        }
+        guard DiscoveryFormat.operatorKeyHex(operatorKey) != nil else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: decoder.codingPath,
+                debugDescription: "malformed operator key"
+            ))
+        }
         guard DiscoveryFormat.isValidURI(manifest.uri) else {
             throw DecodingError.dataCorrupted(.init(
                 codingPath: decoder.codingPath,

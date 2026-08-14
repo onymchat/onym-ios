@@ -79,6 +79,25 @@ final class DiscoveryFetcherTests: XCTestCase {
         XCTAssertEqual(fetched, body)
     }
 
+    func testSnapshotAtTheFullMebibyteCapStreamsWholeAndFast() async throws {
+        // Throughput-shaped: a snapshot at the full 1 MiB bound must
+        // come back intact via chunked accumulation (the old
+        // byte-per-iteration loop was pathologically slow exactly here).
+        var body = Data(capacity: DiscoveryTrust.snapshotMaxBytes)
+        while body.count < DiscoveryTrust.snapshotMaxBytes {
+            body.append(UInt8.random(in: .min ... .max))
+        }
+        StubURLProtocol.set(.init(status: 200, headers: [:], body: body), for: url)
+
+        let started = Date()
+        let fetched = try await makeFetcher().fetchSnapshot(url: url)
+        XCTAssertEqual(fetched, body)
+        XCTAssertLessThan(
+            Date().timeIntervalSince(started), 5,
+            "a 1 MiB in-process fetch finishing this slowly means byte-wise accumulation is back"
+        )
+    }
+
     func testUndeclaredOversizeBodyIsAbortedAtTheCap() async {
         // No Content-Length header: the declared-length check cannot
         // fire, so this exercises the mid-stream abort — the §7 cap

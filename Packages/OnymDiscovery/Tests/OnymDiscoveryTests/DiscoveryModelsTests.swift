@@ -51,6 +51,28 @@ final class DiscoveryModelsTests: XCTestCase {
         XCTAssertEqual(snapshot.skippedEntryCount, 1)
     }
 
+    func testEntryWithMalformedComponentIdOrOperatorKeyIsSkipped() throws {
+        // Junk in the identifier fields is checked with the same
+        // DiscoveryFormat helpers the manifests use — the entry is
+        // skipped (lossy), never carried through with an id or key no
+        // later stage could attribute or verify.
+        let badComponentId = entryJSON().replacingOccurrences(
+            of: #""componentId":"onym:component:a""#,
+            with: #""componentId":"NOT AN ID!""#
+        )
+        let badOperatorKey = entryJSON().replacingOccurrences(
+            of: "onym:key:\(String(repeating: "a", count: 64))",
+            with: "onym:key:junk"
+        )
+        let snapshot = try DiscoveryJSON.decoder().decode(
+            CatalogSnapshot.self,
+            from: snapshotJSON(entries: [entryJSON(), badComponentId, badOperatorKey])
+        )
+        XCTAssertEqual(snapshot.entries.count, 1)
+        XCTAssertEqual(snapshot.skippedEntryCount, 2)
+        XCTAssertEqual(snapshot.entries.first?.componentId, "onym:component:a")
+    }
+
     private func descriptorJSON(catalogId: String = "c", extra: String = "") -> String {
         """
         {"catalogId":"\(catalogId)","snapshot":"https://x.example/c.json",\

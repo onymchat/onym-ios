@@ -18,6 +18,75 @@ private struct FakeFetcher: DiscoveryFetching {
     }
 }
 
+/// `FakeFetcher` whose responses can change between refresh passes.
+private final class MutableFetcher: DiscoveryFetching, @unchecked Sendable {
+    private let lock = NSLock()
+    private var responses: [URL: Data]
+
+    init(responses: [URL: Data]) {
+        self.responses = responses
+    }
+
+    func set(_ data: Data?, for url: URL) {
+        lock.withLock { responses[url] = data }
+    }
+
+    private func serve(_ url: URL) throws -> Data {
+        guard let data = lock.withLock({ responses[url] }) else {
+            throw DiscoveryFetchError.badStatus(404)
+        }
+        return data
+    }
+
+    func fetchProviderManifest(url: URL) async throws -> Data { try serve(url) }
+    func fetchSnapshot(url: URL) async throws -> Data { try serve(url) }
+}
+
+/// Suspends every manifest fetch until the gate opens, counting calls —
+/// lets a test hold one refresh pass mid-flight deterministically.
+private actor FetchGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func open() {
+        isOpen = true
+        for waiter in waiters { waiter.resume() }
+        waiters = []
+    }
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+}
+
+private final class GatedFetcher: DiscoveryFetching, @unchecked Sendable {
+    let gate = FetchGate()
+    private let responses: [URL: Data]
+    private let lock = NSLock()
+    private var _manifestFetchCount = 0
+
+    var manifestFetchCount: Int {
+        lock.withLock { _manifestFetchCount }
+    }
+
+    init(responses: [URL: Data]) {
+        self.responses = responses
+    }
+
+    func fetchProviderManifest(url: URL) async throws -> Data {
+        lock.withLock { _manifestFetchCount += 1 }
+        await gate.wait()
+        guard let data = responses[url] else { throw DiscoveryFetchError.badStatus(404) }
+        return data
+    }
+
+    func fetchSnapshot(url: URL) async throws -> Data {
+        guard let data = responses[url] else { throw DiscoveryFetchError.badStatus(404) }
+        return data
+    }
+}
+
 /// In-memory store; no UserDefaults so tests stay hermetic.
 private final class MemoryStore: DiscoveryStore, @unchecked Sendable {
     private let lock = NSLock()
@@ -310,6 +379,137 @@ final class DiscoveryRepositoryTests: XCTestCase {
         XCTAssertEqual(
             secondState.sources.first?.source.lastAccepted["public-all-seats"]?.sequence, 2
         )
+    }
+
+    func testCrossCatalogSubstitutionNeverPersistsUnderTheExpectedCatalog() async throws {
+        // Catalog A's (valid, correctly signed) snapshot served at
+        // catalog B's URL: without the expected-catalogId binding it
+        // would verify against A's descriptor and then persist and
+        // attribute under B — clobbering B's retained chain state
+        // permanently. It must be rejected with the substitution error
+        // while A's own acceptance proceeds untouched.
+        let betaURL = URL(string: "https://discovery.onym.app/catalogs/beta-seats.json")!
+        let manifest = try SignedFixtureFactory.twoCatalogManifest(
+            secondCatalogId: "beta-seats",
+            secondSnapshotURL: betaURL.absoluteString
+        )
+        let store = MemoryStore()
+        store.saveConfiguration(pinnedConfiguration())
+        let fetcher = FakeFetcher(responses: [
+            manifestURL: manifest,
+            snapshotURL: try Fixture.bytes("snapshot-1.json"),
+            betaURL: try Fixture.bytes("snapshot-1.json"), // catalogId public-all-seats — substituted
+        ])
+        let repository = DiscoveryRepository(fetcher: fetcher, store: store) { Fixture.now }
+
+        await repository.refresh()
+        let state = await repository.currentState()
+
+        let source = try XCTUnwrap(state.sources.first)
+        let error = try XCTUnwrap(source.lastError, "the substitution must surface on the source")
+        XCTAssertTrue(error.contains("cross-catalog"), error)
+        XCTAssertNil(
+            source.source.lastAccepted["beta-seats"],
+            "nothing may be persisted under the substituted catalog"
+        )
+        XCTAssertNil(
+            store.loadRetainedSnapshot(providerId: providerId, catalogId: "beta-seats"),
+            "no retained bytes may land under the substituted catalog"
+        )
+        XCTAssertEqual(
+            source.source.lastAccepted["public-all-seats"]?.sequence, 1,
+            "the legitimate catalog's acceptance stays untouched"
+        )
+    }
+
+    func testOverlappingRefreshesCoalesceOntoOnePass() async throws {
+        // refresh() is public and start() fires one concurrently: an
+        // overlapping call must await the in-flight pass, not run a
+        // second interleaved pass whose stale source copy could
+        // regress accepted sequences.
+        let store = MemoryStore()
+        store.saveConfiguration(pinnedConfiguration())
+        let fetcher = GatedFetcher(responses: [
+            manifestURL: try Fixture.bytes("provider-manifest.json"),
+            snapshotURL: try Fixture.bytes("snapshot-1.json"),
+        ])
+        let repository = DiscoveryRepository(fetcher: fetcher, store: store) { Fixture.now }
+
+        let first = Task { await repository.refresh() }
+        // Wait until the first pass is suspended inside the manifest fetch.
+        while fetcher.manifestFetchCount < 1 { await Task.yield() }
+        let second = Task { await repository.refresh() }
+        // Give the second caller room to reach the guard, then release.
+        for _ in 0..<20 { await Task.yield() }
+        await fetcher.gate.open()
+        await first.value
+        await second.value
+
+        XCTAssertEqual(
+            fetcher.manifestFetchCount, 1,
+            "the overlapping refresh must coalesce onto the in-flight pass"
+        )
+        let state = await repository.currentState()
+        XCTAssertEqual(state.fetchStatus, .success)
+        XCTAssertEqual(state.sources.first?.source.lastAccepted["public-all-seats"]?.sequence, 1)
+    }
+
+    func testManifestStageFailureClearsStaleNotes() async throws {
+        // Pass 1 accepts snapshot 1; pass 2 forward-jumps to snapshot 3
+        // (producing a note); pass 3 fails at the manifest fetch. The
+        // stale forward-jump note must not stay displayed next to the
+        // new failure — notes are cleared at the top of the source
+        // refresh, not only on the success path.
+        let store = MemoryStore()
+        store.saveConfiguration(pinnedConfiguration())
+        let manifest = try Fixture.bytes("provider-manifest.json")
+        let fetcher = MutableFetcher(responses: [
+            manifestURL: manifest,
+            snapshotURL: try Fixture.bytes("snapshot-1.json"),
+        ])
+        let repository = DiscoveryRepository(fetcher: fetcher, store: store) { Fixture.now }
+
+        await repository.refresh()
+        var state = await repository.currentState()
+        XCTAssertEqual(state.sources.first?.notes, [])
+
+        fetcher.set(try Fixture.bytes("snapshot-3.json"), for: snapshotURL)
+        await repository.refresh()
+        state = await repository.currentState()
+        let jumpNote = try XCTUnwrap(state.sources.first?.notes.first)
+        XCTAssertTrue(jumpNote.contains("could not be verified"), jumpNote)
+
+        fetcher.set(nil, for: manifestURL) // manifest fetch now 404s
+        await repository.refresh()
+        state = await repository.currentState()
+        XCTAssertNotNil(state.sources.first?.lastError)
+        XCTAssertEqual(
+            state.sources.first?.notes, [],
+            "a manifest-stage failure must not display the previous pass's notes"
+        )
+    }
+
+    func testAllSourcesUnpinnedSurfacesNeedsConfirmation() async throws {
+        // Only an unpinned (seeded, unconfirmed) source: refresh must
+        // not report a bare .success over a silently empty aggregate —
+        // the source carries a needs-confirmation note and the status
+        // says why nothing was fetched.
+        let store = MemoryStore()
+        let repository = DiscoveryRepository(fetcher: FakeFetcher(responses: [:]), store: store) { Fixture.now }
+        await repository.start()
+        // start() refreshes in the background; await a full pass so the
+        // assertion isn't racing it.
+        await repository.refresh()
+        let state = await repository.currentState()
+
+        XCTAssertEqual(state.sources.count, 1)
+        XCTAssertNil(state.sources.first?.lastError)
+        let note = try XCTUnwrap(state.sources.first?.notes.first)
+        XCTAssertTrue(note.lowercased().contains("confirm"), note)
+        guard case .failed(let message) = state.fetchStatus else {
+            return XCTFail("expected a surfaced non-success status, got \(state.fetchStatus)")
+        }
+        XCTAssertTrue(message.lowercased().contains("confirm"), message)
     }
 
     func testRemoveSourcePurgesOrphanedSnapshotBlobs() async throws {

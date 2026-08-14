@@ -135,6 +135,7 @@ public actor DiscoveryRepository {
     private var fetchStatus: DiscoveryFetchStatus = .idle
     private var continuations: [UUID: AsyncStream<DiscoveryState>.Continuation] = [:]
     private var startTask: Task<Void, Never>?
+    private var refreshTask: Task<Void, Never>?
 
     public init(
         fetcher: any DiscoveryFetching,
@@ -188,18 +189,48 @@ public actor DiscoveryRepository {
     /// tolerated: they surface on that source's status while the other
     /// sources' results (and this source's previously retained
     /// catalogs) stay in the aggregate.
+    ///
+    /// Re-entrancy-safe (mirrors `start()`'s in-flight guard):
+    /// `refresh()` is public AND `start()` fires one concurrently, so
+    /// overlapping callers coalesce onto the in-flight pass instead of
+    /// interleaving two passes whose stale source copies would
+    /// overwrite each other's accepted sequences.
     public func refresh() async {
+        let task: Task<Void, Never>
+        if let refreshTask {
+            task = refreshTask
+        } else {
+            task = Task { [weak self] in
+                await self?.performRefresh()
+                await self?.clearRefreshTask()
+            }
+            refreshTask = task
+        }
+        await task.value
+    }
+
+    private func clearRefreshTask() {
+        refreshTask = nil
+    }
+
+    private func performRefresh() async {
         fetchStatus = .fetching
         publish()
 
         var refreshedAnything = false
         var failures = 0
+        var awaitingConfirmation = 0
 
         for source in configuration.sources where source.isEnabled {
             // A source without a pinned key (an unconfirmed seeded
             // default) is skipped: hard enforcement means we never
-            // build an aggregate on an unpinned identity.
-            guard let pinnedKey = source.pinnedOperatorKeyHex else { continue }
+            // build an aggregate on an unpinned identity. The skip is
+            // surfaced as a note — never a silently empty source.
+            guard let pinnedKey = source.pinnedOperatorKeyHex else {
+                lastNotes[source.providerId] = [String(localized: "Needs confirmation: confirm this source's operator key to start using it.")]
+                awaitingConfirmation += 1
+                continue
+            }
             do {
                 try await refreshSource(source, pinnedKey: pinnedKey)
                 lastErrors[source.providerId] = nil
@@ -213,6 +244,11 @@ public actor DiscoveryRepository {
         rebuildAggregateFromRetained()
         if failures > 0 && !refreshedAnything {
             fetchStatus = .failed(message: String(localized: "Couldn't refresh any discovery source."))
+        } else if !refreshedAnything && awaitingConfirmation > 0 {
+            // Every enabled source was skipped as unconfirmed: a bare
+            // `.success` over a silently empty aggregate would read as
+            // "up to date, nothing listed". Surface the real state.
+            fetchStatus = .failed(message: String(localized: "Discovery sources need their operator keys confirmed."))
         } else {
             fetchStatus = .success
         }
@@ -220,6 +256,10 @@ public actor DiscoveryRepository {
     }
 
     private func refreshSource(_ source: DiscoverySource, pinnedKey: String) async throws {
+        // Cleared up front so a manifest-stage failure (which throws
+        // before the end-of-pass note assignment) never leaves the
+        // PREVIOUS refresh's notes displayed next to this failure.
+        lastNotes[source.providerId] = []
         let manifestBytes = try await fetcher.fetchProviderManifest(url: source.manifestURL)
         let signedManifest = try DiscoveryTrust.verifyProviderManifest(
             raw: manifestBytes,
@@ -252,7 +292,10 @@ public actor DiscoveryRepository {
         // recorded and skipped, never allowed to discard the records
         // (and retained bytes) of catalogs this same pass already
         // accepted — those must feed the next refresh's chain check.
-        var updated = source
+        // Every accepted record is MERGED into the live configuration
+        // immediately (per catalog), never accumulated on a pass-local
+        // source copy: a whole-source replace from a stale copy could
+        // regress sequences another interleaved pass already advanced.
         var firstCatalogError: Error?
         for catalog in signedManifest.manifest.catalogs {
             guard let snapshotURL = catalog.snapshotURL else { continue }
@@ -260,8 +303,9 @@ public actor DiscoveryRepository {
                 let snapshotBytes = try await fetcher.fetchSnapshot(url: snapshotURL)
                 // §8 retained state: last accepted digest + sequence, and
                 // the previous manifest's policy declaration for the §4.2
-                // transition grace.
-                let retained = updated.lastAccepted[catalog.catalogId].map {
+                // transition grace. Read from the LIVE configuration —
+                // the fetch above suspended the actor.
+                let retained = currentSource(source.providerId)?.lastAccepted[catalog.catalogId].map {
                     RetainedCatalogAcceptance(
                         sequence: $0.sequence,
                         digest: $0.digest,
@@ -271,22 +315,28 @@ public actor DiscoveryRepository {
                 let accepted = try DiscoveryTrust.verifySnapshot(
                     raw: snapshotBytes,
                     manifest: signedManifest,
+                    expectedCatalogId: catalog.catalogId,
                     retained: retained,
                     now: now()
                 )
+                // Belt and braces alongside `expectedCatalogId`: nothing
+                // is persisted under a catalog the accepted document
+                // does not itself declare.
+                assert(accepted.snapshot.catalogId == catalog.catalogId)
                 store.saveRetainedSnapshot(
                     accepted.rawBytes,
                     providerId: source.providerId,
                     catalogId: catalog.catalogId
                 )
-                updated = updated.withLastAccepted(
+                mergeAcceptedRecord(
                     AcceptedSnapshotRecord(
                         digest: accepted.digest,
                         sequence: accepted.snapshot.sequence,
                         acceptedAt: now(),
                         policyDigest: catalog.policy
                     ),
-                    forCatalog: catalog.catalogId
+                    forCatalog: catalog.catalogId,
+                    providerId: source.providerId
                 )
                 if case let .forwardJump(missed) = accepted.outcome {
                     notes.append(String(localized: "Catalog \(catalog.catalogId): \(missed) intermediate publication(s) could not be verified."))
@@ -305,11 +355,27 @@ public actor DiscoveryRepository {
         }
 
         lastNotes[source.providerId] = notes
-        replaceSource(updated)
         // Thrown only after the accepted catalogs were persisted: the
         // failure surfaces on the source's status while its partial
         // results stay retained.
         if let firstCatalogError { throw firstCatalogError }
+    }
+
+    private func currentSource(_ providerId: String) -> DiscoverySource? {
+        configuration.sources.first { $0.providerId == providerId }
+    }
+
+    /// Merge one accepted catalog record into the CURRENT
+    /// configuration's copy of the source (which may have changed
+    /// across the fetch suspensions), persisting immediately. A source
+    /// removed mid-pass is left removed.
+    private func mergeAcceptedRecord(
+        _ record: AcceptedSnapshotRecord,
+        forCatalog catalogId: String,
+        providerId: String
+    ) {
+        guard let current = currentSource(providerId) else { return }
+        replaceSource(current.withLastAccepted(record, forCatalog: catalogId))
     }
 
     // MARK: - Source management
@@ -432,9 +498,13 @@ public actor DiscoveryRepository {
                     providerId: source.providerId,
                     catalogId: catalogId
                 ) else { continue }
-                guard let snapshot = try? DiscoveryJSON.decoder().decode(CatalogSnapshot.self, from: raw) else {
-                    continue
-                }
+                // Decoded via the same single-parse normalization the
+                // trust layer verified these bytes through, so the
+                // offline view can never diverge from the verified one
+                // on a duplicate-key document.
+                guard let normalized = try? DiscoveryCanonical.normalizedDocumentBytes(of: raw),
+                      let snapshot = try? DiscoveryJSON.decoder().decode(CatalogSnapshot.self, from: normalized)
+                else { continue }
                 // Entries from an expired retained snapshot are stale
                 // history, not current recommendations (§8).
                 guard snapshot.expiresAt > now() else { continue }

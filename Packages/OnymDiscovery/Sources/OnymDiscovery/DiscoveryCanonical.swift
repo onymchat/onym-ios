@@ -41,6 +41,31 @@ public enum DiscoveryCanonical {
         return Data(out.utf8)
     }
 
+    /// The document re-serialized (canonically, `signature` retained)
+    /// from a single `JSONSerialization` parse — the same parse family
+    /// `signingBytes(of:)` canonicalizes. `DiscoveryTrust` decodes the
+    /// wire models FROM these bytes instead of from `raw`, so both
+    /// views of the document (the value model and the signed bytes)
+    /// share one parser's duplicate-key resolution. Chosen over
+    /// key-count comparison because collapsed duplicates leave counts
+    /// equal in both views; sharing the parse closes the divergence
+    /// outright, with no change to what the signature or digests are
+    /// computed over (still the exact `raw` bytes).
+    public static func normalizedDocumentBytes(of raw: Data) throws -> Data {
+        let parsed: Any
+        do {
+            parsed = try JSONSerialization.jsonObject(with: raw)
+        } catch {
+            throw DiscoveryTrustError.providerManifestInvalid(reason: "document is not valid JSON")
+        }
+        guard let object = parsed as? [String: Any] else {
+            throw DiscoveryTrustError.providerManifestInvalid(reason: "top level is not a JSON object")
+        }
+        var out = ""
+        try serialize(object, into: &out)
+        return Data(out.utf8)
+    }
+
     // MARK: - Canonical serialization (§3)
 
     private static func serialize(_ value: Any, into out: inout String) throws {

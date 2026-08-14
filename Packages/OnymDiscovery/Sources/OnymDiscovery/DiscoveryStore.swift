@@ -77,10 +77,12 @@ public struct DefaultDiscoveryStore: DiscoveryStore, @unchecked Sendable {
     }
 
     public func loadRetainedSnapshot(providerId: String, catalogId: String) -> Data? {
-        try? Data(contentsOf: snapshotFileURL(providerId: providerId, catalogId: catalogId))
+        Self.assertPathSafe(providerId: providerId, catalogId: catalogId)
+        return try? Data(contentsOf: snapshotFileURL(providerId: providerId, catalogId: catalogId))
     }
 
     public func saveRetainedSnapshot(_ raw: Data, providerId: String, catalogId: String) {
+        Self.assertPathSafe(providerId: providerId, catalogId: catalogId)
         let url = snapshotFileURL(providerId: providerId, catalogId: catalogId)
         try? FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(),
@@ -90,6 +92,7 @@ public struct DefaultDiscoveryStore: DiscoveryStore, @unchecked Sendable {
     }
 
     public func removeRetainedSnapshots(providerId: String) {
+        Self.assertPathSafe(providerId: providerId)
         // Prefix removal: the whole per-provider directory goes, so
         // orphaned blobs never outlive the source.
         try? FileManager.default.removeItem(at: providerDirectory(providerId: providerId))
@@ -102,6 +105,27 @@ public struct DefaultDiscoveryStore: DiscoveryStore, @unchecked Sendable {
     }
 
     // MARK: - Private
+
+    /// The doc-comment's promised format assertion, enforced before any
+    /// path interpolation or recursive removal: `providerId` must be a
+    /// component id (`onym:component:<[a-z0-9-]{1,64}>`) and
+    /// `catalogId` a catalog id (`[a-z0-9-]{1,64}`) — both charsets are
+    /// POSIX-filename-safe and free of `/`, `.`, and NUL. Ids reach
+    /// this store only from documents `DiscoveryTrust` already
+    /// format-checked, so a violation is programmer error:
+    /// `preconditionFailure`, never a silent path write.
+    private static func assertPathSafe(providerId: String, catalogId: String? = nil) {
+        precondition(
+            DiscoveryFormat.isComponentId(providerId),
+            "providerId is not a valid component id"
+        )
+        if let catalogId {
+            precondition(
+                DiscoveryFormat.isCatalogId(catalogId),
+                "catalogId is not a valid catalog id"
+            )
+        }
+    }
 
     private func providerDirectory(providerId: String) -> URL {
         snapshotsDirectory.appendingPathComponent(providerId, isDirectory: true)
@@ -127,7 +151,11 @@ public struct DefaultDiscoveryStore: DiscoveryStore, @unchecked Sendable {
             guard let separator = rest.firstIndex(of: "|") else { continue }
             let providerId = String(rest[..<separator])
             let catalogId = String(rest[rest.index(after: separator)...])
-            guard !providerId.isEmpty, !catalogId.isEmpty,
+            // Legacy keys are arbitrary defaults strings, not verified
+            // documents: junk ids are skipped (and their keys dropped),
+            // never allowed to hit the path-safety precondition.
+            guard DiscoveryFormat.isComponentId(providerId),
+                  DiscoveryFormat.isCatalogId(catalogId),
                   let raw = defaults.data(forKey: key)
             else { continue }
             let url = snapshotFileURL(providerId: providerId, catalogId: catalogId)

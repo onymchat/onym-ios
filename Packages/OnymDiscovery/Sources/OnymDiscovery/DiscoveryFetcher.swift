@@ -50,38 +50,55 @@ public struct URLSessionDiscoveryFetcher: DiscoveryFetching {
     private func fetch(url: URL, maxBytes: Int) async throws -> Data {
         var request = URLRequest(url: url)
         request.timeoutInterval = Self.requestTimeoutSeconds
-        let (bytes, response) = try await session.bytes(
-            for: request,
-            delegate: RedirectPolicy()
-        )
-        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-        guard status != 429 else { throw DiscoveryFetchError.rateLimited }
-        guard (200..<300).contains(status) else {
-            throw DiscoveryFetchError.badStatus(status)
+        let handler = CappedFetchHandler(maxBytes: maxBytes)
+        let task = session.dataTask(with: request)
+        task.delegate = handler
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                handler.begin(continuation: continuation, task: task)
+            }
+        } onCancel: {
+            task.cancel()
         }
-        // A declared oversize body is refused before reading a byte;
-        // an undeclared (or lying) one is cut off at the cap below —
-        // throwing out of the iteration cancels the transfer.
-        if response.expectedContentLength > Int64(maxBytes) {
-            throw DiscoveryFetchError.oversize
-        }
-        var data = Data()
-        data.reserveCapacity(min(
-            maxBytes,
-            response.expectedContentLength > 0 ? Int(response.expectedContentLength) : 0
-        ))
-        for try await byte in bytes {
-            guard data.count < maxBytes else { throw DiscoveryFetchError.oversize }
-            data.append(byte)
-        }
-        return data
     }
 
-    /// §7 redirect rules: ≤ 3 redirects per fetch, HTTPS-to-HTTPS
-    /// only, and never toward an IP literal. Returning `nil` refuses
-    /// the redirect (the task then completes with the 3xx response).
-    private final class RedirectPolicy: NSObject, URLSessionTaskDelegate {
+    /// Delegate-driven capped download: the body accumulates in the
+    /// chunks the URL-loading system delivers (never byte-per-iteration
+    /// — `AsyncBytes` iteration is pathologically slow at the 1 MiB
+    /// snapshot cap), the declared-length refusal fires before a body
+    /// byte is read, and the mid-stream cap cancels the transfer the
+    /// moment the accumulated body would cross the bound. Also carries
+    /// the §7 redirect rules: ≤ 3 redirects per fetch, HTTPS-to-HTTPS
+    /// only, and never toward an IP literal — a refused redirect stops
+    /// the chain, so the request completes with the 3xx status and
+    /// fails as `badStatus`.
+    private final class CappedFetchHandler: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+        private let maxBytes: Int
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<Data, Error>?
+        /// Touched only on the session's serial delegate queue.
+        private var body = Data()
         private var redirects = 0
+
+        init(maxBytes: Int) {
+            self.maxBytes = maxBytes
+        }
+
+        func begin(continuation: CheckedContinuation<Data, Error>, task: URLSessionDataTask) {
+            lock.withLock { self.continuation = continuation }
+            task.resume()
+        }
+
+        /// Resume-once: whichever outcome lands first (status refusal,
+        /// oversize, completion, cancellation) wins; the rest no-op.
+        private func finish(_ result: Result<Data, Error>, cancelling task: URLSessionTask? = nil) {
+            let continuation = lock.withLock {
+                defer { self.continuation = nil }
+                return self.continuation
+            }
+            task?.cancel()
+            continuation?.resume(with: result)
+        }
 
         func urlSession(
             _ session: URLSession,
@@ -96,6 +113,51 @@ public struct URLSessionDiscoveryFetcher: DiscoveryFetching {
                   let host = target.host(), !Self.isIPLiteral(host)
             else { return nil }
             return request
+        }
+
+        func urlSession(
+            _ session: URLSession,
+            dataTask: URLSessionDataTask,
+            didReceive response: URLResponse
+        ) async -> URLSession.ResponseDisposition {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            guard status != 429 else {
+                finish(.failure(DiscoveryFetchError.rateLimited))
+                return .cancel
+            }
+            guard (200..<300).contains(status) else {
+                finish(.failure(DiscoveryFetchError.badStatus(status)))
+                return .cancel
+            }
+            // A declared oversize body is refused before reading a byte.
+            guard response.expectedContentLength <= Int64(maxBytes) else {
+                finish(.failure(DiscoveryFetchError.oversize))
+                return .cancel
+            }
+            body.reserveCapacity(min(
+                maxBytes,
+                response.expectedContentLength > 0 ? Int(response.expectedContentLength) : 0
+            ))
+            return .allow
+        }
+
+        func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+            // Mid-stream cap: an undeclared (or lying) oversize body is
+            // cut off on the chunk that crosses the bound, never fully
+            // buffered.
+            guard body.count + data.count <= maxBytes else {
+                finish(.failure(DiscoveryFetchError.oversize), cancelling: dataTask)
+                return
+            }
+            body.append(data)
+        }
+
+        func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+            if let error {
+                finish(.failure(error))
+            } else {
+                finish(.success(body))
+            }
         }
 
         private static func isIPLiteral(_ host: String) -> Bool {
