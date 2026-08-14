@@ -135,6 +135,20 @@ final class DiscoveryTrustTests: XCTestCase {
         )
     }
 
+    /// Retained acceptance state derived from a previously accepted
+    /// snapshot's exact bytes — what the repository persists per §8.
+    private func retained(
+        _ data: Data,
+        previousPolicy: String? = nil
+    ) throws -> RetainedCatalogAcceptance {
+        let snapshot = try DiscoveryJSON.decoder().decode(CatalogSnapshot.self, from: data)
+        return RetainedCatalogAcceptance(
+            sequence: snapshot.sequence,
+            digest: DiscoveryFormat.sha256Digest(of: data),
+            previousPolicyDigest: previousPolicy
+        )
+    }
+
     func testThreeSnapshotChainVerifiesInOrder() throws {
         let manifest = try verifiedManifest()
         let s1 = try Fixture.bytes("snapshot-1.json")
@@ -142,21 +156,24 @@ final class DiscoveryTrustTests: XCTestCase {
         let s3 = try Fixture.bytes("snapshot-3.json")
 
         let a1 = try DiscoveryTrust.verifySnapshot(
-            raw: s1, manifest: manifest, previousRaw: nil, now: Fixture.now
+            raw: s1, manifest: manifest, retained: nil, now: Fixture.now
         )
         XCTAssertEqual(a1.snapshot.sequence, 1)
         XCTAssertNil(a1.snapshot.previousDigest)
         XCTAssertEqual(a1.snapshot.entries.count, 1)
         XCTAssertEqual(a1.snapshot.skippedEntryCount, 0)
+        XCTAssertEqual(a1.outcome, .firstAcceptance)
+        XCTAssertFalse(a1.policyTransition)
 
         let a2 = try DiscoveryTrust.verifySnapshot(
-            raw: s2, manifest: manifest, previousRaw: s1, now: Fixture.now
+            raw: s2, manifest: manifest, retained: try retained(s1), now: Fixture.now
         )
         XCTAssertEqual(a2.snapshot.sequence, 2)
         XCTAssertEqual(a2.snapshot.previousDigest, a1.digest)
+        XCTAssertEqual(a2.outcome, .successor)
 
         let a3 = try DiscoveryTrust.verifySnapshot(
-            raw: s3, manifest: manifest, previousRaw: s2, now: Fixture.now
+            raw: s3, manifest: manifest, retained: try retained(s2), now: Fixture.now
         )
         XCTAssertEqual(a3.snapshot.sequence, 3)
         XCTAssertEqual(a3.snapshot.previousDigest, a2.digest)
@@ -169,7 +186,7 @@ final class DiscoveryTrustTests: XCTestCase {
         let s1 = try Fixture.bytes("snapshot-1.json")
         let s2 = try Fixture.bytes("snapshot-2.json")
         assertThrowsTrustError(try DiscoveryTrust.verifySnapshot(
-            raw: s1, manifest: manifest, previousRaw: s2, now: Fixture.now
+            raw: s1, manifest: manifest, retained: try retained(s2), now: Fixture.now
         )) {
             if case .snapshotInvalid(let reason) = $0 {
                 return reason.contains("rollback") || reason.contains("sequence")
@@ -178,28 +195,168 @@ final class DiscoveryTrustTests: XCTestCase {
         }
     }
 
-    func testSequenceGapIsRejected() throws {
-        // Snapshot 3 directly after snapshot 1: gap.
+    func testForwardJumpIsAcceptedWithNote() throws {
+        // §6/§10 item 8: snapshot 3 after a retained snapshot 1 — the
+        // client missed a publication. Accepted, with the jump
+        // surfaced as an outcome (never a permanent rejection of an
+        // honest catalog).
         let manifest = try verifiedManifest()
         let s1 = try Fixture.bytes("snapshot-1.json")
         let s3 = try Fixture.bytes("snapshot-3.json")
+        let accepted = try DiscoveryTrust.verifySnapshot(
+            raw: s3, manifest: manifest, retained: try retained(s1), now: Fixture.now
+        )
+        XCTAssertEqual(accepted.outcome, .forwardJump(missed: 1))
+    }
+
+    func testNoOpRefreshIsNotAWarning() throws {
+        // §6/§10 item 11: identical latest snapshot re-fetched — the
+        // provider simply hasn't published since.
+        let manifest = try verifiedManifest()
+        let s2 = try Fixture.bytes("snapshot-2.json")
+        let accepted = try DiscoveryTrust.verifySnapshot(
+            raw: s2, manifest: manifest, retained: try retained(s2), now: Fixture.now
+        )
+        XCTAssertEqual(accepted.outcome, .noOpRefresh)
+    }
+
+    func testSameSequenceForkIsRejected() throws {
+        // Fork: the retained sequence republished with different
+        // bytes — equivocation, never resolved toward either side.
+        let manifest = try verifiedManifest()
+        let s2 = try Fixture.bytes("snapshot-2.json")
+        var text = String(data: s2, encoding: .utf8)!
+        text = text.replacingOccurrences(of: #""placement":"policy-ranked""#, with: #""placement":"reordered""#)
         assertThrowsTrustError(try DiscoveryTrust.verifySnapshot(
-            raw: s3, manifest: manifest, previousRaw: s1, now: Fixture.now
+            raw: Data(text.utf8), manifest: manifest, retained: try retained(s2), now: Fixture.now
+        )) {
+            if case .snapshotInvalid(let reason) = $0 { return reason.contains("fork") }
+            return false
+        }
+    }
+
+    func testFirstAcceptanceTakesAnySequence() throws {
+        // §6: on first acceptance there is no retained state to
+        // compare against — an established catalog past its first
+        // snapshot must be addable (TOFU covers trust).
+        let manifest = try verifiedManifest()
+        let s2 = try Fixture.bytes("snapshot-2.json")
+        let accepted = try DiscoveryTrust.verifySnapshot(
+            raw: s2, manifest: manifest, retained: nil, now: Fixture.now
+        )
+        XCTAssertEqual(accepted.snapshot.sequence, 2)
+        XCTAssertEqual(accepted.outcome, .firstAcceptance)
+    }
+
+    func testFutureDatedSnapshotIsRejected() throws {
+        // §4.2: generatedAt beyond the 10-minute skew in the future is
+        // snapshot_invalid — the 90-day ceiling must not be mintable
+        // forward. Fixture generatedAt is 2026-08-13; verify from
+        // 2026-08-01.
+        let manifest = try verifiedManifest()
+        let s1 = try Fixture.bytes("snapshot-1.json")
+        let early = Date(timeIntervalSince1970: 1_785_542_400)
+        assertThrowsTrustError(try DiscoveryTrust.verifySnapshot(
+            raw: s1, manifest: manifest, retained: nil, now: early
+        )) {
+            if case .snapshotInvalid(let reason) = $0 { return reason.contains("future") }
+            return false
+        }
+    }
+
+    func testBornExpiredSnapshotIsRejected() throws {
+        // §4.2: expiresAt must be STRICTLY after generatedAt —
+        // equality is snapshot_invalid (born expired), not merely
+        // expired. The check precedes signature verification, so a
+        // textual tamper exercises it.
+        let manifest = try verifiedManifest()
+        let s1 = try Fixture.bytes("snapshot-1.json")
+        var text = String(data: s1, encoding: .utf8)!
+        text = text.replacingOccurrences(
+            of: #""expiresAt":"2026-09-12T00:00:00Z""#,
+            with: #""expiresAt":"2026-08-13T00:00:00Z""#
+        )
+        XCTAssertNotEqual(Data(text.utf8), s1)
+        assertThrowsTrustError(try DiscoveryTrust.verifySnapshot(
+            raw: Data(text.utf8), manifest: manifest, retained: nil, now: Fixture.now
+        )) {
+            if case .snapshotInvalid(let reason) = $0 { return reason.contains("not after") }
+            return false
+        }
+    }
+
+    func testPolicyTransitionGrace() throws {
+        // §4.2/§10 item 10: manifest updated to a new policy digest,
+        // snapshot still citing the previous one — accepted with the
+        // transition note when (and only when) the previous
+        // declaration was retained; any third digest fails.
+        let transitionManifest = try DiscoveryTrust.verifyProviderManifest(
+            raw: try Fixture.bytes("policy-transition-manifest.json"),
+            pinnedOperatorKeyHex: nil,
+            now: Fixture.now
+        )
+        let s1 = try Fixture.bytes("snapshot-1.json")
+        let previousPolicy = "sha256:" + String(repeating: "11", count: 32)
+
+        // Without the retained previous declaration: snapshot_invalid.
+        assertThrowsTrustError(try DiscoveryTrust.verifySnapshot(
+            raw: s1, manifest: transitionManifest, retained: nil, now: Fixture.now
+        )) {
+            if case .snapshotInvalid(let reason) = $0 { return reason.contains("policy") }
+            return false
+        }
+        // With it: accepted, transition surfaced.
+        let accepted = try DiscoveryTrust.verifySnapshot(
+            raw: s1,
+            manifest: transitionManifest,
+            retained: try retained(s1, previousPolicy: previousPolicy),
+            now: Fixture.now
+        )
+        XCTAssertTrue(accepted.policyTransition)
+        // A third digest matches neither: snapshot_invalid.
+        let third = "sha256:" + String(repeating: "99", count: 32)
+        assertThrowsTrustError(try DiscoveryTrust.verifySnapshot(
+            raw: s1,
+            manifest: transitionManifest,
+            retained: try retained(s1, previousPolicy: third),
+            now: Fixture.now
         )) {
             if case .snapshotInvalid = $0 { return true }
             return false
         }
     }
 
-    func testFirstObservedSnapshotMustBeSequenceOne() throws {
+    func testAudienceSkipManifestIsValidAndEmpty() throws {
+        // §1/§10 item 13: a manifest of decodable but non-public
+        // catalogs is a valid, empty-by-policy source; the skip count
+        // is surfaced, and the source is never provider_manifest_invalid.
+        let signed = try DiscoveryTrust.verifyProviderManifest(
+            raw: try Fixture.bytes("audience-skip-manifest.json"),
+            pinnedOperatorKeyHex: nil,
+            now: Fixture.now
+        )
+        XCTAssertTrue(signed.manifest.catalogs.isEmpty)
+        XCTAssertEqual(signed.manifest.audienceSkippedCatalogCount, 1)
+        XCTAssertEqual(signed.manifest.skippedCatalogCount, 0)
+    }
+
+    func testSponsoredDisclosureAndStatusSurvive() throws {
+        // §10 item 6 + §4.2 status: the sponsored-placement disclosure
+        // and a valid warning status must SURVIVE decoding — an entry
+        // carrying a valid status is never skipped (that would be the
+        // exact warning-dropping failure the field exists to prevent).
         let manifest = try verifiedManifest()
-        let s2 = try Fixture.bytes("snapshot-2.json")
-        assertThrowsTrustError(try DiscoveryTrust.verifySnapshot(
-            raw: s2, manifest: manifest, previousRaw: nil, now: Fixture.now
-        )) {
-            if case .snapshotInvalid = $0 { return true }
-            return false
-        }
+        let raw = try Fixture.bytes("snapshot-sponsored.json")
+        let accepted = try DiscoveryTrust.verifySnapshot(
+            raw: raw, manifest: manifest, retained: nil, now: Fixture.now
+        )
+        XCTAssertEqual(accepted.snapshot.entries.count, 2)
+        XCTAssertEqual(accepted.snapshot.skippedEntryCount, 0)
+        XCTAssertEqual(accepted.snapshot.entries[0].relationship, "sponsored-placement")
+        XCTAssertEqual(accepted.snapshot.entries[0].placement, "sponsored")
+        let status = try XCTUnwrap(accepted.snapshot.entries[1].status)
+        XCTAssertEqual(status.state, "warning")
+        XCTAssertNotNil(status.uri)
     }
 
     func testExpiredSnapshotIsRejected() throws {
@@ -210,7 +367,7 @@ final class DiscoveryTrustTests: XCTestCase {
         // manifest from the fixture date).
         let late = Date(timeIntervalSince1970: 1_790_812_800)
         assertThrowsTrustError(try DiscoveryTrust.verifySnapshot(
-            raw: s1, manifest: manifest, previousRaw: nil, now: late
+            raw: s1, manifest: manifest, retained: nil, now: late
         )) { $0 == .snapshotExpired }
     }
 
@@ -222,12 +379,12 @@ final class DiscoveryTrustTests: XCTestCase {
         let expiresAt = Date(timeIntervalSince1970: 1_789_171_200)
         // Exactly 10 minutes past expiry: within the skew allowance.
         XCTAssertNoThrow(try DiscoveryTrust.verifySnapshot(
-            raw: s1, manifest: manifest, previousRaw: nil,
+            raw: s1, manifest: manifest, retained: nil,
             now: expiresAt.addingTimeInterval(10 * 60)
         ))
         // One second beyond the allowance: snapshot_expired.
         assertThrowsTrustError(try DiscoveryTrust.verifySnapshot(
-            raw: s1, manifest: manifest, previousRaw: nil,
+            raw: s1, manifest: manifest, retained: nil,
             now: expiresAt.addingTimeInterval(10 * 60 + 1)
         )) { $0 == .snapshotExpired }
     }
@@ -238,7 +395,7 @@ final class DiscoveryTrustTests: XCTestCase {
         var text = String(data: s1, encoding: .utf8)!
         text = text.replacingOccurrences(of: "tcU3eQry", with: "tcU3eQrz")
         assertThrowsTrustError(try DiscoveryTrust.verifySnapshot(
-            raw: Data(text.utf8), manifest: manifest, previousRaw: nil, now: Fixture.now
+            raw: Data(text.utf8), manifest: manifest, retained: nil, now: Fixture.now
         )) {
             if case .snapshotInvalid(let reason) = $0 {
                 return reason.contains("signature")
@@ -255,7 +412,7 @@ final class DiscoveryTrustTests: XCTestCase {
         let manifest = try verifiedManifest()
         let s1 = try Fixture.bytes("snapshot-1.json")
         let accepted = try DiscoveryTrust.verifySnapshot(
-            raw: s1, manifest: manifest, previousRaw: nil, now: Fixture.now
+            raw: s1, manifest: manifest, retained: nil, now: Fixture.now
         )
         let pinned = try XCTUnwrap(accepted.snapshot.entries.first?.manifest.digest)
         XCTAssertNoThrow(try DiscoveryTrust.verifyDestination(bytes: bytes, pinnedDigest: pinned))
@@ -267,7 +424,7 @@ final class DiscoveryTrustTests: XCTestCase {
         let s1 = try Fixture.bytes("snapshot-1.json")
         let manifest = try verifiedManifest()
         let accepted = try DiscoveryTrust.verifySnapshot(
-            raw: s1, manifest: manifest, previousRaw: nil, now: Fixture.now
+            raw: s1, manifest: manifest, retained: nil, now: Fixture.now
         )
         let pinned = try XCTUnwrap(accepted.snapshot.entries.first?.manifest.digest)
         assertThrowsTrustError(try DiscoveryTrust.verifyDestination(

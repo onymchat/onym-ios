@@ -59,16 +59,22 @@ public struct AttributedCatalogEntry: Equatable, Sendable, Identifiable {
 
 /// Per-source status for the settings UI: the source itself plus the
 /// last refresh's trust / fetch error, if any (equivocation and
-/// rollback surface here as `snapshotInvalid` reasons).
+/// rollback surface here as `snapshotInvalid` reasons), and the last
+/// refresh's integrity/completeness notes — skipped catalogs and
+/// entries (`result_incomplete`), audience skips, forward-jump and
+/// policy-transition notes (§1/§6/§9). Notes are informational; the
+/// source's data was still accepted.
 public struct DiscoverySourceStatus: Equatable, Sendable, Identifiable {
     public let source: DiscoverySource
     public let lastError: String?
+    public let notes: [String]
 
     public var id: String { source.providerId }
 
-    public init(source: DiscoverySource, lastError: String?) {
+    public init(source: DiscoverySource, lastError: String?, notes: [String] = []) {
         self.source = source
         self.lastError = lastError
+        self.notes = notes
     }
 }
 
@@ -124,6 +130,7 @@ public actor DiscoveryRepository {
 
     private var configuration: DiscoverySourcesConfiguration
     private var lastErrors: [String: String] = [:]
+    private var lastNotes: [String: [String]] = [:]
     private var aggregate: [AttributedCatalogEntry] = []
     private var fetchStatus: DiscoveryFetchStatus = .idle
     private var continuations: [UUID: AsyncStream<DiscoveryState>.Continuation] = [:]
@@ -230,18 +237,35 @@ public actor DiscoveryRepository {
             )
         }
 
+        // §1/§9 surfacing: skipped descriptors and audience skips are
+        // notes on the source, so a partly or wholly skipped manifest
+        // never reads as a silently smaller (or empty) one.
+        var notes: [String] = []
+        if signedManifest.manifest.skippedCatalogCount > 0 {
+            notes.append(String(localized: "\(signedManifest.manifest.skippedCatalogCount) malformed catalog(s) were skipped."))
+        }
+        if signedManifest.manifest.audienceSkippedCatalogCount > 0 {
+            notes.append(String(localized: "\(signedManifest.manifest.audienceSkippedCatalogCount) non-public catalog(s) were skipped."))
+        }
+
         var updated = source
         for catalog in signedManifest.manifest.catalogs {
             guard let snapshotURL = catalog.snapshotURL else { continue }
             let snapshotBytes = try await fetcher.fetchSnapshot(url: snapshotURL)
-            let previousRaw = store.loadRetainedSnapshot(
-                providerId: source.providerId,
-                catalogId: catalog.catalogId
-            )
+            // §8 retained state: last accepted digest + sequence, and
+            // the previous manifest's policy declaration for the §4.2
+            // transition grace.
+            let retained = source.lastAccepted[catalog.catalogId].map {
+                RetainedCatalogAcceptance(
+                    sequence: $0.sequence,
+                    digest: $0.digest,
+                    previousPolicyDigest: $0.policyDigest
+                )
+            }
             let accepted = try DiscoveryTrust.verifySnapshot(
                 raw: snapshotBytes,
                 manifest: signedManifest,
-                previousRaw: previousRaw,
+                retained: retained,
                 now: now()
             )
             store.saveRetainedSnapshot(
@@ -253,12 +277,25 @@ public actor DiscoveryRepository {
                 AcceptedSnapshotRecord(
                     digest: accepted.digest,
                     sequence: accepted.snapshot.sequence,
-                    acceptedAt: now()
+                    acceptedAt: now(),
+                    policyDigest: catalog.policy
                 ),
                 forCatalog: catalog.catalogId
             )
+            if case let .forwardJump(missed) = accepted.outcome {
+                notes.append(String(localized: "Catalog \(catalog.catalogId): \(missed) intermediate publication(s) could not be verified."))
+            }
+            if accepted.policyTransition {
+                notes.append(String(localized: "Catalog \(catalog.catalogId): the provider is transitioning to a new policy."))
+            }
+            if accepted.snapshot.skippedEntryCount > 0 {
+                // §9 result_incomplete: the shrunken set must never be
+                // presented as the whole catalog.
+                notes.append(String(localized: "Catalog \(catalog.catalogId): \(accepted.snapshot.skippedEntryCount) listing(s) could not be read and were skipped."))
+            }
         }
 
+        lastNotes[source.providerId] = notes
         replaceSource(updated)
     }
 
@@ -316,6 +353,7 @@ public actor DiscoveryRepository {
             catalogIds: Array(source.lastAccepted.keys)
         )
         lastErrors[providerId] = nil
+        lastNotes[providerId] = nil
         applyConfiguration(DiscoverySourcesConfiguration(
             sources: configuration.sources.filter { $0.providerId != providerId },
             removedDefaultProviderIds: configuration.removedDefaultProviderIds.union([providerId])
@@ -338,7 +376,11 @@ public actor DiscoveryRepository {
     public func currentState() -> DiscoveryState {
         DiscoveryState(
             sources: configuration.sources.map {
-                DiscoverySourceStatus(source: $0, lastError: lastErrors[$0.providerId])
+                DiscoverySourceStatus(
+                    source: $0,
+                    lastError: lastErrors[$0.providerId],
+                    notes: lastNotes[$0.providerId] ?? []
+                )
             },
             aggregate: aggregate,
             fetchStatus: fetchStatus

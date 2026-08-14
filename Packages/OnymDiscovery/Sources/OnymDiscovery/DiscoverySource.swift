@@ -9,11 +9,30 @@ public struct AcceptedSnapshotRecord: Codable, Equatable, Hashable, Sendable {
     public let digest: String
     public let sequence: Int
     public let acceptedAt: Date
+    /// The `policy` digest the manifest declared for this catalog at
+    /// acceptance time — retained as the "immediately previous
+    /// declaration" the §4.2 policy-transition grace accepts with a
+    /// note on the next refresh. `nil` on records persisted by older
+    /// builds.
+    public let policyDigest: String?
 
-    public init(digest: String, sequence: Int, acceptedAt: Date) {
+    public init(digest: String, sequence: Int, acceptedAt: Date, policyDigest: String? = nil) {
         self.digest = digest
         self.sequence = sequence
         self.acceptedAt = acceptedAt
+        self.policyDigest = policyDigest
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        digest = try c.decode(String.self, forKey: .digest)
+        sequence = try c.decode(Int.self, forKey: .sequence)
+        acceptedAt = try c.decode(Date.self, forKey: .acceptedAt)
+        policyDigest = try c.decodeIfPresent(String.self, forKey: .policyDigest)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case digest, sequence, acceptedAt, policyDigest
     }
 }
 

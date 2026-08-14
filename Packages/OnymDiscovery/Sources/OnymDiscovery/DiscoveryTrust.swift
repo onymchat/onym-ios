@@ -102,14 +102,17 @@ public enum DiscoveryTrust {
         }
 
         // Descriptors decode lossily (§4.1): malformed ones were
-        // skipped and counted at decode time; zero survivors is fatal.
-        guard !manifest.catalogs.isEmpty else {
+        // skipped and counted at decode time. Zero DECODABLE
+        // descriptors is fatal — audience-based skips (§1) do NOT
+        // count toward invalidity: a manifest of decodable but
+        // all-non-public catalogs is a valid, empty-by-policy source.
+        guard !(manifest.catalogs.isEmpty && manifest.nonPublicCatalogs.isEmpty) else {
             throw DiscoveryTrustError.providerManifestInvalid(
                 reason: "no surviving catalog descriptors"
             )
         }
         var seenCatalogIds = Set<String>()
-        for catalog in manifest.catalogs {
+        for catalog in manifest.catalogs + manifest.nonPublicCatalogs {
             guard seenCatalogIds.insert(catalog.catalogId).inserted else {
                 throw DiscoveryTrustError.providerManifestInvalid(
                     reason: "duplicate catalogId \(catalog.catalogId)"
@@ -156,26 +159,25 @@ public enum DiscoveryTrust {
     // MARK: - Catalog snapshot
 
     /// Verify a catalog snapshot's exact published bytes against its
-    /// verified provider manifest and the previously accepted snapshot
-    /// of the same catalog (§6 "on each refresh").
+    /// verified provider manifest and the retained per-catalog
+    /// acceptance state (§6 "on each refresh").
     ///
     /// - Parameters:
     ///   - raw: the snapshot bytes as served.
     ///   - manifest: the verified provider manifest the snapshot URL
     ///     came from; supplies the operator key, the expected
     ///     `providerId`, and the catalog's pinned `policy` digest.
-    ///   - previousRaw: the exact retained bytes of the last accepted
-    ///     snapshot for this catalog, or `nil` on first fetch (then the
-    ///     snapshot must be `sequence` 1 with no `previousDigest`).
-    ///     A sequence that does not advance by exactly 1, or a
-    ///     `previousDigest` that does not hash the retained bytes, is
-    ///     evidence of rollback or equivocation — `snapshot_invalid`,
-    ///     never silently accepted.
+    ///   - retained: the last acceptance retained for this catalog, or
+    ///     `nil` on first acceptance of the source (any sequence is
+    ///     accepted then — TOFU covers trust). §6's four cases apply
+    ///     against it: a no-op refresh (same sequence, same bytes) is
+    ///     fine; a rollback or fork is `snapshot_invalid`; a forward
+    ///     jump is accepted with a source-integrity note.
     ///   - now: injected clock for the expiry checks.
     public static func verifySnapshot(
         raw: Data,
         manifest: SignedProviderManifest,
-        previousRaw: Data?,
+        retained: RetainedCatalogAcceptance?,
         now: Date
     ) throws -> SignedCatalogSnapshot {
         guard raw.count <= snapshotMaxBytes else {
@@ -203,21 +205,44 @@ public enum DiscoveryTrust {
         guard let descriptor = manifest.manifest.catalogs.first(where: { $0.catalogId == snapshot.catalogId }) else {
             throw DiscoveryTrustError.snapshotInvalid(reason: "catalogId is not declared by the manifest")
         }
-        guard snapshot.policyDigest == descriptor.policy else {
-            throw DiscoveryTrustError.snapshotInvalid(
-                reason: "policyDigest does not match the manifest's catalog descriptor"
-            )
+        // §4.2 policy-transition grace: the snapshot must cite the
+        // manifest's current declaration OR the immediately previous
+        // one the client retained — accepted with a surfaced
+        // transition note. Any other digest is snapshot_invalid.
+        var policyTransition = false
+        if snapshot.policyDigest != descriptor.policy {
+            if let previous = retained?.previousPolicyDigest, previous == snapshot.policyDigest {
+                policyTransition = true
+            } else {
+                throw DiscoveryTrustError.snapshotInvalid(
+                    reason: "policyDigest matches neither the manifest's pinned policy nor the retained previous declaration"
+                )
+            }
         }
 
+        // §4.2: expiresAt must be STRICTLY after generatedAt (a
+        // snapshot born expired — including generatedAt == expiresAt —
+        // is snapshot_invalid), and the window is capped at 90 days.
+        // Checked before the expiry evaluation so a born-expired
+        // snapshot maps to snapshot_invalid, matching the reference
+        // implementation's check order.
+        guard snapshot.expiresAt > snapshot.generatedAt else {
+            throw DiscoveryTrustError.snapshotInvalid(reason: "expiresAt is not after generatedAt")
+        }
+        guard snapshot.expiresAt.timeIntervalSince(snapshot.generatedAt) <= snapshotMaxValiditySeconds
+        else {
+            throw DiscoveryTrustError.snapshotInvalid(reason: "expiresAt − generatedAt exceeds 90 days")
+        }
+        // §4.2: generatedAt must not lie in the verifier's future
+        // beyond the skew allowance — otherwise the 90-day ceiling
+        // could be minted forward.
+        guard snapshot.generatedAt <= now.addingTimeInterval(clockSkewSeconds) else {
+            throw DiscoveryTrustError.snapshotInvalid(reason: "generatedAt is in the future")
+        }
         // Expired only when expiresAt is more than the skew allowance
         // in the past (§4.2/§9 — symmetric 10-minute clock skew).
         guard snapshot.expiresAt.addingTimeInterval(clockSkewSeconds) >= now else {
             throw DiscoveryTrustError.snapshotExpired
-        }
-        guard snapshot.generatedAt <= snapshot.expiresAt,
-              snapshot.expiresAt.timeIntervalSince(snapshot.generatedAt) <= snapshotMaxValiditySeconds
-        else {
-            throw DiscoveryTrustError.snapshotInvalid(reason: "expiresAt − generatedAt exceeds 90 days")
         }
 
         guard snapshot.entries.count + snapshot.skippedEntryCount <= snapshotMaxEntries else {
@@ -232,42 +257,57 @@ public enum DiscoveryTrust {
             }
         }
 
-        // Chain rules (§4.2): sequence starts at 1 and advances by
-        // exactly 1; previousDigest hashes the previous snapshot's
-        // exact retained bytes and is present iff sequence > 1.
-        if let previousRaw {
-            let previous: CatalogSnapshot
-            do {
-                previous = try DiscoveryJSON.decoder().decode(CatalogSnapshot.self, from: previousRaw)
-            } catch {
-                throw DiscoveryTrustError.snapshotInvalid(reason: "retained previous snapshot is unreadable")
-            }
-            guard previous.catalogId == snapshot.catalogId else {
-                throw DiscoveryTrustError.snapshotInvalid(reason: "retained previous snapshot is for another catalog")
-            }
-            guard snapshot.sequence == previous.sequence + 1 else {
-                throw DiscoveryTrustError.snapshotInvalid(
-                    reason: "sequence \(snapshot.sequence) does not advance retained sequence \(previous.sequence) by 1 (rollback or gap)"
-                )
-            }
-            guard let previousDigest = snapshot.previousDigest else {
-                throw DiscoveryTrustError.snapshotInvalid(reason: "previousDigest is missing")
-            }
-            let retainedDigest = DiscoveryFormat.sha256Digest(of: previousRaw)
-            guard previousDigest == retainedDigest else {
-                throw DiscoveryTrustError.snapshotInvalid(
-                    reason: "previousDigest does not match retained bytes (fork or equivocation)"
-                )
-            }
-        } else {
-            guard snapshot.sequence == 1 else {
-                throw DiscoveryTrustError.snapshotInvalid(
-                    reason: "first observed snapshot must have sequence 1, got \(snapshot.sequence)"
-                )
-            }
+        // Structural chain rules (§4.2): sequence starts at 1;
+        // previousDigest is present (and digest-shaped) iff
+        // sequence > 1.
+        guard snapshot.sequence >= 1 else {
+            throw DiscoveryTrustError.snapshotInvalid(reason: "sequence starts at 1")
+        }
+        if snapshot.sequence == 1 {
             guard snapshot.previousDigest == nil else {
                 throw DiscoveryTrustError.snapshotInvalid(reason: "sequence 1 must not carry previousDigest")
             }
+        } else {
+            guard let previousDigest = snapshot.previousDigest,
+                  DiscoveryFormat.isDigest(previousDigest)
+            else {
+                throw DiscoveryTrustError.snapshotInvalid(reason: "sequence > 1 requires previousDigest")
+            }
+        }
+
+        // §6 four-case comparison against the retained acceptance.
+        let digest = DiscoveryFormat.sha256Digest(of: raw)
+        let outcome: SnapshotChainOutcome
+        if let retained {
+            if snapshot.sequence < retained.sequence {
+                throw DiscoveryTrustError.snapshotInvalid(
+                    reason: "rollback: sequence \(snapshot.sequence) after accepted \(retained.sequence)"
+                )
+            } else if snapshot.sequence == retained.sequence {
+                guard digest == retained.digest else {
+                    throw DiscoveryTrustError.snapshotInvalid(
+                        reason: "fork: sequence \(snapshot.sequence) republished with different bytes"
+                    )
+                }
+                outcome = .noOpRefresh
+            } else if snapshot.sequence == retained.sequence + 1 {
+                guard snapshot.previousDigest == retained.digest else {
+                    throw DiscoveryTrustError.snapshotInvalid(
+                        reason: "fork: previousDigest does not match the retained snapshot digest"
+                    )
+                }
+                outcome = .successor
+            } else {
+                // Forward jump: accepted with a source-integrity note.
+                // The §6 intermediate continuity walk is not
+                // performed (gap-listed in the profile's §11).
+                outcome = .forwardJump(missed: snapshot.sequence - retained.sequence - 1)
+            }
+        } else {
+            // First acceptance of this catalog: any sequence — an
+            // established catalog past its first snapshot must be
+            // addable; TOFU covers trust.
+            outcome = .firstAcceptance
         }
 
         try verifyEmbeddedSignature(
@@ -280,7 +320,9 @@ public enum DiscoveryTrust {
         return SignedCatalogSnapshot(
             snapshot: snapshot,
             rawBytes: raw,
-            digest: DiscoveryFormat.sha256Digest(of: raw)
+            digest: digest,
+            outcome: outcome,
+            policyTransition: policyTransition
         )
     }
 

@@ -22,13 +22,15 @@ public protocol DiscoveryFetching: Sendable {
 }
 
 /// Production `DiscoveryFetching`. Plain `URLSession` GETs with the
-/// profile's size caps enforced after download (§7).
-///
-/// Not yet enforced here (tracked for the wiring PR): the §7 redirect
-/// rules (≤ 3 redirects, HTTPS-to-HTTPS only, no IP-literal targets)
-/// need a session delegate; URLs only ever come from verified
-/// documents that already passed the URI rules.
+/// profile's §7 bounds: size caps enforced after download, a 60 s
+/// per-request timeout, and a redirect policy of at most 3 redirects,
+/// HTTPS-to-HTTPS only, refusing IP-literal (and other URI-rule
+/// violating) targets. A refused redirect stops the chain, so the
+/// request completes with the 3xx status and fails as `badStatus`.
 public struct URLSessionDiscoveryFetcher: DiscoveryFetching {
+    /// §7: fetch timeout ≤ 60 s per request.
+    static let requestTimeoutSeconds: TimeInterval = 60
+
     let session: URLSession
 
     public init(session: URLSession = .shared) {
@@ -44,7 +46,12 @@ public struct URLSessionDiscoveryFetcher: DiscoveryFetching {
     }
 
     private func fetch(url: URL, maxBytes: Int) async throws -> Data {
-        let (data, response) = try await session.data(from: url)
+        var request = URLRequest(url: url)
+        request.timeoutInterval = Self.requestTimeoutSeconds
+        let (data, response) = try await session.data(
+            for: request,
+            delegate: RedirectPolicy()
+        )
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
         guard status != 429 else { throw DiscoveryFetchError.rateLimited }
         guard (200..<300).contains(status) else {
@@ -52,5 +59,39 @@ public struct URLSessionDiscoveryFetcher: DiscoveryFetching {
         }
         guard data.count <= maxBytes else { throw DiscoveryFetchError.oversize }
         return data
+    }
+
+    /// §7 redirect rules: ≤ 3 redirects per fetch, HTTPS-to-HTTPS
+    /// only, and never toward an IP literal. Returning `nil` refuses
+    /// the redirect (the task then completes with the 3xx response).
+    private final class RedirectPolicy: NSObject, URLSessionTaskDelegate {
+        private var redirects = 0
+
+        func urlSession(
+            _ session: URLSession,
+            task: URLSessionTask,
+            willPerformHTTPRedirection response: HTTPURLResponse,
+            newRequest request: URLRequest
+        ) async -> URLRequest? {
+            redirects += 1
+            guard redirects <= 3 else { return nil }
+            guard let target = request.url,
+                  target.scheme?.lowercased() == "https",
+                  let host = target.host(), !Self.isIPLiteral(host)
+            else { return nil }
+            return request
+        }
+
+        private static func isIPLiteral(_ host: String) -> Bool {
+            if host.contains(":") { return true } // IPv6 (bracket-stripped)
+            let parts = host.split(separator: ".", omittingEmptySubsequences: false)
+            if parts.allSatisfy({ !$0.isEmpty && $0.allSatisfy(\.isNumber) }) {
+                return true // dotted-decimal or integer form
+            }
+            if let last = parts.last, last.lowercased().hasPrefix("0x") {
+                return true // hex form
+            }
+            return false
+        }
     }
 }

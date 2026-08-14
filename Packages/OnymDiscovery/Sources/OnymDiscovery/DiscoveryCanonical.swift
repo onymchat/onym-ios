@@ -5,26 +5,21 @@ import Foundation
 /// cross-language precedent (`onym-moderation` `authority/src/canonical.rs`):
 ///
 /// 1. parse the document as UTF-8 JSON; the top level must be an object;
-/// 2. remove the `signature` field **structurally** — never by string
-///    surgery, because a planted copy of the signature elsewhere in the
-///    document would make textual removal forgeable;
+/// 2. remove the `signature` field **structurally and at the top level
+///    only** — never by string surgery, because a planted copy of the
+///    signature elsewhere in the document would make textual removal
+///    forgeable;
 /// 3. re-serialize compactly with all object keys, at every nesting
-///    level, sorted by UTF-8 byte order, without escaping `/`.
+///    level, sorted by **UTF-8 byte order**, with §3's pinned string
+///    escaping and without escaping `/`.
 ///
-/// Unlike `ModerationCanonicalEncoder` (which canonicalizes values we
-/// *encode*), this canonicalizes bytes we *received*, so it must go
-/// through `JSONSerialization`, not `JSONEncoder`. Two caveats carried
-/// over from that encoder's documentation:
-///
-/// - **Case-sensitivity.** `JSONSerialization`'s `.sortedKeys` sorts
-///   case-insensitively, while serde_json (and the profile) sort by
-///   UTF-8 byte order. The two disagree only when sibling keys differ
-///   by letter case at the deciding character; the profile's schema has
-///   no such pair, and the cross-language `canonical-input.json` →
-///   `canonical-bytes.bin` fixture test pins the agreement.
-/// - **Slashes.** `.withoutEscapingSlashes` is load-bearing: every
-///   snapshot URL and base64 signature contains `/`, and the reference
-///   implementation signs the unescaped form.
+/// The serialization is implemented here rather than delegated to
+/// `JSONSerialization`, because Foundation's `.sortedKeys` sorts
+/// case-insensitively — it diverges from the profile's UTF-8 byte
+/// order exactly on the §10 case-divergence vector — and Foundation's
+/// string escaping is not the §3 pinned set. Both sub-vectors
+/// (`canonical-case-*`, `canonical-escaping-*`) pin this serializer's
+/// agreement with the Rust reference implementation byte for byte.
 public enum DiscoveryCanonical {
     /// The bytes a discovery document's Ed25519 signature is made over.
     /// - Throws: `DiscoveryTrustError.providerManifestInvalid` when the
@@ -41,9 +36,81 @@ public enum DiscoveryCanonical {
             throw DiscoveryTrustError.providerManifestInvalid(reason: "top level is not a JSON object")
         }
         object.removeValue(forKey: "signature")
-        return try JSONSerialization.data(
-            withJSONObject: object,
-            options: [.sortedKeys, .withoutEscapingSlashes]
-        )
+        var out = ""
+        try serialize(object, into: &out)
+        return Data(out.utf8)
+    }
+
+    // MARK: - Canonical serialization (§3)
+
+    private static func serialize(_ value: Any, into out: inout String) throws {
+        switch value {
+        case let object as [String: Any]:
+            out.append("{")
+            // UTF-8 byte order, not Swift's Unicode-aware ordering and
+            // not Foundation's case-insensitive `.sortedKeys`.
+            let keys = object.keys.sorted {
+                Array($0.utf8).lexicographicallyPrecedes(Array($1.utf8))
+            }
+            var first = true
+            for key in keys {
+                if !first { out.append(",") }
+                first = false
+                appendEscaped(key, into: &out)
+                out.append(":")
+                try serialize(object[key]!, into: &out)
+            }
+            out.append("}")
+        case let array as [Any]:
+            out.append("[")
+            var first = true
+            for element in array {
+                if !first { out.append(",") }
+                first = false
+                try serialize(element, into: &out)
+            }
+            out.append("]")
+        case let string as String:
+            appendEscaped(string, into: &out)
+        case let number as NSNumber:
+            if CFGetTypeID(number) == CFBooleanGetTypeID() {
+                out.append(number.boolValue ? "true" : "false")
+            } else if CFNumberIsFloatType(number) {
+                // §3: all numbers are non-negative integers; a float
+                // has no canonical form here.
+                throw DiscoveryTrustError.providerManifestInvalid(
+                    reason: "non-integer number has no canonical form"
+                )
+            } else {
+                out.append(number.stringValue)
+            }
+        case is NSNull:
+            out.append("null")
+        default:
+            throw DiscoveryTrustError.providerManifestInvalid(
+                reason: "unsupported JSON value"
+            )
+        }
+    }
+
+    /// §3 pinned escaping: exactly `"` `\` and U+0000–U+001F are
+    /// escaped — two-character forms where defined, lowercase `\u00xx`
+    /// otherwise — and nothing else: no `/`, no non-ASCII, no U+007F.
+    private static func appendEscaped(_ string: String, into out: inout String) {
+        out.append("\"")
+        for scalar in string.unicodeScalars {
+            switch scalar.value {
+            case 0x22: out.append("\\\"")
+            case 0x5C: out.append("\\\\")
+            case 0x08: out.append("\\b")
+            case 0x0C: out.append("\\f")
+            case 0x0A: out.append("\\n")
+            case 0x0D: out.append("\\r")
+            case 0x09: out.append("\\t")
+            case 0x00...0x1F: out.append(String(format: "\\u%04x", scalar.value))
+            default: out.unicodeScalars.append(scalar)
+            }
+        }
+        out.append("\"")
     }
 }

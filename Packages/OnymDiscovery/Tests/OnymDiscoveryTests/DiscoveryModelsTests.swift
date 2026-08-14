@@ -99,6 +99,114 @@ final class DiscoveryModelsTests: XCTestCase {
         ))
     }
 
+    func testUnknownRelationshipSkipsEntry() throws {
+        // §4.2 fails closed against the extensible relationship set: a
+        // disclosure the client cannot render is one the user never
+        // saw — the entry is skipped, never passed through verbatim.
+        let bad = entryJSON().replacingOccurrences(
+            of: #""relationship":"none""#, with: #""relationship":"equity-stake""#
+        )
+        let snapshot = try DiscoveryJSON.decoder().decode(
+            CatalogSnapshot.self,
+            from: snapshotJSON(entries: [entryJSON(), bad])
+        )
+        XCTAssertEqual(snapshot.entries.count, 1)
+        XCTAssertEqual(snapshot.skippedEntryCount, 1)
+    }
+
+    func testMinimalEntryWithoutProfilesOrEvidenceSurvives() throws {
+        // §4.1 lists profiles and evidence as optional: a minimal
+        // conforming entry must not be skipped.
+        let minimal = entryJSON().replacingOccurrences(
+            of: #""profiles":[],"evidence":[],"#, with: ""
+        )
+        let snapshot = try DiscoveryJSON.decoder().decode(
+            CatalogSnapshot.self,
+            from: snapshotJSON(entries: [minimal])
+        )
+        XCTAssertEqual(snapshot.entries.count, 1)
+        XCTAssertEqual(snapshot.skippedEntryCount, 0)
+        XCTAssertEqual(snapshot.entries.first?.profiles, [])
+        XCTAssertEqual(snapshot.entries.first?.evidence, [])
+    }
+
+    func testNonEmptyEvidenceSkipsEntry() throws {
+        // §4.2: evidence must be absent or empty in v1 — a non-empty
+        // array is an unrenderable attestation, and the entry is
+        // skipped.
+        let bad = entryJSON().replacingOccurrences(
+            of: #""evidence":[]"#,
+            with: #""evidence":[{"type":"audit"}]"#
+        )
+        let snapshot = try DiscoveryJSON.decoder().decode(
+            CatalogSnapshot.self,
+            from: snapshotJSON(entries: [entryJSON(), bad])
+        )
+        XCTAssertEqual(snapshot.entries.count, 1)
+        XCTAssertEqual(snapshot.skippedEntryCount, 1)
+    }
+
+    func testValidStatusSurvivesAndInvalidStatusSkips() throws {
+        // §4.2: a VALID status must never skip the entry — skipping it
+        // is the exact warning-dropping failure the field exists to
+        // prevent. An undecodable status skips the entry.
+        let warned = entryJSON(extra: #","status":{"state":"warning","uri":"https://x.example/note.md"}"#)
+        let reviewed = entryJSON(extra: #","status":{"state":"review"}"#)
+            .replacingOccurrences(of: #""componentId":"onym:component:a""#, with: #""componentId":"onym:component:b""#)
+        let unknownState = entryJSON(extra: #","status":{"state":"suspended"}"#)
+            .replacingOccurrences(of: #""componentId":"onym:component:a""#, with: #""componentId":"onym:component:c""#)
+        let httpUri = entryJSON(extra: #","status":{"state":"warning","uri":"http://x.example/note.md"}"#)
+            .replacingOccurrences(of: #""componentId":"onym:component:a""#, with: #""componentId":"onym:component:d""#)
+        let snapshot = try DiscoveryJSON.decoder().decode(
+            CatalogSnapshot.self,
+            from: snapshotJSON(entries: [warned, reviewed, unknownState, httpUri])
+        )
+        XCTAssertEqual(snapshot.entries.count, 2)
+        XCTAssertEqual(snapshot.skippedEntryCount, 2)
+        XCTAssertEqual(snapshot.entries[0].status?.state, "warning")
+        XCTAssertEqual(snapshot.entries[0].status?.uri, "https://x.example/note.md")
+        XCTAssertEqual(snapshot.entries[1].status?.state, "review")
+        XCTAssertNil(snapshot.entries[1].status?.uri)
+    }
+
+    func testSeatTypesMemberValidationSkipsDescriptor() throws {
+        // §4.1: members are tokens in [a-z0-9.-]{1,64} or the lone
+        // "*" wildcard; anything else skips the descriptor.
+        let good = descriptorJSON()
+        let wildcard = descriptorJSON(catalogId: "w").replacingOccurrences(
+            of: #""seatTypes":["notary"]"#, with: #""seatTypes":["*"]"#
+        )
+        let badMember = descriptorJSON(catalogId: "x").replacingOccurrences(
+            of: #""seatTypes":["notary"]"#, with: #""seatTypes":["Notary!"]"#
+        )
+        let wildcardNotAlone = descriptorJSON(catalogId: "y").replacingOccurrences(
+            of: #""seatTypes":["notary"]"#, with: #""seatTypes":["*","notary"]"#
+        )
+        let manifest = try DiscoveryJSON.decoder().decode(
+            DiscoveryProviderManifest.self,
+            from: manifestJSON(catalogs: [good, wildcard, badMember, wildcardNotAlone])
+        )
+        XCTAssertEqual(manifest.catalogs.map(\.catalogId), ["c", "w"])
+        XCTAssertEqual(manifest.skippedCatalogCount, 2)
+    }
+
+    func testNonPublicAudienceIsSkippedNotMalformed() throws {
+        // §1: non-public catalogs are skipped-and-surfaced, distinct
+        // from malformed descriptors.
+        let good = descriptorJSON()
+        let internalOnly = descriptorJSON(catalogId: "i").replacingOccurrences(
+            of: #""audience":"public""#, with: #""audience":"internal""#
+        )
+        let manifest = try DiscoveryJSON.decoder().decode(
+            DiscoveryProviderManifest.self,
+            from: manifestJSON(catalogs: [good, internalOnly])
+        )
+        XCTAssertEqual(manifest.catalogs.map(\.catalogId), ["c"])
+        XCTAssertEqual(manifest.nonPublicCatalogs.map(\.catalogId), ["i"])
+        XCTAssertEqual(manifest.audienceSkippedCatalogCount, 1)
+        XCTAssertEqual(manifest.skippedCatalogCount, 0)
+    }
+
     func testURIRules() {
         XCTAssertTrue(DiscoveryFormat.isValidURI("https://discovery.onym.app/manifest.json"))
         // http scheme
@@ -111,7 +219,14 @@ final class DiscoveryModelsTests: XCTestCase {
         XCTAssertFalse(DiscoveryFormat.isValidURI("https://x.example/m.json#frag"))
         XCTAssertFalse(DiscoveryFormat.isValidURI("https://user@x.example/m.json"))
         XCTAssertFalse(DiscoveryFormat.isValidURI("https://x.example:8443/m.json"))
+        // §7 raw-string port check: a redundant :443 is normalized
+        // away by URL libraries before any parsed-port check — the raw
+        // string must be rejected regardless.
         XCTAssertFalse(DiscoveryFormat.isValidURI("https://x.example:443/m.json"))
+        // Integer-form and hex-form IPv4 literals.
+        XCTAssertFalse(DiscoveryFormat.isValidURI("https://3232235777/m.json"))
+        XCTAssertFalse(DiscoveryFormat.isValidURI("https://0xc0a80101/m.json"))
+        XCTAssertFalse(DiscoveryFormat.isValidURI("https://192.168.1.0x1/m.json"))
     }
 
     func testIdentifierAndDigestFormats() {
