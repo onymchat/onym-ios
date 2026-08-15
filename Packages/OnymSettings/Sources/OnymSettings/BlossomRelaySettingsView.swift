@@ -61,6 +61,11 @@ struct BlossomRelaySettingsView: View {
         .navigationTitle("Blossom Relays")
         .navigationBarTitleDisplayMode(.inline)
         .task { flow.start() }
+        // Paired with `start()` (ModerationSettingsView precedent):
+        // the drain retains the flow and the repository stream never
+        // finishes on its own, so without this the continuation would
+        // accumulate on every visit.
+        .onDisappear { flow.stop() }
     }
 
     // MARK: - Configured list

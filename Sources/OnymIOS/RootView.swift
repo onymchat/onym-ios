@@ -3,6 +3,7 @@ import OnymSearch
 import OnymChatsUI
 import OnymSettings
 import OnymModerationUI
+import OnymDiscovery
 
 /// App shell — `TabView` with the iOS 18+ `Tab(_, systemImage:, value:)`
 /// syntax. The `.search` role places its tab in the system's bottom-right
@@ -173,7 +174,8 @@ struct RootView: View {
                         onClearAllMessages: { await dependencies.messageRepository.removeAll() },
                         makeModerationSettingsFlow: dependencies.makeModerationSettingsFlow,
                         makeModerationConsentFlow: dependencies.makeModerationConsentFlow,
-                        makeModerationCaseFlow: dependencies.makeModerationCaseFlow
+                        makeModerationCaseFlow: dependencies.makeModerationCaseFlow,
+                        makeDiscoverySettingsFlow: dependencies.makeDiscoverySettingsFlow
                     )
                 }
                 .safeAreaInset(edge: .bottom, spacing: 0) {

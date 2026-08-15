@@ -74,4 +74,20 @@ public struct PinnedConsentRecord: Codable, Sendable, Equatable {
         guard let validUntil else { return false }
         return validUntil < now
     }
+
+    /// `endpoints[].uri` of the pinned manifest bytes, as URLs. The
+    /// seat-specific endpoint fields live outside the common manifest
+    /// spine, so they are read straight from the exact consented
+    /// bytes. Settings screens use this to dedupe a seat's published
+    /// list against its "From catalog" section: a consented catalog
+    /// service's endpoint may also appear in the seat's known list
+    /// (that list is discovery-derived for consented components), and
+    /// the catalog row — with attribution and consent state — is the
+    /// one that should render.
+    public func consentedEndpointURLs() -> Set<URL> {
+        guard let object = (try? JSONSerialization.jsonObject(with: manifestBytes)) as? [String: Any],
+              let endpoints = object["endpoints"] as? [[String: Any]]
+        else { return [] }
+        return Set(endpoints.compactMap { ($0["uri"] as? String).flatMap(URL.init(string:)) })
+    }
 }
