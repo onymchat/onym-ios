@@ -1001,45 +1001,67 @@ struct OnymIOSApp: App {
                     // The Done step's summary is read from the
                     // repositories, not the walk's outcomes — what the
                     // app will actually use is the checkable claim.
+                    // Plural forms come from the catalog's variations
+                    // for the "%lld services" key — a per-locale rule,
+                    // not an English-only == 1 branch (same pattern as
+                    // DiscoveryEntriesLabel).
+                    func serviceCount(_ count: Int) -> String {
+                        String(localized: "\(count) services")
+                    }
                     var rows: [OnboardingSummaryRow] = []
+                    let nostrEndpoints = await nostrRelaysRepository.currentEndpoints()
+                    rows.append(OnboardingSummaryRow(
+                        id: "messageTransport",
+                        title: String(localized: "Message delivery"),
+                        value: nostrEndpoints.first?.name ?? String(localized: "None configured"),
+                        detail: nostrEndpoints.first?.url.absoluteString,
+                        symbol: "antenna.radiowaves.left.and.right",
+                        trailing: nostrEndpoints.isEmpty ? nil : serviceCount(nostrEndpoints.count)
+                    ))
+                    let blossomEndpoints = await blossomServersRepository.currentEndpoints()
+                    rows.append(OnboardingSummaryRow(
+                        id: "blobTransport",
+                        title: String(localized: "Media delivery"),
+                        value: blossomEndpoints.first?.name ?? String(localized: "None configured"),
+                        detail: blossomEndpoints.first?.url.absoluteString,
+                        symbol: "photo.on.rectangle.angled",
+                        trailing: blossomEndpoints.isEmpty ? nil : serviceCount(blossomEndpoints.count)
+                    ))
+                    let relayerEndpoints = await relayerRepository.currentState().configuration.endpoints
+                    rows.append(OnboardingSummaryRow(
+                        id: "notary",
+                        title: String(localized: "Group integrity"),
+                        value: relayerEndpoints.first?.name ?? String(localized: "Published defaults"),
+                        detail: relayerEndpoints.first?.url.absoluteString,
+                        symbol: "checkmark.seal",
+                        // Empty means the value already reads
+                        // "Published defaults" — a "Default" trailing
+                        // would just repeat it.
+                        trailing: relayerEndpoints.isEmpty
+                            ? nil
+                            : serviceCount(relayerEndpoints.count)
+                    ))
                     if let discoveryRepository {
                         let state = await discoveryRepository.currentState()
                         if let source = state.sources.first {
                             rows.append(OnboardingSummaryRow(
                                 id: "discovery",
-                                title: String(localized: "Service Directory"),
+                                title: String(localized: "Directory"),
                                 value: source.source.userLabel,
-                                detail: source.source.operatorKeyFingerprint
+                                detail: source.source.operatorKeyFingerprint,
+                                symbol: "magnifyingglass",
+                                trailing: String(localized: "\(state.sources.count) sources")
                             ))
                         }
                     }
-                    let nostr = await nostrRelaysRepository.currentEndpoints().first
-                    rows.append(OnboardingSummaryRow(
-                        id: "messageTransport",
-                        title: String(localized: "Message Transport"),
-                        value: nostr?.name ?? String(localized: "None configured"),
-                        detail: nostr?.url.absoluteString
-                    ))
-                    let blossom = await blossomServersRepository.currentEndpoints().first
-                    rows.append(OnboardingSummaryRow(
-                        id: "blobTransport",
-                        title: String(localized: "File Storage"),
-                        value: blossom?.name ?? String(localized: "None configured"),
-                        detail: blossom?.url.absoluteString
-                    ))
-                    let relayer = await relayerRepository.currentState().configuration.endpoints.first
-                    rows.append(OnboardingSummaryRow(
-                        id: "notary",
-                        title: String(localized: "Notary"),
-                        value: relayer?.name ?? String(localized: "Published defaults"),
-                        detail: relayer?.url.absoluteString
-                    ))
                     let mandate = await moderationRepository.currentState().activeMandate
                     rows.append(OnboardingSummaryRow(
                         id: "moderation",
-                        title: String(localized: "Moderation"),
+                        title: String(localized: "Reports & safety"),
                         value: mandate?.authorityName ?? String(localized: "None"),
-                        detail: mandate?.mandate.manifestHash
+                        detail: mandate?.mandate.manifestHash,
+                        symbol: "shield",
+                        trailing: mandate == nil ? nil : String(localized: "Agreed")
                     ))
                     return rows
                 }

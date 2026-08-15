@@ -6719,6 +6719,401 @@
         }
       }
     },
+    "IN USE": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "IN USE"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ИСПОЛЬЗУЮТСЯ"
+          }
+        }
+      }
+    },
+    "SUGGESTED BY YOUR DIRECTORIES": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SUGGESTED BY YOUR DIRECTORIES"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ПРЕДЛОЖЕНО ВАШИМИ КАТАЛОГАМИ"
+          }
+        }
+      }
+    },
+    "ADD YOUR OWN": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ADD YOUR OWN"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ДОБАВИТЬ СВОЙ"
+          }
+        }
+      }
+    },
+    "FROM THE PUBLISHED LIST": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FROM THE PUBLISHED LIST"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ИЗ ОПУБЛИКОВАННОГО СПИСКА"
+          }
+        }
+      }
+    },
+    "YOUR SETUP": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "YOUR SETUP"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ВАША НАСТРОЙКА"
+          }
+        }
+      }
+    },
+    "PRIMARY": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PRIMARY"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ОСНОВНОЙ"
+          }
+        }
+      }
+    },
+    "Photos, video and voice notes are too big for the relays that carry text, so they travel through a media service instead. They're encrypted on this device first — it only ever handles sealed blobs.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Photos, video and voice notes are too big for the relays that carry text, so they travel through a media service instead. They're encrypted on this device first — it only ever handles sealed blobs."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Фото, видео и голосовые сообщения слишком велики для релеев, переносящих текст, поэтому они идут через медиасервис. Они заранее шифруются на этом устройстве — сервис имеет дело только с запечатанными данными."
+          }
+        }
+      }
+    },
+    "A notary keeps every group's membership and history honest. It checks each change with a zero-knowledge proof, so it can confirm a group is genuine without learning who is in it or what was said.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A notary keeps every group's membership and history honest. It checks each change with a zero-knowledge proof, so it can confirm a group is genuine without learning who is in it or what was said."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Нотариус следит за честностью состава и истории каждой группы. Он проверяет каждое изменение доказательством с нулевым разглашением: подтверждает подлинность группы, не узнавая, кто в ней состоит и о чём шла речь."
+          }
+        }
+      }
+    },
+    "A directory is a phone book of available services. Onym verifies every entry on this device before showing it to you — adding a second one widens what you can choose from.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A directory is a phone book of available services. Onym verifies every entry on this device before showing it to you — adding a second one widens what you can choose from."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Каталог — это телефонная книга доступных сервисов. Onym проверяет каждую запись на этом устройстве, прежде чем показать её вам; второй каталог расширяет выбор."
+          }
+        }
+      }
+    },
+    "An authority never sees your messages. It only ever sees what a person chooses to report, and it can only act inside the terms you're about to read.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "An authority never sees your messages. It only ever sees what a person chooses to report, and it can only act inside the terms you're about to read."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Орган никогда не видит ваши сообщения. Он видит только то, на что человек пожаловался, и может действовать лишь в рамках условий, которые вы сейчас прочитаете."
+          }
+        }
+      }
+    },
+    "Tap into Settings → Services to change any of this. Nothing here is permanent except your recovery phrase.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tap into Settings → Services to change any of this. Nothing here is permanent except your recovery phrase."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Всё это можно изменить в Настройки → Сервисы. Здесь нет ничего окончательного, кроме фразы восстановления."
+          }
+        }
+      }
+    },
+    "Agreed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agreed"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Принято"
+          }
+        }
+      }
+    },
+    "%lld services": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld service"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld services"
+                }
+              }
+            }
+          }
+        },
+        "ru": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld сервис"
+                }
+              },
+              "few": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld сервиса"
+                }
+              },
+              "many": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld сервисов"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld сервисов"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld sources": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld source"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld sources"
+                }
+              }
+            }
+          }
+        },
+        "ru": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld источник"
+                }
+              },
+              "few": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld источника"
+                }
+              },
+              "many": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld источников"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld источников"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Relays pass sealed messages along. They can't read them, and they never learn who you're talking to. Every message is sent through all of your relays at once — any one of them is enough to reach you.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relays pass sealed messages along. They can't read them, and they never learn who you're talking to. Every message is sent through all of your relays at once — any one of them is enough to reach you."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Релеи передают запечатанные сообщения дальше. Они не могут их прочитать и никогда не узнают, с кем вы переписываетесь. Каждое сообщение отправляется сразу через все ваши релеи — достаточно любого из них, чтобы дойти до вас."
+          }
+        }
+      }
+    },
+    "Every relay in this list carries every message — they're used together, not as fallbacks. Any one that's up is enough to reach you.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Every relay in this list carries every message — they're used together, not as fallbacks. Any one that's up is enough to reach you."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Каждый релей из этого списка переносит каждое сообщение — они работают вместе, а не как запасные. Достаточно любого работающего, чтобы до вас дойти."
+          }
+        }
+      }
+    },
+    "Your uploads go through the active service only. Any others in the list are hosts you trust for downloading what people send you.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your uploads go through the active service only. Any others in the list are hosts you trust for downloading what people send you."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ваши файлы загружаются только через активный сервис. Остальные в списке — узлы, которым вы доверяете скачивание того, что вам присылают."
+          }
+        }
+      }
+    },
+    "New groups are notarised by your primary notary.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New groups are notarised by your primary notary."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Новые группы заверяет ваш основной нотариус."
+          }
+        }
+      }
+    },
+    "When you create a group, Onym picks one of these notaries at random for it — everyone in that group then uses the same one.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When you create a group, Onym picks one of these notaries at random for it — everyone in that group then uses the same one."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "При создании группы Onym выбирает для неё одного из этих нотариусов случайным образом — дальше вся группа использует именно его."
+          }
+        }
+      }
+    },
     "More than one service works differently per category: relays all carry every message together, extra media hosts are trusted download sources, and each new group picks its notary from your list.": {
       "extractionState": "manual",
       "localizations": {
