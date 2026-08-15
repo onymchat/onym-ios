@@ -43,6 +43,12 @@ public struct FreeTierEntitlementProvider: EntitlementProviding {
     /// Convenience over the consent store: resolves offers from the
     /// active pinned manifest of the component in question.
     ///
+    /// NOT fit for a consent surface — on *first* consent the store
+    /// has no record for the component yet, so every offer (free ones
+    /// included) resolves as not-entitled at exactly the moment the
+    /// screen needs an answer. Use `init(reviewing:consentStore:)`
+    /// there.
+    ///
     /// Cost note: every check is a full store `load()` (defaults read
     /// + JSON decode of all records) plus a manifest re-decode — by
     /// design, so entitlement answers can never go stale against the
@@ -54,6 +60,30 @@ public struct FreeTierEntitlementProvider: EntitlementProviding {
     public init(consentStore: any PinnedConsentStore) {
         self.init { offerId, componentId in
             (try? consentStore.activeRecord(componentId: componentId))?
+                .consentedManifest()?
+                .offers
+                .first { $0.offerId == offerId }
+        }
+    }
+
+    /// Convenience for a consent surface reviewing `manifest`: the
+    /// manifest under review is the authority on which offers exist
+    /// (and which are free) for its own component — it must answer
+    /// even when no consent record exists yet (first consent) and even
+    /// when the active record describes an older manifest. The consent
+    /// store answers only for offers the reviewed manifest doesn't
+    /// carry — i.e. other components, or re-reviewing without a
+    /// manifest change.
+    public init(reviewing manifest: SignedServiceManifest, consentStore: any PinnedConsentStore) {
+        self.init { offerId, componentId in
+            if componentId == manifest.componentId,
+               let offer = manifest.offers.first(where: { $0.offerId == offerId }) {
+                return offer
+            }
+            // Same fail-closed rule as above: a store that throws
+            // (corrupt records) resolves to no offer, i.e. not
+            // entitled.
+            return (try? consentStore.activeRecord(componentId: componentId))?
                 .consentedManifest()?
                 .offers
                 .first { $0.offerId == offerId }

@@ -40,9 +40,20 @@ import OnymTransportNostr
 /// customized those screens). A catalog entry reaching `fetchLatest`
 /// therefore becomes a LIVE endpoint for default-config users, with
 /// zero taps. So each endpoint adapter takes an optional
-/// `hasActiveConsent` closure: when provided (the consent system is
-/// wired in), only entries whose componentId the closure approves
-/// merge into the known list; when nil (no consent system present in
+/// `makeConsentGate` factory: when provided (the consent system is
+/// wired in), only entries the gate approves merge into the known
+/// list. The gate answers per entry with BOTH the componentId and the
+/// catalog entry's manifest digest, because consent pins exact bytes:
+/// an active consent record for a componentId whose pinned
+/// `manifestHash` no longer equals the entry's current digest means
+/// the operator republished under terms the user never reviewed — the
+/// gate must refuse (the pickers render that state as TERMS CHANGED
+/// and route through re-consent), or a republish would silently swap
+/// an unreviewed endpoint into the known lists and auto-populate
+/// under the old record's authority. The factory is invoked once per
+/// `fetchLatest` pass, so one consent-store load answers the whole
+/// pass (never per entry) while staying fresh across passes. When nil
+/// (no consent system present in
 /// this build layer), discovery entries are EXCLUDED from `fetchLatest`
 /// entirely — pure legacy passthrough, no catalog review fan-out —
 /// and catalog entries remain reachable only through the separate
@@ -93,6 +104,19 @@ enum SeatManifestVocabulary {
         (acceptedManifestSeats[catalogSeatType] ?? [catalogSeatType]).contains(manifestSeat)
     }
 }
+
+// MARK: - Consent gate
+
+/// One fetch pass's consent check: `true` iff the user's ACTIVE
+/// pinned consent record for `componentId` pins exactly the bytes the
+/// catalog entry currently lists (`manifestHash == manifestDigest`).
+/// Built by an adapter's `makeConsentGate` factory once per
+/// `fetchLatest` pass — the factory is where the composition root
+/// loads the consent store into a lookup, so the per-entry checks
+/// cost a dictionary hit, not a store decode each.
+typealias DiscoveryConsentCheck = @Sendable (
+    _ componentId: String, _ manifestDigest: String
+) -> Bool
 
 // MARK: - Shared catalog seam
 
@@ -409,24 +433,26 @@ struct DiscoveryBackedKnownRelayersFetcher: KnownRelayersFetcher {
 
     let catalog: DiscoverySeatCatalog
     let fallback: any KnownRelayersFetcher
-    /// Consent gate seam — see the file header. `true` iff the user
-    /// holds an active consent record for the componentId; nil when no
-    /// consent system is present, which excludes discovery entries
-    /// from this known list entirely.
-    let hasActiveConsent: (@Sendable (_ componentId: String) -> Bool)?
+    /// Consent gate seam — see the file header. Invoked once per
+    /// fetch pass; the returned check must be `true` only when the
+    /// ACTIVE consent record pins the exact bytes the entry lists
+    /// (componentId AND manifest digest). nil when no consent system
+    /// is present, which excludes discovery entries from this known
+    /// list entirely.
+    let makeConsentGate: (@Sendable () -> DiscoveryConsentCheck)?
 
     /// Wrap `fallback` when a discovery catalog is available; identity
     /// when it isn't (UI-test harness).
     static func wrapping(
         _ fallback: any KnownRelayersFetcher,
         catalog: DiscoverySeatCatalog?,
-        hasActiveConsent: (@Sendable (_ componentId: String) -> Bool)? = nil
+        makeConsentGate: (@Sendable () -> DiscoveryConsentCheck)? = nil
     ) -> any KnownRelayersFetcher {
         guard let catalog else { return fallback }
         return DiscoveryBackedKnownRelayersFetcher(
             catalog: catalog,
             fallback: fallback,
-            hasActiveConsent: hasActiveConsent
+            makeConsentGate: makeConsentGate
         )
     }
 
@@ -434,11 +460,17 @@ struct DiscoveryBackedKnownRelayersFetcher: KnownRelayersFetcher {
         // No consent system in this build layer → pure legacy
         // passthrough, no catalog review fan-out (this list feeds
         // first-launch auto-populate; see the file header).
-        guard let hasActiveConsent else { return try await fallback.fetchLatest() }
+        guard let makeConsentGate else { return try await fallback.fetchLatest() }
         return try await mergeDiscoveredWithLegacy(
             discovered: {
-                await catalog.reviewedEntries(seatType: Self.seatType)
-                    .filter { hasActiveConsent($0.attributed.entry.componentId) }
+                let hasActiveConsent = makeConsentGate()
+                return await catalog.reviewedEntries(seatType: Self.seatType)
+                    .filter {
+                        hasActiveConsent(
+                            $0.attributed.entry.componentId,
+                            $0.attributed.entry.manifest.digest
+                        )
+                    }
                     .compactMap { reviewed -> RelayerEndpoint? in
                         guard let url = reviewed.firstEndpointURL(schemes: ["https"])
                         else { return nil }
@@ -466,29 +498,35 @@ struct DiscoveryBackedKnownNostrRelaysFetcher: KnownNostrRelaysFetcher {
     let catalog: DiscoverySeatCatalog
     let fallback: any KnownNostrRelaysFetcher
     /// Consent gate seam — see the file header.
-    let hasActiveConsent: (@Sendable (_ componentId: String) -> Bool)?
+    let makeConsentGate: (@Sendable () -> DiscoveryConsentCheck)?
 
     static func wrapping(
         _ fallback: any KnownNostrRelaysFetcher,
         catalog: DiscoverySeatCatalog?,
-        hasActiveConsent: (@Sendable (_ componentId: String) -> Bool)? = nil
+        makeConsentGate: (@Sendable () -> DiscoveryConsentCheck)? = nil
     ) -> any KnownNostrRelaysFetcher {
         guard let catalog else { return fallback }
         return DiscoveryBackedKnownNostrRelaysFetcher(
             catalog: catalog,
             fallback: fallback,
-            hasActiveConsent: hasActiveConsent
+            makeConsentGate: makeConsentGate
         )
     }
 
     func fetchLatest() async throws -> [NostrRelayEndpoint] {
         // No consent system in this build layer → pure legacy
         // passthrough (see the file header).
-        guard let hasActiveConsent else { return try await fallback.fetchLatest() }
+        guard let makeConsentGate else { return try await fallback.fetchLatest() }
         return try await mergeDiscoveredWithLegacy(
             discovered: {
-                await catalog.reviewedEntries(seatType: Self.seatType)
-                    .filter { hasActiveConsent($0.attributed.entry.componentId) }
+                let hasActiveConsent = makeConsentGate()
+                return await catalog.reviewedEntries(seatType: Self.seatType)
+                    .filter {
+                        hasActiveConsent(
+                            $0.attributed.entry.componentId,
+                            $0.attributed.entry.manifest.digest
+                        )
+                    }
                     .compactMap { reviewed -> NostrRelayEndpoint? in
                         guard let url = reviewed.firstEndpointURL(schemes: ["wss"])
                         else { return nil }
@@ -520,29 +558,35 @@ struct DiscoveryBackedKnownBlossomServersFetcher: KnownBlossomServersFetcher {
     let catalog: DiscoverySeatCatalog
     let fallback: any KnownBlossomServersFetcher
     /// Consent gate seam — see the file header.
-    let hasActiveConsent: (@Sendable (_ componentId: String) -> Bool)?
+    let makeConsentGate: (@Sendable () -> DiscoveryConsentCheck)?
 
     static func wrapping(
         _ fallback: any KnownBlossomServersFetcher,
         catalog: DiscoverySeatCatalog?,
-        hasActiveConsent: (@Sendable (_ componentId: String) -> Bool)? = nil
+        makeConsentGate: (@Sendable () -> DiscoveryConsentCheck)? = nil
     ) -> any KnownBlossomServersFetcher {
         guard let catalog else { return fallback }
         return DiscoveryBackedKnownBlossomServersFetcher(
             catalog: catalog,
             fallback: fallback,
-            hasActiveConsent: hasActiveConsent
+            makeConsentGate: makeConsentGate
         )
     }
 
     func fetchLatest() async throws -> [BlossomServerEndpoint] {
         // No consent system in this build layer → pure legacy
         // passthrough (see the file header).
-        guard let hasActiveConsent else { return try await fallback.fetchLatest() }
+        guard let makeConsentGate else { return try await fallback.fetchLatest() }
         return try await mergeDiscoveredWithLegacy(
             discovered: {
-                await catalog.reviewedEntries(seatType: Self.seatType)
-                    .filter { hasActiveConsent($0.attributed.entry.componentId) }
+                let hasActiveConsent = makeConsentGate()
+                return await catalog.reviewedEntries(seatType: Self.seatType)
+                    .filter {
+                        hasActiveConsent(
+                            $0.attributed.entry.componentId,
+                            $0.attributed.entry.manifest.digest
+                        )
+                    }
                     .compactMap { reviewed -> BlossomServerEndpoint? in
                         guard let url = reviewed.firstEndpointURL(schemes: ["https"])
                         else { return nil }
@@ -581,7 +625,7 @@ struct DiscoveryBackedKnownBlossomServersFetcher: KnownBlossomServersFetcher {
 ///   endpoint or key — discovery contributes only componentIds the
 ///   published directory doesn't list.
 /// - **`discoveryEnabled` gate seam** (the authorities analogue of
-///   the endpoint adapters' `hasActiveConsent`): nil — no discovery
+///   the endpoint adapters' `makeConsentGate`): nil — no discovery
 ///   surface in this build layer — is a pure legacy passthrough with
 ///   no catalog fan-out; the settings-UI layer that ships provider
 ///   management enables the merge.

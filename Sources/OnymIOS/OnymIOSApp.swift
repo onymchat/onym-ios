@@ -14,6 +14,7 @@ import OnymSettings
 import OnymModeration
 import OnymModerationUI
 import OnymDiscovery
+import OnymFoundation
 
 @main
 struct OnymIOSApp: App {
@@ -83,18 +84,20 @@ struct OnymIOSApp: App {
         // Discovery seat. The repository owns the user's provider
         // sources + the verified catalog aggregate; the seat adapters
         // below wrap the four legacy known-list fetchers with
-        // discovery-backed ones. The three endpoint adapters are
-        // consent-gated: until the consent system provides their
-        // `hasActiveConsent` closure (the settings-UI PR), they serve
-        // the legacy list untouched — catalog entries must not become
-        // live endpoints via first-launch auto-populate with no
-        // consent recorded. The authorities adapter is gated the same
-        // way behind its `discoveryEnabled` seam (nil here → legacy
-        // directory untouched): its rows carry the apiBaseURL + pinned
-        // operator key the mandate flow trusts, so catalog rows join
-        // the directory only when the settings-UI layer that ships
-        // provider management enables the merge — and even then legacy
-        // wins any componentId collision. No network
+        // discovery-backed ones that MERGE consented catalog endpoints
+        // into the legacy list (and serve legacy alone on any
+        // failure): this layer provides the `makeConsentGate`
+        // factory the adapters' consent-gate seam takes (declared
+        // below), so a discovery endpoint reaches a known list — and
+        // first-launch auto-populate — only with an active pinned
+        // consent record pinning the exact bytes the catalog entry
+        // currently lists. This layer likewise enables the authorities
+        // adapter's `discoveryEnabled` seam (this build ships the
+        // discovery surface): the catalog directory merges with the
+        // legacy one, with LEGACY winning any componentId collision —
+        // a catalog entry must never shadow a published authority's
+        // apiBaseURL or operator key. Picking stays consent-free; the
+        // signed mandate downstream is the consent step. No network
         // fetch under the UI harness — same rule as the Nostr /
         // Blossom fetchers below, so tests stay deterministic +
         // offline (UI-test discovery fakes land with the settings-UI
@@ -125,6 +128,35 @@ struct OnymIOSApp: App {
         let discoveryCatalog = discoveryRepository.map {
             DiscoverySeatCatalog(repository: $0, fetcher: discoveryFetcher)
         }
+        // Consent gate for the discovery-backed known-list fetchers:
+        // a discovery-derived endpoint may only enter a known list —
+        // and thereby the repositories' first-launch auto-populate —
+        // when the user holds an active pinned consent whose
+        // `manifestHash` equals the exact digest the catalog entry
+        // currently lists. Consent is consent to BYTES, not to a
+        // componentId: after an operator republishes (new digest, new
+        // endpoint, same componentId), the old record must not admit
+        // the unreviewed manifest — the pickers render that state as
+        // TERMS CHANGED and only a fresh consent re-admits the entry.
+        // A factory rather than a bare closure so each fetch pass
+        // loads + decodes the consent store ONCE (the check runs per
+        // entry) while staying fresh across passes. Declared up here
+        // because the fetchers below are constructed before the
+        // consent UI wiring; the store is the same one the module
+        // consent flow writes to.
+        let pinnedConsentStore = UserDefaultsPinnedConsentStore()
+        let makeDiscoveryConsentGate: @Sendable () -> DiscoveryConsentCheck = {
+            // `try?` is fail-closed: a corrupt consent store gates
+            // every discovery-derived endpoint out of the known lists.
+            let activeHashes = ((try? pinnedConsentStore.load()) ?? [])
+                .reduce(into: [String: String]()) { hashes, record in
+                    guard record.isActive else { return }
+                    hashes[record.componentId] = record.manifestHash
+                }
+            return { componentId, manifestDigest in
+                activeHashes[componentId] == manifestDigest
+            }
+        }
 
         let relayerRepository: RelayerRepository
         let contractsRepository: ContractsRepository
@@ -142,7 +174,8 @@ struct OnymIOSApp: App {
             relayerRepository = RelayerRepository(
                 fetcher: DiscoveryBackedKnownRelayersFetcher.wrapping(
                     GitHubReleasesKnownRelayersFetcher(),
-                    catalog: discoveryCatalog
+                    catalog: discoveryCatalog,
+                    makeConsentGate: makeDiscoveryConsentGate
                 ),
                 store: UserDefaultsRelayerSelectionStore()
             )
@@ -155,7 +188,8 @@ struct OnymIOSApp: App {
         relayerRepository = RelayerRepository(
             fetcher: DiscoveryBackedKnownRelayersFetcher.wrapping(
                 GitHubReleasesKnownRelayersFetcher(),
-                catalog: discoveryCatalog
+                catalog: discoveryCatalog,
+                makeConsentGate: makeDiscoveryConsentGate
             ),
             store: UserDefaultsRelayerSelectionStore()
         )
@@ -237,7 +271,10 @@ struct OnymIOSApp: App {
             moderationRepository = ModerationRepository(
                 authoritiesFetcher: DiscoveryBackedKnownAuthoritiesFetcher.wrapping(
                     GitHubReleasesKnownAuthoritiesFetcher(),
-                    catalog: discoveryCatalog
+                    catalog: discoveryCatalog,
+                    // This build layer ships the discovery surface —
+                    // enable the (legacy-wins) directory merge.
+                    discoveryEnabled: { true }
                 ),
                 manifestFetcher: moderationManifestFetcher,
                 mandateStore: UserDefaultsMandateStore(),
@@ -262,7 +299,10 @@ struct OnymIOSApp: App {
         moderationRepository = ModerationRepository(
             authoritiesFetcher: DiscoveryBackedKnownAuthoritiesFetcher.wrapping(
                 GitHubReleasesKnownAuthoritiesFetcher(),
-                catalog: discoveryCatalog
+                catalog: discoveryCatalog,
+                // This build layer ships the discovery surface —
+                // enable the (legacy-wins) directory merge.
+                discoveryEnabled: { true }
             ),
             manifestFetcher: moderationManifestFetcher,
             mandateStore: UserDefaultsMandateStore(),
@@ -368,12 +408,14 @@ struct OnymIOSApp: App {
             ? nil
             : DiscoveryBackedKnownBlossomServersFetcher.wrapping(
                 GitHubReleasesKnownBlossomServersFetcher(),
-                catalog: discoveryCatalog
+                catalog: discoveryCatalog,
+                makeConsentGate: makeDiscoveryConsentGate
             )
         #else
         blossomFetcher = DiscoveryBackedKnownBlossomServersFetcher.wrapping(
             GitHubReleasesKnownBlossomServersFetcher(),
-            catalog: discoveryCatalog
+            catalog: discoveryCatalog,
+            makeConsentGate: makeDiscoveryConsentGate
         )
         #endif
         let blossomServersRepository = BlossomServersRepository(
@@ -455,12 +497,14 @@ struct OnymIOSApp: App {
             ? nil
             : DiscoveryBackedKnownNostrRelaysFetcher.wrapping(
                 GitHubReleasesKnownNostrRelaysFetcher(),
-                catalog: discoveryCatalog
+                catalog: discoveryCatalog,
+                makeConsentGate: makeDiscoveryConsentGate
             )
         #else
         nostrFetcher = DiscoveryBackedKnownNostrRelaysFetcher.wrapping(
             GitHubReleasesKnownNostrRelaysFetcher(),
-            catalog: discoveryCatalog
+            catalog: discoveryCatalog,
+            makeConsentGate: makeDiscoveryConsentGate
         )
         #endif
         let nostrRelaysRepository = NostrRelaysRepository(
@@ -575,6 +619,132 @@ struct OnymIOSApp: App {
             gateCheck: gateCheckRepository
         )
 
+        // Discovery-driven module consent (Settings UI). The stores are
+        // the app-wide consent + selection provenance; the entitlement
+        // stub grants free offers only (StoreKit slots in behind the
+        // same seam later). Each picker pre-binds its seat type and the
+        // seat-specific `apply` closure that writes a consented
+        // manifest's endpoint into the legacy configuration — the
+        // operational source of truth stays where it always was. All
+        // nil when discovery is nil (UI-test harness), which leaves
+        // every settings screen exactly as it was.
+        // (`pinnedConsentStore` itself is declared next to the seat
+        // adapters above — the known-list consent gate reads it.)
+        let seatSelectionStore = UserDefaultsSeatSelectionStore()
+        /// Live per-seat catalog entries for the pickers' "From
+        /// catalog" sections: the repository's snapshot stream mapped
+        /// to one seat type, yielding the current aggregate on
+        /// subscribe and again after every refresh — so an open picker
+        /// populates when the boot-time refresh lands.
+        let makeSeatEntriesStream = discoveryRepository.map { repo in
+            { @Sendable (seatType: String) -> AsyncStream<[AttributedCatalogEntry]> in
+                AsyncStream { continuation in
+                    let task = Task {
+                        for await state in repo.snapshots {
+                            continuation.yield(
+                                state.aggregate.filter { $0.entry.seatType == seatType }
+                            )
+                        }
+                        continuation.finish()
+                    }
+                    continuation.onTermination = { _ in task.cancel() }
+                }
+            }
+        }
+        /// Entitlements for the consent surface, resolved against the
+        /// manifest currently under review — the consent store alone
+        /// can't answer on FIRST consent (no record exists yet, so
+        /// even free offers would gate as not-entitled); the store is
+        /// only the fallback for offers the reviewed manifest doesn't
+        /// carry. StoreKit slots in behind the same seam later.
+        let makeEntitlements: @Sendable (SignedServiceManifest) -> any EntitlementProviding = { manifest in
+            FreeTierEntitlementProvider(reviewing: manifest, consentStore: pinnedConsentStore)
+        }
+
+        /// Manifest `name` when published and non-empty, else the
+        /// component id minus its prefix — same rule as the adapters.
+        func discoveryDisplayName(_ fields: SeatManifestFields, componentId: String) -> String {
+            if let name = fields.name, !name.isEmpty { return name }
+            return ModuleConsentFlow.shortComponentId(componentId)
+        }
+
+        let relayerCatalogPicker = discoveryCatalog.map { catalog in
+            DiscoveryModulePicker(
+                entries: { await catalog.entries(DiscoveryBackedKnownRelayersFetcher.seatType) },
+                activeConsent: { try? pinnedConsentStore.activeRecord(componentId: $0) },
+                entriesStream: makeSeatEntriesStream.map { make in
+                    { make(DiscoveryBackedKnownRelayersFetcher.seatType) }
+                },
+                makeConsentFlow: { entry in
+                    ModuleConsentFlow(
+                        entry: entry,
+                        fetchManifestBytes: catalog.fetchManifestBytes,
+                        consentStore: pinnedConsentStore,
+                        selectionStore: seatSelectionStore,
+                        makeEntitlements: makeEntitlements,
+                        apply: { manifest in
+                            let fields = SeatManifestFields(rawBytes: manifest.rawBytes)
+                            // Throws `ModuleApplyError.noUsableEndpoint`
+                            // when the manifest has no https endpoint —
+                            // the flow surfaces it instead of showing
+                            // "Service added" over a no-op.
+                            let url = try ModuleConsentAcceptance.requiredEndpointURL(
+                                in: fields.endpointURIs,
+                                scheme: "https"
+                            )
+                            // `addEndpoint` flips the configuration's
+                            // `hasUserInteracted` to true, so a refresh
+                            // never auto-populates over this choice.
+                            await relayerRepository.addEndpoint(RelayerEndpoint(
+                                name: discoveryDisplayName(fields, componentId: manifest.componentId),
+                                url: url,
+                                networks: fields.networks
+                                    ?? DiscoveryBackedKnownRelayersFetcher.defaultNetworks
+                            ))
+                        }
+                    )
+                }
+            )
+        }
+
+        let nostrCatalogPicker = discoveryCatalog.map { catalog in
+            DiscoveryModulePicker(
+                entries: { await catalog.entries(DiscoveryBackedKnownNostrRelaysFetcher.seatType) },
+                activeConsent: { try? pinnedConsentStore.activeRecord(componentId: $0) },
+                entriesStream: makeSeatEntriesStream.map { make in
+                    { make(DiscoveryBackedKnownNostrRelaysFetcher.seatType) }
+                },
+                makeConsentFlow: { entry in
+                    ModuleConsentFlow(
+                        entry: entry,
+                        fetchManifestBytes: catalog.fetchManifestBytes,
+                        consentStore: pinnedConsentStore,
+                        selectionStore: seatSelectionStore,
+                        makeEntitlements: makeEntitlements,
+                        apply: { manifest in
+                            let fields = SeatManifestFields(rawBytes: manifest.rawBytes)
+                            // Throws `ModuleApplyError.noUsableEndpoint`
+                            // when the manifest has no wss endpoint —
+                            // surfaced by the flow, never a silent no-op.
+                            let url = try ModuleConsentAcceptance.requiredEndpointURL(
+                                in: fields.endpointURIs,
+                                scheme: "wss"
+                            )
+                            // A consent-picked relay is the user's own
+                            // choice, not a published default — no
+                            // "Default" badge, and `addEndpoint` marks
+                            // the configuration user-interacted.
+                            await nostrRelaysRepository.addEndpoint(NostrRelayEndpoint(
+                                name: discoveryDisplayName(fields, componentId: manifest.componentId),
+                                url: url,
+                                isDefault: false
+                            ))
+                        }
+                    )
+                }
+            )
+        }
+
         self.dependencies = AppDependencies(
             makeRecoveryPhraseBackupFlow: { @MainActor in
                 RecoveryPhraseBackupFlow(
@@ -583,10 +753,10 @@ struct OnymIOSApp: App {
                 )
             },
             makeRelayerSettingsFlow: { @MainActor in
-                RelayerSettingsFlow(repository: relayerRepository)
+                RelayerSettingsFlow(repository: relayerRepository, discovery: relayerCatalogPicker)
             },
             makeNostrRelaySettingsFlow: { @MainActor in
-                NostrRelaySettingsFlow(repository: nostrRelaysRepository)
+                NostrRelaySettingsFlow(repository: nostrRelaysRepository, discovery: nostrCatalogPicker)
             },
             makeBlossomRelaySettingsFlow: { @MainActor in
                 BlossomRelaySettingsFlow(repository: blossomServersRepository)
@@ -739,6 +909,9 @@ struct OnymIOSApp: App {
                         await gateCheckRepository.redeemRecoveryGrant(grant)
                     }
                 )
+            },
+            makeDiscoverySettingsFlow: discoveryRepository.map { repo in
+                { @MainActor in DiscoverySettingsFlow(repository: repo) }
             }
         )
     }

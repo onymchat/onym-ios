@@ -178,7 +178,7 @@ final class DiscoverySeatAdaptersTests: XCTestCase {
         let fetcher = DiscoveryBackedKnownRelayersFetcher(
             catalog: Self.emptyCatalog,
             fallback: StubRelayersFallback(),
-            hasActiveConsent: { _ in true }
+            makeConsentGate: { { _, _ in true } }
         )
         let result = try await fetcher.fetchLatest()
         XCTAssertEqual(result, StubRelayersFallback.sentinel)
@@ -197,7 +197,7 @@ final class DiscoverySeatAdaptersTests: XCTestCase {
         let fetcher = DiscoveryBackedKnownRelayersFetcher(
             catalog: Self.catalog([seeded]),
             fallback: StubRelayersFallback(),
-            hasActiveConsent: { _ in true }
+            makeConsentGate: { { _, _ in true } }
         )
         let result = try await fetcher.fetchLatest()
         XCTAssertEqual(result, [RelayerEndpoint(
@@ -236,7 +236,7 @@ final class DiscoverySeatAdaptersTests: XCTestCase {
         let fetcher = DiscoveryBackedKnownRelayersFetcher(
             catalog: Self.catalog([first, second]),
             fallback: StubRelayersFallback(),
-            hasActiveConsent: { _ in true }
+            makeConsentGate: { { _, _ in true } }
         )
         let result = try await fetcher.fetchLatest()
         XCTAssertEqual(result.map(\.name), ["Notary One", "Notary Two", "Legacy Relayer"])
@@ -273,7 +273,7 @@ final class DiscoverySeatAdaptersTests: XCTestCase {
         let fetcher = DiscoveryBackedKnownRelayersFetcher(
             catalog: Self.catalog([bad, good]),
             fallback: StubRelayersFallback(),
-            hasActiveConsent: { _ in true }
+            makeConsentGate: { { _, _ in true } }
         )
         let result = try await fetcher.fetchLatest()
         XCTAssertEqual(result.map(\.name), ["Good Notary", "Legacy Relayer"])
@@ -309,7 +309,7 @@ final class DiscoverySeatAdaptersTests: XCTestCase {
         let fetcher = DiscoveryBackedKnownRelayersFetcher(
             catalog: Self.catalog([overlapsLegacy, crossProviderDuplicate]),
             fallback: StubRelayersFallback(),
-            hasActiveConsent: { _ in true }
+            makeConsentGate: { { _, _ in true } }
         )
         let result = try await fetcher.fetchLatest()
         XCTAssertEqual(result.map(\.url), [URL(string: "https://legacy.example")!])
@@ -336,7 +336,7 @@ final class DiscoverySeatAdaptersTests: XCTestCase {
         let fetcher = DiscoveryBackedKnownRelayersFetcher(
             catalog: Self.catalog([seeded]),
             fallback: FailingFallback(),
-            hasActiveConsent: { _ in true }
+            makeConsentGate: { { _, _ in true } }
         )
         let result = try await fetcher.fetchLatest()
         XCTAssertEqual(result.map(\.name), ["Discovered Notary"])
@@ -344,7 +344,7 @@ final class DiscoverySeatAdaptersTests: XCTestCase {
         let emptyDiscovery = DiscoveryBackedKnownRelayersFetcher(
             catalog: Self.emptyCatalog,
             fallback: FailingFallback(),
-            hasActiveConsent: { _ in true }
+            makeConsentGate: { { _, _ in true } }
         )
         do {
             _ = try await emptyDiscovery.fetchLatest()
@@ -366,7 +366,7 @@ final class DiscoverySeatAdaptersTests: XCTestCase {
         let fetcher = DiscoveryBackedKnownRelayersFetcher(
             catalog: Self.catalog([mislabeled]),
             fallback: StubRelayersFallback(),
-            hasActiveConsent: { _ in true }
+            makeConsentGate: { { _, _ in true } }
         )
         let result = try await fetcher.fetchLatest()
         XCTAssertEqual(result, StubRelayersFallback.sentinel)
@@ -384,7 +384,7 @@ final class DiscoverySeatAdaptersTests: XCTestCase {
         let fetcher = DiscoveryBackedKnownRelayersFetcher(
             catalog: Self.catalog([swapped]),
             fallback: StubRelayersFallback(),
-            hasActiveConsent: { _ in true }
+            makeConsentGate: { { _, _ in true } }
         )
         let result = try await fetcher.fetchLatest()
         XCTAssertEqual(result, StubRelayersFallback.sentinel)
@@ -410,7 +410,7 @@ final class DiscoverySeatAdaptersTests: XCTestCase {
         let fetcher = DiscoveryBackedKnownRelayersFetcher(
             catalog: Self.catalog([seeded]),
             fallback: StubRelayersFallback(),
-            hasActiveConsent: { _ in true }
+            makeConsentGate: { { _, _ in true } }
         )
         let result = try await fetcher.fetchLatest()
         XCTAssertEqual(result.first?.url, URL(string: "https://serve.example/api"))
@@ -428,7 +428,7 @@ final class DiscoverySeatAdaptersTests: XCTestCase {
         let fallbackFetcher = DiscoveryBackedKnownRelayersFetcher(
             catalog: Self.catalog([noPreferredRole]),
             fallback: StubRelayersFallback(),
-            hasActiveConsent: { _ in true }
+            makeConsentGate: { { _, _ in true } }
         )
         let fallbackResult = try await fallbackFetcher.fetchLatest()
         XCTAssertEqual(fallbackResult.first?.url, URL(string: "https://first.example/api"))
@@ -453,7 +453,7 @@ final class DiscoverySeatAdaptersTests: XCTestCase {
         let fetcher = DiscoveryBackedKnownRelayersFetcher(
             catalog: Self.catalog(seeded),
             fallback: StubRelayersFallback(),
-            hasActiveConsent: { _ in true }
+            makeConsentGate: { { _, _ in true } }
         )
         let result = try await fetcher.fetchLatest()
         // First `maxEntriesPerSeat` discovery entries in aggregate
@@ -475,7 +475,7 @@ final class DiscoverySeatAdaptersTests: XCTestCase {
         let fetcher = DiscoveryBackedKnownRelayersFetcher(
             catalog: Self.catalog([seeded]),
             fallback: StubRelayersFallback(),
-            hasActiveConsent: { _ in true }
+            makeConsentGate: { { _, _ in true } }
         )
         let result = try await fetcher.fetchLatest()
         XCTAssertEqual(result.first?.name, "test-notary")
@@ -493,7 +493,7 @@ final class DiscoverySeatAdaptersTests: XCTestCase {
         let fetcher = DiscoveryBackedKnownRelayersFetcher(
             catalog: Self.catalog([seeded]),
             fallback: StubRelayersFallback(),
-            hasActiveConsent: { _ in true }
+            makeConsentGate: { { _, _ in true } }
         )
         let result = try await fetcher.fetchLatest()
         XCTAssertEqual(result, StubRelayersFallback.sentinel)
@@ -511,7 +511,7 @@ final class DiscoverySeatAdaptersTests: XCTestCase {
         let fetcher = DiscoveryBackedKnownRelayersFetcher(
             catalog: unreachable,
             fallback: StubRelayersFallback(),
-            hasActiveConsent: { _ in true }
+            makeConsentGate: { { _, _ in true } }
         )
         let result = try await fetcher.fetchLatest()
         XCTAssertEqual(result, StubRelayersFallback.sentinel)
@@ -534,7 +534,7 @@ final class DiscoverySeatAdaptersTests: XCTestCase {
         let fetcher = DiscoveryBackedKnownNostrRelaysFetcher(
             catalog: Self.catalog([seeded]),
             fallback: StubNostrFallback(),
-            hasActiveConsent: { _ in true }
+            makeConsentGate: { { _, _ in true } }
         )
         let result = try await fetcher.fetchLatest()
         XCTAssertEqual(result, [NostrRelayEndpoint(
@@ -555,7 +555,7 @@ final class DiscoverySeatAdaptersTests: XCTestCase {
         let fetcher = DiscoveryBackedKnownNostrRelaysFetcher(
             catalog: Self.catalog([seeded]),
             fallback: StubNostrFallback(),
-            hasActiveConsent: { _ in true }
+            makeConsentGate: { { _, _ in true } }
         )
         let result = try await fetcher.fetchLatest()
         XCTAssertEqual(result, StubNostrFallback.sentinel)
@@ -575,7 +575,7 @@ final class DiscoverySeatAdaptersTests: XCTestCase {
         let fetcher = DiscoveryBackedKnownBlossomServersFetcher(
             catalog: Self.catalog([seeded]),
             fallback: StubBlossomFallback(),
-            hasActiveConsent: { _ in true }
+            makeConsentGate: { { _, _ in true } }
         )
         let result = try await fetcher.fetchLatest()
         XCTAssertEqual(result, [BlossomServerEndpoint(
@@ -592,7 +592,7 @@ final class DiscoverySeatAdaptersTests: XCTestCase {
         let fetcher = DiscoveryBackedKnownBlossomServersFetcher(
             catalog: Self.emptyCatalog,
             fallback: StubBlossomFallback(),
-            hasActiveConsent: { _ in true }
+            makeConsentGate: { { _, _ in true } }
         )
         let result = try await fetcher.fetchLatest()
         XCTAssertEqual(result, StubBlossomFallback.sentinel)
@@ -680,7 +680,7 @@ final class DiscoverySeatAdaptersTests: XCTestCase {
 
     // MARK: - Consent gate seam
 
-    /// With NO consent system present (`hasActiveConsent: nil` — this
+    /// With NO consent system present (`makeConsentGate: nil` — this
     /// PR standalone), discovery entries are excluded from the known
     /// list entirely: the adapter is a pure legacy passthrough and
     /// never even fans out into the catalog. The known list feeds
@@ -702,7 +702,7 @@ final class DiscoverySeatAdaptersTests: XCTestCase {
         let fetcher = DiscoveryBackedKnownRelayersFetcher(
             catalog: catalog,
             fallback: StubRelayersFallback(),
-            hasActiveConsent: nil
+            makeConsentGate: nil
         )
         let result = try await fetcher.fetchLatest()
         XCTAssertEqual(result, StubRelayersFallback.sentinel)
@@ -716,7 +716,7 @@ final class DiscoverySeatAdaptersTests: XCTestCase {
         let fetcher = DiscoveryBackedKnownNostrRelaysFetcher(
             catalog: Self.catalog([seeded]),
             fallback: StubNostrFallback(),
-            hasActiveConsent: nil
+            makeConsentGate: nil
         )
         let result = try await fetcher.fetchLatest()
         XCTAssertEqual(result, StubNostrFallback.sentinel)
@@ -730,7 +730,7 @@ final class DiscoverySeatAdaptersTests: XCTestCase {
         let fetcher = DiscoveryBackedKnownBlossomServersFetcher(
             catalog: Self.catalog([seeded]),
             fallback: StubBlossomFallback(),
-            hasActiveConsent: nil
+            makeConsentGate: nil
         )
         let result = try await fetcher.fetchLatest()
         XCTAssertEqual(result, StubBlossomFallback.sentinel)
@@ -761,10 +761,96 @@ final class DiscoverySeatAdaptersTests: XCTestCase {
         let fetcher = DiscoveryBackedKnownRelayersFetcher(
             catalog: Self.catalog([consented, unconsented]),
             fallback: StubRelayersFallback(),
-            hasActiveConsent: { $0 == "onym:component:notary-one" }
+            makeConsentGate: { { componentId, _ in componentId == "onym:component:notary-one" } }
         )
         let result = try await fetcher.fetchLatest()
         XCTAssertEqual(result.map(\.name), ["Notary One", "Legacy Relayer"])
+    }
+
+    /// THE consent-to-bytes rule: consent pins exact manifest bytes,
+    /// so the gate compares the entry's CURRENT digest against the
+    /// active record's pinned hash. An operator republishing under the
+    /// same componentId (new digest, new endpoint) must not ride the
+    /// old record into the known list — that entry is excluded until
+    /// the user re-consents (the pickers render it as TERMS CHANGED),
+    /// while an entry whose digest still matches its pinned hash
+    /// merges as before.
+    func test_relayers_consentGateExcludesRepublishedManifestWithStaleConsent() async throws {
+        let stillConsented = try Self.seeded(
+            componentId: "onym:component:notary-one",
+            seatType: "notary",
+            manifestExtras: [
+                "name": "Still Consented",
+                "endpoints": [["uri": "https://one.example/api"]],
+            ],
+            manifestURI: "https://provider.example/manifests/one.json"
+        )
+        let republished = try Self.seeded(
+            componentId: "onym:component:notary-two",
+            seatType: "notary",
+            manifestExtras: [
+                "name": "Republished Notary",
+                "endpoints": [["uri": "https://two-new.example/api"]],
+            ],
+            manifestURI: "https://provider.example/manifests/two.json"
+        )
+        // The app-shaped gate: active pinned hash per componentId. The
+        // republished component's ACTIVE record pins the digest of the
+        // manifest the user reviewed — which is no longer the digest
+        // the catalog entry lists.
+        let activeHashes = [
+            "onym:component:notary-one": stillConsented.entry.entry.manifest.digest,
+            "onym:component:notary-two": "sha256:" + String(repeating: "a", count: 64),
+        ]
+        let fetcher = DiscoveryBackedKnownRelayersFetcher(
+            catalog: Self.catalog([stillConsented, republished]),
+            fallback: StubRelayersFallback(),
+            makeConsentGate: { { componentId, digest in activeHashes[componentId] == digest } }
+        )
+        let result = try await fetcher.fetchLatest()
+        XCTAssertEqual(
+            result.map(\.name), ["Still Consented", "Legacy Relayer"],
+            "an active consent record must not admit a republished (unreviewed) manifest's endpoint"
+        )
+        XCTAssertFalse(
+            result.contains { $0.url == URL(string: "https://two-new.example/api")! },
+            "the republished endpoint must stay out of the known list (and auto-populate) until re-consent"
+        )
+    }
+
+    /// The gate factory is invoked once per `fetchLatest` pass — the
+    /// per-entry checks answer from that one gate (one consent-store
+    /// load per pass), never one store load per entry.
+    func test_relayers_consentGateFactoryRunsOncePerFetchPass() async throws {
+        let seeded = try (0..<3).map { index in
+            try Self.seeded(
+                componentId: "onym:component:notary-\(index)",
+                seatType: "notary",
+                manifestExtras: [
+                    "name": "Notary \(index)",
+                    "endpoints": [["uri": "https://notary-\(index).example/api"]],
+                ],
+                manifestURI: "https://provider.example/manifests/notary-\(index).json"
+            )
+        }
+        final class Counter: @unchecked Sendable {
+            private let lock = NSLock()
+            private var value = 0
+            func increment() { lock.withLock { value += 1 } }
+            var count: Int { lock.withLock { value } }
+        }
+        let factoryCalls = Counter()
+        let fetcher = DiscoveryBackedKnownRelayersFetcher(
+            catalog: Self.catalog(seeded),
+            fallback: StubRelayersFallback(),
+            makeConsentGate: {
+                factoryCalls.increment()
+                return { _, _ in true }
+            }
+        )
+        let result = try await fetcher.fetchLatest()
+        XCTAssertEqual(result.count, 4, "three discovery entries + the legacy row")
+        XCTAssertEqual(factoryCalls.count, 1, "one gate (one store load) per fetch pass")
     }
 
     // MARK: - Endpoint URI rules + dedupe normalization
@@ -786,7 +872,7 @@ final class DiscoverySeatAdaptersTests: XCTestCase {
         let fetcher = DiscoveryBackedKnownRelayersFetcher(
             catalog: Self.catalog([seeded]),
             fallback: StubRelayersFallback(),
-            hasActiveConsent: { _ in true }
+            makeConsentGate: { { _, _ in true } }
         )
         let result = try await fetcher.fetchLatest()
         XCTAssertEqual(result, StubRelayersFallback.sentinel)
@@ -808,7 +894,7 @@ final class DiscoverySeatAdaptersTests: XCTestCase {
         let fetcher = DiscoveryBackedKnownNostrRelaysFetcher(
             catalog: Self.catalog([seeded]),
             fallback: StubNostrFallback(),
-            hasActiveConsent: { _ in true }
+            makeConsentGate: { { _, _ in true } }
         )
         let result = try await fetcher.fetchLatest()
         XCTAssertEqual(result.map(\.name), ["Case Variant Courier"])
@@ -832,7 +918,7 @@ final class DiscoverySeatAdaptersTests: XCTestCase {
         let fetcher = DiscoveryBackedKnownRelayersFetcher(
             catalog: Self.catalog([flagged]),
             fallback: StubRelayersFallback(),
-            hasActiveConsent: { _ in true }
+            makeConsentGate: { { _, _ in true } }
         )
         let result = try await fetcher.fetchLatest()
         XCTAssertEqual(result, StubRelayersFallback.sentinel)
@@ -854,7 +940,7 @@ final class DiscoverySeatAdaptersTests: XCTestCase {
         let fetcher = DiscoveryBackedKnownRelayersFetcher(
             catalog: Self.catalog([underReview]),
             fallback: StubRelayersFallback(),
-            hasActiveConsent: { _ in true }
+            makeConsentGate: { { _, _ in true } }
         )
         let result = try await fetcher.fetchLatest()
         XCTAssertEqual(result.map(\.name), ["Review Notary", "Legacy Relayer"])
@@ -875,7 +961,7 @@ final class DiscoverySeatAdaptersTests: XCTestCase {
         let fetcher = DiscoveryBackedKnownNostrRelaysFetcher(
             catalog: Self.catalog([seeded]),
             fallback: StubNostrFallback(),
-            hasActiveConsent: { _ in true }
+            makeConsentGate: { { _, _ in true } }
         )
         let result = try await fetcher.fetchLatest()
         XCTAssertEqual(result.map(\.name), ["Shouting Courier", "Legacy Nostr"])

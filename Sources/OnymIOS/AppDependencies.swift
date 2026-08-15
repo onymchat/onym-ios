@@ -9,6 +9,7 @@ import OnymChatsUI
 import OnymSettings
 import OnymModerationUI
 import OnymModeration
+import OnymDiscovery
 
 /// App-wide composition root. Constructed exactly once by `OnymIOSApp`
 /// and threaded down to views via `RootView`. Each member is a factory
@@ -100,4 +101,8 @@ struct AppDependencies {
     /// with the authority's human moderator, poll it, and redeem the
     /// signed grant at the enforcement backend. Nothing self-serve.
     let makeDeviceRecoveryFlow: @MainActor () async -> DeviceRecoveryFlow
+    /// Discovery Providers drill-down factory. Optional so Settings
+    /// renders without the discovery stack (nil under the UI-test
+    /// harness — same pattern as the moderation factories).
+    let makeDiscoverySettingsFlow: (@MainActor () -> DiscoverySettingsFlow)?
 }

@@ -7,6 +7,7 @@ import OnymRecovery
 import OnymChatsCore
 import OnymModeration
 import OnymModerationUI
+import OnymDiscovery
 
 /// Settings tab — Onym design home. Identity hero (active identity
 /// avatar + truncated BLS fingerprint) and a per-identity invite QR
@@ -33,6 +34,10 @@ public struct SettingsView: View {
     let makeModerationSettingsFlow: (@MainActor () -> ModerationSettingsFlow)?
     let makeModerationConsentFlow: (@MainActor (ModerationConsentFlow.Mode) -> ModerationConsentFlow)?
     let makeModerationCaseFlow: (@MainActor (CaseNotice) -> ModerationCaseFlow)?
+    /// Discovery drill-down factory. Optional so the Settings screen
+    /// renders without the discovery stack (the section is hidden
+    /// until the app wires this in — same pattern as moderation).
+    let makeDiscoverySettingsFlow: (@MainActor () -> DiscoverySettingsFlow)?
 
     public init(
         makeBackupFlow: @escaping @MainActor () -> RecoveryPhraseBackupFlow,
@@ -44,7 +49,8 @@ public struct SettingsView: View {
         onClearAllMessages: @escaping () async -> Void,
         makeModerationSettingsFlow: (@MainActor () -> ModerationSettingsFlow)? = nil,
         makeModerationConsentFlow: (@MainActor (ModerationConsentFlow.Mode) -> ModerationConsentFlow)? = nil,
-        makeModerationCaseFlow: (@MainActor (CaseNotice) -> ModerationCaseFlow)? = nil
+        makeModerationCaseFlow: (@MainActor (CaseNotice) -> ModerationCaseFlow)? = nil,
+        makeDiscoverySettingsFlow: (@MainActor () -> DiscoverySettingsFlow)? = nil
     ) {
         self.makeBackupFlow = makeBackupFlow
         self.makeRelayerSettingsFlow = makeRelayerSettingsFlow
@@ -56,6 +62,7 @@ public struct SettingsView: View {
         self.makeModerationSettingsFlow = makeModerationSettingsFlow
         self.makeModerationConsentFlow = makeModerationConsentFlow
         self.makeModerationCaseFlow = makeModerationCaseFlow
+        self.makeDiscoverySettingsFlow = makeDiscoverySettingsFlow
     }
 
     @State private var showRecoveryPhrase = false
@@ -94,6 +101,27 @@ public struct SettingsView: View {
                 // Recovery Phrase) was removed: recovery-phrase backup now
                 // lives on each identity's carousel page (its Backup
                 // action), and the informational Privacy screen is gone.
+
+                if let makeDiscoverySettingsFlow {
+                    SettingsSectionLabel("DISCOVERY")
+                    SettingsCard {
+                        NavigationLink {
+                            DiscoverySettingsView(flow: makeDiscoverySettingsFlow())
+                        } label: {
+                            SettingsRow(
+                                title: "Discovery Providers",
+                                subtitle: "Catalogs of relays and services",
+                                last: true
+                            ) {
+                                SettingsIconTile(symbol: "sparkle.magnifyingglass",
+                                                 bg: SettingsTile.purple)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("settings.discovery_row")
+                    }
+                    SettingsFootnote("Discovery providers publish signed catalogs of services you can adopt. You choose which providers to trust — each one's key is pinned when you add it.")
+                }
 
                 SettingsSectionLabel("ANCHORS")
                 SettingsCard {

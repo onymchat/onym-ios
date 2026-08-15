@@ -1,5 +1,6 @@
 import SwiftUI
 import OnymDesign
+import OnymDiscovery
 
 /// Settings → Transport → Nostr Relays. Lists configured Nostr
 /// WebSocket endpoints, lets the user add a custom URL or remove
@@ -12,6 +13,8 @@ import OnymDesign
 /// reconnect-on-config-change is wired in a follow-up.
 struct NostrRelaySettingsView: View {
     @State private var flow: NostrRelaySettingsFlow
+    /// The catalog entry whose consent sheet is presented, if any.
+    @State private var consentEntry: AttributedCatalogEntry?
 
     init(flow: NostrRelaySettingsFlow) {
         _flow = State(initialValue: flow)
@@ -26,6 +29,15 @@ struct NostrRelaySettingsView: View {
                     "CONFIGURED · \(flow.state.snapshot.endpoints.count)"
                 )
                 configuredCard
+
+                DiscoveryCatalogSection(
+                    entries: flow.catalogEntries,
+                    activeConsent: { flow.activeConsent(for: $0) },
+                    consentedOffer: { flow.consentedOffer(for: $0) },
+                    tileSymbol: "antenna.radiowaves.left.and.right.circle.fill",
+                    accessibilityPrefix: "nostr.catalog",
+                    onSelect: { consentEntry = $0 }
+                )
 
                 SettingsSectionLabel("ADD CUSTOM URL")
                 customURLCard
@@ -62,6 +74,18 @@ struct NostrRelaySettingsView: View {
         .navigationTitle("Nostr Relays")
         .navigationBarTitleDisplayMode(.inline)
         .task { flow.start() }
+        // Paired with `start()` (ModerationSettingsView precedent):
+        // the drains retain the flow and the repository streams never
+        // finish on their own, so without this the continuations would
+        // accumulate on every visit.
+        .onDisappear { flow.stop() }
+        // Consent runs as a sheet; on dismiss the catalog badges
+        // refresh so a fresh consent shows immediately.
+        .sheet(item: $consentEntry, onDismiss: { flow.refreshCatalog() }) { entry in
+            if let discovery = flow.discovery {
+                ModuleConsentView(flow: discovery.makeConsentFlow(entry))
+            }
+        }
     }
 
     // MARK: - Configured list

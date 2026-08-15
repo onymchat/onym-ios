@@ -1,6 +1,7 @@
 import SwiftUI
 import OnymDesign
 import OnymChain
+import OnymDiscovery
 
 /// Settings → Relayer. Reskinned to the Onym design — segmented
 /// strategy toggle, configured-relayers card with star-to-promote and
@@ -13,6 +14,8 @@ import OnymChain
 /// identifiers are preserved so existing UI tests still bind.
 struct RelayerSettingsView: View {
     @State private var flow: RelayerSettingsFlow
+    /// The catalog entry whose consent sheet is presented, if any.
+    @State private var consentEntry: AttributedCatalogEntry?
 
     init(flow: RelayerSettingsFlow) {
         _flow = State(initialValue: flow)
@@ -32,6 +35,15 @@ struct RelayerSettingsView: View {
                 publishedCard
                 SettingsFootnote("Published by the onym-relayer project. Tap to add.")
 
+                DiscoveryCatalogSection(
+                    entries: flow.catalogEntries,
+                    activeConsent: { flow.activeConsent(for: $0) },
+                    consentedOffer: { flow.consentedOffer(for: $0) },
+                    tileSymbol: "antenna.radiowaves.left.and.right",
+                    accessibilityPrefix: "relayer.catalog",
+                    onSelect: { consentEntry = $0 }
+                )
+
                 SettingsSectionLabel("ADD CUSTOM URL")
                 customURLCard
                 SettingsFootnote("Use a private deployment, localhost, or any relayer not in the published list.")
@@ -44,6 +56,18 @@ struct RelayerSettingsView: View {
         .navigationTitle("Relayer")
         .navigationBarTitleDisplayMode(.inline)
         .task { flow.start() }
+        // Paired with `start()` (ModerationSettingsView precedent):
+        // the drains retain the flow and the repository streams never
+        // finish on their own, so without this the continuations would
+        // accumulate on every visit.
+        .onDisappear { flow.stop() }
+        // Consent runs as a sheet; on dismiss the catalog badges
+        // refresh so a fresh consent shows immediately.
+        .sheet(item: $consentEntry, onDismiss: { flow.refreshCatalog() }) { entry in
+            if let discovery = flow.discovery {
+                ModuleConsentView(flow: discovery.makeConsentFlow(entry))
+            }
+        }
     }
 
     // MARK: - Strategy toggle (segmented capsule)
