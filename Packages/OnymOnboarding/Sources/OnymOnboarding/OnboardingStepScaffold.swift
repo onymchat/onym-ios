@@ -112,22 +112,27 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
                 .disabled(primaryDisabled)
                 .accessibilityIdentifier("onboarding.\(step.rawValue).primary")
 
-                HStack {
-                    if let backAction {
-                        Button("Back", action: backAction)
-                            .accessibilityIdentifier("onboarding.\(step.rawValue).back")
-                    }
-                    Spacer()
-                    if let skipAction {
-                        Button(action: skipAction) { Text(verbatim: skipTitle) }
-                            .accessibilityIdentifier("onboarding.\(step.rawValue).skip")
-                    } else if showsSkipProgress {
-                        ProgressView()
-                            .controlSize(.small)
-                            .accessibilityIdentifier("onboarding.\(step.rawValue).skip_pending")
-                    }
+                // Secondary actions stack centered under the primary
+                // (the design's quiet text buttons) — a corner-pinned
+                // Back read as page chrome, not as this screen's
+                // alternative action.
+                if let skipAction {
+                    Button(action: skipAction) { Text(verbatim: skipTitle) }
+                        .font(.subheadline)
+                        .frame(maxWidth: .infinity)
+                        .accessibilityIdentifier("onboarding.\(step.rawValue).skip")
+                } else if showsSkipProgress {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(maxWidth: .infinity)
+                        .accessibilityIdentifier("onboarding.\(step.rawValue).skip_pending")
                 }
-                .font(.subheadline)
+                if let backAction {
+                    Button("Back", action: backAction)
+                        .font(.subheadline)
+                        .frame(maxWidth: .infinity)
+                        .accessibilityIdentifier("onboarding.\(step.rawValue).back")
+                }
             }
             .padding(.horizontal, 20)
             .padding(.top, 12)
