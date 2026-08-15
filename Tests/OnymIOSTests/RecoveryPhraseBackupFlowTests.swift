@@ -133,6 +133,57 @@ final class RecoveryPhraseBackupFlowTests: XCTestCase {
         }
     }
 
+    // MARK: - Lifetime / scrub (onym-ios #265 review)
+
+    /// `stop()` must SCRUB, not just cancel: the revealed phrase held
+    /// in `.reveal` and the cached identity are dropped, and the step
+    /// rewinds to `.intro` so any re-entry goes back through the
+    /// biometric gate.
+    func test_stop_scrubsRevealedPhraseBackToIntro() async {
+        authenticator.outcome = .success
+        await flow.authenticate()
+        flow.tappedReveal()
+        guard case .reveal(_, true) = flow.step else {
+            return XCTFail("expected revealed step, got \(flow.step)")
+        }
+
+        flow.stop()
+
+        XCTAssertEqual(flow.step, .intro,
+                       "stop() must rewind to intro, dropping the phrase")
+        // Re-arming after stop goes back through auth, not straight to
+        // the words.
+        flow.start()
+        await waitForReady()
+        XCTAssertEqual(flow.step, .intro)
+    }
+
+    /// The snapshot task strongly retains the flow over a
+    /// never-finishing stream — `stop()` is what breaks the cycle.
+    /// Without it, releasing the last external reference leaks an
+    /// immortal flow holding the plaintext phrase.
+    func test_stop_breaksSnapshotRetainCycle_flowDeallocates() async {
+        weak var leaked: RecoveryPhraseBackupFlow?
+        do {
+            var scoped: RecoveryPhraseBackupFlow? = RecoveryPhraseBackupFlow(
+                repository: repository,
+                authenticator: authenticator,
+                pasteboard: pasteboard
+            )
+            leaked = scoped
+            scoped?.start()
+            await waitForReady(scoped)
+            authenticator.outcome = .success
+            await scoped?.authenticate()
+            scoped?.stop()
+            scoped = nil
+        }
+        // One main-actor hop lets the cancelled task unwind.
+        await Task.yield()
+        XCTAssertNil(leaked,
+                     "stop() must break the snapshot task's self-retain so the flow deallocates")
+    }
+
     // DEBUG posture: the same unevaluable policy fails OPEN so the dev flow
     // proceeds to the reveal step.
     func test_unevaluablePolicy_failOpen_reachesReveal() async {

@@ -40,6 +40,12 @@ public struct RecoveryPhraseBackupView: View {
                     obscured = phase != .active
                 }
                 .task { flow.start() }
+                // Every flow view pairs start with stop; this one
+                // additionally relies on stop() to scrub the revealed
+                // phrase and break the snapshot task's self-retain —
+                // without it the flow (and the plaintext words in
+                // `.reveal`) outlive the screen.
+                .onDisappear { flow.stop() }
         }
     }
 

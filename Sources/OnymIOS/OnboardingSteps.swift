@@ -1227,7 +1227,10 @@ struct OnboardingBlossomContent: View {
                         // allowlist of hosts you'll accept downloads
                         // from — not upload fallbacks, so no "backup"
                         // chip.
-                        badge: idx == 0 ? "ACTIVE" : nil,
+                        // Keyed entry, not the bare "ACTIVE" literal:
+                        // that key's ru is feminine (АКТИВНАЯ, for the
+                        // identity card); a service is masculine.
+                        badge: idx == 0 ? "ACTIVE_SERVICE_CHIP" : nil,
                         selected: idx == 0,
                         badgeColor: OnymTokens.green,
                         last: idx == endpoints.count - 1
@@ -1642,8 +1645,12 @@ struct OnboardingRecoveryContent: View {
                 .padding(.top, 12)
         }
         .sheet(isPresented: $showBackup, onDismiss: {
-            // Release the flow — and with it the plaintext phrase —
-            // the moment the sheet goes away, however it was closed.
+            // stop() breaks the snapshot task's self-retain (dropping
+            // the reference alone would leak an immortal flow holding
+            // the plaintext phrase) and scrubs back to Intro; nilling
+            // then releases our reference. The view's own onDisappear
+            // also stops — this is the belt to that suspender.
+            flow?.stop()
             flow = nil
         }) {
             if let flow {

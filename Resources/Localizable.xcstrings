@@ -7130,6 +7130,23 @@
           }
         }
       }
+    },
+    "ACTIVE_SERVICE_CHIP": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ACTIVE"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "АКТИВНЫЙ"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
