@@ -41,7 +41,11 @@ struct RootView: View {
 
     init(dependencies: AppDependencies) {
         self.dependencies = dependencies
-        _onboardingFlow = State(initialValue: dependencies.makeOnboardingFlow?())
+        _onboardingFlow = State(
+            initialValue: dependencies.presentOnboardingAtLaunch
+                ? dependencies.makeOnboardingFlow?()
+                : nil
+        )
     }
 
     /// The blocking consent sheet, when one is up. Driven by the gate,
@@ -116,6 +120,25 @@ struct RootView: View {
             if phase == .active {
                 dependencies.moderationGateFlow.appForegrounded()
             }
+        }
+        // Settings → Restart Onboarding: present a fresh walk
+        // mid-session. The persisted restart marker (written before
+        // this signal fires) already re-armed the auto-populate
+        // suppression and makes a mid-walk kill resume on the next
+        // launch through the normal gate. Identity, chats, messages,
+        // and every current selection are untouched — the step
+        // surfaces render the applied configuration and change
+        // nothing until the user does.
+        .onChange(of: dependencies.onboardingRestart?.pendingRestart ?? false) { _, pending in
+            guard pending, let restart = dependencies.onboardingRestart else { return }
+            restart.consumeRestart()
+            guard onboardingFlow == nil, let make = dependencies.makeOnboardingFlow else { return }
+            // The onboarding cover replaces any moderation consent
+            // cover for the duration of the walk — its moderation
+            // step is the same surface (same suppression as at
+            // launch; the gate is re-read on completion).
+            consentPresentation = nil
+            onboardingFlow = make()
         }
         .fullScreenCover(item: $consentPresentation) { presentation in
             // `.id` rather than a dismiss-and-re-present dance: one gate
@@ -241,7 +264,10 @@ struct RootView: View {
                         makeModerationSettingsFlow: dependencies.makeModerationSettingsFlow,
                         makeModerationConsentFlow: dependencies.makeModerationConsentFlow,
                         makeModerationCaseFlow: dependencies.makeModerationCaseFlow,
-                        makeDiscoverySettingsFlow: dependencies.makeDiscoverySettingsFlow
+                        makeDiscoverySettingsFlow: dependencies.makeDiscoverySettingsFlow,
+                        onRestartOnboarding: dependencies.onboardingRestart.map { restart in
+                            { restart.requestRestart() }
+                        }
                     )
                 }
                 .safeAreaInset(edge: .bottom, spacing: 0) {

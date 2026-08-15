@@ -939,6 +939,18 @@ struct OnboardingModerationContent: View {
                     ))
                 }
             }
+            // A restarted walk (Settings → Restart Onboarding) arrives
+            // here with a mandate already active. Standing consent
+            // satisfies the step as-is — re-consent is only for
+            // changing authority (the pick → review → sign path above,
+            // which overwrites this outcome when taken). First runs
+            // are untouched: no mandate, no currentAuthorityId.
+            .onChange(of: flow.state.currentAuthorityId) { _, current in
+                guard let current,
+                      onboarding.outcomes[.moderation] == nil
+                else { return }
+                onboarding.recordOutcome(.consented(componentId: current))
+            }
     }
 }
 

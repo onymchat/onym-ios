@@ -223,15 +223,36 @@ struct OnymIOSApp: App {
             isExistingUser: { OnboardingLaunch.isExistingUser() }
         )
         #endif
-        // While onboarding is incomplete, a background relayer fetch
-        // must not install the whole published list over the notary
-        // step's empty configuration — the step IS the choice. The
-        // policy re-reads the flag per fetch pass, so the very first
-        // refresh after `complete()` (kicked by the flow's onCompleted)
-        // installs the defaults when the user skipped the step.
+        // Whether onboarding is AVAILABLE in this build — factories,
+        // restart controller, and the Settings row all key off this.
+        // Distinct from `shouldOnboard` (the launch-time presentation
+        // decision) since Settings → Restart Onboarding can start a
+        // walk mid-session on a launch that didn't onboard.
+        #if DEBUG
+        let onboardingAvailable = args.contains("--ui-testing")
+            ? args.contains("--ui-onboarding")
+            : true
+        #else
+        let onboardingAvailable = true
+        #endif
+        // While an onboarding walk is (or will be) active, a
+        // background relayer fetch must not install the whole
+        // published list over the notary step's empty configuration —
+        // the step IS the choice. The policy re-reads the store per
+        // fetch pass, so the very first refresh after `complete()`
+        // (kicked by the flow's onCompleted) installs the defaults
+        // when the user skipped the step. On steady-state launches the
+        // suppressor is the restart marker alone: the completion flag
+        // can't serve there, because grandfathered users never carry
+        // it and must keep today's auto-populate behavior.
         let relayerAutoPopulatePolicy: @Sendable () -> Bool
         if shouldOnboard {
-            relayerAutoPopulatePolicy = { onboardingStore.hasCompletedOnboarding() }
+            relayerAutoPopulatePolicy = {
+                onboardingStore.hasCompletedOnboarding()
+                    && !onboardingStore.isRestartRequested()
+            }
+        } else if onboardingAvailable {
+            relayerAutoPopulatePolicy = { !onboardingStore.isRestartRequested() }
         } else {
             relayerAutoPopulatePolicy = { true }
         }
@@ -918,12 +939,15 @@ struct OnymIOSApp: App {
             { @MainActor in DiscoverySettingsFlow(repository: repo) }
         }
 
-        // First-launch onboarding factories. Both nil when this launch
-        // doesn't onboard (flag set, existing user, or the UI-test
-        // harness without `--ui-onboarding`).
+        // Onboarding factories. Built whenever onboarding is AVAILABLE
+        // (not only when this launch presents it): Settings → Restart
+        // Onboarding needs them on steady-state launches too. All nil
+        // only under the UI-test harness without `--ui-onboarding`.
         let makeOnboardingFlow: (@MainActor () -> OnboardingFlow)?
         let makeOnboardingStepContent: (@MainActor (OnboardingFlow, OnboardingStep) -> AnyView?)?
-        if shouldOnboard {
+        let onboardingRestartController: OnboardingRestartController?
+        if onboardingAvailable {
+            onboardingRestartController = OnboardingRestartController(store: onboardingStore)
             makeOnboardingFlow = { @MainActor in
                 OnboardingFlow(
                     store: onboardingStore,
@@ -1011,6 +1035,7 @@ struct OnymIOSApp: App {
         } else {
             makeOnboardingFlow = nil
             makeOnboardingStepContent = nil
+            onboardingRestartController = nil
         }
 
         self.dependencies = AppDependencies(
@@ -1168,6 +1193,8 @@ struct OnymIOSApp: App {
             },
             makeDiscoverySettingsFlow: makeDiscoverySettingsFlow,
             makeOnboardingFlow: makeOnboardingFlow,
+            presentOnboardingAtLaunch: shouldOnboard,
+            onboardingRestart: onboardingRestartController,
             makeOnboardingStepContent: makeOnboardingStepContent
         )
     }

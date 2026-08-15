@@ -106,14 +106,23 @@ struct AppDependencies {
     /// renders without the discovery stack (nil under the UI-test
     /// harness — same pattern as the moderation factories).
     let makeDiscoverySettingsFlow: (@MainActor () -> DiscoverySettingsFlow)?
-    /// First-launch onboarding flow factory. Non-nil exactly when THIS
-    /// launch should onboard: `OnboardingGate.shouldOnboard` said yes
-    /// (no completion flag, no existing-user state), and the UI-test
-    /// harness didn't veto it (`--ui-testing` keeps this nil unless
-    /// `--ui-onboarding` opts in, so every existing UI test launches
-    /// exactly as before). RootView calls it once and presents the
-    /// cover while the returned flow is incomplete.
+    /// Onboarding flow factory. Non-nil whenever onboarding is
+    /// AVAILABLE in this build (always in production; under
+    /// `--ui-testing` only with `--ui-onboarding`, so every existing
+    /// UI test launches exactly as before). Whether the cover presents
+    /// at launch is `presentOnboardingAtLaunch` — the factory alone no
+    /// longer implies presentation, because Settings → Restart
+    /// Onboarding can present a fresh walk mid-session.
     let makeOnboardingFlow: (@MainActor () -> OnboardingFlow)?
+    /// The cold-boot gate decision (`OnboardingGate.shouldOnboard`,
+    /// grandfathering included): RootView presents the cover on first
+    /// mount exactly when this is true.
+    let presentOnboardingAtLaunch: Bool
+    /// Settings → Restart Onboarding bridge: Settings raises it, the
+    /// RootView observes `pendingRestart` and presents a fresh walk.
+    /// nil exactly when `makeOnboardingFlow` is nil (the Settings row
+    /// hides too).
+    let onboardingRestart: OnboardingRestartController?
     /// Step-content slot for `OnboardingView`: the app-layer surfaces
     /// (discovery TOFU confirm, catalog pickers, the moderation
     /// mandate flow) pre-bound to the same repositories and pickers

@@ -106,4 +106,64 @@ final class OnboardingStoreTests: XCTestCase {
         _ = OnboardingGate.shouldOnboard(store: store, isExistingUser: { true })
         XCTAssertFalse(store.hasCompletedOnboarding())
     }
+
+    // MARK: - Restart request (Settings → Restart Onboarding)
+
+    func testRequestRestartSetsMarkerAndClearsCompleted() {
+        store.markOnboardingCompleted()
+        store.requestRestart()
+        XCTAssertTrue(store.isRestartRequested())
+        XCTAssertFalse(store.hasCompletedOnboarding())
+        // Idempotent.
+        store.requestRestart()
+        XCTAssertTrue(store.isRestartRequested())
+    }
+
+    /// Completion ends the restart, however the walk was entered — the
+    /// marker must not survive to re-open the gate on the next launch.
+    func testMarkCompletedClearsRestartMarker() {
+        store.requestRestart()
+        store.markOnboardingCompleted()
+        XCTAssertFalse(store.isRestartRequested())
+        XCTAssertTrue(store.hasCompletedOnboarding())
+        XCTAssertNil(defaults.object(forKey: UserDefaultsOnboardingStore.restartKey))
+    }
+
+    /// The app's `--reset-keychain` path clears BOTH documented keys.
+    func testResetOnboardingClearsRestartMarkerToo() {
+        XCTAssertEqual(
+            UserDefaultsOnboardingStore.restartKey,
+            "app.onym.ios.onboarding.restartRequested"
+        )
+        store.requestRestart()
+        store.resetOnboarding()
+        XCTAssertFalse(store.isRestartRequested())
+        XCTAssertNil(defaults.object(forKey: UserDefaultsOnboardingStore.restartKey))
+    }
+
+    /// The substantive rule: an explicit restart OUTRANKS
+    /// grandfathering. A configured user's state suppresses onboarding
+    /// they never asked for — never onboarding they requested.
+    func testRestartRequestOverridesGrandfathering() {
+        store.requestRestart()
+        XCTAssertTrue(OnboardingGate.shouldOnboard(store: store, isExistingUser: { true }))
+    }
+
+    /// A mid-walk kill resumes: the marker persists until completion,
+    /// so the next cold boot's gate answers onboard again.
+    func testRestartMarkerPersistsUntilCompletion() {
+        store.requestRestart()
+        // Simulate relaunch: a fresh store over the same defaults.
+        let relaunched = UserDefaultsOnboardingStore(defaults: defaults)
+        XCTAssertTrue(OnboardingGate.shouldOnboard(store: relaunched, isExistingUser: { true }))
+        relaunched.markOnboardingCompleted()
+        XCTAssertFalse(OnboardingGate.shouldOnboard(store: relaunched, isExistingUser: { true }))
+    }
+
+    /// Cold-boot grandfathering for upgraders is untouched: without
+    /// the marker, existing-user state still suppresses onboarding.
+    func testGrandfatheringUnchangedWithoutRestartMarker() {
+        XCTAssertFalse(store.isRestartRequested())
+        XCTAssertFalse(OnboardingGate.shouldOnboard(store: store, isExistingUser: { true }))
+    }
 }

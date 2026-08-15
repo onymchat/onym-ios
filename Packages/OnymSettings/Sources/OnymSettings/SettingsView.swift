@@ -38,6 +38,14 @@ public struct SettingsView: View {
     /// renders without the discovery stack (the section is hidden
     /// until the app wires this in — same pattern as moderation).
     let makeDiscoverySettingsFlow: (@MainActor () -> DiscoverySettingsFlow)?
+    /// Settings → Restart Onboarding: re-runs the first-launch seat
+    /// selection. KEEPS identity, chats, messages, and every current
+    /// choice — the walk just runs again over the applied
+    /// configuration. Optional so the row hides when the app runs
+    /// without onboarding (UI-test harness) — same pattern as the
+    /// moderation/discovery factories. The closure fires only after
+    /// the confirmation alert.
+    let onRestartOnboarding: (@MainActor () -> Void)?
 
     public init(
         makeBackupFlow: @escaping @MainActor () -> RecoveryPhraseBackupFlow,
@@ -50,7 +58,8 @@ public struct SettingsView: View {
         makeModerationSettingsFlow: (@MainActor () -> ModerationSettingsFlow)? = nil,
         makeModerationConsentFlow: (@MainActor (ModerationConsentFlow.Mode) -> ModerationConsentFlow)? = nil,
         makeModerationCaseFlow: (@MainActor (CaseNotice) -> ModerationCaseFlow)? = nil,
-        makeDiscoverySettingsFlow: (@MainActor () -> DiscoverySettingsFlow)? = nil
+        makeDiscoverySettingsFlow: (@MainActor () -> DiscoverySettingsFlow)? = nil,
+        onRestartOnboarding: (@MainActor () -> Void)? = nil
     ) {
         self.makeBackupFlow = makeBackupFlow
         self.makeRelayerSettingsFlow = makeRelayerSettingsFlow
@@ -63,6 +72,7 @@ public struct SettingsView: View {
         self.makeModerationConsentFlow = makeModerationConsentFlow
         self.makeModerationCaseFlow = makeModerationCaseFlow
         self.makeDiscoverySettingsFlow = makeDiscoverySettingsFlow
+        self.onRestartOnboarding = onRestartOnboarding
     }
 
     @State private var showRecoveryPhrase = false
@@ -72,6 +82,11 @@ public struct SettingsView: View {
     /// First / second gate of the "clear message cache" double-confirm.
     @State private var showClearConfirm1 = false
     @State private var showClearConfirm2 = false
+
+    /// Confirmation gate for Restart Onboarding. Single confirm —
+    /// unlike the message-cache clear, nothing is deleted: identity,
+    /// chats, messages, and every current selection are kept.
+    @State private var showRestartOnboardingConfirm = false
 
     /// Persisted in `UserDefaults` under the same key
     /// `UserDefaultsNetworkPreference` reads. Toggling here changes
@@ -224,6 +239,26 @@ public struct SettingsView: View {
                     SettingsFootnote("The moderation authority handles reports of prohibited content under terms you consented to. You can switch to a different authority at any time.")
                 }
 
+                if onRestartOnboarding != nil {
+                    SettingsSectionLabel("SETUP")
+                    SettingsCard {
+                        Button { showRestartOnboardingConfirm = true } label: {
+                            SettingsRow(
+                                title: "Restart Onboarding",
+                                subtitle: "Review your service choices again",
+                                hasChevron: false,
+                                last: true
+                            ) {
+                                SettingsIconTile(symbol: "arrow.counterclockwise.circle.fill",
+                                                 bg: SettingsTile.blue)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("settings.restart_onboarding_row")
+                    }
+                    SettingsFootnote("Runs the first-launch setup again: message transport, file storage, notary, and moderation. Your identity, chats, and messages are kept, and your current choices stay until you change them.")
+                }
+
                 SettingsSectionLabel("DATA")
                 SettingsCard {
                     SettingsRow(
@@ -285,6 +320,12 @@ public struct SettingsView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This permanently deletes every message stored on this device. Your chats stay in the list, but the messages inside them will be gone.\n\nOnym keeps no copy on its servers, and messages can’t be re-downloaded — relay copies are best-effort and may already have expired.")
+        }
+        .alert("Restart onboarding?", isPresented: $showRestartOnboardingConfirm) {
+            Button("Restart Setup") { onRestartOnboarding?() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The first-launch setup runs again so you can review who carries your messages, stores your files, notarizes your history, and moderates reports.\n\nNothing is deleted: your identity, chats, and messages are kept, and your current choices stay until you change them.")
         }
         .alert("Delete all messages?", isPresented: $showClearConfirm2) {
             Button("Delete All Messages", role: .destructive) {

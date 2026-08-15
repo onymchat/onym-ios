@@ -594,6 +594,86 @@
         }
       }
     },
+    "Restart Onboarding": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restart Onboarding"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Пройти настройку заново"
+          }
+        }
+      }
+    },
+    "Restart onboarding?": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restart onboarding?"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Пройти настройку заново?"
+          }
+        }
+      }
+    },
+    "Restart Setup": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restart Setup"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Перезапустить настройку"
+          }
+        }
+      }
+    },
+    "Review your service choices again": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review your service choices again"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Пересмотреть выбор сервисов"
+          }
+        }
+      }
+    },
+    "Runs the first-launch setup again: message transport, file storage, notary, and moderation. Your identity, chats, and messages are kept, and your current choices stay until you change them.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Runs the first-launch setup again: message transport, file storage, notary, and moderation. Your identity, chats, and messages are kept, and your current choices stay until you change them."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Запускает первичную настройку заново: доставка сообщений, хранилище файлов, нотариус и модерация. Ваша идентичность, чаты и сообщения сохраняются, а текущий выбор остаётся в силе, пока вы его не измените."
+          }
+        }
+      }
+    },
     "Service Directory": {
       "localizations": {
         "en": {
@@ -606,6 +686,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Каталог сервисов"
+          }
+        }
+      }
+    },
+    "SETUP": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SETUP"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "НАСТРОЙКА"
           }
         }
       }
@@ -670,6 +766,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Шаг %1$lld из %2$lld"
+          }
+        }
+      }
+    },
+    "The first-launch setup runs again so you can review who carries your messages, stores your files, notarizes your history, and moderates reports.\n\nNothing is deleted: your identity, chats, and messages are kept, and your current choices stay until you change them.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The first-launch setup runs again so you can review who carries your messages, stores your files, notarizes your history, and moderates reports.\n\nNothing is deleted: your identity, chats, and messages are kept, and your current choices stay until you change them."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Первичная настройка запустится заново, чтобы вы могли пересмотреть, кто доставляет ваши сообщения, хранит ваши файлы, заверяет вашу историю и модерирует жалобы.\n\nНичего не удаляется: ваша идентичность, чаты и сообщения сохраняются, а текущий выбор остаётся в силе, пока вы его не измените."
           }
         }
       }
