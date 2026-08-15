@@ -35,7 +35,11 @@ public actor ChatVoiceLoader {
         if FileManager.default.fileExists(atPath: dest.path) { return dest }
         if let existing = inflight[key] { return try await existing.value }
 
-        let client = blossomClient
+        // Fetch from the server STAMPED into the attachment (where the
+        // sender uploaded), falling back to the live client for legacy
+        // rows without a stamp — see ChatImageLoader.
+        let client = attachment.server.map { blossomClient.bound(toServer: $0) }
+            ?? blossomClient
         let task = Task<URL, Error> {
             let blob = try await client.download(sha256: attachment.sha256)
             let plaintext = try ChatImageCrypto.open(

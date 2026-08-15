@@ -37,9 +37,15 @@ public struct DynamicBaseURLBlossomClient: BlossomClient {
     /// that URL, so a multi-blob send that stamped the URL into its
     /// metadata uploads every blob there even if the configuration
     /// changes mid-send. Falls back to `self` (live resolution) when
-    /// the string isn't a URL.
+    /// the string isn't a usable base URL — `URL(string:)` happily
+    /// parses a schemeless stamp like "blossom.example" as a relative
+    /// URL that every request would then fail against, so scheme and
+    /// host are required explicitly.
     public func bound(toServer serverURL: String) -> any BlossomClient {
-        guard let url = URL(string: serverURL) else { return self }
+        guard let url = URL(string: serverURL),
+              url.scheme != nil,
+              let host = url.host(), !host.isEmpty
+        else { return self }
         return makeClient(url)
     }
 }

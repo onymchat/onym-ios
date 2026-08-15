@@ -78,7 +78,13 @@ public actor ChatImageLoader {
     private func downloadAndDecrypt(_ attachment: ChatImageAttachment) async throws -> Data {
         let key = attachment.sha256
         if let existing = inflight[key] { return try await existing.value }
-        let client = blossomClient
+        // Fetch from the server STAMPED into the attachment — the one
+        // the sender actually uploaded to — not whatever server is
+        // currently configured (the live client's base URL moves the
+        // moment the user picks a different server). Legacy rows
+        // without a stamp fall back to the live client.
+        let client = attachment.server.map { blossomClient.bound(toServer: $0) }
+            ?? blossomClient
         let task = Task<Data, Error> {
             let blob = try await client.download(sha256: attachment.sha256)
             return try ChatImageCrypto.open(

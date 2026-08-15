@@ -110,6 +110,25 @@ final class DynamicBaseURLBlossomClientTests: XCTestCase {
         XCTAssertEqual(recorder.operations, [.download(baseURL: serverB, sha256: "aa")])
     }
 
+    func test_boundToServer_schemelessStamp_fallsBackToLiveResolution() async throws {
+        // `URL(string: "blossom.example")` parses fine as a relative
+        // URL — binding to it would fail every request. It must fall
+        // back to live resolution instead.
+        let recorder = Recorder()
+        let client = DynamicBaseURLBlossomClient(
+            resolveBaseURL: { [serverB] in serverB },
+            makeClient: { recorder.make(baseURL: $0) }
+        )
+
+        _ = try await client.bound(toServer: "blossom.example").download(sha256: "bb")
+        _ = try await client.bound(toServer: "https://").download(sha256: "cc")
+
+        XCTAssertEqual(recorder.operations, [
+            .download(baseURL: serverB, sha256: "bb"),
+            .download(baseURL: serverB, sha256: "cc"),
+        ])
+    }
+
     // MARK: - fakes
 
     /// Records every operation, tagged with the base URL the inner

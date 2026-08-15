@@ -21,10 +21,10 @@ import OnymFoundation
 /// far too heavy per row per render.
 @MainActor
 @Observable
-public final class DiscoveryCatalogState {
+final class DiscoveryCatalogState {
     /// Entries for the "From catalog" section. Empty when the app runs
     /// without discovery.
-    public private(set) var entries: [AttributedCatalogEntry] = []
+    private(set) var entries: [AttributedCatalogEntry] = []
     /// Endpoint URLs of the CONSENTED catalog entries, derived from
     /// the pinned consent records' exact manifest bytes. Used by flows
     /// that also render a published list to hide catalog-sourced rows
@@ -32,7 +32,7 @@ public final class DiscoveryCatalogState {
     /// and consent state instead). Derived from `entries`, not any
     /// fetch-time registry, so it can never race a known list rendered
     /// from cache before a fetch completes.
-    public private(set) var consentedEndpointURLs: Set<URL> = []
+    private(set) var consentedEndpointURLs: Set<URL> = []
 
     private var consentRecords: [String: PinnedConsentRecord] = [:]
     private var consentedOffers: [String: ServiceOffer] = [:]
@@ -41,12 +41,12 @@ public final class DiscoveryCatalogState {
 
     /// `nil` discovery keeps the state permanently empty — the seam
     /// the flows already expose for running without discovery.
-    public init(discovery: DiscoveryModulePicker?) {
+    init(discovery: DiscoveryModulePicker?) {
         self.discovery = discovery
     }
 
     /// Begin draining the picker's entries stream. Idempotent.
-    public func start() {
+    func start() {
         guard task == nil, let discovery else { return }
         task = Task { [weak self] in
             for await entries in discovery.entriesStream() {
@@ -55,13 +55,13 @@ public final class DiscoveryCatalogState {
         }
     }
 
-    public func stop() {
+    func stop() {
         task?.cancel()
         task = nil
     }
 
     /// Re-read the discovery aggregate once.
-    public func refresh() {
+    func refresh() {
         guard let discovery else { return }
         Task { [weak self] in
             let entries = await discovery.entries()
@@ -71,13 +71,13 @@ public final class DiscoveryCatalogState {
 
     /// The active pinned consent for a catalog entry's component
     /// (memoized per catalog install).
-    public func activeConsent(for entry: AttributedCatalogEntry) -> PinnedConsentRecord? {
+    func activeConsent(for entry: AttributedCatalogEntry) -> PinnedConsentRecord? {
         consentRecords[entry.entry.componentId]
     }
 
     /// The offer accepted at consent time, resolved from the pinned
     /// manifest snapshot (memoized per catalog install).
-    public func consentedOffer(for entry: AttributedCatalogEntry) -> ServiceOffer? {
+    func consentedOffer(for entry: AttributedCatalogEntry) -> ServiceOffer? {
         consentedOffers[entry.entry.componentId]
     }
 
