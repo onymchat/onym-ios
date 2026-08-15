@@ -5596,6 +5596,1145 @@
           }
         }
       }
+    },
+    "Making your keys": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Making your keys"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Создаём ваши ключи"
+          }
+        }
+      }
+    },
+    "Your services": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your services"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ваши сервисы"
+          }
+        }
+      }
+    },
+    "Reports & safety": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reports & safety"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Жалобы и безопасность"
+          }
+        }
+      }
+    },
+    "Save your recovery phrase": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save your recovery phrase"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Сохраните фразу восстановления"
+          }
+        }
+      }
+    },
+    "You're ready": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You're ready"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Всё готово"
+          }
+        }
+      }
+    },
+    "Messaging that answers to you — not to a company.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Messaging that answers to you — not to a company."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Мессенджер, который отвечает перед вами, а не перед компанией."
+          }
+        }
+      }
+    },
+    "This takes a second. Everything happens on your iPhone — nothing has been sent anywhere yet.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This takes a second. Everything happens on your iPhone — nothing has been sent anywhere yet."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Это займёт секунду. Всё происходит на вашем iPhone — никуда ничего ещё не отправлялось."
+          }
+        }
+      }
+    },
+    "Onym runs on independent services for delivery, files and timestamps. Start with a set that works, or pick your own.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Onym runs on independent services for delivery, files and timestamps. Start with a set that works, or pick your own."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Onym работает на независимых сервисах доставки, файлов и меток времени. Начните с готового набора или выберите свои."
+          }
+        }
+      }
+    },
+    "If someone reports illegal content, an authority you choose reviews the report. Pick one to continue — you'll see exactly what it can do before you agree.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "If someone reports illegal content, an authority you choose reviews the report. Pick one to continue — you'll see exactly what it can do before you agree."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Если кто-то пожалуется на незаконный контент, жалобу рассмотрит выбранный вами орган. Выберите его, чтобы продолжить, — перед согласием вы увидите, что именно он может делать."
+          }
+        }
+      }
+    },
+    "These 12 words are the only way back into your account if you lose this iPhone. Onym cannot reset them for you.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "These 12 words are the only way back into your account if you lose this iPhone. Onym cannot reset them for you."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Эти 12 слов — единственный способ вернуть доступ к аккаунту, если вы потеряете этот iPhone. Onym не сможет их сбросить."
+          }
+        }
+      }
+    },
+    "Your identity is on this device and your services are connected.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your identity is on this device and your services are connected."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ваша личность на этом устройстве, сервисы подключены."
+          }
+        }
+      }
+    },
+    "Create my identity": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Create my identity"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Создать мою личность"
+          }
+        }
+      }
+    },
+    "Start messaging": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Start messaging"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Начать общение"
+          }
+        }
+      }
+    },
+    "Remind me later": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remind me later"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Напомнить позже"
+          }
+        }
+      }
+    },
+    "Later": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Later"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Позже"
+          }
+        }
+      }
+    },
+    "Revealed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Revealed"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Показана"
+          }
+        }
+      }
+    },
+    "Tap any line to change it later in Settings. Nothing here is permanent except your recovery phrase.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tap any line to change it later in Settings. Nothing here is permanent except your recovery phrase."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Любую строку можно изменить позже в Настройках. Здесь нет ничего окончательного, кроме фразы восстановления."
+          }
+        }
+      }
+    },
+    "Your identity key is made on this device and stays here.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your identity key is made on this device and stays here."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ключ вашей личности создаётся на этом устройстве и остаётся на нём."
+          }
+        }
+      }
+    },
+    "You pick who carries your messages — and can swap them any time.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You pick who carries your messages — and can swap them any time."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Вы сами выбираете, кто доставляет ваши сообщения, — и можете заменить их в любой момент."
+          }
+        }
+      }
+    },
+    "You pick who handles reports, and see exactly what they can do.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You pick who handles reports, and see exactly what they can do."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Вы сами выбираете, кто разбирает жалобы, и точно видите, что они могут делать."
+          }
+        }
+      }
+    },
+    "Your identity key is made on this device and stays here. No account, no phone number.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your identity key is made on this device and stays here. No account, no phone number."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ключ вашей личности создаётся на этом устройстве и остаётся на нём. Ни аккаунта, ни номера телефона."
+          }
+        }
+      }
+    },
+    "You pick who carries your messages — and can swap them any time in Settings.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You pick who carries your messages — and can swap them any time in Settings."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Вы сами выбираете, кто доставляет ваши сообщения, — и можете заменить их в любой момент в Настройках."
+          }
+        }
+      }
+    },
+    "You pick who handles reports, and see exactly what they can do before you agree.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You pick who handles reports, and see exactly what they can do before you agree."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Вы сами выбираете, кто разбирает жалобы, и до согласия точно видите, что они могут делать."
+          }
+        }
+      }
+    },
+    "Identity key created": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Identity key created"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ключ личности создан"
+          }
+        }
+      }
+    },
+    "Held in this device's secure enclave": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Held in this device's secure enclave"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Хранится в Secure Enclave этого устройства"
+          }
+        }
+      }
+    },
+    "Recovery phrase generated": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recovery phrase generated"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Фраза восстановления создана"
+          }
+        }
+      }
+    },
+    "12 words — you'll back these up in a moment": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "12 words — you'll back these up in a moment"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "12 слов — вы сохраните их через минуту"
+          }
+        }
+      }
+    },
+    "Your keys couldn't be created. Nothing was sent anywhere — try again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your keys couldn't be created. Nothing was sent anywhere — try again."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не удалось создать ключи. Никуда ничего не отправлялось — попробуйте ещё раз."
+          }
+        }
+      }
+    },
+    "Your key is the only thing that proves this account is yours. No server holds a copy of it.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your key is the only thing that proves this account is yours. No server holds a copy of it."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Только ваш ключ доказывает, что этот аккаунт ваш. Ни один сервер не хранит его копию."
+          }
+        }
+      }
+    },
+    "Recommended setup": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recommended setup"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Рекомендуемая настройка"
+          }
+        }
+      }
+    },
+    "Selected": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selected"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Выбрано"
+          }
+        }
+      }
+    },
+    "Services published by Onym, verified on this device. Ready in a second.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Services published by Onym, verified on this device. Ready in a second."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Сервисы, опубликованные Onym и проверенные на этом устройстве. Готово за секунду."
+          }
+        }
+      }
+    },
+    "Delivery": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delivery"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Доставка"
+          }
+        }
+      }
+    },
+    "Onym Official relays": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Onym Official relays"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Релеи Onym Official"
+          }
+        }
+      }
+    },
+    "Onym Official": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Onym Official"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Onym Official"
+          }
+        }
+      }
+    },
+    "Onym Discovery": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Onym Discovery"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Onym Discovery"
+          }
+        }
+      }
+    },
+    "Media delivery": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Media delivery"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Доставка медиа"
+          }
+        }
+      }
+    },
+    "Group integrity": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Group integrity"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Целостность групп"
+          }
+        }
+      }
+    },
+    "Directory": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Directory"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Каталог"
+          }
+        }
+      }
+    },
+    "Choose services myself": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose services myself"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Выбрать сервисы самостоятельно"
+          }
+        }
+      }
+    },
+    "Pick your own directories, relays, storage and notaries. About two minutes.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pick your own directories, relays, storage and notaries. About two minutes."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Выберите свои каталоги, релеи, хранилище и нотариусов. Около двух минут."
+          }
+        }
+      }
+    },
+    "Whichever you choose, every service can be added, replaced or removed later in Settings.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Whichever you choose, every service can be added, replaced or removed later in Settings."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Что бы вы ни выбрали, любой сервис можно добавить, заменить или удалить позже в Настройках."
+          }
+        }
+      }
+    },
+    "Set up as much or as little as you like — anything you leave alone keeps the recommended default.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Set up as much or as little as you like — anything you leave alone keeps the recommended default."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Настройте столько, сколько хотите, — всё, чего вы не касались, остаётся на рекомендуемых значениях."
+          }
+        }
+      }
+    },
+    "NEEDED TO SEND MESSAGES": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "NEEDED TO SEND MESSAGES"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "НУЖНО ДЛЯ ОТПРАВКИ СООБЩЕНИЙ"
+          }
+        }
+      }
+    },
+    "Message delivery": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Message delivery"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Доставка сообщений"
+          }
+        }
+      }
+    },
+    "Who carries your sealed messages": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Who carries your sealed messages"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Кто переносит ваши запечатанные сообщения"
+          }
+        }
+      }
+    },
+    "Carries photos, video and voice notes": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Carries photos, video and voice notes"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Переносит фото, видео и голосовые сообщения"
+          }
+        }
+      }
+    },
+    "Where Onym looks services up": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Where Onym looks services up"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Где Onym ищет сервисы"
+          }
+        }
+      }
+    },
+    "OPTIONAL": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OPTIONAL"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "НЕОБЯЗАТЕЛЬНО"
+          }
+        }
+      }
+    },
+    "Keeps group membership provably honest": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keeps group membership provably honest"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Гарантирует доказуемую честность состава групп"
+          }
+        }
+      }
+    },
+    "Adding more than one service in a category gives you a fallback — Onym uses the fastest one that answers.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adding more than one service in a category gives you a fallback — Onym uses the fastest one that answers."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Несколько сервисов в категории дают запасной вариант — Onym использует самый быстрый из отвечающих."
+          }
+        }
+      }
+    },
+    "Use the recommended setup instead": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use the recommended setup instead"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Вернуться к рекомендуемой настройке"
+          }
+        }
+      }
+    },
+    "Anything you already added here stays configured — remove it from the lists above if you've changed your mind.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anything you already added here stays configured — remove it from the lists above if you've changed your mind."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Всё, что вы уже добавили, остаётся настроенным — удалите из списков выше, если передумали."
+          }
+        }
+      }
+    },
+    "No relay configured yet. Add one below, or go back to keep the default.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No relay configured yet. Add one below, or go back to keep the default."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Релей ещё не настроен. Добавьте ниже или вернитесь назад, чтобы оставить значение по умолчанию."
+          }
+        }
+      }
+    },
+    "No server configured yet. Add one below, or go back to keep the default.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No server configured yet. Add one below, or go back to keep the default."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Сервер ещё не настроен. Добавьте ниже или вернитесь назад, чтобы оставить значение по умолчанию."
+          }
+        }
+      }
+    },
+    "No notary chosen yet. Pick one below, or leave this empty to use the published defaults.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No notary chosen yet. Pick one below, or leave this empty to use the published defaults."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Нотариус ещё не выбран. Выберите ниже или оставьте пустым, чтобы использовать опубликованные значения по умолчанию."
+          }
+        }
+      }
+    },
+    "Leave this empty to use the published defaults — they're installed automatically once setup finishes.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Leave this empty to use the published defaults — they're installed automatically once setup finishes."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Оставьте пустым, чтобы использовать опубликованные значения по умолчанию — они установятся автоматически после завершения настройки."
+          }
+        }
+      }
+    },
+    "Not backed up yet": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not backed up yet"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ещё не сохранена"
+          }
+        }
+      }
+    },
+    "Revealed — write it down": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Revealed — write it down"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Показана — запишите её"
+          }
+        }
+      }
+    },
+    "Reveal the 12 words, write them down, then verify a few of them. Takes about a minute.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reveal the 12 words, write them down, then verify a few of them. Takes about a minute."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Откройте 12 слов, запишите их и подтвердите несколько из них. Около минуты."
+          }
+        }
+      }
+    },
+    "You've seen the 12 words. Verifying a few of them makes sure your copy is right.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You've seen the 12 words. Verifying a few of them makes sure your copy is right."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Вы увидели 12 слов. Проверка нескольких из них убедит, что ваша запись верна."
+          }
+        }
+      }
+    },
+    "You revealed and verified your phrase. Keep it somewhere safe — off screenshots and out of chats.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You revealed and verified your phrase. Keep it somewhere safe — off screenshots and out of chats."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Вы открыли и подтвердили фразу. Храните её в надёжном месте — не в скриншотах и не в чатах."
+          }
+        }
+      }
+    },
+    "Reveal my recovery phrase": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reveal my recovery phrase"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Показать фразу восстановления"
+          }
+        }
+      }
+    },
+    "View it again": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "View it again"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Посмотреть ещё раз"
+          }
+        }
+      }
+    },
+    "Anyone with these words can read your future messages. Keep them off screenshots and out of chats.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anyone with these words can read your future messages. Keep them off screenshots and out of chats."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Любой, у кого есть эти слова, сможет читать ваши будущие сообщения. Не храните их в скриншотах и чатах."
+          }
+        }
+      }
+    },
+    "Finish verifying your recovery phrase": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Finish verifying your recovery phrase"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Завершите проверку фразы восстановления"
+          }
+        }
+      }
+    },
+    "You've seen the 12 words. Verify a few of them from Settings → Back Up Recovery Phrase to make sure your copy is right.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You've seen the 12 words. Verify a few of them from Settings → Back Up Recovery Phrase to make sure your copy is right."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Вы увидели 12 слов. Подтвердите несколько из них в Настройки → Резервная копия фразы восстановления, чтобы убедиться, что запись верна."
+          }
+        }
+      }
     }
   },
   "version": "1.0"
