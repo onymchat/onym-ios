@@ -1001,10 +1001,12 @@ struct OnymIOSApp: App {
                     // The Done step's summary is read from the
                     // repositories, not the walk's outcomes — what the
                     // app will actually use is the checkable claim.
+                    // Plural forms come from the catalog's variations
+                    // for the "%lld services" key — a per-locale rule,
+                    // not an English-only == 1 branch (same pattern as
+                    // DiscoveryEntriesLabel).
                     func serviceCount(_ count: Int) -> String {
-                        count == 1
-                            ? String(localized: "1 service")
-                            : String(localized: "\(count) services")
+                        String(localized: "\(count) services")
                     }
                     var rows: [OnboardingSummaryRow] = []
                     let nostrEndpoints = await nostrRelaysRepository.currentEndpoints()
@@ -1032,8 +1034,11 @@ struct OnymIOSApp: App {
                         value: relayerEndpoints.first?.name ?? String(localized: "Published defaults"),
                         detail: relayerEndpoints.first?.url.absoluteString,
                         symbol: "checkmark.seal",
+                        // Empty means the value already reads
+                        // "Published defaults" — a "Default" trailing
+                        // would just repeat it.
                         trailing: relayerEndpoints.isEmpty
-                            ? String(localized: "Default")
+                            ? nil
                             : serviceCount(relayerEndpoints.count)
                     ))
                     if let discoveryRepository {
@@ -1045,9 +1050,7 @@ struct OnymIOSApp: App {
                                 value: source.source.userLabel,
                                 detail: source.source.operatorKeyFingerprint,
                                 symbol: "magnifyingglass",
-                                trailing: state.sources.count == 1
-                                    ? String(localized: "1 source")
-                                    : String(localized: "\(state.sources.count) sources")
+                                trailing: String(localized: "\(state.sources.count) sources")
                             ))
                         }
                     }

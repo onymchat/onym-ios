@@ -835,6 +835,7 @@ struct OnboardingDiscoveryContent: View {
             .padding(.bottom, 12)
 
         if let status = flow.state.sources.first {
+            OnboardingSectionLabel(text: "IN USE")
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(verbatim: status.source.userLabel)
@@ -1015,7 +1016,6 @@ struct OnboardingNostrContent: View {
                 .lineSpacing(3)
                 .padding(.bottom, 4)
 
-            OnboardingSectionLabel(text: "IN USE")
             configured
 
             catalogSection(prefix: "onboarding.services.messageDelivery.catalog")
@@ -1055,6 +1055,9 @@ struct OnboardingNostrContent: View {
                 accessibilityID: "onboarding.services.messageDelivery.empty"
             )
         } else {
+            // The label belongs to the non-empty list — over the
+            // empty-state card it would caption nothing in use.
+            OnboardingSectionLabel(text: "IN USE")
             VStack(spacing: 0) {
                 ForEach(Array(endpoints.enumerated()), id: \.element.url) { idx, endpoint in
                     OnboardingEndpointRow(
@@ -1141,7 +1144,6 @@ struct OnboardingBlossomContent: View {
                 .lineSpacing(3)
                 .padding(.bottom, 4)
 
-            OnboardingSectionLabel(text: "IN USE")
             configured
 
             if !flow.catalogEntries.isEmpty {
@@ -1195,13 +1197,16 @@ struct OnboardingBlossomContent: View {
                 accessibilityID: "onboarding.services.mediaDelivery.empty"
             )
         } else {
+            OnboardingSectionLabel(text: "IN USE")
             VStack(spacing: 0) {
                 ForEach(Array(endpoints.enumerated()), id: \.element.url) { idx, endpoint in
                     OnboardingEndpointRow(
                         name: endpoint.name,
                         url: endpoint.url,
-                        // First endpoint is the upload/download target.
-                        badge: idx == 0 ? "ACTIVE" : (endpoint.isDefault ? "DEFAULT" : nil),
+                        // First endpoint is the upload/download
+                        // target; the rest are fallbacks — same role
+                        // vocabulary as the other seats.
+                        badge: idx == 0 ? "ACTIVE" : "BACKUP",
                         selected: idx == 0,
                         badgeColor: idx == 0 ? OnymTokens.green : OnymTokens.text2,
                         last: idx == endpoints.count - 1
@@ -1258,7 +1263,6 @@ struct OnboardingNotaryContent: View {
                 .lineSpacing(3)
                 .padding(.bottom, 4)
 
-            OnboardingSectionLabel(text: "IN USE")
             configured
 
             OnboardingSectionLabel(text: "FROM THE PUBLISHED LIST")
@@ -1320,13 +1324,19 @@ struct OnboardingNotaryContent: View {
                 accessibilityID: "onboarding.services.groupIntegrity.empty"
             )
         } else {
+            OnboardingSectionLabel(text: "IN USE")
             VStack(spacing: 0) {
                 ForEach(Array(endpoints.enumerated()), id: \.element.url) { idx, endpoint in
                     OnboardingEndpointRow(
                         name: endpoint.name,
                         url: endpoint.url,
-                        badge: nil,
-                        selected: true,
+                        // Same role vocabulary as the other seats:
+                        // the first endpoint is tried first
+                        // (RelayerConfiguration falls back to
+                        // endpoints.first), the rest are fallbacks.
+                        badge: idx == 0 ? "PRIMARY" : "BACKUP",
+                        selected: idx == 0,
+                        badgeColor: idx == 0 ? OnymTokens.green : OnymTokens.text2,
                         last: idx == endpoints.count - 1
                     )
                     .accessibilityElement(children: .contain)
@@ -1459,11 +1469,19 @@ struct OnboardingModerationContent: View {
                 // horizontal insets; pull them back to the scaffold's.
                 .padding(.horizontal, -16)
 
-            Text("An authority never sees your messages. It only ever sees what a person chooses to report, and it can only act inside the terms you're about to read.")
-                .font(.system(size: 12.5))
-                .foregroundStyle(OnymTokens.text2)
-                .lineSpacing(2)
-                .padding(.top, 12)
+            // "…the terms you're about to read" is only true up to the
+            // review; once signing/signed the terms are behind the
+            // user and the reassurance would read stale.
+            switch flow.state.step {
+            case .loadingDirectory, .pickingAuthority, .reviewingManifest:
+                Text("An authority never sees your messages. It only ever sees what a person chooses to report, and it can only act inside the terms you're about to read.")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(OnymTokens.text2)
+                    .lineSpacing(2)
+                    .padding(.top, 12)
+            case .signing, .done:
+                EmptyView()
+            }
         }
             .task { flow.start() }
             .onDisappear { flow.stop() }
@@ -1656,11 +1674,22 @@ struct OnboardingDoneContent: View {
                                 Text(verbatim: row.title)
                                     .font(.system(size: 14.5, weight: .semibold))
                                     .foregroundStyle(OnymTokens.text)
-                                Text(verbatim: row.detail.map { "\(row.value) · \($0)" } ?? row.value)
+                                Text(verbatim: row.value)
                                     .font(.system(size: 12))
-                                    .foregroundStyle(OnymTokens.text3)
+                                    .foregroundStyle(OnymTokens.text2)
                                     .lineLimit(1)
-                                    .truncationMode(.middle)
+                                    .truncationMode(.tail)
+                                // The checkable claim: URL / key
+                                // fingerprint / manifest hash on its
+                                // own monospaced line, not folded into
+                                // the proportional value text.
+                                if let detail = row.detail {
+                                    Text(verbatim: detail)
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .foregroundStyle(OnymTokens.text3)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                }
                             }
                             Spacer(minLength: 4)
                             if let trailing = row.trailing {
