@@ -254,9 +254,11 @@ struct DoneStepContent: View {
         }
         switch outcomes[step] {
         case .consented: return String(localized: "Chosen")
-        case .skipped: return String(localized: "Later")
         case .unavailable: return String(localized: "Unavailable")
-        case .notApplicable, nil: return String(localized: "Default")
+        // `.skipped` folds into the default: only recoveryPhrase is
+        // skippable, and it is special-cased above — this arm exists
+        // for exhaustiveness, not as live logic.
+        case .skipped, .notApplicable, nil: return String(localized: "Default")
         }
     }
 }

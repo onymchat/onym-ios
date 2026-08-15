@@ -9,7 +9,11 @@ import XCTest
 /// Accessibility identifiers follow the scaffold's convention:
 /// `onboarding.<step>.<element>` — `title` / `primary` / `skip` /
 /// `back` from `OnboardingStepScaffold`, step-specific elements from
-/// the app-layer step bodies (`OnboardingSteps.swift`).
+/// the app-layer step bodies (`OnboardingSteps.swift`). The hub
+/// sub-surfaces (directory / messageDelivery / mediaDelivery /
+/// groupIntegrity) use `onboarding.services.<seat>.<element>`; their
+/// accessors below are exercised by the redesigned walk in the tests
+/// PR of this stack — on this PR only the smoke test runs.
 struct OnboardingScreen {
     let app: XCUIApplication
 
@@ -45,17 +49,17 @@ struct OnboardingScreen {
 
     /// "Verify & Confirm" on the seeded (unpinned) default source.
     var discoveryConfirmButton: XCUIElement {
-        app.buttons["onboarding.discoveryConfirm.confirm"]
+        app.buttons["onboarding.services.directory.confirm"]
     }
 
     /// The TOFU fingerprint hero.
     var discoveryFingerprint: XCUIElement {
-        app.staticTexts["onboarding.discoveryConfirm.fingerprint"]
+        app.staticTexts["onboarding.services.directory.fingerprint"]
     }
 
     /// "Pin Key & Confirm".
     var discoveryPinButton: XCUIElement {
-        app.buttons["onboarding.discoveryConfirm.pin"]
+        app.buttons["onboarding.services.directory.pin"]
     }
 
     /// The "Provider confirmed" state. The identifier sits on a
@@ -64,7 +68,7 @@ struct OnboardingScreen {
     /// `DiscoverySettingsScreen.addDone`).
     var discoveryAdded: XCUIElement {
         app.descendants(matching: .any)
-            .matching(identifier: "onboarding.discoveryConfirm.added")
+            .matching(identifier: "onboarding.services.directory.added")
             .firstMatch
     }
 
@@ -103,7 +107,7 @@ struct OnboardingScreen {
 
     /// A published-list row (tap to add, no consent sheet).
     func notaryPublishedRow(url: String) -> XCUIElement {
-        app.buttons["onboarding.notary.published.\(url)"]
+        app.buttons["onboarding.services.groupIntegrity.published.\(url)"]
     }
 
     // MARK: - Moderation step (shared consent surface)
