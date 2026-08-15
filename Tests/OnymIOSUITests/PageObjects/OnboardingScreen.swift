@@ -45,6 +45,46 @@ struct OnboardingScreen {
         button.tap()
     }
 
+    // MARK: - Services step (recommended vs. hub)
+
+    /// The preselected "Recommended setup" card.
+    var servicesRecommendedCard: XCUIElement {
+        app.buttons["onboarding.services.recommended"]
+    }
+
+    /// "Choose services myself" — opens the hub sheet.
+    var servicesCustomCard: XCUIElement {
+        app.buttons["onboarding.services.custom"]
+    }
+
+    /// One hub row: `messageDelivery` / `mediaDelivery` / `directory`
+    /// / `groupIntegrity`.
+    func hubRow(_ key: String) -> XCUIElement {
+        app.buttons["onboarding.services.hub.\(key)"]
+    }
+
+    /// The hub sheet's Done (keeps the custom choice, closes the hub).
+    var hubDone: XCUIElement {
+        app.buttons["onboarding.services.hub.done"]
+    }
+
+    /// Pop the currently pushed hub detail back to the hub list.
+    func hubBack() {
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+    }
+
+    // MARK: - Recovery phrase step
+
+    var recoveryStatus: XCUIElement {
+        app.descendants(matching: .any)
+            .matching(identifier: "onboarding.recoveryPhrase.status")
+            .firstMatch
+    }
+
+    var recoveryReveal: XCUIElement {
+        app.buttons["onboarding.recoveryPhrase.reveal"]
+    }
+
     // MARK: - Discovery confirm step
 
     /// "Verify & Confirm" on the seeded (unpinned) default source.
