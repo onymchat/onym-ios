@@ -90,15 +90,16 @@ private struct OnboardingInfoCard: View {
     }
 }
 
-/// One configured-endpoint row (name + badge + URL), shared by the
-/// transport steps. The check mark on the first row is the
-/// "preselected default" affordance — the seed is already installed,
-/// tapping Continue keeps it.
+/// One configured-endpoint row (name + role chip + URL), shared by the
+/// transport steps. The role chip on the first row ("Primary" /
+/// "Active") is the "preselected default" affordance — the seed is
+/// already installed, tapping Continue keeps it.
 private struct OnboardingEndpointRow: View {
     let name: String
     let url: URL
     let badge: LocalizedStringKey?
     let selected: Bool
+    var badgeColor: Color = OnymTokens.text2
     var last: Bool = false
 
     var body: some View {
@@ -108,27 +109,25 @@ private struct OnboardingEndpointRow: View {
                     .font(.system(size: 20))
                     .foregroundStyle(selected ? OnymAccent.blue.color : OnymTokens.text3)
                 VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(verbatim: name)
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(OnymTokens.text)
-                        if let badge {
-                            Text(badge)
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundStyle(OnymTokens.text2)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(OnymTokens.surface3,
-                                            in: RoundedRectangle(cornerRadius: 4))
-                        }
-                    }
+                    Text(verbatim: name)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(OnymTokens.text)
                     Text(url.absoluteString)
                         .font(.system(size: 12, design: .monospaced))
                         .foregroundStyle(OnymTokens.text3)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
-                Spacer(minLength: 0)
+                Spacer(minLength: 4)
+                if let badge {
+                    Text(badge)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(badgeColor)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(badgeColor.opacity(0.14),
+                                    in: Capsule())
+                }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -702,6 +701,12 @@ struct OnboardingDiscoveryContent: View {
 
     @ViewBuilder
     private func idle(_ flow: DiscoverySettingsFlow) -> some View {
+        Text("A directory is a phone book of available services. Onym verifies every entry on this device before showing it to you — adding a second one widens what you can choose from.")
+            .font(.system(size: 14))
+            .foregroundStyle(OnymTokens.text2)
+            .lineSpacing(3)
+            .padding(.bottom, 12)
+
         if let status = flow.state.sources.first {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -763,7 +768,7 @@ struct OnboardingDiscoveryContent: View {
     private func addOwn(_ flow: DiscoverySettingsFlow) -> some View {
         @Bindable var flow = flow
         if showAddOwn {
-            OnboardingSectionLabel(text: "YOUR OWN PROVIDER")
+            OnboardingSectionLabel(text: "ADD YOUR OWN")
             VStack(alignment: .leading, spacing: 8) {
                 TextField("https://discovery.example.com/manifest.json", text: $flow.addDraft)
                     .textInputAutocapitalization(.never)
@@ -877,11 +882,18 @@ struct OnboardingNostrContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            Text("Relays pass sealed messages along. They can't read them, and they never learn who you're talking to. Two or more keeps you reachable if one goes down.")
+                .font(.system(size: 14))
+                .foregroundStyle(OnymTokens.text2)
+                .lineSpacing(3)
+                .padding(.bottom, 4)
+
+            OnboardingSectionLabel(text: "IN USE")
             configured
 
             catalogSection(prefix: "onboarding.messageTransport.catalog")
 
-            OnboardingSectionLabel(text: "ADD CUSTOM URL")
+            OnboardingSectionLabel(text: "ADD YOUR OWN")
             OnboardingCustomURLField(
                 placeholder: "wss://relay.example.com",
                 draft: Binding(
@@ -921,8 +933,9 @@ struct OnboardingNostrContent: View {
                     OnboardingEndpointRow(
                         name: endpoint.name,
                         url: endpoint.url,
-                        badge: endpoint.isDefault ? "DEFAULT" : nil,
+                        badge: idx == 0 ? "PRIMARY" : "BACKUP",
                         selected: idx == 0,
+                        badgeColor: idx == 0 ? OnymTokens.green : OnymTokens.text2,
                         last: idx == endpoints.count - 1
                     )
                     .accessibilityElement(children: .contain)
@@ -931,13 +944,18 @@ struct OnboardingNostrContent: View {
             }
             .background(OnymTokens.surface2,
                         in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+            Text("The top relay is tried first; the rest are fallbacks.")
+                .font(.system(size: 12.5))
+                .foregroundStyle(OnymTokens.text2)
+                .padding(.top, 8)
         }
     }
 
     @ViewBuilder
     private func catalogSection(prefix: String) -> some View {
         if !flow.catalogEntries.isEmpty {
-            OnboardingSectionLabel(text: "FROM CATALOG")
+            OnboardingSectionLabel(text: "SUGGESTED BY YOUR DIRECTORIES")
             DiscoveryCatalogSection(
                 entries: flow.catalogEntries,
                 activeConsent: { flow.activeConsent(for: $0) },
@@ -990,10 +1008,17 @@ struct OnboardingBlossomContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            Text("Photos, video and voice notes are too big for the relays that carry text, so they travel through a media service instead. They're encrypted on this device first — it only ever handles sealed blobs.")
+                .font(.system(size: 14))
+                .foregroundStyle(OnymTokens.text2)
+                .lineSpacing(3)
+                .padding(.bottom, 4)
+
+            OnboardingSectionLabel(text: "IN USE")
             configured
 
             if !flow.catalogEntries.isEmpty {
-                OnboardingSectionLabel(text: "FROM CATALOG")
+                OnboardingSectionLabel(text: "SUGGESTED BY YOUR DIRECTORIES")
                 DiscoveryCatalogSection(
                     entries: flow.catalogEntries,
                     activeConsent: { flow.activeConsent(for: $0) },
@@ -1008,7 +1033,7 @@ struct OnboardingBlossomContent: View {
                 .padding(.horizontal, -16)
             }
 
-            OnboardingSectionLabel(text: "ADD CUSTOM URL")
+            OnboardingSectionLabel(text: "ADD YOUR OWN")
             OnboardingCustomURLField(
                 placeholder: "https://blossom.example.com",
                 draft: Binding(
@@ -1051,6 +1076,7 @@ struct OnboardingBlossomContent: View {
                         // First endpoint is the upload/download target.
                         badge: idx == 0 ? "ACTIVE" : (endpoint.isDefault ? "DEFAULT" : nil),
                         selected: idx == 0,
+                        badgeColor: idx == 0 ? OnymTokens.green : OnymTokens.text2,
                         last: idx == endpoints.count - 1
                     )
                     .accessibilityElement(children: .contain)
@@ -1099,13 +1125,20 @@ struct OnboardingNotaryContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            Text("A notary keeps every group's membership and history honest. It checks each change with a zero-knowledge proof, so it can confirm a group is genuine without learning who is in it or what was said.")
+                .font(.system(size: 14))
+                .foregroundStyle(OnymTokens.text2)
+                .lineSpacing(3)
+                .padding(.bottom, 4)
+
+            OnboardingSectionLabel(text: "IN USE")
             configured
 
-            OnboardingSectionLabel(text: "FROM PUBLISHED LIST")
+            OnboardingSectionLabel(text: "FROM THE PUBLISHED LIST")
             published
 
             if !flow.catalogEntries.isEmpty {
-                OnboardingSectionLabel(text: "FROM CATALOG")
+                OnboardingSectionLabel(text: "SUGGESTED BY YOUR DIRECTORIES")
                 DiscoveryCatalogSection(
                     entries: flow.catalogEntries,
                     activeConsent: { flow.activeConsent(for: $0) },
@@ -1120,7 +1153,7 @@ struct OnboardingNotaryContent: View {
                 .padding(.horizontal, -16)
             }
 
-            OnboardingSectionLabel(text: "ADD CUSTOM URL")
+            OnboardingSectionLabel(text: "ADD YOUR OWN")
             OnboardingCustomURLField(
                 placeholder: "https://relayer.example.com",
                 draft: Binding(
@@ -1293,10 +1326,18 @@ struct OnboardingModerationContent: View {
     }
 
     var body: some View {
-        ModerationConsentContent(flow: flow)
-            // The content carries the Settings pages' own horizontal
-            // insets; pull them back to the scaffold's.
-            .padding(.horizontal, -16)
+        VStack(alignment: .leading, spacing: 0) {
+            ModerationConsentContent(flow: flow)
+                // The content carries the Settings pages' own
+                // horizontal insets; pull them back to the scaffold's.
+                .padding(.horizontal, -16)
+
+            Text("An authority never sees your messages. It only ever sees what a person chooses to report, and it can only act inside the terms you're about to read.")
+                .font(.system(size: 12.5))
+                .foregroundStyle(OnymTokens.text2)
+                .lineSpacing(2)
+                .padding(.top, 12)
+        }
             .task { flow.start() }
             .onDisappear { flow.stop() }
             .onChange(of: flow.state.step) { _, step in
@@ -1395,12 +1436,16 @@ struct OnboardingRecoveryContent: View {
 
 /// One summary row on the Done step: which seat, what was chosen, and
 /// the identifying detail (endpoint URL / key fingerprint / manifest
-/// hash) so the summary is checkable, not just reassuring.
+/// hash) so the summary is checkable, not just reassuring. `trailing`
+/// carries the design's count/state text ("2 services", "Agreed");
+/// `symbol` draws the seat's icon.
 struct OnboardingSummaryRow: Identifiable, Sendable {
     let id: String
     let title: String
     let value: String
     let detail: String?
+    var symbol: String = "circle"
+    var trailing: String?
 }
 
 /// Summary of the chosen components + the backup-phrase nudge. The
@@ -1413,27 +1458,43 @@ struct OnboardingDoneContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Spacer()
+                Circle()
+                    .fill(OnymTokens.green)
+                    .frame(width: 62, height: 62)
+                    .overlay(Image(systemName: "checkmark")
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundStyle(OnymTokens.onAccent))
+                Spacer()
+            }
+            .padding(.bottom, 20)
+            .accessibilityHidden(true)
+
+            OnboardingSectionLabel(text: "YOUR SETUP")
             VStack(spacing: 0) {
                 ForEach(Array(rows.enumerated()), id: \.element.id) { idx, row in
                     VStack(spacing: 0) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack {
+                        HStack(spacing: 12) {
+                            Image(systemName: row.symbol)
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(OnymAccent.blue.color)
+                                .frame(width: 24)
+                            VStack(alignment: .leading, spacing: 2) {
                                 Text(verbatim: row.title)
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(OnymTokens.text2)
-                                Spacer()
-                                Text(verbatim: row.value)
-                                    .font(.system(size: 13.5, weight: .semibold))
+                                    .font(.system(size: 14.5, weight: .semibold))
                                     .foregroundStyle(OnymTokens.text)
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                            }
-                            if let detail = row.detail {
-                                Text(verbatim: detail)
-                                    .font(.system(size: 11.5, design: .monospaced))
+                                Text(verbatim: row.detail.map { "\(row.value) · \($0)" } ?? row.value)
+                                    .font(.system(size: 12))
                                     .foregroundStyle(OnymTokens.text3)
                                     .lineLimit(1)
                                     .truncationMode(.middle)
+                            }
+                            Spacer(minLength: 4)
+                            if let trailing = row.trailing {
+                                Text(verbatim: trailing)
+                                    .font(.system(size: 12.5))
+                                    .foregroundStyle(OnymTokens.text2)
                             }
                         }
                         .padding(.horizontal, 14)
@@ -1441,7 +1502,7 @@ struct OnboardingDoneContent: View {
                         if idx != rows.count - 1 {
                             Divider()
                                 .background(OnymTokens.hairline)
-                                .padding(.leading, 14)
+                                .padding(.leading, 50)
                         }
                     }
                 }
@@ -1451,26 +1512,11 @@ struct OnboardingDoneContent: View {
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("onboarding.done.summary")
 
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: "key.viewfinder")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(SettingsTile.amber)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Back up your recovery phrase")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(OnymTokens.text)
-                    Text("Your identity key was created on this device and exists nowhere else. Back it up from Settings → Back Up Recovery Phrase so you can recover your account.")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(OnymTokens.text2)
-                        .lineSpacing(2)
-                }
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(SettingsTile.amber.opacity(0.10),
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .padding(.top, 12)
-            .accessibilityIdentifier("onboarding.done.backup_nudge")
+            Text("Tap into Settings → Services to change any of this. Nothing here is permanent except your recovery phrase.")
+                .font(.system(size: 12.5))
+                .foregroundStyle(OnymTokens.text2)
+                .lineSpacing(2)
+                .padding(.top, 12)
         }
         .task { rows = await loadSummary() }
     }
