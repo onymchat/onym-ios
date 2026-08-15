@@ -640,7 +640,7 @@ struct OnboardingServicesHub: View {
                     .background(OnymTokens.surface2,
                                 in: RoundedRectangle(cornerRadius: 14, style: .continuous))
 
-                    Text("Adding more than one service in a category gives you a fallback — Onym uses the fastest one that answers.")
+                    Text("More than one service works differently per category: relays all carry every message together, extra media hosts are trusted download sources, and each new group picks its notary from your list.")
                         .font(.system(size: 12.5))
                         .foregroundStyle(OnymTokens.text2)
                         .lineSpacing(2)
