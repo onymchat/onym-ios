@@ -9,7 +9,11 @@ import XCTest
 /// Accessibility identifiers follow the scaffold's convention:
 /// `onboarding.<step>.<element>` — `title` / `primary` / `skip` /
 /// `back` from `OnboardingStepScaffold`, step-specific elements from
-/// the app-layer step bodies (`OnboardingSteps.swift`).
+/// the app-layer step bodies (`OnboardingSteps.swift`). The hub
+/// sub-surfaces (directory / messageDelivery / mediaDelivery /
+/// groupIntegrity) use `onboarding.services.<seat>.<element>`; their
+/// accessors below are exercised by the redesigned walk in the tests
+/// PR of this stack — on this PR only the smoke test runs.
 struct OnboardingScreen {
     let app: XCUIApplication
 
