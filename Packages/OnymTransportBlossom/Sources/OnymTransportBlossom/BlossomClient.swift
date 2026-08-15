@@ -38,6 +38,12 @@ public protocol BlossomClient: Sendable {
     /// so the stamp and the blobs' actual location can never diverge —
     /// even if the configured server changes mid-operation. Clients
     /// with a fixed base URL return `self` (the default).
+    ///
+    /// TRUST NOTE: this is the trusted binding level — the URL must
+    /// come from the user's own configuration (or their own earlier
+    /// stamp), never from peer-influenced bytes. Peer stamps are gated
+    /// upstream by `BlossomServerStampPolicy` (https + allowlist,
+    /// binding to the allowlist's URL).
     func bound(toServer serverURL: String) -> any BlossomClient
 }
 

@@ -276,6 +276,105 @@ final class SendMessageInteractorTests: XCTestCase {
                        "no upload may bypass the bound client and re-resolve live")
     }
 
+    func test_retry_reuploadsThroughClientBoundToStampedServer() async throws {
+        // The retry re-upload must pin to the server STAMPED into the
+        // failed message's attachments — not whatever the provider
+        // resolves at retry time.
+        let groupID = await seedGroupWithTwoPeers()
+        let tagging = ServerTaggingBlossomClient()
+        let provider = FlippingURLProvider(
+            first: "https://stamped-at-send.test", rest: "https://changed-since.test"
+        )
+        let boundInteractor = SendMessageInteractor(
+            identity: identity,
+            inboxTransport: transport,
+            messageRepository: messages,
+            groupRepository: groups,
+            blossomClient: tagging,
+            blossomServerURL: { provider.next() },
+            outbox: outbox
+        )
+
+        // Fail at fan-out (uploads succeed, relays reject) so the
+        // outbox keeps the blob for the retry.
+        await transport.setAcceptedBy(0)
+        let failed = try await boundInteractor.sendImage(
+            groupID: groupID, imageData: Self.makeJPEG()
+        )
+        XCTAssertEqual(failed.status, .failed)
+        XCTAssertEqual(failed.imageAttachment?.server, "https://stamped-at-send.test")
+
+        await transport.setAcceptedBy(1)
+        await boundInteractor.retry(groupID: groupID, messageID: failed.id)
+
+        let stored = await messages.currentMessages(groupID: groupID, owner: currentIdentityID)
+        XCTAssertEqual(stored.first?.status, .sent)
+        let uploadServers = await tagging.uploadServers
+        XCTAssertEqual(uploadServers,
+                       ["https://stamped-at-send.test", "https://stamped-at-send.test"],
+                       "the retry re-upload must bind to the stamped server, not the provider's current URL")
+        let unbound = await tagging.unboundUploads
+        XCTAssertEqual(unbound, 0)
+    }
+
+    func test_retry_legacyNilStampRow_fallsBackToLiveClient() async throws {
+        // Rows persisted before stamping existed carry server == nil;
+        // their retry re-uploads through the live (unbound) client.
+        let groupID = await seedGroupWithTwoPeers()
+        let tagging = ServerTaggingBlossomClient()
+
+        // Hand-craft the legacy failed row + its outbox blob (written
+        // straight into a dedicated outbox directory — `store` is
+        // internal to the package).
+        let blob = Data("legacy-ciphertext".utf8)
+        let sha = ChatImageCrypto.sha256Hex(blob)
+        let outboxDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("outbox-legacy-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: outboxDir, withIntermediateDirectories: true
+        )
+        try blob.write(
+            to: outboxDir.appendingPathComponent(sha).appendingPathExtension("blob")
+        )
+        let boundInteractor = SendMessageInteractor(
+            identity: identity,
+            inboxTransport: transport,
+            messageRepository: messages,
+            groupRepository: groups,
+            blossomClient: tagging,
+            blossomServerURL: { "https://current.test" },
+            outbox: ChatOutbox(directory: outboxDir)
+        )
+        let legacy = ChatMessage(
+            id: UUID(),
+            groupID: groupID,
+            ownerIdentityID: currentIdentityID,
+            senderBlsPubkeyHex: myBlsHex,
+            body: "",
+            sentAt: Date(),
+            direction: .outgoing,
+            status: .failed,
+            replyToMessageID: nil,
+            groupType: .tyranny,
+            imageAttachment: ChatImageAttachment(
+                sha256: sha, mimeType: "image/jpeg", byteSize: blob.count,
+                width: 4, height: 4, encKey: Data(repeating: 7, count: 32),
+                blurhash: "LEHV6nWB2yk8", server: nil
+            )
+        )
+        await messages.insert(legacy)
+
+        await transport.setAcceptedBy(1)
+        await boundInteractor.retry(groupID: groupID, messageID: legacy.id)
+
+        let uploadServers = await tagging.uploadServers
+        XCTAssertTrue(uploadServers.isEmpty,
+                      "a nil-stamp legacy row must not bind to any server")
+        let unbound = await tagging.unboundUploads
+        XCTAssertEqual(unbound, 1,
+                       "the legacy re-upload goes through the live (unbound) client")
+    }
+
     /// `BlossomClient` that tags every upload with the server URL the
     /// client was `bound(toServer:)` to; direct (unbound) uploads are
     /// counted separately because the per-send guarantee forbids them.

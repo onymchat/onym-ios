@@ -18,8 +18,18 @@ import OnymTransportBlossom
 /// pointed at the user's own active server.
 enum BlossomServerStampPolicy {
     /// The client a stamped attachment downloads through: `live` bound
-    /// to the stamp when the stamp's origin is in `allowedServers`,
-    /// plain `live` otherwise.
+    /// to the MATCHED allowlist URL when the stamp is https and its
+    /// origin is in `allowedServers`, plain `live` otherwise.
+    ///
+    /// This is the PEER-influenced trust level: https is required (a
+    /// peer must not be able to steer traffic to cleartext or odd
+    /// schemes), the origin must be one the user configured, and the
+    /// request is built from the allowlist's own URL — the stamp's
+    /// origin proves membership, but its path/query are still
+    /// peer-chosen bytes and must never shape the request, even
+    /// against the user's own server. The user's own hand-typed
+    /// endpoints (send/retry binding) live at the trusted level in
+    /// `bound(toServer:)` instead, where http local-dev URLs are fine.
     static func client(
         forStamp server: String?,
         allowedServers: [URL],
@@ -27,20 +37,24 @@ enum BlossomServerStampPolicy {
     ) -> any BlossomClient {
         guard let server,
               let stamped = URL(string: server),
+              stamped.scheme?.lowercased() == "https",
               let stampedKey = originKey(stamped),
-              allowedServers.contains(where: { originKey($0) == stampedKey })
+              let matched = allowedServers.first(where: { originKey($0) == stampedKey })
         else { return live }
-        return live.bound(toServer: server)
+        return live.bound(toServer: matched.absoluteString)
     }
 
-    /// Normalized scheme+host+port comparison key. `nil` when the URL
+    /// Normalized scheme+host+port comparison key; default ports
+    /// (443/https, 80/http) fold away so `https://a.example` and
+    /// `https://a.example:443` are the same origin. `nil` when the URL
     /// has no scheme or host — such a stamp is never comparable and
     /// never honored.
     static func originKey(_ url: URL) -> String? {
         guard let scheme = url.scheme?.lowercased(),
               let host = url.host()?.lowercased(), !host.isEmpty
         else { return nil }
-        let port = url.port.map { ":\($0)" } ?? ""
+        let defaultPort: Int? = scheme == "https" ? 443 : (scheme == "http" ? 80 : nil)
+        let port = url.port.flatMap { $0 == defaultPort ? nil : ":\($0)" } ?? ""
         return "\(scheme)://\(host)\(port)"
     }
 }

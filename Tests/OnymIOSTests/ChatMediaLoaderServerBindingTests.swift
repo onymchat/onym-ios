@@ -100,8 +100,8 @@ final class ChatMediaLoaderServerBindingTests: XCTestCase {
             for: Self.imageAttachment(sealed: sealed, server: Self.stampedServer)
         )
         let downloads = await client.downloads
-        XCTAssertEqual(downloads, [.init(server: Self.stampedServer, sha256: sealed.sha256Hex)],
-                       "case-insensitive origin match must honor the stamp")
+        XCTAssertEqual(downloads, [.init(server: "https://Stamped.Example/", sha256: sealed.sha256Hex)],
+                       "case-insensitive origin match honors the stamp, binding to the ALLOWLIST URL")
 
         let other = try ChatImageCrypto.seal(Data("origin-port".utf8))
         let portClient = ServerRecordingBlossomClient(blobs: [other.sha256Hex: other.blob])
@@ -175,6 +175,83 @@ final class ChatMediaLoaderServerBindingTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: url), Data("voice-bytes".utf8))
         let downloads = await client.downloads
         XCTAssertEqual(downloads, [.init(server: Self.stampedServer, sha256: sealed.sha256Hex)])
+    }
+
+    func test_stampWithPathAndQuery_bindsToAllowlistURL_notRawStamp() async throws {
+        // The stamp's origin proves allowlist membership, but its
+        // path/query are peer-chosen bytes — the request must be built
+        // from the allowlist's own URL, never the raw stamp.
+        let sealed = try ChatImageCrypto.seal(Data("path-query".utf8))
+        let client = ServerRecordingBlossomClient(blobs: [sealed.sha256Hex: sealed.blob])
+        let loader = ChatImageLoader(
+            blossomClient: client,
+            cacheDirectory: Self.tempDir(),
+            allowedStampServers: { [URL(string: Self.stampedServer)!] }
+        )
+
+        _ = try await loader.plaintext(
+            for: Self.imageAttachment(
+                sealed: sealed,
+                server: Self.stampedServer + "/evil/prefix?track=1"
+            )
+        )
+
+        let downloads = await client.downloads
+        XCTAssertEqual(downloads, [.init(server: Self.stampedServer, sha256: sealed.sha256Hex)],
+                       "binding must use the allowlist URL, stripping the peer's path/query")
+    }
+
+    func test_httpStamp_neverHonored_evenWhenHTTPEndpointConfigured() async throws {
+        // The peer-influenced path is https-only regardless of what
+        // the user configured — an http local-dev endpoint still works
+        // through the LIVE client, it just can't be stamp-routed.
+        let sealed = try ChatImageCrypto.seal(Data("http-stamp".utf8))
+        let client = ServerRecordingBlossomClient(blobs: [sealed.sha256Hex: sealed.blob])
+        let loader = ChatImageLoader(
+            blossomClient: client,
+            cacheDirectory: Self.tempDir(),
+            allowedStampServers: { [URL(string: "http://192.168.1.10:3000")!] }
+        )
+
+        _ = try await loader.plaintext(
+            for: Self.imageAttachment(sealed: sealed, server: "http://192.168.1.10:3000")
+        )
+
+        let downloads = await client.downloads
+        XCTAssertEqual(downloads, [.init(server: nil, sha256: sealed.sha256Hex)],
+                       "http stamps fall back to the live client even when the endpoint is configured")
+    }
+
+    func test_defaultPortNormalization_bothDirections() async throws {
+        // "https://a.example:443" and "https://a.example" are the same
+        // origin — explicit default port on either side still matches.
+        let sealedA = try ChatImageCrypto.seal(Data("port-a".utf8))
+        let clientA = ServerRecordingBlossomClient(blobs: [sealedA.sha256Hex: sealedA.blob])
+        let loaderA = ChatImageLoader(
+            blossomClient: clientA,
+            cacheDirectory: Self.tempDir(),
+            allowedStampServers: { [URL(string: "https://stamped.example")!] }
+        )
+        _ = try await loaderA.plaintext(
+            for: Self.imageAttachment(sealed: sealedA, server: "https://stamped.example:443")
+        )
+        let downloadsA = await clientA.downloads
+        XCTAssertEqual(downloadsA, [.init(server: "https://stamped.example", sha256: sealedA.sha256Hex)],
+                       "stamp with explicit :443 matches the portless allowlist entry")
+
+        let sealedB = try ChatImageCrypto.seal(Data("port-b".utf8))
+        let clientB = ServerRecordingBlossomClient(blobs: [sealedB.sha256Hex: sealedB.blob])
+        let loaderB = ChatImageLoader(
+            blossomClient: clientB,
+            cacheDirectory: Self.tempDir(),
+            allowedStampServers: { [URL(string: "https://stamped.example:443")!] }
+        )
+        _ = try await loaderB.plaintext(
+            for: Self.imageAttachment(sealed: sealedB, server: Self.stampedServer)
+        )
+        let downloadsB = await clientB.downloads
+        XCTAssertEqual(downloadsB, [.init(server: "https://stamped.example:443", sha256: sealedB.sha256Hex)],
+                       "portless stamp matches the allowlist entry with explicit :443")
     }
 
     // MARK: - In-flight deduplication

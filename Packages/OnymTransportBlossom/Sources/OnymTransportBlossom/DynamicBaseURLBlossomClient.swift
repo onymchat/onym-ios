@@ -36,16 +36,26 @@ public struct DynamicBaseURLBlossomClient: BlossomClient {
     /// Pin to `serverURL`: returns the inner client built for exactly
     /// that URL, so a multi-blob send that stamped the URL into its
     /// metadata uploads every blob there even if the configuration
-    /// changes mid-send. Falls back to `self` (live resolution) when
-    /// the string isn't a usable https base URL — `URL(string:)`
-    /// happily parses a schemeless stamp like "blossom.example" as a
-    /// relative URL that every request would then fail against, and
-    /// anything non-https (cleartext http, odd schemes) is rejected
-    /// outright, matching the consent apply path's
-    /// `requiredEndpointURL(in:scheme:"https")`.
+    /// changes mid-send.
+    ///
+    /// This is the TRUSTED binding level: callers vouch for the URL —
+    /// it comes from the user's own configuration (the per-send upload
+    /// pin, retry's re-upload to the self-stamped server), never from
+    /// peer-influenced bytes. The scheme is deliberately NOT
+    /// second-guessed here, so a hand-typed http://192.168.x local-dev
+    /// endpoint binds exactly as the user configured it.
+    /// Peer-influenced stamps must never reach this directly — they go
+    /// through `BlossomServerStampPolicy` (OnymChatsCore), which
+    /// enforces https + the user's configured allowlist and then binds
+    /// to the allowlist's own URL.
+    ///
+    /// Falls back to `self` (live resolution) when the string isn't a
+    /// usable absolute URL — `URL(string:)` happily parses a schemeless
+    /// "blossom.example" as a relative URL that every request would
+    /// then fail against, so scheme and host are required.
     public func bound(toServer serverURL: String) -> any BlossomClient {
         guard let url = URL(string: serverURL),
-              url.scheme?.lowercased() == "https",
+              url.scheme != nil,
               let host = url.host(), !host.isEmpty
         else { return self }
         return makeClient(url)
