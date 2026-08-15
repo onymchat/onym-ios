@@ -970,6 +970,15 @@ public actor SendMessageInteractor {
         // currently-configured one — a config change between the failed
         // send and the retry must not strand the descriptor. Falls back
         // to the live client for legacy rows without a stamp.
+        //
+        // Taking the FIRST stamp is deliberate: every send since the
+        // per-send binding landed resolves the URL exactly once, so all
+        // of one message's attachments carry the same stamp and any of
+        // them is representative. A mixed-stamp message could only be a
+        // legacy row from before that guarantee; per-blob binding for
+        // that vanishing case isn't worth the complexity — the retry
+        // then re-uploads all blobs to the first stamp's server, which
+        // at worst re-homes a legacy blob alongside its siblings.
         let stampedServer = message.media.lazy.compactMap { item -> String? in
             switch item {
             case .image(let image): return image.server

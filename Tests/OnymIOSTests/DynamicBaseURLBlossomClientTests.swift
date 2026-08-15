@@ -129,6 +129,25 @@ final class DynamicBaseURLBlossomClientTests: XCTestCase {
         ])
     }
 
+    func test_boundToServer_nonHTTPSScheme_fallsBackToLiveResolution() async throws {
+        // Only https is bindable — cleartext http (no ATS exception
+        // ships) and odd schemes fall back to live resolution, same
+        // rule as the consent apply's requiredEndpointURL.
+        let recorder = Recorder()
+        let client = DynamicBaseURLBlossomClient(
+            resolveBaseURL: { [serverB] in serverB },
+            makeClient: { recorder.make(baseURL: $0) }
+        )
+
+        _ = try await client.bound(toServer: "http://blossom.example").download(sha256: "dd")
+        _ = try await client.bound(toServer: "ftp://blossom.example").download(sha256: "ee")
+
+        XCTAssertEqual(recorder.operations, [
+            .download(baseURL: serverB, sha256: "dd"),
+            .download(baseURL: serverB, sha256: "ee"),
+        ])
+    }
+
     // MARK: - fakes
 
     /// Records every operation, tagged with the base URL the inner

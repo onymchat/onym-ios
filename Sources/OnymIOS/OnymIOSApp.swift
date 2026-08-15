@@ -459,11 +459,26 @@ struct OnymIOSApp: App {
         #else
         blossomClient = makeLiveBlossomClient()
         #endif
-        let imageLoader = ChatImageLoader(blossomClient: blossomClient)
+        // The loaders may honor an attachment's `server` stamp only
+        // within this set — the user's own configured servers — never
+        // a peer-chosen host (see BlossomServerStampPolicy).
+        let allowedStampServers: @Sendable () async -> [URL] = {
+            await blossomServersRepository.currentEndpoints().map(\.url)
+        }
+        let imageLoader = ChatImageLoader(
+            blossomClient: blossomClient,
+            allowedStampServers: allowedStampServers
+        )
         self.imageLoader = imageLoader
-        let videoLoader = ChatVideoLoader(blossomClient: blossomClient)
+        let videoLoader = ChatVideoLoader(
+            blossomClient: blossomClient,
+            allowedStampServers: allowedStampServers
+        )
         self.videoLoader = videoLoader
-        let voiceLoader = ChatVoiceLoader(blossomClient: blossomClient)
+        let voiceLoader = ChatVoiceLoader(
+            blossomClient: blossomClient,
+            allowedStampServers: allowedStampServers
+        )
         self.voiceLoader = voiceLoader
 
         // Video encoder for outgoing videos. The real encoder runs

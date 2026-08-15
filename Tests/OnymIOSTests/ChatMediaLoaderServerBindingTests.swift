@@ -5,11 +5,12 @@ import OnymChatsCore
 import OnymTransportBlossom
 
 /// The read half of the server-stamp contract: all three media loaders
-/// must download a stamped attachment through a client BOUND to the
-/// attachment's `server` — the one the sender actually uploaded to —
-/// not the live client, whose base URL moves the moment the user picks
-/// a different Blossom server. Legacy rows without a stamp fall back
-/// to the live client.
+/// download a stamped attachment through a client BOUND to the
+/// attachment's `server` — but ONLY when that server is one of the
+/// user's configured endpoints. The stamp arrives off the wire, so an
+/// unrecognized stamp (a peer-chosen host) must NEVER receive a
+/// request: it falls back to the live client, as do legacy nil-server
+/// rows and loaders with no allowlist wired.
 final class ChatMediaLoaderServerBindingTests: XCTestCase {
     private static let stampedServer = "https://stamped.example"
 
@@ -18,7 +19,11 @@ final class ChatMediaLoaderServerBindingTests: XCTestCase {
     func test_imageLoader_stampedAttachment_downloadsViaBoundClient() async throws {
         let sealed = try ChatImageCrypto.seal(Data("image-bytes".utf8))
         let client = ServerRecordingBlossomClient(blobs: [sealed.sha256Hex: sealed.blob])
-        let loader = ChatImageLoader(blossomClient: client, cacheDirectory: Self.tempDir())
+        let loader = ChatImageLoader(
+            blossomClient: client,
+            cacheDirectory: Self.tempDir(),
+            allowedStampServers: { [URL(string: Self.stampedServer)!] }
+        )
 
         let plaintext = try await loader.plaintext(
             for: Self.imageAttachment(sealed: sealed, server: Self.stampedServer)
@@ -44,12 +49,85 @@ final class ChatMediaLoaderServerBindingTests: XCTestCase {
                        "no stamp → the live (unbound) client")
     }
 
+    func test_imageLoader_stampNotInConfiguredSet_usesLiveClient_neverContactsStamp() async throws {
+        // The security property: a peer-chosen stamp outside the
+        // user's configured servers must not receive ANY request —
+        // the download goes through the live client instead.
+        let sealed = try ChatImageCrypto.seal(Data("hostile-stamp".utf8))
+        let client = ServerRecordingBlossomClient(blobs: [sealed.sha256Hex: sealed.blob])
+        let loader = ChatImageLoader(
+            blossomClient: client,
+            cacheDirectory: Self.tempDir(),
+            allowedStampServers: { [URL(string: "https://mine.example")!] }
+        )
+
+        _ = try await loader.plaintext(
+            for: Self.imageAttachment(sealed: sealed, server: "https://tracker.example")
+        )
+
+        let downloads = await client.downloads
+        XCTAssertEqual(downloads, [.init(server: nil, sha256: sealed.sha256Hex)],
+                       "an unconfigured stamp must fall back to the live client, with zero requests bound to the stamp")
+    }
+
+    func test_imageLoader_noAllowlistWired_ignoresStamp() async throws {
+        // Default (empty) allowlist — e.g. a composition root that
+        // never wires the provider — must ignore every stamp.
+        let sealed = try ChatImageCrypto.seal(Data("unwired".utf8))
+        let client = ServerRecordingBlossomClient(blobs: [sealed.sha256Hex: sealed.blob])
+        let loader = ChatImageLoader(blossomClient: client, cacheDirectory: Self.tempDir())
+
+        _ = try await loader.plaintext(
+            for: Self.imageAttachment(sealed: sealed, server: Self.stampedServer)
+        )
+
+        let downloads = await client.downloads
+        XCTAssertEqual(downloads, [.init(server: nil, sha256: sealed.sha256Hex)])
+    }
+
+    func test_stampMatchingIsByNormalizedOrigin() async throws {
+        // Same scheme+host+port with different case and a trailing
+        // path/slash still matches; a different port does not.
+        let sealed = try ChatImageCrypto.seal(Data("origin".utf8))
+        let client = ServerRecordingBlossomClient(blobs: [sealed.sha256Hex: sealed.blob])
+        let loader = ChatImageLoader(
+            blossomClient: client,
+            cacheDirectory: Self.tempDir(),
+            allowedStampServers: { [URL(string: "https://Stamped.Example/")!] }
+        )
+
+        _ = try await loader.plaintext(
+            for: Self.imageAttachment(sealed: sealed, server: Self.stampedServer)
+        )
+        let downloads = await client.downloads
+        XCTAssertEqual(downloads, [.init(server: Self.stampedServer, sha256: sealed.sha256Hex)],
+                       "case-insensitive origin match must honor the stamp")
+
+        let other = try ChatImageCrypto.seal(Data("origin-port".utf8))
+        let portClient = ServerRecordingBlossomClient(blobs: [other.sha256Hex: other.blob])
+        let portLoader = ChatImageLoader(
+            blossomClient: portClient,
+            cacheDirectory: Self.tempDir(),
+            allowedStampServers: { [URL(string: "https://stamped.example:8443")!] }
+        )
+        _ = try await portLoader.plaintext(
+            for: Self.imageAttachment(sealed: other, server: Self.stampedServer)
+        )
+        let portDownloads = await portClient.downloads
+        XCTAssertEqual(portDownloads, [.init(server: nil, sha256: other.sha256Hex)],
+                       "a different port is a different origin — stamp not honored")
+    }
+
     // MARK: - Video loader
 
     func test_videoLoader_stampedAttachment_downloadsViaBoundClient() async throws {
         let sealed = try ChatImageCrypto.seal(Data("video-bytes".utf8))
         let client = ServerRecordingBlossomClient(blobs: [sealed.sha256Hex: sealed.blob])
-        let loader = ChatVideoLoader(blossomClient: client, cacheDirectory: Self.tempDir())
+        let loader = ChatVideoLoader(
+            blossomClient: client,
+            cacheDirectory: Self.tempDir(),
+            allowedStampServers: { [URL(string: Self.stampedServer)!] }
+        )
 
         let poster = Self.imageAttachment(
             sealed: try ChatImageCrypto.seal(Data("poster".utf8)),
@@ -77,7 +155,11 @@ final class ChatMediaLoaderServerBindingTests: XCTestCase {
     func test_voiceLoader_stampedAttachment_downloadsViaBoundClient() async throws {
         let sealed = try ChatImageCrypto.seal(Data("voice-bytes".utf8))
         let client = ServerRecordingBlossomClient(blobs: [sealed.sha256Hex: sealed.blob])
-        let loader = ChatVoiceLoader(blossomClient: client, cacheDirectory: Self.tempDir())
+        let loader = ChatVoiceLoader(
+            blossomClient: client,
+            cacheDirectory: Self.tempDir(),
+            allowedStampServers: { [URL(string: Self.stampedServer)!] }
+        )
 
         let attachment = ChatVoiceAttachment(
             sha256: sealed.sha256Hex,

@@ -14,11 +14,19 @@ import OnymTransportBlossom
 /// play it directly.
 public actor ChatVideoLoader {
     private let blossomClient: any BlossomClient
+    /// See `ChatImageLoader.allowedStampServers` — the only servers a
+    /// wire-decoded `server` stamp may route a download to.
+    private let allowedStampServers: @Sendable () async -> [URL]
     private let cacheDir: URL
     private var inflight: [String: Task<URL, Error>] = [:]
 
-    public init(blossomClient: any BlossomClient, cacheDirectory: URL? = nil) {
+    public init(
+        blossomClient: any BlossomClient,
+        cacheDirectory: URL? = nil,
+        allowedStampServers: @escaping @Sendable () async -> [URL] = { [] }
+    ) {
         self.blossomClient = blossomClient
+        self.allowedStampServers = allowedStampServers
         self.cacheDir = cacheDirectory ?? FileManager.default
             .urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("OnymChatVideos", isDirectory: true)
@@ -37,11 +45,13 @@ public actor ChatVideoLoader {
         if FileManager.default.fileExists(atPath: dest.path) { return dest }
         if let existing = inflight[key] { return try await existing.value }
 
-        // Fetch from the server STAMPED into the attachment (where the
-        // sender uploaded), falling back to the live client for legacy
-        // rows without a stamp — see ChatImageLoader.
-        let client = attachment.server.map { blossomClient.bound(toServer: $0) }
-            ?? blossomClient
+        // Stamp honored only within the user's configured server set —
+        // never a peer-chosen host. See BlossomServerStampPolicy.
+        let client = BlossomServerStampPolicy.client(
+            forStamp: attachment.server,
+            allowedServers: await allowedStampServers(),
+            live: blossomClient
+        )
         let task = Task<URL, Error> {
             let blob = try await client.download(sha256: attachment.sha256)
             let plaintext = try ChatImageCrypto.open(
