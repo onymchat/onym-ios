@@ -192,6 +192,24 @@ jobs:
             -resultBundlePath /tmp/onym-ios-unit.xcresult \
             -only-testing:OnymIOSTests
 
+      - name: xcodebuild test (OnymDiscovery package)
+        # The OnymDiscovery test bundle is a SwiftPM package target, so
+        # `-only-testing:OnymIOSTests` above never runs it. Run the
+        # package's own scheme from the package directory to gate its
+        # conformance/trust suite here. Same pre-clean rationale as the
+        # unit step. `always()` (like the xcresult uploads) so a red
+        # unit step doesn't short-circuit this suite — its results
+        # must exist for `report-to-issue` even when unit tests fail.
+        if: always()
+        working-directory: Packages/OnymDiscovery
+        run: |
+          rm -rf /tmp/onym-discovery-tests /tmp/onym-discovery.xcresult
+          xcodebuild test \
+            -scheme OnymDiscovery \
+            -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }},OS=latest" \
+            -derivedDataPath /tmp/onym-discovery-tests \
+            -resultBundlePath /tmp/onym-discovery.xcresult
+
       - name: Upload unit test xcresult
         # `always()` so `report-to-issue` can parse green runs too —
         # not just failures.
@@ -200,6 +218,17 @@ jobs:
         with:
           name: unit-tests-xcresult
           path: /tmp/onym-ios-unit.xcresult
+          retention-days: 7
+
+      - name: Upload OnymDiscovery test xcresult
+        # Same rationale as the unit-tests upload: without it the
+        # OnymDiscovery bundle written to /tmp dies with the runner
+        # workspace and `report-to-issue` can never parse it.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: discovery-tests-xcresult
+          path: /tmp/onym-discovery.xcresult
           retention-days: 7
 
   ui-tests:
@@ -681,7 +710,7 @@ jobs:
         # a test deleted in #119, even though the freshly-uploaded
         # artifact only contained passing test names. Wipe both before
         # the downloads so each run sees only its own bundles.
-        run: rm -rf /tmp/unit-xcresult /tmp/ui-xcresult
+        run: rm -rf /tmp/unit-xcresult /tmp/ui-xcresult /tmp/discovery-xcresult
 
       - name: Download unit-tests xcresult
         uses: actions/download-artifact@v4
@@ -689,6 +718,13 @@ jobs:
           name: unit-tests-xcresult
           path: /tmp/unit-xcresult
         continue-on-error: true   # bundle may be missing if the test job died before upload
+
+      - name: Download discovery-tests xcresult
+        uses: actions/download-artifact@v4
+        with:
+          name: discovery-tests-xcresult
+          path: /tmp/discovery-xcresult
+        continue-on-error: true
 
       - name: Download ui-tests xcresult
         uses: actions/download-artifact@v4
@@ -706,8 +742,9 @@ jobs:
           # `{<Target>.<Class>: "passed" | "failed"}` plus a per-class
           # failures section for the comment.
           python3 .github/workflows/parse_xcresult.py \
-            --bundle "/tmp/unit-xcresult" --target OnymIOSTests \
-            --bundle "/tmp/ui-xcresult"   --target OnymIOSUITests \
+            --bundle "/tmp/unit-xcresult"      --target OnymIOSTests \
+            --bundle "/tmp/discovery-xcresult" --target OnymDiscoveryTests \
+            --bundle "/tmp/ui-xcresult"        --target OnymIOSUITests \
             --results /tmp/results.json \
             --comment-md /tmp/failure_comment.md
 
