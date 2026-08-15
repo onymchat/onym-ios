@@ -4,6 +4,8 @@ import OnymChatsUI
 import OnymSettings
 import OnymModerationUI
 import OnymDiscovery
+import OnymDesign
+import OnymOnboarding
 
 /// App shell — `TabView` with the iOS 18+ `Tab(_, systemImage:, value:)`
 /// syntax. The `.search` role places its tab in the system's bottom-right
@@ -27,6 +29,20 @@ struct RootView: View {
 
     @State private var selectedTab: RootTab = .chats
     @Environment(\.scenePhase) private var scenePhase
+
+    /// The first-launch onboarding walk, when THIS launch should
+    /// onboard (`AppDependencies.makeOnboardingFlow` non-nil — the
+    /// gate + grandfathering + UI-test veto were already decided in
+    /// `OnymIOSApp.init`). Presented as a full-screen cover over the
+    /// tab bar; set back to nil on `complete()`, which dismisses it.
+    /// Never re-presented within the session — the flow deliberately
+    /// restarts only on a relaunch that still has no completion flag.
+    @State private var onboardingFlow: OnboardingFlow?
+
+    init(dependencies: AppDependencies) {
+        self.dependencies = dependencies
+        _onboardingFlow = State(initialValue: dependencies.makeOnboardingFlow?())
+    }
 
     /// The blocking consent sheet, when one is up. Driven by the gate,
     /// which stays the single source of truth: `needsConsent` presents
@@ -89,12 +105,12 @@ struct RootView: View {
             // The gate can already be decided by the time this view
             // appears, and `onChange` alone would never present for a
             // value that never changes.
-            consentPresentation = Self.presentation(
+            consentPresentation = presentationUnlessOnboarding(
                 for: dependencies.moderationGateFlow.gate
             )
         }
         .onChange(of: dependencies.moderationGateFlow.gate) { _, gate in
-            consentPresentation = Self.presentation(for: gate)
+            consentPresentation = presentationUnlessOnboarding(for: gate)
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
@@ -116,6 +132,56 @@ struct RootView: View {
             )
             .id(presentation.id)
         }
+        // First-launch onboarding, over everything (the moderation
+        // gate's own cover stays suppressed while this is up — the
+        // walk's moderation step is the consent surface). A
+        // full-screen cover has no interactive dismissal, but the
+        // modifier documents intent and guards a future switch to
+        // `.sheet`: the only exits are `complete()` on Done and the
+        // per-step Skips.
+        .fullScreenCover(
+            isPresented: Binding(
+                get: { onboardingFlow != nil },
+                set: { if !$0 { onboardingFlow = nil } }
+            )
+        ) {
+            if let flow = onboardingFlow {
+                OnboardingView(
+                    flow: flow,
+                    stepContent: dependencies.makeOnboardingStepContent.map { make in
+                        { step in make(flow, step) }
+                    },
+                    stepIndicator: { index, count in
+                        AnyView(SettingsStepIndicator(step: index, count: count))
+                    }
+                )
+                .interactiveDismissDisabled(true)
+                .onChange(of: flow.isCompleted) { _, completed in
+                    guard completed else { return }
+                    // Dismiss, then hand control back to the
+                    // moderation gate: if its answer still demands a
+                    // cover (it shouldn't after the walk's consent,
+                    // but the gate stays the single source of truth),
+                    // it goes up now instead of never.
+                    onboardingFlow = nil
+                    consentPresentation = Self.presentation(
+                        for: dependencies.moderationGateFlow.gate
+                    )
+                }
+            }
+        }
+    }
+
+    /// The moderation gate's cover is suppressed while onboarding is
+    /// up: the walk's moderation step embeds the same consent surface,
+    /// so presenting both would stack two identical obligations. The
+    /// gate itself keeps running — its answer is re-read the moment
+    /// onboarding completes.
+    private func presentationUnlessOnboarding(
+        for gate: ModerationGateFlow.RootGate
+    ) -> ConsentPresentation? {
+        guard onboardingFlow == nil else { return nil }
+        return Self.presentation(for: gate)
     }
 
     /// Both consent gates present the same surface; only the gate

@@ -34,6 +34,854 @@
         }
       }
     },
+    "ADD CUSTOM URL": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ADD CUSTOM URL"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "СВОЙ URL"
+          }
+        }
+      }
+    },
+    "Add your own provider URL": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add your own provider URL"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Добавить URL своего провайдера"
+          }
+        }
+      }
+    },
+    "All published notaries added.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All published notaries added."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Все опубликованные нотариусы добавлены."
+          }
+        }
+      }
+    },
+    "Already confirmed — its key is pinned.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Already confirmed — its key is pinned."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Уже подтверждён — его ключ закреплён."
+          }
+        }
+      }
+    },
+    "Back": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Back"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Назад"
+          }
+        }
+      }
+    },
+    "Back up your recovery phrase": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Back up your recovery phrase"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Сделайте резервную копию фразы восстановления"
+          }
+        }
+      }
+    },
+    "Choose a moderation authority and review its terms.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose a moderation authority and review its terms."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Выберите орган модерации и ознакомьтесь с его условиями."
+          }
+        }
+      }
+    },
+    "Choose where your attachments are stored.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose where your attachments are stored."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Выберите, где хранятся ваши вложения."
+          }
+        }
+      }
+    },
+    "Choose who relays your messages.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose who relays your messages."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Выберите, кто доставляет ваши сообщения."
+          }
+        }
+      }
+    },
+    "Choose who timestamps your conversation history.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose who timestamps your conversation history."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Выберите, кто заверяет историю ваших переписок."
+          }
+        }
+      }
+    },
+    "Chosen": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chosen"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Выбрано"
+          }
+        }
+      }
+    },
+    "Confirm the directory your app uses to find services, or add your own provider.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirm the directory your app uses to find services, or add your own provider."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Подтвердите каталог, через который приложение находит сервисы, или добавьте собственного провайдера."
+          }
+        }
+      }
+    },
+    "Continue": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Continue"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Продолжить"
+          }
+        }
+      }
+    },
+    "Default": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Default"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "По умолчанию"
+          }
+        }
+      }
+    },
+    "Fetch Provider": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fetch Provider"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Загрузить провайдера"
+          }
+        }
+      }
+    },
+    "Fetching the provider's manifest…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fetching the provider's manifest…"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Загружаем манифест провайдера…"
+          }
+        }
+      }
+    },
+    "File Storage": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "File Storage"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Хранилище файлов"
+          }
+        }
+      }
+    },
+    "FROM CATALOG": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FROM CATALOG"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ИЗ КАТАЛОГА"
+          }
+        }
+      }
+    },
+    "FROM PUBLISHED LIST": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FROM PUBLISHED LIST"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ИЗ ОПУБЛИКОВАННОГО СПИСКА"
+          }
+        }
+      }
+    },
+    "Its catalogs are being fetched and verified now — the next steps can offer what it lists.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Its catalogs are being fetched and verified now — the next steps can offer what it lists."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Его каталоги уже загружаются и проверяются — следующие шаги смогут предложить то, что он публикует."
+          }
+        }
+      }
+    },
+    "Key %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Key %@"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ключ %@"
+          }
+        }
+      }
+    },
+    "Message Transport": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Message Transport"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Доставка сообщений"
+          }
+        }
+      }
+    },
+    "Moderation": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Moderation"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Модерация"
+          }
+        }
+      }
+    },
+    "No discovery provider is configured yet. Add your own below, or continue with the built-in defaults.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No discovery provider is configured yet. Add your own below, or continue with the built-in defaults."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Провайдер каталога ещё не настроен. Добавьте собственного ниже или продолжайте со встроенными значениями по умолчанию."
+          }
+        }
+      }
+    },
+    "No notary chosen yet. Pick one below, or skip to use the published defaults.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No notary chosen yet. Pick one below, or skip to use the published defaults."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Нотариус ещё не выбран. Выберите его ниже или пропустите, чтобы использовать опубликованные значения по умолчанию."
+          }
+        }
+      }
+    },
+    "No relay configured yet. Add one below, or skip to use the default.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No relay configured yet. Add one below, or skip to use the default."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Релей ещё не настроен. Добавьте его ниже или пропустите, чтобы использовать вариант по умолчанию."
+          }
+        }
+      }
+    },
+    "No server configured yet. Add one below, or skip to use the default.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No server configured yet. Add one below, or skip to use the default."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Сервер ещё не настроен. Добавьте его ниже или пропустите, чтобы использовать вариант по умолчанию."
+          }
+        }
+      }
+    },
+    "None": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "None"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Нет"
+          }
+        }
+      }
+    },
+    "None configured": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "None configured"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не настроено"
+          }
+        }
+      }
+    },
+    "Not now": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not now"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не сейчас"
+          }
+        }
+      }
+    },
+    "Notary": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notary"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Нотариус"
+          }
+        }
+      }
+    },
+    "Nothing is final — every choice can change later in Settings.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing is final — every choice can change later in Settings."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ничего не окончательно — любой выбор можно изменить позже в настройках."
+          }
+        }
+      }
+    },
+    "Pin Key & Confirm": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pin Key & Confirm"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Закрепить ключ и подтвердить"
+          }
+        }
+      }
+    },
+    "Provider confirmed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Provider confirmed"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Провайдер подтверждён"
+          }
+        }
+      }
+    },
+    "Published defaults": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Published defaults"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Опубликованные значения по умолчанию"
+          }
+        }
+      }
+    },
+    "Service Directory": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Service Directory"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Каталог сервисов"
+          }
+        }
+      }
+    },
+    "Skip": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skip"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Пропустить"
+          }
+        }
+      }
+    },
+    "Skip to use the published defaults — they're installed automatically once setup finishes.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skip to use the published defaults — they're installed automatically once setup finishes."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Пропустите, чтобы использовать опубликованные значения по умолчанию — они будут установлены автоматически после завершения настройки."
+          }
+        }
+      }
+    },
+    "Start": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Start"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Начать"
+          }
+        }
+      }
+    },
+    "Step %lld of %lld": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Step %lld of %lld"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Шаг %1$lld из %2$lld"
+          }
+        }
+      }
+    },
+    "The next few screens set up the services this app runs on. Each one shows exactly what you're agreeing to before anything is turned on.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The next few screens set up the services this app runs on. Each one shows exactly what you're agreeing to before anything is turned on."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Следующие несколько экранов настраивают сервисы, на которых работает приложение. Каждый показывает, с чем именно вы соглашаетесь, прежде чем что-либо будет включено."
+          }
+        }
+      }
+    },
+    "The next screens set up the services this app runs on. Each one shows exactly what you're agreeing to before anything is turned on.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The next screens set up the services this app runs on. Each one shows exactly what you're agreeing to before anything is turned on."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Следующие экраны настраивают сервисы, на которых работает приложение. Каждый показывает, с чем именно вы соглашаетесь, прежде чем что-либо будет включено."
+          }
+        }
+      }
+    },
+    "This build runs without a service directory. Continue — the app uses its built-in defaults.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This build runs without a service directory. Continue — the app uses its built-in defaults."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Эта сборка работает без каталога сервисов. Продолжайте — приложение использует встроенные значения по умолчанию."
+          }
+        }
+      }
+    },
+    "This fingerprint identifies the provider's operator key. Verify it out-of-band before confirming — it's pinned on confirm, and a later manifest signed by any other key will be rejected.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This fingerprint identifies the provider's operator key. Verify it out-of-band before confirming — it's pinned on confirm, and a later manifest signed by any other key will be rejected."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Этот отпечаток идентифицирует операторский ключ провайдера. Проверьте его по независимому каналу перед подтверждением — при подтверждении он закрепляется, и манифест, подписанный любым другим ключом, будет отклонён."
+          }
+        }
+      }
+    },
+    "Verify & Confirm": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verify & Confirm"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Проверить и подтвердить"
+          }
+        }
+      }
+    },
+    "Welcome to Onym": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Welcome to Onym"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Добро пожаловать в Onym"
+          }
+        }
+      }
+    },
+    "You're Set": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You're Set"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Всё готово"
+          }
+        }
+      }
+    },
+    "Your choices are saved. You can revisit any of them in Settings.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your choices are saved. You can revisit any of them in Settings."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ваш выбор сохранён. Любой пункт можно изменить в настройках."
+          }
+        }
+      }
+    },
+    "Your identity key is created on this device. No account, no phone number.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your identity key is created on this device. No account, no phone number."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ключ вашей идентичности создаётся на этом устройстве. Ни аккаунта, ни номера телефона."
+          }
+        }
+      }
+    },
+    "Your identity key was created on this device and exists nowhere else. Back it up from Settings → Back Up Recovery Phrase so you can recover your account.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your identity key was created on this device and exists nowhere else. Back it up from Settings → Back Up Recovery Phrase so you can recover your account."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ключ вашей идентичности создан на этом устройстве и больше нигде не существует. Сделайте резервную копию (Настройки → Резервная копия фразы восстановления), чтобы можно было восстановить аккаунт."
+          }
+        }
+      }
+    },
+    "Your identity key was created on this device. Back it up from Settings so you can recover your account.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your identity key was created on this device. Back it up from Settings so you can recover your account."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ключ вашей идентичности создан на этом устройстве. Сделайте резервную копию в настройках, чтобы можно было восстановить аккаунт."
+          }
+        }
+      }
+    },
+    "Your keys, your services. Pick who carries your messages, stores your files, and vouches for your history — every choice is yours, and every one can change later in Settings.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your keys, your services. Pick who carries your messages, stores your files, and vouches for your history — every choice is yours, and every one can change later in Settings."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ваши ключи — ваши сервисы. Выберите, кто доставляет ваши сообщения, хранит ваши файлы и заверяет вашу историю. Каждый выбор — ваш, и любой можно изменить позже в настройках."
+          }
+        }
+      }
+    },
+    "YOUR OWN PROVIDER": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "YOUR OWN PROVIDER"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "СВОЙ ПРОВАЙДЕР"
+          }
+        }
+      }
+    },
     "—": {
       "localizations": {
         "en": {

@@ -64,6 +64,11 @@ public final class OnboardingFlow {
     /// answers `false`. Racing the probe must never open a skip window
     /// that a resolved `true` would have closed.
     public private(set) var moderationDirectoryHasEntries: Bool?
+    /// Flips exactly once, inside `complete()` — the observable signal
+    /// the presenter dismisses its cover on. `onCompleted` alone can't
+    /// carry the dismissal: it is bound at the composition root, which
+    /// has no handle on the presenting view's state.
+    public private(set) var isCompleted = false
 
     /// Whether the directory probe has answered — the view shows a
     /// progress state on the skip affordance while this is false.
@@ -203,6 +208,7 @@ public final class OnboardingFlow {
             outcomes[step] = .notApplicable
         }
         store.markOnboardingCompleted()
+        isCompleted = true
         onCompleted()
     }
 

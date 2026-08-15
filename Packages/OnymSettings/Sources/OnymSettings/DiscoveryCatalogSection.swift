@@ -12,7 +12,11 @@ import OnymFoundation
 /// Renders nothing when `entries` is empty, so pickers without
 /// discovery wired (or with an empty aggregate) look exactly as they
 /// did before this section existed.
-struct DiscoveryCatalogSection: View {
+///
+/// Public since the onboarding wiring: the first-launch transport /
+/// blob / notary steps render the same catalog section the Settings
+/// pickers do.
+public struct DiscoveryCatalogSection: View {
     let entries: [AttributedCatalogEntry]
     /// Cached lookups (computed once per catalog refresh in the flow,
     /// not per row per render — `activeConsent` decodes the whole
@@ -23,7 +27,23 @@ struct DiscoveryCatalogSection: View {
     let accessibilityPrefix: String
     let onSelect: (AttributedCatalogEntry) -> Void
 
-    var body: some View {
+    public init(
+        entries: [AttributedCatalogEntry],
+        activeConsent: @escaping (AttributedCatalogEntry) -> PinnedConsentRecord?,
+        consentedOffer: @escaping (AttributedCatalogEntry) -> ServiceOffer?,
+        tileSymbol: String,
+        accessibilityPrefix: String,
+        onSelect: @escaping (AttributedCatalogEntry) -> Void
+    ) {
+        self.entries = entries
+        self.activeConsent = activeConsent
+        self.consentedOffer = consentedOffer
+        self.tileSymbol = tileSymbol
+        self.accessibilityPrefix = accessibilityPrefix
+        self.onSelect = onSelect
+    }
+
+    public var body: some View {
         if !entries.isEmpty {
             SettingsSectionLabel("FROM CATALOG")
             SettingsCard {

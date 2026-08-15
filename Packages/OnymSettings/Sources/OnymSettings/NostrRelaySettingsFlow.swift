@@ -81,7 +81,9 @@ public final class NostrRelaySettingsFlow {
         catalog.consentedOffer(for: entry)
     }
 
-    func stop() {
+    /// Public like `RelayerSettingsFlow.stop()` — the onboarding
+    /// message-transport step drives this flow's lifecycle too.
+    public func stop() {
         snapshotTask?.cancel()
         snapshotTask = nil
         catalog.stop()
