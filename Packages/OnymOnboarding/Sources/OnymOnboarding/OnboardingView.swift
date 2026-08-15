@@ -192,6 +192,7 @@ struct DoneStepContent: View {
         switch outcome {
         case .consented: return "checkmark.circle.fill"
         case .skipped: return "arrow.right.circle"
+        case .unavailable: return "minus.circle"
         case .notApplicable, nil: return "circle.dashed"
         }
     }
@@ -200,6 +201,7 @@ struct DoneStepContent: View {
         switch outcome {
         case .consented: return String(localized: "Chosen")
         case .skipped: return String(localized: "Default")
+        case .unavailable: return String(localized: "Unavailable")
         case .notApplicable, nil: return String(localized: "—")
         }
     }

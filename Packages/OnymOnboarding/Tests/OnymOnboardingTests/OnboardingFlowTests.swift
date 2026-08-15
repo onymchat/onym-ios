@@ -148,26 +148,53 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertNil(flow.outcomes[.done])
     }
 
-    // MARK: - Moderation skippability
+    // MARK: - Moderation is never skippable
 
-    func testModerationSkippableWhileDirectoryEmpty() async {
-        let flow = makeFlow(moderationDirectoryNonEmpty: { false })
-        flow.start()
-        await flow.moderationProbeTask?.value
-        XCTAssertTrue(flow.isSkippable(.moderation))
+    /// The rule, across every probe state: moderation offers NO skip
+    /// path. Unresolved, resolved-empty, resolved-non-empty — always
+    /// unskippable, and `skip()` is always a no-op there.
+    func testModerationNeverSkippableInAnyProbeState() async {
+        // Unresolved (probe not started).
+        let unresolved = makeFlow(moderationDirectoryNonEmpty: { false })
+        XCTAssertFalse(unresolved.isSkippable(.moderation))
 
-        while flow.step != .moderation { flow.advance() }
-        flow.skip()
-        XCTAssertEqual(flow.step, .done)
-        XCTAssertEqual(flow.outcomes[.moderation], .skipped)
+        // Resolved empty.
+        let empty = await makeResolvedFlow(directoryNonEmpty: false)
+        XCTAssertFalse(empty.isSkippable(.moderation))
+        while empty.step != .moderation { empty.advance() }
+        empty.skip() // no-op — there is no skip path
+        XCTAssertEqual(empty.step, .moderation)
+        XCTAssertNil(empty.outcomes[.moderation])
+
+        // Resolved non-empty.
+        let nonEmpty = await makeResolvedFlow(directoryNonEmpty: true)
+        XCTAssertFalse(nonEmpty.isSkippable(.moderation))
     }
 
-    func testModerationNotSkippableWhenDirectoryHasEntries() async {
+    /// EMPTY directory: nothing is selectable, so the step must not
+    /// hard-block — it turns Continue-only informational. The advance
+    /// is an acknowledgment, recorded as the distinct `.unavailable`
+    /// (never `.skipped` — opting out of moderation is not a thing).
+    func testModerationEmptyDirectoryIsContinueOnlyAcknowledgment() async {
+        let flow = await makeResolvedFlow(directoryNonEmpty: false)
+        XCTAssertFalse(flow.isMandatory(.moderation))
+        XCTAssertFalse(flow.isSkippable(.moderation))
+
+        while flow.step != .moderation { flow.advance() }
+        flow.advance() // plain Continue
+        XCTAssertEqual(flow.step, .done)
+        XCTAssertEqual(flow.outcomes[.moderation], .unavailable)
+    }
+
+    /// Non-empty directory: must consent — no skip, and Continue
+    /// refuses until the consent outcome is recorded.
+    func testModerationMustConsentWhenDirectoryHasEntries() async {
         let flow = makeFlow(moderationDirectoryNonEmpty: { true })
         flow.start()
         await flow.moderationProbeTask?.value
         XCTAssertFalse(flow.isSkippable(.moderation))
-        // Every other step stays skippable.
+        XCTAssertTrue(flow.isMandatory(.moderation))
+        // Every other middle step stays skippable.
         for step: OnboardingStep in [.discoveryConfirm, .messageTransport, .blobTransport, .notary] {
             XCTAssertTrue(flow.isSkippable(step), "\(step) should stay skippable")
         }
@@ -176,6 +203,12 @@ final class OnboardingFlowTests: XCTestCase {
         flow.skip() // must be a no-op
         XCTAssertEqual(flow.step, .moderation)
         XCTAssertNil(flow.outcomes[.moderation])
+        flow.advance() // equally refused without a consent outcome
+        XCTAssertEqual(flow.step, .moderation)
+
+        flow.recordOutcome(.consented(componentId: "onym:component:authority"))
+        flow.advance()
+        XCTAssertEqual(flow.step, .done)
     }
 
     func testStartIsIdempotent() async {
@@ -249,14 +282,14 @@ final class OnboardingFlowTests: XCTestCase {
         flow.skip() // notary
         flow.recordOutcome(.consented(componentId: "onym:component:onym-relayer"))
         flow.advance() // moderation
-        flow.advance() // done (informational moderation, directory empty)
+        flow.advance() // done (Continue-only moderation, directory empty)
 
         XCTAssertEqual(flow.outcomes[.welcome], .notApplicable)
         XCTAssertEqual(flow.outcomes[.discoveryConfirm], .consented(componentId: nil))
         XCTAssertEqual(flow.outcomes[.messageTransport], .consented(componentId: "onym:component:onym-nostr"))
         XCTAssertEqual(flow.outcomes[.blobTransport], .skipped)
         XCTAssertEqual(flow.outcomes[.notary], .consented(componentId: "onym:component:onym-relayer"))
-        XCTAssertEqual(flow.outcomes[.moderation], .notApplicable)
+        XCTAssertEqual(flow.outcomes[.moderation], .unavailable)
     }
 
     // MARK: - Welcome skippability
@@ -272,7 +305,7 @@ final class OnboardingFlowTests: XCTestCase {
     // MARK: - Probe race (fail-closed until resolved)
 
     /// Before the probe answers, moderation reads unskippable AND
-    /// mandatory — racing the probe must never open a skip window.
+    /// mandatory — racing the probe must never open an advance window.
     func testModerationFailsClosedWhileProbeUnresolved() async {
         let flow = makeFlow(moderationDirectoryNonEmpty: { false })
         // Probe not started: unresolved.
@@ -281,19 +314,22 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertTrue(flow.isMandatory(.moderation))
 
         while flow.step != .moderation { flow.advance() }
-        flow.skip() // no-op while unresolved
+        flow.skip() // no-op — always, on moderation
         XCTAssertEqual(flow.step, .moderation)
-        flow.advance() // equally refused — mandatory without an outcome
+        flow.advance() // refused — mandatory without an outcome
         XCTAssertEqual(flow.step, .moderation)
 
-        // Empty directory resolves → skippable, not mandatory.
+        // Empty directory resolves → Continue-only informational:
+        // still not skippable, no longer mandatory, and the plain
+        // Continue records the distinct `.unavailable` outcome.
         flow.start()
         await flow.moderationProbeTask?.value
         XCTAssertTrue(flow.moderationProbeResolved)
-        XCTAssertTrue(flow.isSkippable(.moderation))
+        XCTAssertFalse(flow.isSkippable(.moderation))
         XCTAssertFalse(flow.isMandatory(.moderation))
-        flow.skip()
+        flow.advance()
         XCTAssertEqual(flow.step, .done)
+        XCTAssertEqual(flow.outcomes[.moderation], .unavailable)
     }
 
     /// The other transition: unresolved (fail-closed) → resolved
