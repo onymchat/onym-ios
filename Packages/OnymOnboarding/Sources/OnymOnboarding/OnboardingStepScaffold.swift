@@ -24,6 +24,9 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
     /// is the second layer of the same rule).
     private let primaryDisabled: Bool
     private let primaryAction: () -> Void
+    /// Label for the Skip affordance — the recovery step reads
+    /// "Remind me later"; the default is "Skip".
+    private let skipTitle: String
     /// nil hides the Skip affordance (unskippable steps).
     private let skipAction: (() -> Void)?
     /// Renders a small progress indicator in the Skip slot — used
@@ -32,6 +35,10 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
     private let showsSkipProgress: Bool
     /// nil hides the Back affordance (the first step).
     private let backAction: (() -> Void)?
+    /// False drops the indicator slot entirely — the unnumbered steps
+    /// (welcome, recovery, done) must not carry a blank 24pt band
+    /// where the indicator would sit.
+    private let showsIndicator: Bool
     private let content: Content
     private let indicator: Indicator
 
@@ -42,9 +49,11 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
         primaryTitle: String,
         primaryDisabled: Bool = false,
         primaryAction: @escaping () -> Void,
+        skipTitle: String = String(localized: "Skip"),
         skipAction: (() -> Void)? = nil,
         showsSkipProgress: Bool = false,
         backAction: (() -> Void)? = nil,
+        showsIndicator: Bool = true,
         @ViewBuilder content: () -> Content,
         @ViewBuilder indicator: () -> Indicator
     ) {
@@ -54,9 +63,11 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
         self.primaryTitle = primaryTitle
         self.primaryDisabled = primaryDisabled
         self.primaryAction = primaryAction
+        self.skipTitle = skipTitle
         self.skipAction = skipAction
         self.showsSkipProgress = showsSkipProgress
         self.backAction = backAction
+        self.showsIndicator = showsIndicator
         self.content = content()
         self.indicator = indicator()
     }
@@ -65,14 +76,16 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    indicator
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 24)
+                    if showsIndicator {
+                        indicator
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 24)
+                    }
 
                     Text(verbatim: title)
                         .font(.largeTitle.bold())
                         .accessibilityIdentifier("onboarding.\(step.rawValue).title")
-                        .padding(.top, 8)
+                        .padding(.top, showsIndicator ? 8 : 24)
 
                     if let subtitle {
                         Text(verbatim: subtitle)
@@ -106,7 +119,7 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
                     }
                     Spacer()
                     if let skipAction {
-                        Button("Skip", action: skipAction)
+                        Button(action: skipAction) { Text(verbatim: skipTitle) }
                             .accessibilityIdentifier("onboarding.\(step.rawValue).skip")
                     } else if showsSkipProgress {
                         ProgressView()

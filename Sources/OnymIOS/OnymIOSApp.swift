@@ -982,6 +982,21 @@ struct OnymIOSApp: App {
                 makeRelayerFlow: makeRelayerSettingsFlow,
                 relayerPicker: relayerCatalogPicker,
                 makeModerationConsentFlow: makeModerationConsentFlow,
+                // The recovery step runs the same backup walk Settings
+                // offers — same biometric gate, same verify quiz.
+                makeBackupFlow: { @MainActor in
+                    RecoveryPhraseBackupFlow(
+                        repository: repository,
+                        authenticator: authenticator
+                    )
+                },
+                // Bootstrap is idempotent: this awaits the same call
+                // the WindowGroup task fires, so the identity step's
+                // checklist reflects the real outcome instead of
+                // asserting one.
+                identityReady: { @MainActor in
+                    (try? await repository.bootstrap()) != nil
+                },
                 loadSummary: { @MainActor in
                     // The Done step's summary is read from the
                     // repositories, not the walk's outcomes — what the
