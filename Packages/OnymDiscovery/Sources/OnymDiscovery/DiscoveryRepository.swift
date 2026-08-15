@@ -67,13 +67,23 @@ public struct AttributedCatalogEntry: Equatable, Sendable, Identifiable {
 public struct DiscoverySourceStatus: Equatable, Sendable, Identifiable {
     public let source: DiscoverySource
     public let lastError: String?
+    /// True when `lastError` is an integrity finding (failed
+    /// verification) rather than plain unreachability — see
+    /// `DiscoveryUserMessage.isIntegrityFailure`.
+    public let lastErrorIsIntegrity: Bool
     public let notes: [String]
 
     public var id: String { source.providerId }
 
-    public init(source: DiscoverySource, lastError: String?, notes: [String] = []) {
+    public init(
+        source: DiscoverySource,
+        lastError: String?,
+        lastErrorIsIntegrity: Bool = false,
+        notes: [String] = []
+    ) {
         self.source = source
         self.lastError = lastError
+        self.lastErrorIsIntegrity = lastErrorIsIntegrity
         self.notes = notes
     }
 }
@@ -128,8 +138,14 @@ public actor DiscoveryRepository {
     private let store: any DiscoveryStore
     private let now: @Sendable () -> Date
 
+    /// The last refresh failure of one source, pre-rendered for the UI.
+    private struct SourceFailure {
+        let message: String
+        let isIntegrity: Bool
+    }
+
     private var configuration: DiscoverySourcesConfiguration
-    private var lastErrors: [String: String] = [:]
+    private var lastErrors: [String: SourceFailure] = [:]
     private var lastNotes: [String: [String]] = [:]
     private var aggregate: [AttributedCatalogEntry] = []
     private var fetchStatus: DiscoveryFetchStatus = .idle
@@ -213,6 +229,37 @@ public actor DiscoveryRepository {
         refreshTask = nil
     }
 
+    /// Targeted refresh of ONE source, deliberately NOT subject to
+    /// `refresh()`'s coalescing. Used right after `confirmAddSource`:
+    /// a full pass already in flight captured its source list *before*
+    /// the add, so coalescing onto it would silently skip the new
+    /// source while the UI says its catalogs are being fetched. This
+    /// runs a fresh pass for exactly the named source; per-catalog
+    /// merging keeps it safe alongside an interleaved full pass.
+    /// Per-source status only: `fetchStatus` is the outcome of the most
+    /// recent FULL pass, and a targeted single-source refresh must not
+    /// clobber it — e.g. flipping a full pass's `.failed` to `.success`
+    /// because one just-added source fetched fine, or vice versa. The
+    /// outcome of this refresh surfaces on the source's own
+    /// `DiscoverySourceStatus.lastError`.
+    public func refreshSource(providerId: String) async {
+        guard let source = currentSource(providerId),
+              source.isEnabled,
+              let pinnedKey = source.pinnedOperatorKeyHex
+        else { return }
+        do {
+            try await refreshSource(source, pinnedKey: pinnedKey)
+            lastErrors[providerId] = nil
+        } catch {
+            lastErrors[providerId] = SourceFailure(
+                message: DiscoveryUserMessage.message(for: error),
+                isIntegrity: DiscoveryUserMessage.isIntegrityFailure(error)
+            )
+        }
+        rebuildAggregateFromRetained()
+        publish()
+    }
+
     private func performRefresh() async {
         fetchStatus = .fetching
         publish()
@@ -236,7 +283,10 @@ public actor DiscoveryRepository {
                 lastErrors[source.providerId] = nil
                 refreshedAnything = true
             } catch {
-                lastErrors[source.providerId] = Self.message(for: error)
+                lastErrors[source.providerId] = SourceFailure(
+                    message: DiscoveryUserMessage.message(for: error),
+                    isIntegrity: DiscoveryUserMessage.isIntegrityFailure(error)
+                )
                 failures += 1
             }
         }
@@ -398,17 +448,31 @@ public actor DiscoveryRepository {
     /// explicit re-add clears the provider from
     /// `removedDefaultProviderIds` — only *silent* restoration is
     /// forbidden.
+    ///
+    /// Confirming a providerId that is already configured (the seeded
+    /// default's TOFU confirmation, or a re-confirm through the add
+    /// sheet) is an in-place update: the existing source's `userLabel`,
+    /// `addedAt`, `isEnabled`, and — critically — `lastAccepted` carry
+    /// forward. `lastAccepted` is the per-catalog rollback/equivocation
+    /// chain state (§8); resetting it here would let the next refresh
+    /// accept an older snapshot the chain had already advanced past.
     @discardableResult
     public func confirmAddSource(
         _ preview: DiscoveryProviderPreview,
         userLabel: String? = nil
     ) -> DiscoverySource {
+        let existing = currentSource(preview.providerId)
         let source = DiscoverySource(
             providerId: preview.providerId,
-            userLabel: userLabel ?? preview.manifestURL.host() ?? preview.providerId,
+            userLabel: userLabel
+                ?? existing?.userLabel
+                ?? preview.manifestURL.host()
+                ?? preview.providerId,
             manifestURL: preview.manifestURL,
             pinnedOperatorKeyHex: preview.signed.operatorPublicKeyHex,
-            addedAt: now()
+            addedAt: existing?.addedAt ?? now(),
+            isEnabled: existing?.isEnabled ?? true,
+            lastAccepted: existing?.lastAccepted ?? [:]
         )
         var sources = configuration.sources.filter { $0.providerId != source.providerId }
         sources.append(source)
@@ -456,9 +520,11 @@ public actor DiscoveryRepository {
     public func currentState() -> DiscoveryState {
         DiscoveryState(
             sources: configuration.sources.map {
-                DiscoverySourceStatus(
+                let failure = lastErrors[$0.providerId]
+                return DiscoverySourceStatus(
                     source: $0,
-                    lastError: lastErrors[$0.providerId],
+                    lastError: failure?.message,
+                    lastErrorIsIntegrity: failure?.isIntegrity ?? false,
                     notes: lastNotes[$0.providerId] ?? []
                 )
             },
@@ -554,6 +620,11 @@ public actor DiscoveryRepository {
         continuations.removeValue(forKey: id)
     }
 
+    /// Test seam: live subscriber continuations. A cancelled drain
+    /// must remove its continuation (`onTermination` → `unsubscribe`),
+    /// or every settings-screen visit would leak one.
+    var subscriberCount: Int { continuations.count }
+
     private func publish() {
         let state = currentState()
         for continuation in continuations.values {
@@ -561,24 +632,4 @@ public actor DiscoveryRepository {
         }
     }
 
-    private static func message(for error: Error) -> String {
-        switch error {
-        case let DiscoveryTrustError.providerManifestInvalid(reason):
-            return String(localized: "Provider manifest rejected: \(reason)")
-        case let DiscoveryTrustError.snapshotInvalid(reason):
-            return String(localized: "Catalog snapshot rejected: \(reason)")
-        case DiscoveryTrustError.snapshotExpired:
-            return String(localized: "Catalog snapshot has expired.")
-        case DiscoveryFetchError.rateLimited:
-            return String(localized: "The provider is rate limiting requests.")
-        case DiscoveryFetchError.oversize:
-            return String(localized: "The provider served an oversized document.")
-        case let DiscoveryFetchError.badStatus(code):
-            return String(localized: "Couldn't reach the provider (status \(code)).")
-        case is URLError:
-            return String(localized: "Couldn't reach the provider.")
-        default:
-            return String(localized: "Couldn't refresh the provider.")
-        }
-    }
 }

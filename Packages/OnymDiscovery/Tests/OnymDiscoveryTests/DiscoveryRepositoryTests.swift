@@ -87,6 +87,43 @@ private final class GatedFetcher: DiscoveryFetching, @unchecked Sendable {
     }
 }
 
+/// Gates the manifest fetch of ONE url only — holds a full refresh
+/// pass mid-flight on that source while other sources' fetches (an
+/// added provider's) proceed.
+private final class URLGatedFetcher: DiscoveryFetching, @unchecked Sendable {
+    let gate = FetchGate()
+    private let gatedURL: URL
+    private let responses: [URL: Data]
+    private let lock = NSLock()
+    private var _gatedFetchCount = 0
+
+    var gatedFetchCount: Int {
+        lock.withLock { _gatedFetchCount }
+    }
+
+    init(gatedURL: URL, responses: [URL: Data]) {
+        self.gatedURL = gatedURL
+        self.responses = responses
+    }
+
+    private func serve(_ url: URL) throws -> Data {
+        guard let data = responses[url] else { throw DiscoveryFetchError.badStatus(404) }
+        return data
+    }
+
+    func fetchProviderManifest(url: URL) async throws -> Data {
+        if url == gatedURL {
+            lock.withLock { _gatedFetchCount += 1 }
+            await gate.wait()
+        }
+        return try serve(url)
+    }
+
+    func fetchSnapshot(url: URL) async throws -> Data {
+        try serve(url)
+    }
+}
+
 /// In-memory store; no UserDefaults so tests stay hermetic.
 private final class MemoryStore: DiscoveryStore, @unchecked Sendable {
     private let lock = NSLock()
@@ -148,6 +185,32 @@ private enum SignedFixtureFactory {
         )
         object["signature"] = try key.signature(for: signingBytes).base64EncodedString()
         return try JSONSerialization.data(withJSONObject: object)
+    }
+
+    /// The pinned `provider-manifest.json` fixture re-published under
+    /// a different providerId (and snapshot URL), re-signed — a second,
+    /// independent provider for multi-source tests.
+    static func manifest(providerId: String, snapshotURL: String) throws -> Data {
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Fixture.bytes("provider-manifest.json"))
+                as? [String: Any]
+        )
+        object["providerId"] = providerId
+        var catalogs = try XCTUnwrap(object["catalogs"] as? [[String: Any]])
+        catalogs[0]["snapshot"] = snapshotURL
+        object["catalogs"] = catalogs
+        return try resign(object)
+    }
+
+    /// The pinned `snapshot-1.json` fixture re-published under a
+    /// different providerId, re-signed.
+    static func snapshot(providerId: String) throws -> Data {
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Fixture.bytes("snapshot-1.json"))
+                as? [String: Any]
+        )
+        object["providerId"] = providerId
+        return try resign(object)
     }
 
     /// The pinned `provider-manifest.json` fixture with a second
@@ -331,6 +394,54 @@ final class DiscoveryRepositoryTests: XCTestCase {
         XCTAssertTrue(saved.hasUserInteracted)
     }
 
+    /// Re-confirming an ALREADY-configured provider (the seeded
+    /// default's TOFU confirm, or a re-confirm through the add sheet)
+    /// must be an in-place update: the per-catalog `lastAccepted`
+    /// chain state carries forward — resetting it would let the next
+    /// refresh accept an older snapshot as if the chain never advanced
+    /// (rollback laundering) — and the user's label survives.
+    func testReconfirmExistingSourceKeepsChainStateAndLabel() async throws {
+        let store = MemoryStore()
+        store.saveConfiguration(pinnedConfiguration())
+        let manifest = try Fixture.bytes("provider-manifest.json")
+
+        // Advance the chain to snapshot 2.
+        for name in ["snapshot-1.json", "snapshot-2.json"] {
+            let fetcher = FakeFetcher(responses: [
+                manifestURL: manifest,
+                snapshotURL: try Fixture.bytes(name),
+            ])
+            let repository = DiscoveryRepository(fetcher: fetcher, store: store) { Fixture.now }
+            await repository.refresh()
+        }
+
+        // Re-confirm the same provider through the add-source path,
+        // against a server now serving the OLD snapshot 1.
+        let fetcher = FakeFetcher(responses: [
+            manifestURL: manifest,
+            snapshotURL: try Fixture.bytes("snapshot-1.json"),
+        ])
+        let repository = DiscoveryRepository(fetcher: fetcher, store: store) { Fixture.now }
+        let preview = try await repository.addSource(manifestURL: manifestURL)
+        await repository.confirmAddSource(preview)
+
+        let saved = try XCTUnwrap(store.loadConfiguration().sources.first)
+        XCTAssertEqual(saved.userLabel, "Onym Discovery",
+                       "in-place confirm must keep the existing label, not reset to the URL host")
+        XCTAssertEqual(saved.lastAccepted["public-all-seats"]?.sequence, 2,
+                       "in-place confirm must carry the rollback chain forward")
+
+        // And the carried-forward chain still rejects the rollback.
+        await repository.refresh()
+        let state = await repository.currentState()
+        let sourceError = try XCTUnwrap(state.sources.first?.lastError)
+        XCTAssertTrue(sourceError.contains("rejected"), sourceError)
+        XCTAssertEqual(
+            state.sources.first?.source.lastAccepted["public-all-seats"]?.sequence, 2,
+            "the old snapshot must still be rejected as a rollback after re-confirm"
+        )
+    }
+
     func testPartialCatalogFailureKeepsEarlierCatalogsAcceptance() async throws {
         // Two catalogs; the first's snapshot verifies, the second's
         // fetch 404s. The failure must surface on the source WITHOUT
@@ -452,6 +563,99 @@ final class DiscoveryRepositoryTests: XCTestCase {
         let state = await repository.currentState()
         XCTAssertEqual(state.fetchStatus, .success)
         XCTAssertEqual(state.sources.first?.source.lastAccepted["public-all-seats"]?.sequence, 1)
+    }
+
+    func testConfirmAddDuringInFlightRefreshRunsAFreshPassForTheAddedSource() async throws {
+        // The reviewed race: `tappedConfirmAdd` persists the source
+        // and then refreshes — but a full pass already in flight
+        // captured its source list BEFORE the add, and a coalescing
+        // `refresh()` would merely await it, so the new source would
+        // never be fetched while the sheet says its catalogs are being
+        // fetched now. `refreshSource(providerId:)` must run a fresh
+        // targeted pass instead.
+        let secondProviderId = "onym:component:second-provider"
+        let secondManifestURL = URL(string: "https://second.example/manifest.json")!
+        let secondSnapshotURL = URL(string: "https://second.example/catalogs/public-all-seats.json")!
+        let store = MemoryStore()
+        store.saveConfiguration(pinnedConfiguration())
+        let fetcher = URLGatedFetcher(gatedURL: manifestURL, responses: [
+            manifestURL: try Fixture.bytes("provider-manifest.json"),
+            snapshotURL: try Fixture.bytes("snapshot-1.json"),
+            secondManifestURL: try SignedFixtureFactory.manifest(
+                providerId: secondProviderId,
+                snapshotURL: secondSnapshotURL.absoluteString
+            ),
+            secondSnapshotURL: try SignedFixtureFactory.snapshot(providerId: secondProviderId),
+        ])
+        let repository = DiscoveryRepository(fetcher: fetcher, store: store) { Fixture.now }
+
+        // Hold a full pass mid-flight on the first source's manifest.
+        let inFlight = Task { await repository.refresh() }
+        while fetcher.gatedFetchCount < 1 { await Task.yield() }
+
+        // Add + confirm the second provider while the pass is held.
+        let preview = try await repository.addSource(manifestURL: secondManifestURL)
+        await repository.confirmAddSource(preview)
+        await repository.refreshSource(providerId: secondProviderId)
+
+        var state = await repository.currentState()
+        XCTAssertTrue(
+            state.aggregate.contains { $0.source.providerId == secondProviderId },
+            "the added source must be fetched by its own targeted pass, not skipped by the stale in-flight one"
+        )
+        XCTAssertNil(state.sources.first { $0.id == secondProviderId }?.lastError)
+
+        // Release the held pass; both sources' results coexist.
+        await fetcher.gate.open()
+        await inFlight.value
+        state = await repository.currentState()
+        XCTAssertEqual(
+            Set(state.aggregate.map(\.source.providerId)),
+            [providerId, secondProviderId]
+        )
+        XCTAssertEqual(state.fetchStatus, .success)
+    }
+
+    func testTargetedRefreshDoesNotClobberGlobalFetchStatus() async throws {
+        // `fetchStatus` reports the most recent FULL pass. A targeted
+        // single-source refresh (the post-confirm fetch) succeeding
+        // must not flip a full pass's `.failed` to `.success` — the
+        // other sources are still failing; its own outcome belongs on
+        // the source's status.
+        let secondProviderId = "onym:component:second-provider"
+        let secondManifestURL = URL(string: "https://second.example/manifest.json")!
+        let secondSnapshotURL = URL(string: "https://second.example/catalogs/public-all-seats.json")!
+        let store = MemoryStore()
+        store.saveConfiguration(pinnedConfiguration())
+        // The configured default's URLs 404; only the second provider
+        // resolves.
+        let fetcher = FakeFetcher(responses: [
+            secondManifestURL: try SignedFixtureFactory.manifest(
+                providerId: secondProviderId,
+                snapshotURL: secondSnapshotURL.absoluteString
+            ),
+            secondSnapshotURL: try SignedFixtureFactory.snapshot(providerId: secondProviderId),
+        ])
+        let repository = DiscoveryRepository(fetcher: fetcher, store: store) { Fixture.now }
+
+        await repository.refresh()
+        var state = await repository.currentState()
+        guard case .failed = state.fetchStatus else {
+            return XCTFail("expected the full pass to fail, got \(state.fetchStatus)")
+        }
+
+        let preview = try await repository.addSource(manifestURL: secondManifestURL)
+        await repository.confirmAddSource(preview)
+        await repository.refreshSource(providerId: secondProviderId)
+
+        state = await repository.currentState()
+        XCTAssertNil(state.sources.first { $0.id == secondProviderId }?.lastError)
+        XCTAssertTrue(state.aggregate.contains { $0.source.providerId == secondProviderId })
+        guard case .failed = state.fetchStatus else {
+            return XCTFail(
+                "a targeted refresh must not overwrite the full pass's status, got \(state.fetchStatus)"
+            )
+        }
     }
 
     func testManifestStageFailureClearsStaleNotes() async throws {
