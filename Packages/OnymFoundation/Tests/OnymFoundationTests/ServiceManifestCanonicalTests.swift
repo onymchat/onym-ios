@@ -81,12 +81,30 @@ final class ServiceManifestCanonicalTests: XCTestCase {
 
     /// §3: all numbers are non-negative integers — a float has no
     /// canonical form, so it must be rejected, never re-serialized
-    /// into whatever form `JSONSerialization` happens to pick.
-    func testNonIntegerNumberIsRejected() {
+    /// into whatever form `JSONSerialization` happens to pick. The
+    /// error is the distinct `nonIntegerNumber` case, not a generic
+    /// `manifestInvalid`, and it names the offending field.
+    func testNonIntegerNumberIsRejectedWithFieldPath() {
         XCTAssertThrowsError(try canonical(#"{"a":1.5}"#)) { error in
-            guard case ServiceManifestError.manifestInvalid = error else {
-                return XCTFail("expected manifestInvalid, got \(error)")
+            guard case let ServiceManifestError.nonIntegerNumber(path) = error else {
+                return XCTFail("expected nonIntegerNumber, got \(error)")
             }
+            XCTAssertEqual(path, "a")
+        }
+    }
+
+    /// The likely real-world shape: a decimal price inside an offer's
+    /// seat-specific `service` object. Rejected (v1 signed manifests
+    /// are integer-only per spec §3 — price-like values go in strings
+    /// or scaled integers), and the path pinpoints the field so the
+    /// operator can find it.
+    func testNestedNonIntegerNumberReportsFullPath() {
+        let json = #"{"componentId":"onym:component:x","offers":[{"offerId":"o","service":{"pricePerGB":0.5}}]}"#
+        XCTAssertThrowsError(try canonical(json)) { error in
+            guard case let ServiceManifestError.nonIntegerNumber(path) = error else {
+                return XCTFail("expected nonIntegerNumber, got \(error)")
+            }
+            XCTAssertEqual(path, "offers[0].service.pricePerGB")
         }
     }
 
@@ -98,6 +116,42 @@ final class ServiceManifestCanonicalTests: XCTestCase {
     }
 
     // MARK: - Cross-language proof
+
+    /// The `foundation-vectors` fixture pair is generated and
+    /// committed by the Rust reference (`onym-discovery`
+    /// `tests/conformance.rs`, `DISCOVERY_REGEN_FIXTURES=1`): an input
+    /// combining case-divergent keys (`seatID`/`seatable`),
+    /// numeric-looking keys (`relay10`/`relay2`), a control character,
+    /// and a non-ASCII string — plus the canonical bytes serde_json
+    /// actually emitted for it. Byte equality here means the exact
+    /// divergence classes this hand-rolled encoder exists for are
+    /// checked against real Rust output, not self-written Swift
+    /// literals; "change one, change both" is enforced on both sides.
+    func testFoundationVectorsFixtureMatchesRustEmittedBytes() throws {
+        let inputURL = try XCTUnwrap(Bundle.module.url(
+            forResource: "foundation-vectors-input",
+            withExtension: "json",
+            subdirectory: "Fixtures"
+        ))
+        let bytesURL = try XCTUnwrap(Bundle.module.url(
+            forResource: "foundation-vectors-bytes",
+            withExtension: "bin",
+            subdirectory: "Fixtures"
+        ))
+        let input = try Data(contentsOf: inputURL)
+        let expected = try Data(contentsOf: bytesURL)
+
+        XCTAssertEqual(try ServiceManifestCanonical.signingBytes(of: input), expected)
+        // The vector actually exercises the divergence classes.
+        let text = String(decoding: expected, as: UTF8.self)
+        XCTAssertTrue(text.contains(#""seatID""#))
+        XCTAssertTrue(text.contains(#""seatable""#))
+        XCTAssertTrue(text.contains(#""relay10":"a","relay2":"b""#))
+        // The control character is emitted as the pinned lowercase
+        // `\u0001` escape; the non-ASCII e-acute stays raw.
+        XCTAssertTrue(text.contains("\\u0001"))
+        XCTAssertTrue(text.contains("caf\u{e9}"))
+    }
 
     /// A destination manifest signed by the Rust reference CLI
     /// (`onym-discovery` `tests/fixtures/destination-manifest.json`,
@@ -114,9 +168,11 @@ final class ServiceManifestCanonicalTests: XCTestCase {
         let raw = try Data(contentsOf: url)
         let now = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-08-14T00:00:00Z"))
 
+        // Hardcoded digest of the committed fixture bytes — computing
+        // the pin from `raw` here would make the digest check vacuous.
         let reviewed = try ServiceManifestReviewer().review(
             raw: raw,
-            expectedDigest: ServiceManifestFormat.sha256Digest(of: raw),
+            expectedDigest: "sha256:6536b1a70c859fae21afc610035a924a1a96a842c8b124094ed4978d828f1c45",
             now: now
         )
         let manifest = reviewed.signedManifest

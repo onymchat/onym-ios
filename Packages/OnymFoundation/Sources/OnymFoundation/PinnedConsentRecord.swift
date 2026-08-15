@@ -54,4 +54,24 @@ public struct PinnedConsentRecord: Codable, Sendable, Equatable {
     public func consentedManifest() -> SignedServiceManifest? {
         try? SignedServiceManifest(raw: manifestBytes)
     }
+
+    /// The pinned manifest's `validUntil`, derived from the stored
+    /// bytes; `nil` when the operator published no expiry (or the
+    /// snapshot no longer decodes).
+    public var validUntil: Date? {
+        consentedManifest()?.validUntil
+    }
+
+    /// Whether the pinned manifest's `validUntil` has passed. **Pin
+    /// freshness is deliberately not enforced anywhere**: expiry is
+    /// checked once at review time, and an expired pin stays the
+    /// active consent record — consent to an operator does not lapse
+    /// just because the operator's published manifest aged out. This
+    /// exists so callers *can* ask (to badge a stale pin, prompt a
+    /// re-fetch, or gate a paid flow); a manifest with no `validUntil`
+    /// never expires.
+    public func isExpired(now: Date = Date()) -> Bool {
+        guard let validUntil else { return false }
+        return validUntil < now
+    }
 }

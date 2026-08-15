@@ -48,10 +48,12 @@ public struct FreeTierEntitlementProvider: EntitlementProviding {
     /// design, so entitlement answers can never go stale against the
     /// store. Fine for action-time checks; a UI that polls this per
     /// frame or per row should resolve the offer once and hold it, or
-    /// supply a caching `offerLookup` instead.
+    /// supply a caching `offerLookup` instead. A store that throws
+    /// (corrupt records) resolves to no offer, i.e. not entitled —
+    /// fail-closed.
     public init(consentStore: any PinnedConsentStore) {
         self.init { offerId, componentId in
-            consentStore.activeRecord(componentId: componentId)?
+            (try? consentStore.activeRecord(componentId: componentId))?
                 .consentedManifest()?
                 .offers
                 .first { $0.offerId == offerId }

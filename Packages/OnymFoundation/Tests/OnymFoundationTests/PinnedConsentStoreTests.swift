@@ -19,7 +19,7 @@ final class PinnedConsentStoreTests: XCTestCase {
 
     func testAcceptPersistsRecordPinningReviewedBytes() throws {
         let reviewed = try ManifestFactory.reviewedSample()
-        let record = store.accept(
+        let record = try store.accept(
             reviewed,
             sourceLabel: "Onym Directory",
             offerId: "free-tier",
@@ -36,8 +36,8 @@ final class PinnedConsentStoreTests: XCTestCase {
         XCTAssertEqual(record.offerId, "free-tier")
         XCTAssertTrue(record.isActive)
 
-        XCTAssertEqual(store.load(), [record])
-        XCTAssertEqual(store.activeRecord(componentId: record.componentId), record)
+        XCTAssertEqual(try store.load(), [record])
+        XCTAssertEqual(try store.activeRecord(componentId: record.componentId), record)
     }
 
     func testReconsentDeactivatesPreviousRecordAndKeepsHistory() throws {
@@ -47,15 +47,15 @@ final class PinnedConsentStoreTests: XCTestCase {
         }
         XCTAssertNotEqual(first.signedManifest.manifestHash, second.signedManifest.manifestHash)
 
-        store.accept(first, acceptedAt: ManifestFactory.now)
-        store.accept(second, acceptedAt: ManifestFactory.now.addingTimeInterval(60))
+        try store.accept(first, acceptedAt: ManifestFactory.now)
+        try store.accept(second, acceptedAt: ManifestFactory.now.addingTimeInterval(60))
 
-        let records = store.load()
+        let records = try store.load()
         XCTAssertEqual(records.count, 2)
         XCTAssertFalse(records[0].isActive)
         XCTAssertTrue(records[1].isActive)
         XCTAssertEqual(
-            store.activeRecord(componentId: "onym:component:sample-notary")?.manifestHash,
+            try store.activeRecord(componentId: "onym:component:sample-notary")?.manifestHash,
             second.signedManifest.manifestHash
         )
         // History still carries the superseded bytes, re-decodable.
@@ -69,16 +69,16 @@ final class PinnedConsentStoreTests: XCTestCase {
             object["seat"] = "courier"
         }
 
-        store.accept(notary, acceptedAt: ManifestFactory.now)
-        store.accept(courier, acceptedAt: ManifestFactory.now)
+        try store.accept(notary, acceptedAt: ManifestFactory.now)
+        try store.accept(courier, acceptedAt: ManifestFactory.now)
 
-        XCTAssertNotNil(store.activeRecord(componentId: "onym:component:sample-notary"))
-        XCTAssertNotNil(store.activeRecord(componentId: "onym:component:sample-courier"))
+        XCTAssertNotNil(try store.activeRecord(componentId: "onym:component:sample-notary"))
+        XCTAssertNotNil(try store.activeRecord(componentId: "onym:component:sample-courier"))
     }
 
     func testRecordsSurviveEncodeDecodeRoundTrip() throws {
         let reviewed = try ManifestFactory.reviewedSample()
-        let record = store.accept(
+        let record = try store.accept(
             reviewed,
             sourceLabel: "Manual",
             offerId: nil,
@@ -88,14 +88,14 @@ final class PinnedConsentStoreTests: XCTestCase {
         // A fresh store instance over the same suite must read back
         // identical records (ISO 8601 dates are second-precision, and
         // the factory timestamp has no sub-second component).
-        let reread = UserDefaultsPinnedConsentStore(defaults: defaults).load()
+        let reread = try UserDefaultsPinnedConsentStore(defaults: defaults).load()
         XCTAssertEqual(reread, [record])
         XCTAssertEqual(reread[0].consentedManifest()?.componentId, record.componentId)
     }
 
-    func testEmptyStoreLoadsEmpty() {
-        XCTAssertEqual(store.load(), [])
-        XCTAssertNil(store.activeRecord(componentId: "onym:component:sample-notary"))
+    func testEmptyStoreLoadsEmpty() throws {
+        XCTAssertEqual(try store.load(), [])
+        XCTAssertNil(try store.activeRecord(componentId: "onym:component:sample-notary"))
     }
 
     // MARK: - Retention
@@ -111,10 +111,10 @@ final class PinnedConsentStoreTests: XCTestCase {
                 object["name"] = "Sample Notary rev \(round)"
             }
             hashes.append(reviewed.signedManifest.manifestHash)
-            store.accept(reviewed, acceptedAt: ManifestFactory.now.addingTimeInterval(Double(round)))
+            try store.accept(reviewed, acceptedAt: ManifestFactory.now.addingTimeInterval(Double(round)))
         }
 
-        let records = store.load()
+        let records = try store.load()
         XCTAssertEqual(records.count, cap + 1, "active record plus capped history")
         XCTAssertEqual(records.filter(\.isActive).count, 1)
         XCTAssertEqual(records.last?.manifestHash, hashes.last)
@@ -128,19 +128,19 @@ final class PinnedConsentStoreTests: XCTestCase {
             object["componentId"] = "onym:component:sample-courier"
             object["seat"] = "courier"
         }
-        store.accept(courier, acceptedAt: ManifestFactory.now)
+        try store.accept(courier, acceptedAt: ManifestFactory.now)
 
         let cap = UserDefaultsPinnedConsentStore.maxInactiveRecordsPerComponent
         for round in 0..<(cap + 4) {
             let reviewed = try ManifestFactory.reviewedSample { object in
                 object["name"] = "rev \(round)"
             }
-            store.accept(reviewed, acceptedAt: ManifestFactory.now.addingTimeInterval(Double(round)))
+            try store.accept(reviewed, acceptedAt: ManifestFactory.now.addingTimeInterval(Double(round)))
         }
 
-        XCTAssertNotNil(store.activeRecord(componentId: "onym:component:sample-courier"))
+        XCTAssertNotNil(try store.activeRecord(componentId: "onym:component:sample-courier"))
         XCTAssertEqual(
-            store.load().filter { $0.componentId == "onym:component:sample-courier" }.count,
+            try store.load().filter { $0.componentId == "onym:component:sample-courier" }.count,
             1
         )
     }
@@ -158,10 +158,10 @@ final class PinnedConsentStoreTests: XCTestCase {
         }
 
         DispatchQueue.concurrentPerform(iterations: reviewedManifests.count) { index in
-            store.accept(reviewedManifests[index], acceptedAt: ManifestFactory.now)
+            _ = try? store.accept(reviewedManifests[index], acceptedAt: ManifestFactory.now)
         }
 
-        let records = store.load()
+        let records = try store.load()
         XCTAssertEqual(records.count, reviewedManifests.count, "no accept may be lost")
         for index in 0..<reviewedManifests.count {
             let componentId = "onym:component:concurrent-\(index)"
@@ -171,5 +171,106 @@ final class PinnedConsentStoreTests: XCTestCase {
                 "exactly one active record for \(componentId)"
             )
         }
+    }
+
+    // MARK: - Corruption
+
+    private var recordsKey: String { "app.onym.ios.consent.records" }
+    private var corruptKey: String { "app.onym.ios.consent.records.corrupt" }
+
+    func testCorruptStoreThrowsDistinctlyAndParksBlob() throws {
+        let garbage = Data("not an array of records".utf8)
+        defaults.set(garbage, forKey: recordsKey)
+
+        XCTAssertThrowsError(try store.load()) { error in
+            guard case PinnedConsentStoreError.corruptStore = error else {
+                return XCTFail("expected corruptStore, got \(error)")
+            }
+        }
+        // The undecodable blob is parked for forensics; the live key
+        // is left in place so absent and corrupt stay distinguishable.
+        XCTAssertTrue(store.hasCorruptRecords)
+        XCTAssertEqual(defaults.data(forKey: corruptKey), garbage)
+        XCTAssertEqual(defaults.data(forKey: recordsKey), garbage)
+    }
+
+    func testAcceptOnCorruptStoreThrowsAndNeverOverwrites() throws {
+        // The exact disaster the corrupt/absent distinction prevents:
+        // decode failure reading as "no records", and the next accept
+        // saving a fresh array over every prior consent record.
+        let garbage = Data(#"[{"componentId":42}]"#.utf8)
+        defaults.set(garbage, forKey: recordsKey)
+
+        let reviewed = try ManifestFactory.reviewedSample()
+        XCTAssertThrowsError(
+            try store.accept(reviewed, acceptedAt: ManifestFactory.now)
+        ) { error in
+            guard case PinnedConsentStoreError.corruptStore = error else {
+                return XCTFail("expected corruptStore, got \(error)")
+            }
+        }
+        XCTAssertEqual(defaults.data(forKey: recordsKey), garbage, "corrupt blob must never be overwritten")
+        XCTAssertNil(try? store.activeRecord(componentId: reviewed.signedManifest.componentId))
+    }
+
+    func testClearCorruptRecordsRestoresAcceptance() throws {
+        defaults.set(Data("garbage".utf8), forKey: recordsKey)
+        XCTAssertThrowsError(try store.load())
+        XCTAssertTrue(store.hasCorruptRecords)
+
+        // Explicit, destructive recovery — after it, the store is
+        // empty and accepts work again.
+        store.clearCorruptRecords()
+        XCTAssertFalse(store.hasCorruptRecords)
+        XCTAssertEqual(try store.load(), [])
+
+        let reviewed = try ManifestFactory.reviewedSample()
+        let record = try store.accept(reviewed, acceptedAt: ManifestFactory.now)
+        XCTAssertEqual(try store.load(), [record])
+    }
+
+    func testSaveThrowsAreNotSwallowedByAccept() throws {
+        // A store whose save fails must fail the accept — a returned
+        // record always means persisted consent.
+        struct FailingSaveStore: PinnedConsentStore {
+            func load() throws -> [PinnedConsentRecord] { [] }
+            func save(_ records: [PinnedConsentRecord]) throws {
+                throw PinnedConsentStoreError.persistenceFailed(reason: "disk said no")
+            }
+        }
+        let reviewed = try ManifestFactory.reviewedSample()
+        XCTAssertThrowsError(
+            try FailingSaveStore().accept(reviewed, acceptedAt: ManifestFactory.now)
+        ) { error in
+            guard case PinnedConsentStoreError.persistenceFailed = error else {
+                return XCTFail("expected persistenceFailed, got \(error)")
+            }
+        }
+    }
+
+    // MARK: - Pin freshness
+
+    func testRecordSurfacesValidUntilAndExpiry() throws {
+        let reviewed = try ManifestFactory.reviewedSample()
+        let record = try store.accept(reviewed, acceptedAt: ManifestFactory.now)
+
+        // Derived from the pinned manifest bytes (factory publishes
+        // validUntil 2027-01-01). Not enforced anywhere — the pin
+        // stays active — but callers can ask.
+        XCTAssertEqual(record.validUntil, ISO8601DateFormatter().date(from: "2027-01-01T00:00:00Z"))
+        XCTAssertFalse(record.isExpired(now: ManifestFactory.now))
+        let afterExpiry = ISO8601DateFormatter().date(from: "2027-06-01T00:00:00Z")!
+        XCTAssertTrue(record.isExpired(now: afterExpiry))
+        // Expiry never deactivates the pin.
+        XCTAssertEqual(try store.activeRecord(componentId: record.componentId), record)
+    }
+
+    func testRecordWithoutValidUntilNeverExpires() throws {
+        let reviewed = try ManifestFactory.reviewedSample { object in
+            object.removeValue(forKey: "validUntil")
+        }
+        let record = try store.accept(reviewed, acceptedAt: ManifestFactory.now)
+        XCTAssertNil(record.validUntil)
+        XCTAssertFalse(record.isExpired(now: .distantFuture))
     }
 }

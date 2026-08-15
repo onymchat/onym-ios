@@ -42,7 +42,7 @@ final class EntitlementTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = UserDefaultsPinnedConsentStore(defaults: defaults)
-        store.accept(try ManifestFactory.reviewedSample(), acceptedAt: ManifestFactory.now)
+        try store.accept(try ManifestFactory.reviewedSample(), acceptedAt: ManifestFactory.now)
 
         let provider = FreeTierEntitlementProvider(consentStore: store)
         let free = await provider.entitlement(for: "free-tier", component: Self.componentId)

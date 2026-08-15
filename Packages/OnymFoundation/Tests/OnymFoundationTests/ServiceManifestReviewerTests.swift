@@ -135,6 +135,36 @@ final class ServiceManifestReviewerTests: XCTestCase {
         )
     }
 
+    // MARK: - Operator key binding
+
+    func testMatchingExpectedOperatorKeyPasses() throws {
+        let (raw, key) = try ManifestFactory.signedSample()
+        let expected = "onym:key:" + ManifestFactory.operatorKeyHex(key)
+        XCTAssertNoThrow(
+            try reviewer.review(raw: raw, expectedOperatorKey: expected, now: ManifestFactory.now)
+        )
+    }
+
+    func testExpectedOperatorKeyMismatchIsRejected() throws {
+        // The manifest is internally valid (its own signature
+        // verifies) — but it names a different operator than the one
+        // the caller bound the review to. Without `expectedOperatorKey`
+        // this review is TOFU and would pass; with it, identity
+        // mismatch is a distinct, diagnosable failure.
+        let (raw, key) = try ManifestFactory.signedSample()
+        let actual = "onym:key:" + ManifestFactory.operatorKeyHex(key)
+        let other = "onym:key:" + String(repeating: "ab", count: 32)
+        XCTAssertThrowsError(
+            try reviewer.review(raw: raw, expectedOperatorKey: other, now: ManifestFactory.now)
+        ) { error in
+            guard case let ServiceManifestError.operatorKeyMismatch(expected, got) = error else {
+                return XCTFail("expected operatorKeyMismatch, got \(error)")
+            }
+            XCTAssertEqual(expected, other)
+            XCTAssertEqual(got, actual)
+        }
+    }
+
     // MARK: - Expiry
 
     func testExpiredManifestIsRejected() throws {
@@ -207,6 +237,16 @@ final class ServiceManifestReviewerTests: XCTestCase {
         // Unknown models are preserved verbatim and gate as not-free.
         XCTAssertEqual(offers[2].model, "some-future-model")
         XCTAssertFalse(offers[2].isFree)
+    }
+
+    func testIsFreeNormalizesCaseAndWhitespace() {
+        // A stray-cased or padded "free" must not silently gate a free
+        // offer as paid; unrelated models still gate as not-free.
+        XCTAssertTrue(ServiceOffer(offerId: "o", model: "Free").isFree)
+        XCTAssertTrue(ServiceOffer(offerId: "o", model: " free ").isFree)
+        XCTAssertTrue(ServiceOffer(offerId: "o", model: "FREE").isFree)
+        XCTAssertFalse(ServiceOffer(offerId: "o", model: "freemium").isFree)
+        XCTAssertFalse(ServiceOffer(offerId: "o", model: "subscription").isFree)
     }
 
     // MARK: - Format helpers

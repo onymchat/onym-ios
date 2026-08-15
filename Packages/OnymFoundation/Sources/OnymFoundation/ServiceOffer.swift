@@ -7,6 +7,14 @@ import Foundation
 /// optional `period`); everything under `service` is seat-specific
 /// and kept opaque for the seat adapter (or a future StoreKit layer)
 /// to interpret.
+///
+/// **Numbers in offers are integers-only** in v1 signed manifests:
+/// spec §3 pins canonical signing bytes to integer numbers so
+/// re-serialization is byte-stable, and the whole manifest — offers
+/// included — is inside the signed document. A price like `0.5` must
+/// be published as a string (`"pricePerGB": "0.5"`) or a scaled
+/// integer (`"priceMilliCentsPerGB": 50`); a float anywhere fails
+/// review with `ServiceManifestError.nonIntegerNumber(path:)`.
 public struct ServiceOffer: Sendable, Equatable {
     /// Operator-scoped offer identifier.
     public let offerId: String
@@ -29,7 +37,12 @@ public struct ServiceOffer: Sendable, Equatable {
 
     /// Free offers are the only ones the stub entitlement layer can
     /// grant; StoreKit slots in behind `EntitlementProviding` later.
-    public var isFree: Bool { model == "free" }
+    /// The comparison is trim-and-case-insensitive (`"Free"`, `" free "`
+    /// gate as free) — a stray-cased model should not silently gate a
+    /// free offer as paid. Unknown models still gate as not-free.
+    public var isFree: Bool {
+        model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "free"
+    }
 
     public init(offerId: String, model: String, period: String? = nil, serviceData: Data? = nil) {
         self.offerId = offerId

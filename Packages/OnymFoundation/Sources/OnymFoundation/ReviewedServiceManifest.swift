@@ -32,8 +32,10 @@ public struct ReviewedServiceManifest: Sendable, Equatable {
 /// any check is rejected. The signature is the manifest's own embedded
 /// `signature`, verified against its own `operator` key over the
 /// canonical bytes (`ServiceManifestCanonical`); binding that key to
-/// an identity the user trusts (catalog digest pin, out-of-band
-/// fingerprint check) is the caller's protocol.
+/// an identity the user trusts is the caller's protocol — pass
+/// `expectedDigest` (catalog byte pin) and/or `expectedOperatorKey`
+/// (known operator identity) to make that binding part of the review,
+/// or neither to make trust-on-first-use an explicit choice.
 public struct ServiceManifestReviewer: Sendable {
     public init() {}
 
@@ -46,29 +48,47 @@ public struct ServiceManifestReviewer: Sendable {
     ///     reached through a catalog entry (or a user-confirmed hash).
     ///     `nil` on the direct paste-URL path, where trust is the
     ///     signature self-check plus the user's explicit review.
+    ///   - expectedOperatorKey: `onym:key:<hex>` when the caller
+    ///     already knows which operator these bytes must come from
+    ///     (a catalog entry, a prior pin, an out-of-band fingerprint).
+    ///     The manifest's own `operator` must equal it or review fails
+    ///     with `operatorKeyMismatch`. Leaving it `nil` makes the
+    ///     review **trust-on-first-use**: the signature is verified
+    ///     against whatever key the manifest itself names — an
+    ///     explicit call-site choice, not a hidden default property.
     ///   - now: injected clock for the `validUntil` check.
     /// - Throws: `ServiceManifestError`.
     public func review(
         raw: Data,
         expectedDigest: String? = nil,
+        expectedOperatorKey: String? = nil,
         now: Date = Date()
     ) throws -> ReviewedServiceManifest {
         if let expectedDigest {
             // Catalogs and users copy digests around; uppercase hex is
             // the same pin, so normalize before comparing. A pin that
             // is not `sha256:<64-hex>` even after normalization is the
-            // caller's bug, not a byte swap — distinct error.
+            // caller's bug, not a byte swap — distinct error. Errors
+            // report the caller's original string, not the normalized
+            // form, so logs line up with what was actually passed.
             let normalized = expectedDigest.lowercased()
             guard ServiceManifestFormat.isDigest(normalized) else {
                 throw ServiceManifestError.digestPinMalformed(value: expectedDigest)
             }
             let actual = ServiceManifestFormat.sha256Digest(of: raw)
             guard normalized == actual else {
-                throw ServiceManifestError.digestMismatch(expected: normalized, actual: actual)
+                throw ServiceManifestError.digestMismatch(expected: expectedDigest, actual: actual)
             }
         }
 
         let manifest = try SignedServiceManifest(raw: raw)
+
+        if let expectedOperatorKey, manifest.operatorKey != expectedOperatorKey {
+            throw ServiceManifestError.operatorKeyMismatch(
+                expected: expectedOperatorKey,
+                actual: manifest.operatorKey
+            )
+        }
 
         guard let signatureBase64 = manifest.signatureBase64 else {
             throw ServiceManifestError.signatureInvalid(reason: "manifest carries no signature")

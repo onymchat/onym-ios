@@ -18,6 +18,23 @@ public enum ServiceManifestError: Error, Equatable, Sendable {
     /// garbage in the pin, not swapped bytes. Distinct from
     /// `digestMismatch` so the two failures stay diagnosable.
     case digestPinMalformed(value: String)
+    /// The manifest's `operator` key differs from the key the caller
+    /// bound the review to (`expectedOperatorKey`). The signature may
+    /// still be internally valid — this is an identity mismatch, not a
+    /// byte swap.
+    case operatorKeyMismatch(expected: String, actual: String)
+    /// A number at `path` is not an integer. Signed v1 manifests are
+    /// integer-only (spec §3): canonical signing bytes must re-serialize
+    /// byte-stably, and floats have no pinned decimal form. Distinct
+    /// from `manifestInvalid` and names the offending field so an
+    /// operator can find `pricePerGB: 0.5` and republish it as a string
+    /// or scaled integer.
+    case nonIntegerNumber(path: String)
+    /// A JSON value at `path` is of a type the canonical form does not
+    /// define (should be unreachable for values `JSONSerialization`
+    /// produces; kept distinct so it never masquerades as a manifest
+    /// syntax problem).
+    case unsupportedValueType(path: String)
 }
 
 /// A seat operator's manifest — courier, notary, authority, or any
@@ -34,6 +51,13 @@ public enum ServiceManifestError: Error, Equatable, Sendable {
 /// The exact bytes as served are retained alongside the decode —
 /// signature verification and hash pinning are always over
 /// `rawBytes`, never over a re-encode.
+///
+/// **Numbers are integers-only in v1 signed manifests** (spec §3):
+/// the canonical signing bytes must re-serialize byte-stably, and a
+/// float has no pinned decimal form, so a manifest containing one
+/// anywhere fails review with `nonIntegerNumber(path:)`. Price-like
+/// values belong in strings (`"0.5"`) or scaled integers
+/// (`priceMilliCentsPerGB`).
 public struct SignedServiceManifest: Sendable, Equatable {
     /// `onym:component:<[a-z0-9-]{1,64}>`.
     public let componentId: String
@@ -128,13 +152,12 @@ public struct SignedServiceManifest: Sendable, Equatable {
 /// and numerically* — `seatID`/`seatable` and `relay2`/`relay10` both
 /// come out in the wrong order — and whose number re-serialization is
 /// uncontrolled; `ModerationCanonicalEncoder` and `Report.signingBytes`
-/// document the same prohibition. This is a deliberate twin of
-/// `DiscoveryCanonical` in OnymDiscovery (fixture-proven byte-identical
-/// to the Rust serde_json reference): OnymFoundation is the bottom of
-/// the dependency stack and must not import OnymDiscovery (or
-/// OnymModeration) to verify a manifest, so the ~60 lines are
-/// duplicated by design, like the moderation twin files. Change one,
-/// change both.
+/// document the same prohibition. The normative definition of these
+/// bytes is `Discovery-Static-Ed25519.md` §3 in `onym-system`; the
+/// reference implementation is the Rust canonicalizer in the
+/// `onym-discovery` repo, whose emitted bytes are pinned here as the
+/// `foundation-vectors` fixture pair — change either implementation
+/// and that fixture fails on whichever side drifted.
 public enum ServiceManifestCanonical {
     /// The bytes a manifest's embedded Ed25519 signature is made over.
     public static func signingBytes(of raw: Data) throws -> Data {
@@ -149,13 +172,16 @@ public enum ServiceManifestCanonical {
         }
         object.removeValue(forKey: "signature")
         var out = ""
-        try serialize(object, into: &out)
+        try serialize(object, at: "", into: &out)
         return Data(out.utf8)
     }
 
     // MARK: - Canonical serialization (§3)
 
-    private static func serialize(_ value: Any, into out: inout String) throws {
+    /// `path` is the dotted/indexed location of `value` for error
+    /// reporting ("" at the top level, `offers[0].service.pricePerGB`
+    /// deeper down) — diagnostics only, never part of the bytes.
+    private static func serialize(_ value: Any, at path: String, into out: inout String) throws {
         switch value {
         case let object as [String: Any]:
             out.append("{")
@@ -170,16 +196,17 @@ public enum ServiceManifestCanonical {
                 first = false
                 appendEscaped(key, into: &out)
                 out.append(":")
-                try serialize(object[key]!, into: &out)
+                let childPath = path.isEmpty ? key : path + "." + key
+                try serialize(object[key]!, at: childPath, into: &out)
             }
             out.append("}")
         case let array as [Any]:
             out.append("[")
             var first = true
-            for element in array {
+            for (index, element) in array.enumerated() {
                 if !first { out.append(",") }
                 first = false
-                try serialize(element, into: &out)
+                try serialize(element, at: "\(path)[\(index)]", into: &out)
             }
             out.append("]")
         case let string as String:
@@ -188,10 +215,11 @@ public enum ServiceManifestCanonical {
             if CFGetTypeID(number) == CFBooleanGetTypeID() {
                 out.append(number.boolValue ? "true" : "false")
             } else if CFNumberIsFloatType(number) {
-                // §3: all numbers are non-negative integers; a float
-                // has no canonical form here.
-                throw ServiceManifestError.manifestInvalid(
-                    reason: "non-integer number has no canonical form"
+                // Spec §3: numbers in signed manifests are integers;
+                // a float has no canonical decimal form, so its
+                // signing bytes could not round-trip byte-stably.
+                throw ServiceManifestError.nonIntegerNumber(
+                    path: path.isEmpty ? "(top level)" : path
                 )
             } else {
                 out.append(number.stringValue)
@@ -199,8 +227,8 @@ public enum ServiceManifestCanonical {
         case is NSNull:
             out.append("null")
         default:
-            throw ServiceManifestError.manifestInvalid(
-                reason: "unsupported JSON value"
+            throw ServiceManifestError.unsupportedValueType(
+                path: path.isEmpty ? "(top level)" : path
             )
         }
     }
@@ -279,13 +307,20 @@ enum ServiceManifestFormat {
         return bytes
     }
 
+    /// Cached formatters — `ISO8601DateFormatter` is expensive to
+    /// build and documented thread-safe, and `date(fromRFC3339:)` sits
+    /// on the parse path of every manifest.
+    private static let wholeSecondsFormatter = ISO8601DateFormatter()
+    private static let fractionalSecondsFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
     /// RFC 3339, seconds or fractional-seconds precision.
     static func date(fromRFC3339 value: String) -> Date? {
-        let wholeSeconds = ISO8601DateFormatter()
-        if let date = wholeSeconds.date(from: value) { return date }
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return fractional.date(from: value)
+        if let date = wholeSecondsFormatter.date(from: value) { return date }
+        return fractionalSecondsFormatter.date(from: value)
     }
 
     /// Base64 accepting padded or unpadded input.
