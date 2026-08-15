@@ -200,13 +200,22 @@ struct OnymIOSApp: App {
             // opts in, so every existing UI test launches exactly as
             // before. Under the opt-in the fakes are a fresh world, so
             // the existing-user probe answers false by construction.
+            // `--skip-onboarding` is the explicit veto — AppLauncher
+            // passes it by default so a suite's no-onboarding posture
+            // is declared in its launch arguments, and it wins over
+            // `--ui-onboarding` should both ever appear.
             shouldOnboard = args.contains("--ui-onboarding")
+                && !args.contains("--skip-onboarding")
                 && OnboardingGate.shouldOnboard(store: onboardingStore, isExistingUser: { false })
         } else {
-            shouldOnboard = OnboardingGate.shouldOnboard(
-                store: onboardingStore,
-                isExistingUser: { OnboardingLaunch.isExistingUser() }
-            )
+            // `--skip-onboarding` also works for plain DEBUG runs —
+            // a developer convenience for skipping the walk on a
+            // fresh simulator without composing UserDefaults.
+            shouldOnboard = !args.contains("--skip-onboarding")
+                && OnboardingGate.shouldOnboard(
+                    store: onboardingStore,
+                    isExistingUser: { OnboardingLaunch.isExistingUser() }
+                )
         }
         #else
         shouldOnboard = OnboardingGate.shouldOnboard(

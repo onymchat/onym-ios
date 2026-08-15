@@ -19,8 +19,20 @@ import XCTest
 /// in the app target). Default `false` keeps discovery nil — the
 /// pre-existing `--ui-testing` behavior — so existing call sites and
 /// tests are untouched.
+///
+/// Every launch passes `--skip-onboarding`, so "this suite runs
+/// without onboarding" is DECLARED in the launch arguments rather
+/// than being an incidental consequence of the factory's nil default
+/// — a future change to the app's default can't silently put a cover
+/// in front of every existing test. Onboarding suites don't come
+/// through this factory: they build their own argument lists (see
+/// `OnboardingUITests`), because the walk needs `--ui-onboarding`
+/// plus step-specific flags.
 enum AppLauncher {
-    static func launchFresh(discovery: Bool = false, language: String = "en") -> XCUIApplication {
+    static func launchFresh(
+        discovery: Bool = false,
+        language: String = "en"
+    ) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = [
             "--ui-testing",
@@ -32,6 +44,7 @@ enum AppLauncher {
         if discovery {
             app.launchArguments.append("--ui-discovery")
         }
+        app.launchArguments.append("--skip-onboarding")
         app.launch()
         return app
     }
