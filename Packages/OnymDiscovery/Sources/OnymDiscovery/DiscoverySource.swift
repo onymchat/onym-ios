@@ -86,9 +86,15 @@ public struct DiscoverySource: Codable, Equatable, Hashable, Identifiable, Senda
     }
 
     /// The Onym-operated default provider, seeded on first run only
-    /// (see `DiscoverySourcesConfiguration`). Ships unpinned — the
-    /// deployment is not live yet, and pinning happens through the
-    /// same TOFU confirmation as any other source.
+    /// (see `DiscoverySourcesConfiguration`). Ships unpinned **by
+    /// design**: pinning is the user's own trust-on-first-use act, so
+    /// even the bundled default goes through the same TOFU
+    /// confirmation as any other source. The deployment is live; for
+    /// maintainers, the operator key it currently serves is
+    /// `onym:key:42b0da001104dd03052c7feddab9520c920c9e40d11b245c46c27cf6be853f24`
+    /// (fingerprint `4d:a9:ec:c9:e8:6f:6e:97` — sha256 of the 32 raw
+    /// key bytes, first 8 bytes colon-hex). Reference only — never
+    /// pre-pin it here.
     public static let onymDefault = DiscoverySource(
         providerId: "onym:component:onym-discovery",
         userLabel: "Onym Discovery",
