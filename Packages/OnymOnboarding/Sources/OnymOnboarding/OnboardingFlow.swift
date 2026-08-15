@@ -219,6 +219,20 @@ public final class OnboardingFlow {
         }
     }
 
+    /// Whether the recorded outcome actually satisfies an
+    /// outcome-gated step. `.skipped` deliberately does NOT: skipping
+    /// records a decision, but revisiting the step must re-gate its
+    /// primary — an earlier "Remind me later" must never leave
+    /// "I've written it down" enabled over a phrase that was never
+    /// revealed. The honest exits from a re-gated step are the same
+    /// as the first visit: satisfy the gate, or skip again.
+    public func outcomeSatisfiesGate(_ step: OnboardingStep) -> Bool {
+        switch outcomes[step] {
+        case nil, .skipped?: return false
+        default: return true
+        }
+    }
+
     // MARK: - Lifecycle
 
     /// Kick the async moderation-directory probe. Idempotent.
@@ -250,7 +264,7 @@ public final class OnboardingFlow {
     /// (the view also disables it; this guard is the second layer).
     public func advance() {
         guard let next = neighbor(offset: 1) else { return }
-        guard !requiresOutcomeToAdvance(step) || outcomes[step] != nil else { return }
+        guard !requiresOutcomeToAdvance(step) || outcomeSatisfiesGate(step) else { return }
         if outcomes[step] == nil {
             outcomes[step] = step == .moderation && moderationDirectoryHasEntries == false
                 ? .unavailable

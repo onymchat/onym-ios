@@ -443,6 +443,29 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertEqual(flow.step, .done)
     }
 
+    /// A `.skipped` outcome must NOT satisfy the gate: after
+    /// "Remind me later" → Done → Back, the recovery step's primary
+    /// ("I've written it down") re-locks — the recorded skip survives
+    /// (back-preservation), but it must never enable a claim about a
+    /// phrase that was never revealed. Regression for the gate hole
+    /// dev-onym found on the Android port.
+    func testSkipThenBackReGatesTheRecoveryPrimary() async {
+        let flow = await makeResolvedFlow()
+        walk(flow, to: .recoveryPhrase)
+        flow.skip()
+        XCTAssertEqual(flow.step, .done)
+        flow.back()
+        XCTAssertEqual(flow.step, .recoveryPhrase)
+        XCTAssertEqual(flow.outcomes[.recoveryPhrase], .skipped,
+                       "the skip decision survives Back")
+        XCTAssertFalse(flow.outcomeSatisfiesGate(.recoveryPhrase),
+                       "a skip must not satisfy the reveal gate")
+        flow.advance() // refused — the primary is re-locked
+        XCTAssertEqual(flow.step, .recoveryPhrase)
+        flow.skip() // skipping again remains the honest exit
+        XCTAssertEqual(flow.step, .done)
+    }
+
     /// The outcome-gate matrix: identity and recovery always;
     /// moderation only while mandatory; nothing else ever.
     func testRequiresOutcomeToAdvanceMatrix() async {
