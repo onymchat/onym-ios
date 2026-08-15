@@ -51,7 +51,10 @@ struct OnboardingStepContentBuilder {
         case .welcome:
             return AnyView(OnboardingWelcomeContent())
         case .identity:
-            return AnyView(OnboardingIdentityContent(identityReady: identityReady))
+            return AnyView(OnboardingIdentityContent(
+                onboarding: flow,
+                identityReady: identityReady
+            ))
         case .services:
             return AnyView(OnboardingServicesContent(
                 onboarding: flow,
@@ -255,10 +258,13 @@ struct OnboardingWelcomeContent: View {
 /// WindowGroup task; this step BINDS to it instead of asserting
 /// success it can't know about. The checklist shows progress while the
 /// bootstrap resolves, checks once a snapshot exists, and an explicit
-/// failure state (with retry) if it doesn't — a failed bootstrap must
-/// not hand the user a recovery step that can't reveal. Informational:
-/// nothing to decide, nothing recorded.
+/// failure state (with retry) if it doesn't. The step is
+/// outcome-gated (`requiresOutcomeToAdvance`): Continue stays
+/// disabled until a snapshot exists, because a failed bootstrap must
+/// not walk the user on to services and a recovery step whose reveal
+/// cannot work.
 struct OnboardingIdentityContent: View {
+    let onboarding: OnboardingFlow
     let identityReady: @MainActor () async -> Bool
 
     private enum Phase {
@@ -322,7 +328,18 @@ struct OnboardingIdentityContent: View {
         }
         .task(id: attempt) {
             phase = .checking
-            phase = await identityReady() ? .ready : .failed
+            if await identityReady() {
+                phase = .ready
+                // Unlocks the step's Continue — nothing was decided
+                // here, but the gate needs proof the keys exist.
+                // recordOutcome writes to the CURRENT step; guard
+                // against the probe resolving after a quick Back.
+                if onboarding.step == .identity {
+                    onboarding.recordOutcome(.notApplicable)
+                }
+            } else {
+                phase = .failed
+            }
         }
     }
 
@@ -391,6 +408,16 @@ struct OnboardingServicesContent: View {
                 .lineSpacing(2)
                 .padding(.top, 4)
         }
+        // The screen shows "Selected" on the recommended card from the
+        // first frame, so the outcome must say the same thing:
+        // Continue from here IS accepting the recommended setup, not
+        // walking past an unanswered question. Seeding also makes
+        // tapping the already-selected card an honest no-op.
+        .task {
+            if onboarding.step == .services, onboarding.outcomes[.services] == nil {
+                onboarding.recordOutcome(.consented(componentId: nil))
+            }
+        }
         .sheet(isPresented: $showHub) {
             OnboardingServicesHub(
                 onboarding: onboarding,
@@ -409,7 +436,11 @@ struct OnboardingServicesContent: View {
                     // The hub's per-seat surfaces record specific
                     // consents (with componentIds) as they happen —
                     // keep those; otherwise closing the hub still
-                    // means "I set things up myself".
+                    // means "I set things up myself". All seats share
+                    // the single `.services` outcome, so what survives
+                    // here is whichever seat consented LAST — arbitrary
+                    // but harmless: the Done step's summary reads live
+                    // repository state, not this outcome.
                     if case .consented(let componentId)? = onboarding.outcomes[.services],
                        componentId != nil {
                         // keep the specific consent
@@ -742,7 +773,7 @@ struct OnboardingDiscoveryContent: View {
         } else {
             OnboardingInfoCard(
                 text: "This build runs without a service directory. Continue — the app uses its built-in defaults.",
-                accessibilityID: "onboarding.discoveryConfirm.unavailable"
+                accessibilityID: "onboarding.services.directory.unavailable"
             )
         }
     }
@@ -783,7 +814,7 @@ struct OnboardingDiscoveryContent: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 24)
-            .accessibilityIdentifier("onboarding.discoveryConfirm.added")
+            .accessibilityIdentifier("onboarding.services.directory.added")
         }
     }
 
@@ -811,25 +842,25 @@ struct OnboardingDiscoveryContent: View {
             }
             .background(OnymTokens.surface2,
                         in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .accessibilityIdentifier("onboarding.discoveryConfirm.source")
+            .accessibilityIdentifier("onboarding.services.directory.source")
 
             if status.source.pinnedOperatorKeyHex == nil {
                 SettingsPrimaryButton("Verify & Confirm") {
                     flow.tappedConfirmSource(providerId: status.source.providerId)
                 }
                 .padding(.top, 12)
-                .accessibilityIdentifier("onboarding.discoveryConfirm.confirm")
+                .accessibilityIdentifier("onboarding.services.directory.confirm")
             } else {
                 Label("Already confirmed — its key is pinned.", systemImage: "checkmark.seal.fill")
                     .font(.system(size: 13))
                     .foregroundStyle(OnymTokens.green)
                     .padding(.top, 12)
-                    .accessibilityIdentifier("onboarding.discoveryConfirm.pinned")
+                    .accessibilityIdentifier("onboarding.services.directory.pinned")
             }
         } else {
             OnboardingInfoCard(
                 text: "No discovery provider is configured yet. Add your own below, or continue with the built-in defaults.",
-                accessibilityID: "onboarding.discoveryConfirm.empty"
+                accessibilityID: "onboarding.services.directory.empty"
             )
         }
 
@@ -838,7 +869,7 @@ struct OnboardingDiscoveryContent: View {
                 .font(.system(size: 12.5))
                 .foregroundStyle(OnymTokens.red)
                 .padding(.top, 8)
-                .accessibilityIdentifier("onboarding.discoveryConfirm.error")
+                .accessibilityIdentifier("onboarding.services.directory.error")
         }
 
         addOwn(flow)
@@ -861,7 +892,7 @@ struct OnboardingDiscoveryContent: View {
                     .padding(.horizontal, 10)
                     .background(OnymTokens.surface3,
                                 in: RoundedRectangle(cornerRadius: 8))
-                    .accessibilityIdentifier("onboarding.discoveryConfirm.add_url_field")
+                    .accessibilityIdentifier("onboarding.services.directory.add_url_field")
                 Button {
                     flow.tappedFetchProvider()
                 } label: {
@@ -869,7 +900,7 @@ struct OnboardingDiscoveryContent: View {
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(OnymAccent.blue.color)
                 }
-                .accessibilityIdentifier("onboarding.discoveryConfirm.fetch")
+                .accessibilityIdentifier("onboarding.services.directory.fetch")
             }
             .padding(14)
             .background(OnymTokens.surface2,
@@ -883,7 +914,7 @@ struct OnboardingDiscoveryContent: View {
                     .foregroundStyle(OnymAccent.blue.color)
             }
             .padding(.top, 12)
-            .accessibilityIdentifier("onboarding.discoveryConfirm.add_own")
+            .accessibilityIdentifier("onboarding.services.directory.add_own")
         }
     }
 
@@ -905,7 +936,7 @@ struct OnboardingDiscoveryContent: View {
             .background(OnymTokens.surface2,
                         in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .padding(.top, 12)
-            .accessibilityIdentifier("onboarding.discoveryConfirm.fingerprint")
+            .accessibilityIdentifier("onboarding.services.directory.fingerprint")
 
         VStack(alignment: .leading, spacing: 6) {
             Text(verbatim: preview.providerId)
@@ -927,14 +958,14 @@ struct OnboardingDiscoveryContent: View {
             flow.tappedConfirmAdd()
         }
         .padding(.top, 12)
-        .accessibilityIdentifier("onboarding.discoveryConfirm.pin")
+        .accessibilityIdentifier("onboarding.services.directory.pin")
 
         Button("Not now") { flow.tappedCancelPreview() }
             .font(.system(size: 14))
             .foregroundStyle(OnymTokens.text2)
             .frame(maxWidth: .infinity)
             .padding(.top, 8)
-            .accessibilityIdentifier("onboarding.discoveryConfirm.cancel_preview")
+            .accessibilityIdentifier("onboarding.services.directory.cancel_preview")
     }
 }
 
@@ -966,7 +997,7 @@ struct OnboardingNostrContent: View {
         VStack(alignment: .leading, spacing: 0) {
             configured
 
-            catalogSection(prefix: "onboarding.messageTransport.catalog")
+            catalogSection(prefix: "onboarding.services.messageDelivery.catalog")
 
             OnboardingSectionLabel(text: "ADD CUSTOM URL")
             OnboardingCustomURLField(
@@ -1000,7 +1031,7 @@ struct OnboardingNostrContent: View {
         if endpoints.isEmpty {
             OnboardingInfoCard(
                 text: "No relay configured yet. Add one below, or go back to keep the default.",
-                accessibilityID: "onboarding.messageTransport.empty"
+                accessibilityID: "onboarding.services.messageDelivery.empty"
             )
         } else {
             VStack(spacing: 0) {
@@ -1013,7 +1044,7 @@ struct OnboardingNostrContent: View {
                         last: idx == endpoints.count - 1
                     )
                     .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier("onboarding.messageTransport.configured.\(endpoint.url.absoluteString)")
+                    .accessibilityIdentifier("onboarding.services.messageDelivery.configured.\(endpoint.url.absoluteString)")
                 }
             }
             .background(OnymTokens.surface2,
@@ -1086,7 +1117,7 @@ struct OnboardingBlossomContent: View {
                     activeConsent: { flow.activeConsent(for: $0) },
                     consentedOffer: { flow.consentedOffer(for: $0) },
                     tileSymbol: "photo.on.rectangle.angled",
-                    accessibilityPrefix: "onboarding.blobTransport.catalog",
+                    accessibilityPrefix: "onboarding.services.mediaDelivery.catalog",
                     onSelect: { entry in
                         lastConsentEntry = entry
                         consentEntry = entry
@@ -1127,7 +1158,7 @@ struct OnboardingBlossomContent: View {
         if endpoints.isEmpty {
             OnboardingInfoCard(
                 text: "No server configured yet. Add one below, or go back to keep the default.",
-                accessibilityID: "onboarding.blobTransport.empty"
+                accessibilityID: "onboarding.services.mediaDelivery.empty"
             )
         } else {
             VStack(spacing: 0) {
@@ -1141,7 +1172,7 @@ struct OnboardingBlossomContent: View {
                         last: idx == endpoints.count - 1
                     )
                     .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier("onboarding.blobTransport.configured.\(endpoint.url.absoluteString)")
+                    .accessibilityIdentifier("onboarding.services.mediaDelivery.configured.\(endpoint.url.absoluteString)")
                 }
             }
             .background(OnymTokens.surface2,
@@ -1198,7 +1229,7 @@ struct OnboardingNotaryContent: View {
                     activeConsent: { flow.activeConsent(for: $0) },
                     consentedOffer: { flow.consentedOffer(for: $0) },
                     tileSymbol: "antenna.radiowaves.left.and.right",
-                    accessibilityPrefix: "onboarding.notary.catalog",
+                    accessibilityPrefix: "onboarding.services.groupIntegrity.catalog",
                     onSelect: { entry in
                         lastConsentEntry = entry
                         consentEntry = entry
@@ -1244,7 +1275,7 @@ struct OnboardingNotaryContent: View {
         if endpoints.isEmpty {
             OnboardingInfoCard(
                 text: "No notary chosen yet. Pick one below, or leave this empty to use the published defaults.",
-                accessibilityID: "onboarding.notary.empty"
+                accessibilityID: "onboarding.services.groupIntegrity.empty"
             )
         } else {
             VStack(spacing: 0) {
@@ -1257,7 +1288,7 @@ struct OnboardingNotaryContent: View {
                         last: idx == endpoints.count - 1
                     )
                     .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier("onboarding.notary.configured.\(endpoint.url.absoluteString)")
+                    .accessibilityIdentifier("onboarding.services.groupIntegrity.configured.\(endpoint.url.absoluteString)")
                 }
             }
             .background(OnymTokens.surface2,
@@ -1282,21 +1313,21 @@ struct OnboardingNotaryContent: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(14)
-                .accessibilityIdentifier("onboarding.notary.published.fetching")
+                .accessibilityIdentifier("onboarding.services.groupIntegrity.published.fetching")
             case .failed(let message):
                 Text(verbatim: message)
                     .font(.system(size: 13.5))
                     .foregroundStyle(OnymTokens.text2)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(14)
-                    .accessibilityIdentifier("onboarding.notary.published.failed")
+                    .accessibilityIdentifier("onboarding.services.groupIntegrity.published.failed")
             case .success where unconfigured.isEmpty:
                 Text("All published notaries added.")
                     .font(.system(size: 13.5))
                     .foregroundStyle(OnymTokens.text3)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(14)
-                    .accessibilityIdentifier("onboarding.notary.published.all_added")
+                    .accessibilityIdentifier("onboarding.services.groupIntegrity.published.all_added")
             case .success:
                 ForEach(Array(unconfigured.enumerated()), id: \.element.url) { idx, endpoint in
                     Button {
@@ -1341,7 +1372,7 @@ struct OnboardingNotaryContent: View {
                         }
                     }
                     .buttonStyle(.plain)
-                    .accessibilityIdentifier("onboarding.notary.published.\(endpoint.url.absoluteString)")
+                    .accessibilityIdentifier("onboarding.services.groupIntegrity.published.\(endpoint.url.absoluteString)")
                 }
             }
         }
@@ -1425,8 +1456,13 @@ struct OnboardingRecoveryContent: View {
     let onboarding: OnboardingFlow
     @State private var flow: RecoveryPhraseBackupFlow
     @State private var showBackup = false
-    @State private var sawPhrase = false
-    @State private var backedUp = false
+
+    /// Derived from the flow, never view-local — the step content is
+    /// rebuilt on every navigation, and the status card must not
+    /// reset to "Not backed up yet" after Back from Done (the same
+    /// hoisting `servicesChoice` got).
+    private var sawPhrase: Bool { onboarding.recoveryBackupState != .none }
+    private var backedUp: Bool { onboarding.recoveryBackupState == .verified }
 
     init(
         onboarding: OnboardingFlow,
@@ -1476,13 +1512,17 @@ struct OnboardingRecoveryContent: View {
         .onChange(of: flow.step) { old, step in
             // The reveal is what makes "I've written it down" honest —
             // record the outcome (unlocking the step's primary) the
-            // moment the words are actually on screen.
+            // moment the words are actually on screen. The backup
+            // state never downgrades: a verified backup stays
+            // verified across re-reveals.
             if case .reveal(_, true) = step {
-                sawPhrase = true
+                if onboarding.recoveryBackupState == .none {
+                    onboarding.recoveryBackupState = .revealed
+                }
                 onboarding.recordOutcome(.consented(componentId: nil))
             }
             if case .done = step {
-                backedUp = true
+                onboarding.recoveryBackupState = .verified
                 onboarding.recordOutcome(.consented(componentId: nil))
             }
             // The backup flow's DoneScreen "Done" resets it to .intro
