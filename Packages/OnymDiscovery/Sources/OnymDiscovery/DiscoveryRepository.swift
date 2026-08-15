@@ -151,13 +151,15 @@ public actor DiscoveryRepository {
     private var fetchStatus: DiscoveryFetchStatus = .idle
     private var continuations: [UUID: AsyncStream<DiscoveryState>.Continuation] = [:]
     private var startTask: Task<Void, Never>?
-    private var refreshTask: Task<Void, Never>?
-    /// providerIds the most recent full pass ATTEMPTED (enabled +
-    /// pinned at its entry). `refresh()` compares the live source list
-    /// against this after joining a pass: a source confirmed while the
-    /// pass was in flight is absent, and triggers a follow-up pass
-    /// instead of a stale `.success`.
-    private var lastPassAttemptedIds: Set<String> = []
+    /// A full pass, carrying the providerIds it ATTEMPTED (enabled +
+    /// pinned at its entry) as its value. `refresh()` compares the live
+    /// source list against the set of the pass it actually joined: a
+    /// source confirmed while that pass was in flight is absent, and
+    /// triggers a follow-up pass instead of a stale `.success`. Carried
+    /// on the task rather than in a stored property so a later pass
+    /// cannot overwrite the record an earlier caller is about to read
+    /// (actor jobs are not FIFO-ordered).
+    private var refreshTask: Task<Set<String>, Never>?
 
     public init(
         fetcher: any DiscoveryFetching,
@@ -224,25 +226,26 @@ public actor DiscoveryRepository {
     /// so `confirmAddSource` + `refresh()` during that pass would join
     /// a pass that never saw the new source and still return
     /// `.success`. After joining, any enabled + pinned source the
-    /// finished pass never attempted (`lastPassAttemptedIds`) queues a
+    /// joined pass never attempted (its task's value) queues a
     /// follow-up full pass; the loop exits once a pass has covered the
     /// then-current source list.
     public func refresh() async {
         while true {
-            let task: Task<Void, Never>
+            let task: Task<Set<String>, Never>
             if let refreshTask {
                 task = refreshTask
             } else {
                 task = Task { [weak self] in
-                    await self?.performRefresh()
+                    let attempted = await self?.performRefresh() ?? []
                     await self?.clearRefreshTask()
+                    return attempted
                 }
                 refreshTask = task
             }
-            await task.value
+            let attempted = await task.value
             let uncovered = configuration.sources.contains {
                 $0.isEnabled && $0.pinnedOperatorKeyHex != nil
-                    && !lastPassAttemptedIds.contains($0.providerId)
+                    && !attempted.contains($0.providerId)
             }
             guard uncovered else { return }
         }
@@ -288,7 +291,10 @@ public actor DiscoveryRepository {
         publish()
     }
 
-    private func performRefresh() async {
+    /// - Returns: the providerIds this pass attempted (enabled + pinned
+    ///   at entry), so `refresh()` can tell whether the pass it joined
+    ///   covered the current source list.
+    private func performRefresh() async -> Set<String> {
         fetchStatus = .fetching
         publish()
 
@@ -297,10 +303,11 @@ public actor DiscoveryRepository {
         var awaitingConfirmation = 0
 
         // Captured once at entry: the pass refreshes exactly this list.
-        // Recorded (enabled + pinned only) so `refresh()` can detect
-        // sources confirmed after this point and queue a follow-up.
+        // Reported back (enabled + pinned only) so `refresh()` can
+        // detect sources confirmed after this point and queue a
+        // follow-up.
         let sources = configuration.sources.filter(\.isEnabled)
-        lastPassAttemptedIds = Set(
+        let attempted = Set(
             sources.compactMap { $0.pinnedOperatorKeyHex == nil ? nil : $0.providerId }
         )
 
@@ -349,6 +356,7 @@ public actor DiscoveryRepository {
             fetchStatus = .success
         }
         publish()
+        return attempted
     }
 
     private func refreshSource(_ source: DiscoverySource, pinnedKey: String) async throws {
@@ -528,6 +536,9 @@ public actor DiscoveryRepository {
     /// the chain restarts, and the old identity's retained blobs are
     /// purged rather than left orphaned. A genuinely fresh add purges
     /// too, clearing any orphan a mid-pass removal may have left.
+    ///
+    /// The source's pre-confirm error and notes are cleared either way:
+    /// they describe the state this confirm just answered.
     @discardableResult
     public func confirmAddSource(
         _ preview: DiscoveryProviderPreview,
@@ -552,6 +563,16 @@ public actor DiscoveryRepository {
             isEnabled: existing?.isEnabled ?? true,
             lastAccepted: carriesChainForward ? (existing?.lastAccepted ?? [:]) : [:]
         )
+        // The pre-confirm status described a source that no longer
+        // exists in that form, and `confirmAddSource` publishes
+        // immediately — so leaving it would show the just-confirmed
+        // source under the old state's error/notes until some later
+        // refresh replaced them. Both cases are the common ones: the
+        // seeded default carries `performRefresh`'s "needs confirmation"
+        // note right up to this call, and a rotation re-confirm is
+        // normally reached *because* the last pass failed the key pin.
+        lastErrors[source.providerId] = nil
+        lastNotes[source.providerId] = nil
         var sources = configuration.sources.filter { $0.providerId != source.providerId }
         sources.append(source)
         applyConfiguration(DiscoverySourcesConfiguration(

@@ -747,6 +747,40 @@ final class DiscoveryRepositoryTests: XCTestCase {
         )
     }
 
+    func testConfirmClearsThePreConfirmStatusOfTheSource() async throws {
+        // Now that `confirmAddSource` publishes, the state it publishes
+        // must describe the source it just wrote. The seeded default
+        // carries `performRefresh`'s needs-confirmation note right up to
+        // this call — displaying it beside a now-pinned source would ask
+        // the user to do what they just did.
+        let store = MemoryStore()
+        let fetcher = FakeFetcher(responses: [
+            manifestURL: try Fixture.bytes("provider-manifest.json"),
+            snapshotURL: try Fixture.bytes("snapshot-1.json"),
+        ])
+        let repository = DiscoveryRepository(fetcher: fetcher, store: store) { Fixture.now }
+
+        await repository.start()
+        // start() refreshes in the background; join a full pass so the
+        // needs-confirmation note is in place before the confirm.
+        await repository.refresh()
+        let seeded = await repository.currentState()
+        XCTAssertFalse(
+            seeded.sources.first?.notes.isEmpty ?? true,
+            "precondition: the unpinned seeded default is noted"
+        )
+
+        let preview = try await repository.addSource(manifestURL: manifestURL)
+        await repository.confirmAddSource(preview)
+
+        let confirmed = await repository.currentState()
+        XCTAssertEqual(
+            confirmed.sources.first?.notes, [],
+            "the pre-confirm note must not survive the confirm that answered it"
+        )
+        XCTAssertNil(confirmed.sources.first?.lastError)
+    }
+
     func testConfirmThenRefreshDuringInFlightPassRunsFollowUpPass() async throws {
         // The repository-level half of the reviewed race: a full pass
         // captured its source list before the add, so a `refresh()`
