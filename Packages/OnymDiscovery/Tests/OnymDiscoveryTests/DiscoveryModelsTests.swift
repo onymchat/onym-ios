@@ -231,6 +231,9 @@ final class DiscoveryModelsTests: XCTestCase {
 
     func testURIRules() {
         XCTAssertTrue(DiscoveryFormat.isValidURI("https://discovery.onym.app/manifest.json"))
+        // Schemes are case-insensitive (RFC 3986 §3.1): an uppercase
+        // scheme validates instead of being silently dropped.
+        XCTAssertTrue(DiscoveryFormat.isValidURI("HTTPS://discovery.onym.app/manifest.json"))
         // http scheme
         XCTAssertFalse(DiscoveryFormat.isValidURI("http://discovery.onym.app/manifest.json"))
         // IP literals, v4 and v6
@@ -249,6 +252,23 @@ final class DiscoveryModelsTests: XCTestCase {
         XCTAssertFalse(DiscoveryFormat.isValidURI("https://3232235777/m.json"))
         XCTAssertFalse(DiscoveryFormat.isValidURI("https://0xc0a80101/m.json"))
         XCTAssertFalse(DiscoveryFormat.isValidURI("https://192.168.1.0x1/m.json"))
+    }
+
+    func testURIRulesWithAllowedScheme() {
+        // Seat adapters validate WebSocket endpoints under the same §7
+        // rules with the scheme swapped for the one the seat expects.
+        XCTAssertTrue(DiscoveryFormat.isValidURI("wss://relay.example", scheme: "wss"))
+        XCTAssertTrue(DiscoveryFormat.isValidURI("wss://relay.example/inbox", scheme: "wss"))
+        // Case-insensitive: `WSS://…` must validate, not silently drop.
+        XCTAssertTrue(DiscoveryFormat.isValidURI("WSS://relay.example", scheme: "wss"))
+        // The default stays https-only; wss passes only when asked for.
+        XCTAssertFalse(DiscoveryFormat.isValidURI("wss://relay.example"))
+        XCTAssertFalse(DiscoveryFormat.isValidURI("https://relay.example", scheme: "wss"))
+        // The rest of the rules still apply under an allowed scheme.
+        XCTAssertFalse(DiscoveryFormat.isValidURI("wss://relay.example:8443", scheme: "wss"))
+        XCTAssertFalse(DiscoveryFormat.isValidURI("wss://user@relay.example", scheme: "wss"))
+        XCTAssertFalse(DiscoveryFormat.isValidURI("wss://relay.example/x?a=1", scheme: "wss"))
+        XCTAssertFalse(DiscoveryFormat.isValidURI("wss://192.168.1.10/x", scheme: "wss"))
     }
 
     func testIdentifierAndDigestFormats() {

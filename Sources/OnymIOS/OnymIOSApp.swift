@@ -13,6 +13,7 @@ import OnymChatsUI
 import OnymSettings
 import OnymModeration
 import OnymModerationUI
+import OnymDiscovery
 
 @main
 struct OnymIOSApp: App {
@@ -39,6 +40,11 @@ struct OnymIOSApp: App {
     /// backend is a stub until one is deployed.
     private let moderationRepository: ModerationRepository
     private let gateCheckRepository: GateCheckRepository
+    /// Discovery seat: verified provider catalogs that back the four
+    /// known-list fetchers (see `DiscoverySeatAdapters`). Nil under
+    /// the UI harness, like the other network fetchers — the legacy
+    /// fetchers then run unwrapped.
+    private let discoveryRepository: DiscoveryRepository?
     /// Factory for the per-request SEP contract transport. Normally
     /// `URLSessionSEPContractTransport`; swapped for an in-memory
     /// ledger-backed fake under `--ui-loopback` so a Tyranny group
@@ -74,6 +80,52 @@ struct OnymIOSApp: App {
         _ = args  // silence unused warning in Release
         #endif
 
+        // Discovery seat. The repository owns the user's provider
+        // sources + the verified catalog aggregate; the seat adapters
+        // below wrap the four legacy known-list fetchers with
+        // discovery-backed ones. The three endpoint adapters are
+        // consent-gated: until the consent system provides their
+        // `hasActiveConsent` closure (the settings-UI PR), they serve
+        // the legacy list untouched — catalog entries must not become
+        // live endpoints via first-launch auto-populate with no
+        // consent recorded. The authorities adapter is gated the same
+        // way behind its `discoveryEnabled` seam (nil here → legacy
+        // directory untouched): its rows carry the apiBaseURL + pinned
+        // operator key the mandate flow trusts, so catalog rows join
+        // the directory only when the settings-UI layer that ships
+        // provider management enables the merge — and even then legacy
+        // wins any componentId collision. No network
+        // fetch under the UI harness — same rule as the Nostr /
+        // Blossom fetchers below, so tests stay deterministic +
+        // offline (UI-test discovery fakes land with the settings-UI
+        // PR).
+        // One fetcher instance serves both the repository and the seat
+        // catalog below — same URLSession, same size caps; no second
+        // session to configure and drift.
+        let discoveryFetcher = URLSessionDiscoveryFetcher()
+        let discoveryRepository: DiscoveryRepository?
+        #if DEBUG
+        discoveryRepository = args.contains("--ui-loopback") || args.contains("--ui-testing")
+            ? nil
+            : DiscoveryRepository(
+                fetcher: discoveryFetcher,
+                store: UserDefaultsDiscoveryStore()
+            )
+        #else
+        discoveryRepository = DiscoveryRepository(
+            fetcher: discoveryFetcher,
+            store: UserDefaultsDiscoveryStore()
+        )
+        #endif
+        self.discoveryRepository = discoveryRepository
+        // Shared seam the four seat adapters fetch catalog entries +
+        // destination manifests through. Nil exactly when the
+        // repository is nil — `wrapping(_:catalog:)` then returns the
+        // legacy fetcher unwrapped.
+        let discoveryCatalog = discoveryRepository.map {
+            DiscoverySeatCatalog(repository: $0, fetcher: discoveryFetcher)
+        }
+
         let relayerRepository: RelayerRepository
         let contractsRepository: ContractsRepository
         #if DEBUG
@@ -88,7 +140,10 @@ struct OnymIOSApp: App {
             )
         } else {
             relayerRepository = RelayerRepository(
-                fetcher: GitHubReleasesKnownRelayersFetcher(),
+                fetcher: DiscoveryBackedKnownRelayersFetcher.wrapping(
+                    GitHubReleasesKnownRelayersFetcher(),
+                    catalog: discoveryCatalog
+                ),
                 store: UserDefaultsRelayerSelectionStore()
             )
             contractsRepository = ContractsRepository(
@@ -98,7 +153,10 @@ struct OnymIOSApp: App {
         }
         #else
         relayerRepository = RelayerRepository(
-            fetcher: GitHubReleasesKnownRelayersFetcher(),
+            fetcher: DiscoveryBackedKnownRelayersFetcher.wrapping(
+                GitHubReleasesKnownRelayersFetcher(),
+                catalog: discoveryCatalog
+            ),
             store: UserDefaultsRelayerSelectionStore()
         )
         contractsRepository = ContractsRepository(
@@ -177,7 +235,10 @@ struct OnymIOSApp: App {
             )
             moderationManifestFetcher = URLSessionAuthorityManifestFetcher()
             moderationRepository = ModerationRepository(
-                authoritiesFetcher: GitHubReleasesKnownAuthoritiesFetcher(),
+                authoritiesFetcher: DiscoveryBackedKnownAuthoritiesFetcher.wrapping(
+                    GitHubReleasesKnownAuthoritiesFetcher(),
+                    catalog: discoveryCatalog
+                ),
                 manifestFetcher: moderationManifestFetcher,
                 mandateStore: UserDefaultsMandateStore(),
                 backend: backend,
@@ -199,7 +260,10 @@ struct OnymIOSApp: App {
         let moderationBackend = URLSessionEnforcementBackendClient()
         moderationManifestFetcher = URLSessionAuthorityManifestFetcher()
         moderationRepository = ModerationRepository(
-            authoritiesFetcher: GitHubReleasesKnownAuthoritiesFetcher(),
+            authoritiesFetcher: DiscoveryBackedKnownAuthoritiesFetcher.wrapping(
+                GitHubReleasesKnownAuthoritiesFetcher(),
+                catalog: discoveryCatalog
+            ),
             manifestFetcher: moderationManifestFetcher,
             mandateStore: UserDefaultsMandateStore(),
             backend: moderationBackend,
@@ -301,9 +365,16 @@ struct OnymIOSApp: App {
         let blossomFetcher: (any KnownBlossomServersFetcher)?
         #if DEBUG
         blossomFetcher = args.contains("--ui-loopback") || args.contains("--ui-testing")
-            ? nil : GitHubReleasesKnownBlossomServersFetcher()
+            ? nil
+            : DiscoveryBackedKnownBlossomServersFetcher.wrapping(
+                GitHubReleasesKnownBlossomServersFetcher(),
+                catalog: discoveryCatalog
+            )
         #else
-        blossomFetcher = GitHubReleasesKnownBlossomServersFetcher()
+        blossomFetcher = DiscoveryBackedKnownBlossomServersFetcher.wrapping(
+            GitHubReleasesKnownBlossomServersFetcher(),
+            catalog: discoveryCatalog
+        )
         #endif
         let blossomServersRepository = BlossomServersRepository(
             store: blossomStore,
@@ -381,9 +452,16 @@ struct OnymIOSApp: App {
         let nostrFetcher: (any KnownNostrRelaysFetcher)?
         #if DEBUG
         nostrFetcher = args.contains("--ui-loopback") || args.contains("--ui-testing")
-            ? nil : GitHubReleasesKnownNostrRelaysFetcher()
+            ? nil
+            : DiscoveryBackedKnownNostrRelaysFetcher.wrapping(
+                GitHubReleasesKnownNostrRelaysFetcher(),
+                catalog: discoveryCatalog
+            )
         #else
-        nostrFetcher = GitHubReleasesKnownNostrRelaysFetcher()
+        nostrFetcher = DiscoveryBackedKnownNostrRelaysFetcher.wrapping(
+            GitHubReleasesKnownNostrRelaysFetcher(),
+            catalog: discoveryCatalog
+        )
         #endif
         let nostrRelaysRepository = NostrRelaysRepository(
             store: UserDefaultsNostrRelaysSelectionStore(),
@@ -755,6 +833,26 @@ struct OnymIOSApp: App {
                     // verification resolves the moment its fresh snapshot
                     // materializes.
                     await groupStateVerifier.start()
+                    // Discovery FIRST: seed the default source (first
+                    // run), rebuild the offline aggregate from retained
+                    // snapshots, refresh enabled sources in the
+                    // background. Nil under the UI harness. Ordering
+                    // matters: `start()` rebuilds the retained aggregate
+                    // synchronously (inside the actor call) before it
+                    // spawns the network refresh, and the repositories
+                    // started below read the discovery-backed known-list
+                    // fetchers on THEIR start — so this must run first or
+                    // a cold boot's adapter reads see an empty aggregate
+                    // and serve legacy-only lists.
+                    // Known limitation: entries fetched by the background
+                    // refresh (including a very first launch, which has
+                    // no retained snapshots yet) are not re-pushed into
+                    // the repositories this launch — they surface on the
+                    // next launch's adapter reads (or a manual refresh in
+                    // Settings). Wiring the repositories to the
+                    // repository's snapshot stream is the clean seam if
+                    // this ever needs to be live.
+                    await discoveryRepository?.start()
                     // Kick off both GitHub Releases fetches as soon as the
                     // app is on screen. Failures are silent; the user can
                     // still enter a custom relayer URL / pick an older
