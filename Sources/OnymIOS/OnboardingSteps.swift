@@ -71,7 +71,10 @@ struct OnboardingStepContentBuilder {
                 makeBackupFlow: makeBackupFlow
             ))
         case .done:
-            return AnyView(OnboardingDoneContent(loadSummary: loadSummary))
+            return AnyView(OnboardingDoneContent(
+                recoveryBackupState: flow.recoveryBackupState,
+                loadSummary: loadSummary
+            ))
         }
     }
 }
@@ -1007,7 +1010,7 @@ struct OnboardingNostrContent: View {
                     set: { flow.customDraftChanged($0) }
                 ),
                 error: flow.state.customDraftError,
-                accessibilityPrefix: "onboarding.messageTransport",
+                accessibilityPrefix: "onboarding.services.messageDelivery",
                 onAdd: {
                     flow.tappedAddCustom()
                     if flow.state.customDraftError == nil {
@@ -1134,7 +1137,7 @@ struct OnboardingBlossomContent: View {
                     set: { flow.customDraftChanged($0) }
                 ),
                 error: flow.state.customDraftError,
-                accessibilityPrefix: "onboarding.blobTransport",
+                accessibilityPrefix: "onboarding.services.mediaDelivery",
                 onAdd: {
                     flow.tappedAddCustom()
                     if flow.state.customDraftError == nil {
@@ -1246,7 +1249,7 @@ struct OnboardingNotaryContent: View {
                     set: { flow.customDraftChanged($0) }
                 ),
                 error: flow.state.customDraftError,
-                accessibilityPrefix: "onboarding.notary",
+                accessibilityPrefix: "onboarding.services.groupIntegrity",
                 onAdd: {
                     flow.tappedAddCustom()
                     if flow.state.customDraftError == nil {
@@ -1510,6 +1513,10 @@ struct OnboardingRecoveryContent: View {
             RecoveryPhraseBackupView(flow: flow)
         }
         .onChange(of: flow.step) { old, step in
+            // recordOutcome writes to the flow's CURRENT step — same
+            // async-callback hazard OnboardingIdentityContent guards
+            // against; refuse to record from anywhere else.
+            guard onboarding.step == .recoveryPhrase else { return }
             // The reveal is what makes "I've written it down" honest —
             // record the outcome (unlocking the step's primary) the
             // moment the words are actually on screen. The backup
@@ -1562,6 +1569,11 @@ struct OnboardingSummaryRow: Identifiable, Sendable {
 /// and its own confirmation walk — not something to inline at the end
 /// of onboarding).
 struct OnboardingDoneContent: View {
+    /// How far the recovery backup got — drives the nudge below the
+    /// summary. This is the app-layer reader of the flow's
+    /// `recoveryBackupState`: a user who just revealed and verified
+    /// must not be told to go back their phrase up in Settings.
+    let recoveryBackupState: RecoveryBackupState
     let loadSummary: @MainActor () async -> [OnboardingSummaryRow]
     @State private var rows: [OnboardingSummaryRow] = []
 
@@ -1605,26 +1617,36 @@ struct OnboardingDoneContent: View {
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("onboarding.done.summary")
 
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: "key.viewfinder")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(SettingsTile.amber)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Back up your recovery phrase")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(OnymTokens.text)
-                    Text("Your identity key was created on this device and exists nowhere else. Back it up from Settings → Back Up Recovery Phrase so you can recover your account.")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(OnymTokens.text2)
-                        .lineSpacing(2)
+            // Gated on how far the recovery step actually got:
+            // hidden once revealed AND verified, softened to "finish
+            // verifying" after a reveal alone, the full nudge only
+            // when the step was deferred.
+            if recoveryBackupState != .verified {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "key.viewfinder")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(SettingsTile.amber)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(recoveryBackupState == .revealed
+                             ? "Finish verifying your recovery phrase"
+                             : "Back up your recovery phrase")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(OnymTokens.text)
+                        Text(recoveryBackupState == .revealed
+                             ? "You've seen the 12 words. Verify a few of them from Settings → Back Up Recovery Phrase to make sure your copy is right."
+                             : "Your identity key was created on this device and exists nowhere else. Back it up from Settings → Back Up Recovery Phrase so you can recover your account.")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(OnymTokens.text2)
+                            .lineSpacing(2)
+                    }
                 }
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(SettingsTile.amber.opacity(0.10),
+                            in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .padding(.top, 12)
+                .accessibilityIdentifier("onboarding.done.backup_nudge")
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(SettingsTile.amber.opacity(0.10),
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .padding(.top, 12)
-            .accessibilityIdentifier("onboarding.done.backup_nudge")
         }
         .task { rows = await loadSummary() }
     }
