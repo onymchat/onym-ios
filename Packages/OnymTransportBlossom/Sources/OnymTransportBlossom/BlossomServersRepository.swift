@@ -10,12 +10,12 @@ import Foundation
 ///   2. On init, if the persisted config is empty and the user hasn't
 ///      interacted yet, seed with `.seed` (Onym's official Blossom
 ///      server). Subsequent launches restore the user's actual list.
-///   3. App boot reads `currentEndpoints()` once and points the
-///      `URLSessionBlossomClient` base URL at the first configured
-///      server (uploads + downloads).
+///   3. The app's `DynamicBaseURLBlossomClient` re-reads
+///      `currentEndpoints()` per operation and targets the first
+///      configured server (uploads + downloads).
 ///   4. Settings → Transport → Blossom drives `addEndpoint` /
-///      `removeEndpoint`. Changes apply on the next app launch (V1
-///      doesn't rebuild the client live — Settings shows a banner).
+///      `removeEndpoint`. Changes apply to the very next
+///      upload/download — no relaunch needed.
 public actor BlossomServersRepository {
     private let store: any BlossomServersSelectionStore
     /// Fetches the Onym-published default list from GitHub. `nil` disables

@@ -51,14 +51,28 @@ public struct RelayerState: Equatable, Sendable {
 public actor RelayerRepository {
     private let fetcher: any KnownRelayersFetcher
     private let store: any RelayerSelectionStore
+    /// Seam over the first-launch auto-populate: consulted right
+    /// before a fetch would install the whole published list into an
+    /// untouched configuration. Returning `false` defers it — the
+    /// fetched list still lands in `knownList` (and the on-disk
+    /// cache), but the configuration and `hasUserInteracted` stay
+    /// untouched, so a later fetch (or an explicit user pick, e.g.
+    /// during onboarding) can still populate. Defaults to always-on,
+    /// preserving the historical behavior.
+    private let autoPopulatePolicy: @Sendable () -> Bool
 
     private var cached: RelayerState
     private var continuations: [UUID: AsyncStream<RelayerState>.Continuation] = [:]
     private var startTask: Task<Void, Never>?
 
-    public init(fetcher: any KnownRelayersFetcher, store: any RelayerSelectionStore) {
+    public init(
+        fetcher: any KnownRelayersFetcher,
+        store: any RelayerSelectionStore,
+        autoPopulatePolicy: @escaping @Sendable () -> Bool = { true }
+    ) {
         self.fetcher = fetcher
         self.store = store
+        self.autoPopulatePolicy = autoPopulatePolicy
         self.cached = RelayerState(
             configuration: store.loadConfiguration(),
             knownList: store.loadCachedKnownList(),
@@ -101,6 +115,10 @@ public actor RelayerRepository {
     /// `.random`, and `hasUserInteracted` flips to `true`. The flag is
     /// sticky — subsequent fetches never re-auto-populate, so a user
     /// who explicitly clears the list isn't fought by the next refresh.
+    /// `autoPopulatePolicy` gates the install: when it returns `false`
+    /// the fetched list only lands in `knownList` (configuration and
+    /// flag untouched), leaving the choice to a later fetch or an
+    /// explicit user pick.
     public func refresh() async throws {
         // Mark in-flight so the picker stops showing whatever stale
         // status it had and renders the spinner.
@@ -128,7 +146,7 @@ public actor RelayerRepository {
 
         let current = cached.configuration
         let updatedConfig: RelayerConfiguration
-        if !current.hasUserInteracted && !list.isEmpty {
+        if !current.hasUserInteracted && !list.isEmpty && autoPopulatePolicy() {
             updatedConfig = RelayerConfiguration(
                 endpoints: list,
                 primaryURL: nil,

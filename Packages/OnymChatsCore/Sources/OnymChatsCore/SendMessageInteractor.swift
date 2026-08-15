@@ -22,9 +22,13 @@ public actor SendMessageInteractor {
     private let messageRepository: MessageRepository
     private let groupRepository: GroupRepository
     private let blossomClient: any BlossomClient
-    /// Base URL stamped into `ChatImageAttachment.server` so receivers
-    /// fetch from the same server the sender uploaded to.
-    private let blossomServerURL: String
+    /// Resolves the base URL stamped into `ChatImageAttachment.server`
+    /// so receivers fetch from the same server the sender uploaded to.
+    /// A provider (not a frozen string) so it can re-read the current
+    /// Blossom configuration — a server change in Settings applies to
+    /// the next send, not the next launch. Sampled once per send so
+    /// all of one message's attachments agree.
+    private let resolveBlossomServerURL: @Sendable () async -> String
     /// Transcodes + extracts a poster from a picked video. Injected so
     /// the UI-test harness can supply a canned encoding instead of
     /// running AVFoundation on a real clip. Defaults to the real encoder.
@@ -86,7 +90,9 @@ public actor SendMessageInteractor {
             baseURL: URLSessionBlossomClient.defaultBaseURL,
             signerProvider: OnymNostrSignerProvider()
         ),
-        blossomServerURL: String = URLSessionBlossomClient.defaultBaseURL.absoluteString,
+        blossomServerURL: @escaping @Sendable () async -> String = {
+            URLSessionBlossomClient.defaultBaseURL.absoluteString
+        },
         videoEncoder: @escaping @Sendable (URL) async -> ChatVideoEncoder.Encoded? = ChatVideoEncoder.encode(fromVideoURL:),
         voiceEncoder: @escaping @Sendable (URL) async -> ChatVoiceEncoder.Encoded? = ChatVoiceEncoder.encode(fromAudioURL:),
         outbox: ChatOutbox? = nil,
@@ -97,7 +103,7 @@ public actor SendMessageInteractor {
         self.messageRepository = messageRepository
         self.groupRepository = groupRepository
         self.blossomClient = blossomClient
-        self.blossomServerURL = blossomServerURL
+        self.resolveBlossomServerURL = blossomServerURL
         self.outbox = outbox
         self.imageLoader = imageLoader
         self.videoEncoder = videoEncoder
@@ -324,6 +330,7 @@ public actor SendMessageInteractor {
             throw SendError.imageUploadFailed("encrypt: \(error)")
         }
 
+        let blossomServerURL = await resolveBlossomServerURL()
         let attachment = ChatImageAttachment(
             sha256: sealed.sha256Hex,
             mimeType: "image/jpeg",
@@ -460,6 +467,7 @@ public actor SendMessageInteractor {
             throw SendError.videoTooLarge
         }
 
+        let blossomServerURL = await resolveBlossomServerURL()
         let poster = ChatImageAttachment(
             sha256: posterSealed.sha256Hex,
             mimeType: "image/jpeg",
@@ -616,6 +624,7 @@ public actor SendMessageInteractor {
         // from both, which keeps the commitment describing exactly what
         // was sent rather than what was picked.
         var commitments: [ChatModerationProof.MediaCommitment] = []
+        let blossomServerURL = await resolveBlossomServerURL()
         for source in sources {
             switch source {
             case .image(let data):
@@ -786,6 +795,7 @@ public actor SendMessageInteractor {
             throw SendError.videoTooLarge
         }
 
+        let blossomServerURL = await resolveBlossomServerURL()
         let voiceAttachment = ChatVoiceAttachment(
             sha256: sealed.sha256Hex,
             mimeType: "audio/mp4",

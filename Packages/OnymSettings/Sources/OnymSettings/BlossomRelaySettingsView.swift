@@ -1,16 +1,19 @@
 import SwiftUI
 import OnymDesign
+import OnymDiscovery
 
 /// Settings → Transport → Blossom Relays. Lists configured Blossom
 /// media servers, lets the user add a custom URL or remove any entry,
 /// and surfaces a "Restore default" affordance that re-installs the
 /// Onym Official seed. Mirrors `NostrRelaySettingsView`.
 ///
-/// V1 limitation: changes apply on the next app launch — the Blossom
-/// client's base URL is chosen once at boot (the first configured
-/// server). A footnote at the bottom surfaces this.
+/// Changes apply immediately — the Blossom client re-reads the first
+/// configured server per upload/download, so the next media operation
+/// targets whatever is configured right now.
 struct BlossomRelaySettingsView: View {
     @State private var flow: BlossomRelaySettingsFlow
+    /// The catalog entry whose consent sheet is presented, if any.
+    @State private var consentEntry: AttributedCatalogEntry?
 
     init(flow: BlossomRelaySettingsFlow) {
         _flow = State(initialValue: flow)
@@ -26,6 +29,15 @@ struct BlossomRelaySettingsView: View {
                 )
                 configuredCard
 
+                DiscoveryCatalogSection(
+                    entries: flow.catalogEntries,
+                    activeConsent: { flow.activeConsent(for: $0) },
+                    consentedOffer: { flow.consentedOffer(for: $0) },
+                    tileSymbol: "photo.on.rectangle.angled",
+                    accessibilityPrefix: "blossom.catalog",
+                    onSelect: { consentEntry = $0 }
+                )
+
                 SettingsSectionLabel("ADD CUSTOM URL")
                 customURLCard
                 SettingsFootnote(
@@ -34,7 +46,7 @@ struct BlossomRelaySettingsView: View {
 
                 resetCard
                 SettingsFootnote(
-                    "Changes apply on the next app launch. Uploads target the first configured server."
+                    "Changes apply to the next upload or download. Uploads target the first configured server."
                 )
 
                 SettingsSectionLabel("SELF-HOST")
@@ -66,6 +78,13 @@ struct BlossomRelaySettingsView: View {
         // finishes on its own, so without this the continuation would
         // accumulate on every visit.
         .onDisappear { flow.stop() }
+        // Consent runs as a sheet; on dismiss the catalog badges
+        // refresh so a fresh consent shows immediately.
+        .sheet(item: $consentEntry, onDismiss: { flow.refreshCatalog() }) { entry in
+            if let discovery = flow.discovery {
+                ModuleConsentView(flow: discovery.makeConsentFlow(entry))
+            }
+        }
     }
 
     // MARK: - Configured list

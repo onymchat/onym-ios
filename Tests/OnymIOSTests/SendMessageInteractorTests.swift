@@ -93,7 +93,7 @@ final class SendMessageInteractorTests: XCTestCase {
             messageRepository: messages,
             groupRepository: groups,
             blossomClient: blossom,
-            blossomServerURL: "https://blossom.test",
+            blossomServerURL: { "https://blossom.test" },
             outbox: outbox
         )
     }
@@ -259,7 +259,7 @@ final class SendMessageInteractorTests: XCTestCase {
             messageRepository: messages,
             groupRepository: groups,
             blossomClient: blossom,
-            blossomServerURL: "https://blossom.test",
+            blossomServerURL: { "https://blossom.test" },
             videoEncoder: encoder,
             outbox: outbox
         )
@@ -368,7 +368,7 @@ final class SendMessageInteractorTests: XCTestCase {
             messageRepository: messages,
             groupRepository: groups,
             blossomClient: blossom,
-            blossomServerURL: "https://blossom.test",
+            blossomServerURL: { "https://blossom.test" },
             voiceEncoder: encoder,
             outbox: outbox
         )
