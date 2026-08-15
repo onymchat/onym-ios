@@ -13,8 +13,14 @@ import XCTest
 ///
 /// `language` flips Apple's `-AppleLanguages` / `-AppleLocale` user-defaults
 /// so the same test can exercise localized strings.
+///
+/// `discovery: true` adds `--ui-discovery`, wiring the discovery
+/// surface to offline fixture fakes (see `UITestDiscoveryFakes.swift`
+/// in the app target). Default `false` keeps discovery nil — the
+/// pre-existing `--ui-testing` behavior — so existing call sites and
+/// tests are untouched.
 enum AppLauncher {
-    static func launchFresh(language: String = "en") -> XCUIApplication {
+    static func launchFresh(discovery: Bool = false, language: String = "en") -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = [
             "--ui-testing",
@@ -23,6 +29,9 @@ enum AppLauncher {
             "-AppleLanguages", "(\(language))",
             "-AppleLocale", localeIdentifier(for: language),
         ]
+        if discovery {
+            app.launchArguments.append("--ui-discovery")
+        }
         app.launch()
         return app
     }

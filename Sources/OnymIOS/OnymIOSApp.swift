@@ -105,16 +105,35 @@ struct OnymIOSApp: App {
         // One fetcher instance serves both the repository and the seat
         // catalog below — same URLSession, same size caps; no second
         // session to configure and drift.
-        let discoveryFetcher = URLSessionDiscoveryFetcher()
+        let discoveryFetcher: any DiscoveryFetching
         let discoveryRepository: DiscoveryRepository?
         #if DEBUG
-        discoveryRepository = args.contains("--ui-loopback") || args.contains("--ui-testing")
-            ? nil
-            : DiscoveryRepository(
-                fetcher: discoveryFetcher,
-                store: UserDefaultsDiscoveryStore()
+        if args.contains("--ui-testing") && args.contains("--ui-discovery") {
+            // `--ui-discovery` (with `--ui-testing`): the discovery
+            // surface runs against byte-pinned fixture documents served
+            // offline — real signatures, real `DiscoveryTrust` checks,
+            // fixture-era `now` so the tests outlive the fixtures'
+            // expiry dates. See `UITestDiscoveryFakes.swift`. Without
+            // the flag, `--ui-testing` keeps discovery nil exactly as
+            // before, so every existing UI test is untouched.
+            let fetcher = UITestDiscoveryFetcher()
+            discoveryFetcher = fetcher
+            discoveryRepository = DiscoveryRepository(
+                fetcher: fetcher,
+                store: InMemoryDiscoveryStore(),
+                now: { UITestDiscoveryFixtures.now }
             )
+        } else {
+            discoveryFetcher = URLSessionDiscoveryFetcher()
+            discoveryRepository = args.contains("--ui-loopback") || args.contains("--ui-testing")
+                ? nil
+                : DiscoveryRepository(
+                    fetcher: discoveryFetcher,
+                    store: UserDefaultsDiscoveryStore()
+                )
+        }
         #else
+        discoveryFetcher = URLSessionDiscoveryFetcher()
         discoveryRepository = DiscoveryRepository(
             fetcher: discoveryFetcher,
             store: UserDefaultsDiscoveryStore()
