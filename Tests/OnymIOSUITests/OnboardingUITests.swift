@@ -1,18 +1,21 @@
 import XCTest
 
 /// End-to-end walk of the first-launch onboarding cover under
-/// `--ui-onboarding` + `--ui-discovery`: all seven steps, offline and
+/// `--ui-onboarding` + `--ui-discovery`: the redesigned flow —
+/// welcome → identity → services (through the "Choose services
+/// myself" hub) → moderation → recovery phrase → done — offline and
 /// deterministic.
 ///
 /// The discovery fakes serve the byte-pinned OnymDiscovery conformance
 /// fixtures with the repository clock parked in the fixtures' validity
 /// window (2026-08-14; snapshot expiry 2026-09-12 can't rot the test),
-/// so step 2's TOFU confirm and step 3's module-consent walk run the
-/// full production trust pipeline. The moderation fakes serve the
-/// canned UITest Authority; `--moderation-needs-consent` starts the
-/// mandate store empty so step 6 exercises the real pick → review →
-/// sign path (mandatory: the directory has an entry, so Continue stays
-/// locked until the mandate is signed).
+/// so the hub's Directory TOFU confirm and Message-delivery
+/// module-consent walk run the full production trust pipeline. The
+/// moderation fakes serve the canned UITest Authority;
+/// `--moderation-needs-consent` starts the mandate store empty so the
+/// Reports & safety step exercises the real pick → review → sign path
+/// (mandatory: the directory has an entry, so Continue stays locked
+/// until the mandate is signed).
 ///
 /// A second launch WITHOUT `--reset-keychain` then proves persistence:
 /// the completion flag survives, and the cover never re-presents even
@@ -31,7 +34,7 @@ final class OnboardingUITests: XCTestCase {
     private let courierEntryId =
         "onym:component:onym-discovery|public-all-seats|onym:component:onym-courier"
 
-    func test_onboardingWalk_allSevenSteps_thenNeverAgain() throws {
+    func test_onboardingWalk_customServicesPath_thenNeverAgain() throws {
         let app = XCUIApplication()
         app.launchArguments = [
             "--ui-testing",
@@ -47,17 +50,34 @@ final class OnboardingUITests: XCTestCase {
 
         let onboarding = OnboardingScreen(app: app)
 
-        // Step 1 — Welcome. Unskippable: no Skip affordance.
+        // Step 1 — Welcome. Unskippable: no Skip affordance; the
+        // primary reads "Create my identity".
         XCTAssertTrue(onboarding.title("welcome").waitForExistence(timeout: 10),
                       "onboarding cover never presented. Hierarchy:\n\(app.debugDescription)")
         XCTAssertFalse(onboarding.skip("welcome").exists,
                        "welcome must not offer Skip")
         onboarding.continueFrom("welcome")
 
-        // Step 2 — Discovery TOFU confirm. The seeded default source is
-        // unpinned; Verify & Confirm fetches the fixture manifest and
-        // shows the fixtures' operator-key fingerprint, byte-exact.
-        XCTAssertTrue(onboarding.title("discoveryConfirm").waitForExistence(timeout: 5))
+        // Step 2 — Identity ("Making your keys", 1 of 3). The
+        // checklist surfaces the silent bootstrap; informational.
+        XCTAssertTrue(onboarding.title("identity").waitForExistence(timeout: 5))
+        XCTAssertFalse(onboarding.skip("identity").exists,
+                       "identity must not offer Skip")
+        onboarding.continueFrom("identity")
+
+        // Step 3 — Services (2 of 3). The recommended card is
+        // preselected; take the "Choose services myself" branch so the
+        // walk exercises the hub and every seat surface.
+        XCTAssertTrue(onboarding.title("services").waitForExistence(timeout: 5))
+        XCTAssertTrue(onboarding.servicesRecommendedCard.waitForExistence(timeout: 5),
+                      "recommended-setup card never appeared")
+        onboarding.servicesCustomCard.tap()
+        XCTAssertTrue(onboarding.hubDone.waitForExistence(timeout: 5),
+                      "services hub never presented. Hierarchy:\n\(app.debugDescription)")
+
+        // Hub → Directory first: TOFU-confirm the seeded source so the
+        // other seats' catalogs have a pinned provider to draw from.
+        onboarding.hubRow("directory").tap()
         XCTAssertTrue(onboarding.discoveryConfirmButton.waitForExistence(timeout: 5),
                       "seeded source's Verify & Confirm never appeared")
         onboarding.discoveryConfirmButton.tap()
@@ -68,17 +88,17 @@ final class OnboardingUITests: XCTestCase {
         onboarding.discoveryPinButton.tap()
         XCTAssertTrue(onboarding.discoveryAdded.waitForExistence(timeout: 5),
                       "provider-confirmed state never appeared")
-        onboarding.continueFrom("discoveryConfirm")
+        onboarding.hubBack()
 
-        // Step 3 — Message transport. The seeded Onym Official relay is
-        // preselected; the pinned provider's catalog offers the fixture
+        // Hub → Message delivery. The seeded Onym Official relay is
+        // in use; the pinned provider's catalog offers the fixture
         // courier module — consent to it through the same sheet
         // Settings uses (offer preselected: courier-free-v1 is free).
-        XCTAssertTrue(onboarding.title("messageTransport").waitForExistence(timeout: 5))
+        onboarding.hubRow("messageDelivery").tap()
         XCTAssertTrue(
             onboarding.configuredRow(step: "messageTransport", url: "wss://nostr.onym.app")
                 .waitForExistence(timeout: 5),
-            "seeded default relay never appeared on the message-transport step"
+            "seeded default relay never appeared on the message-delivery screen"
         )
         let courierRow = onboarding.catalogRow(step: "messageTransport", entryId: courierEntryId)
         XCTAssertTrue(courierRow.waitForExistence(timeout: 10),
@@ -86,31 +106,29 @@ final class OnboardingUITests: XCTestCase {
         courierRow.tap()
         XCTAssertTrue(onboarding.consentAccept.waitForExistence(timeout: 5),
                       "module-consent sheet never appeared")
-        // The reviewed manifest carries one free offer; Accept unlocks
-        // once the review landed and the offer is preselected.
         XCTAssertTrue(waitUntilEnabled(onboarding.consentAccept, timeout: 5),
                       "Accept never became enabled")
         onboarding.consentAccept.tap()
         XCTAssertTrue(onboarding.consentDone.waitForExistence(timeout: 5),
                       "module-consent done state never appeared")
         onboarding.consentDismiss.tap()
-        onboarding.continueFrom("messageTransport")
+        onboarding.hubBack()
 
-        // Step 4 — Blob transport. The seeded Onym Official Blossom
+        // Hub → Media delivery. The seeded Onym Official Blossom
         // server renders as the ACTIVE pick; keep it.
-        XCTAssertTrue(onboarding.title("blobTransport").waitForExistence(timeout: 5))
+        onboarding.hubRow("mediaDelivery").tap()
         XCTAssertTrue(
             onboarding.configuredRow(step: "blobTransport", url: "https://blossom.onym.app")
                 .waitForExistence(timeout: 5),
-            "seeded ACTIVE Blossom endpoint never appeared on the blob-transport step"
+            "seeded ACTIVE Blossom endpoint never appeared on the media-delivery screen"
         )
-        onboarding.continueFrom("blobTransport")
+        onboarding.hubBack()
 
-        // Step 5 — Notary. Auto-populate is suppressed during
+        // Hub → Group integrity. Auto-populate is suppressed during
         // onboarding, so the configuration starts empty and the
         // published list (UITest fixture fetcher) is the offer; add
         // the testnet relayer explicitly.
-        XCTAssertTrue(onboarding.title("notary").waitForExistence(timeout: 5))
+        onboarding.hubRow("groupIntegrity").tap()
         let testnetRow = onboarding.notaryPublishedRow(url: "https://uitest-testnet-relayer.example")
         XCTAssertTrue(testnetRow.waitForExistence(timeout: 10),
                       "published notary row never appeared. Hierarchy:\n\(app.debugDescription)")
@@ -122,11 +140,15 @@ final class OnboardingUITests: XCTestCase {
             ).waitForExistence(timeout: 5),
             "added notary never appeared in the configured list"
         )
-        onboarding.continueFrom("notary")
+        onboarding.hubBack()
 
-        // Step 6 — Moderation. Directory has the UITest Authority, so
-        // the step is MANDATORY: Continue stays disabled and Skip never
-        // appears until a mandate is signed.
+        // Close the hub — the walk configured three seats by hand.
+        onboarding.hubDone.tap()
+        onboarding.continueFrom("services")
+
+        // Step 4 — Reports & safety (3 of 3). Directory has the UITest
+        // Authority, so the step is MANDATORY: Continue stays disabled
+        // and Skip never appears until a mandate is signed.
         XCTAssertTrue(onboarding.title("moderation").waitForExistence(timeout: 5))
         let authorityRow = onboarding.moderationAuthorityRow(
             componentId: "onym:component:uitest-authority"
@@ -148,8 +170,22 @@ final class OnboardingUITests: XCTestCase {
                       "mandate-signed state never appeared")
         onboarding.continueFrom("moderation")
 
-        // Step 7 — Done. Summary card renders; Start completes and the
-        // cover dismisses onto the Chats tab.
+        // Step 5 — Recovery phrase. Unnumbered; the deferral reads
+        // "Remind me later" (the only skippable step) and the reveal
+        // affordance is present. The full reveal + verify quiz has its
+        // own coverage in OnymRecovery; here the walk advances via the
+        // primary ("I've written it down").
+        XCTAssertTrue(onboarding.title("recoveryPhrase").waitForExistence(timeout: 5))
+        XCTAssertTrue(onboarding.recoveryStatus.waitForExistence(timeout: 5),
+                      "recovery status card never appeared")
+        XCTAssertTrue(onboarding.recoveryReveal.exists,
+                      "reveal affordance never appeared")
+        XCTAssertTrue(onboarding.skip("recoveryPhrase").exists,
+                      "recovery phrase must offer the Remind-me-later deferral")
+        onboarding.continueFrom("recoveryPhrase")
+
+        // Step 6 — Done. Summary card renders; "Start messaging"
+        // completes and the cover dismisses onto the Chats tab.
         XCTAssertTrue(onboarding.title("done").waitForExistence(timeout: 5))
         XCTAssertTrue(onboarding.doneSummary.waitForExistence(timeout: 5),
                       "done summary card never appeared")

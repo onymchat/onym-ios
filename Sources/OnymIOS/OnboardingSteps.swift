@@ -471,6 +471,7 @@ struct OnboardingServicesHub: View {
                     OnboardingSectionLabel(text: "NEEDED TO SEND MESSAGES")
                     VStack(spacing: 0) {
                         hubRow(
+                            id: "messageDelivery",
                             symbol: "antenna.radiowaves.left.and.right",
                             color: OnymAccent.purple.color,
                             title: "Message delivery",
@@ -484,6 +485,7 @@ struct OnboardingServicesHub: View {
                         }
                         divider
                         hubRow(
+                            id: "mediaDelivery",
                             symbol: "photo.on.rectangle.angled",
                             color: OnymAccent.pink.color,
                             title: "Media delivery",
@@ -497,6 +499,7 @@ struct OnboardingServicesHub: View {
                         }
                         divider
                         hubRow(
+                            id: "directory",
                             symbol: "magnifyingglass",
                             color: OnymAccent.blue.color,
                             title: "Directory",
@@ -514,6 +517,7 @@ struct OnboardingServicesHub: View {
                     OnboardingSectionLabel(text: "OPTIONAL")
                     VStack(spacing: 0) {
                         hubRow(
+                            id: "groupIntegrity",
                             symbol: "checkmark.seal",
                             color: OnymAccent.green.color,
                             title: "Group integrity",
@@ -566,6 +570,7 @@ struct OnboardingServicesHub: View {
     }
 
     private func hubRow(
+        id: String,
         symbol: String,
         color: Color,
         title: LocalizedStringKey,
@@ -600,6 +605,7 @@ struct OnboardingServicesHub: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("onboarding.services.hub.\(id)")
     }
 }
 
