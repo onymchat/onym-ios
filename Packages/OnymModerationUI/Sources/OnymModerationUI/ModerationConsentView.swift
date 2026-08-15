@@ -18,19 +18,8 @@ public struct ModerationConsentView: View {
     public var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    switch flow.state.step {
-                    case .loadingDirectory:
-                        loading
-                    case .pickingAuthority:
-                        picker
-                    case .reviewingManifest, .signing:
-                        review
-                    case .done:
-                        done
-                    }
-                }
-                .padding(.bottom, 32)
+                ModerationConsentContent(flow: flow)
+                    .padding(.bottom, 32)
             }
             .background(OnymTokens.surface.ignoresSafeArea())
             .navigationTitle(navigationTitle)
@@ -69,6 +58,41 @@ public struct ModerationConsentView: View {
         switch flow.state.step {
         case .done: return "Done"
         default: return "Cancel"
+        }
+    }
+
+}
+
+/// The consent surface's step bodies (directory pick → manifest review
+/// → sign → done), extracted from `ModerationConsentView` so the
+/// first-launch onboarding moderation step can embed the exact same
+/// surface — same copy, same accessibility identifiers, same flow —
+/// inside its own scaffold instead of a second implementation.
+/// `ModerationConsentView` remains the standalone presentation
+/// (NavigationStack + dismissal rules) over this content.
+///
+/// The embedder owns the flow's lifecycle: call `flow.start()` /
+/// `flow.stop()` around this view's appearance the way
+/// `ModerationConsentView` does.
+public struct ModerationConsentContent: View {
+    private let flow: ModerationConsentFlow
+
+    public init(flow: ModerationConsentFlow) {
+        self.flow = flow
+    }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            switch flow.state.step {
+            case .loadingDirectory:
+                loading
+            case .pickingAuthority:
+                picker
+            case .reviewingManifest, .signing:
+                review
+            case .done:
+                done
+            }
         }
     }
 

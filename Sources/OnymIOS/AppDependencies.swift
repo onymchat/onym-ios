@@ -10,6 +10,7 @@ import OnymSettings
 import OnymModerationUI
 import OnymModeration
 import OnymDiscovery
+import OnymOnboarding
 
 /// App-wide composition root. Constructed exactly once by `OnymIOSApp`
 /// and threaded down to views via `RootView`. Each member is a factory
@@ -105,4 +106,18 @@ struct AppDependencies {
     /// renders without the discovery stack (nil under the UI-test
     /// harness — same pattern as the moderation factories).
     let makeDiscoverySettingsFlow: (@MainActor () -> DiscoverySettingsFlow)?
+    /// First-launch onboarding flow factory. Non-nil exactly when THIS
+    /// launch should onboard: `OnboardingGate.shouldOnboard` said yes
+    /// (no completion flag, no existing-user state), and the UI-test
+    /// harness didn't veto it (`--ui-testing` keeps this nil unless
+    /// `--ui-onboarding` opts in, so every existing UI test launches
+    /// exactly as before). RootView calls it once and presents the
+    /// cover while the returned flow is incomplete.
+    let makeOnboardingFlow: (@MainActor () -> OnboardingFlow)?
+    /// Step-content slot for `OnboardingView`: the app-layer surfaces
+    /// (discovery TOFU confirm, catalog pickers, the moderation
+    /// mandate flow) pre-bound to the same repositories and pickers
+    /// the Settings screens use. nil falls back to the package's
+    /// built-in step bodies.
+    let makeOnboardingStepContent: (@MainActor (OnboardingFlow, OnboardingStep) -> AnyView?)?
 }

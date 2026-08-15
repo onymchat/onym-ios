@@ -205,6 +205,20 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertEqual(flow.outcomes[.done], .notApplicable)
     }
 
+    /// `isCompleted` is the presenter's dismissal signal: false for the
+    /// whole walk, true only after `complete()` on the Done step — and
+    /// never from a mid-sequence `complete()` call.
+    func testIsCompletedFlipsOnlyFromDone() async {
+        let flow = await makeResolvedFlow()
+        XCTAssertFalse(flow.isCompleted)
+        flow.advance()
+        flow.complete() // mid-sequence — refused
+        XCTAssertFalse(flow.isCompleted)
+        while flow.step != .done { flow.advance() }
+        flow.complete()
+        XCTAssertTrue(flow.isCompleted)
+    }
+
     func testCompleteBeforeDoneIsANoOp() {
         var completedCalls = 0
         let flow = makeFlow(onCompleted: { completedCalls += 1 })

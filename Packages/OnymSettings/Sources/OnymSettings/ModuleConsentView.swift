@@ -9,15 +9,19 @@ import OnymModerationUI
 /// relationship, the operator key fingerprint, the offers, the linked
 /// terms when the operator published any, and the exact manifest hash
 /// the acceptance pins. One explicit accept button.
-struct ModuleConsentView: View {
+///
+/// Public since the onboarding wiring: the first-launch transport /
+/// blob / notary steps present the same consent sheet the Settings
+/// pickers do, so catalog picks consent identically in both places.
+public struct ModuleConsentView: View {
     @State private var flow: ModuleConsentFlow
     @Environment(\.dismiss) private var dismiss
 
-    init(flow: ModuleConsentFlow) {
+    public init(flow: ModuleConsentFlow) {
         _flow = State(initialValue: flow)
     }
 
-    var body: some View {
+    public var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {

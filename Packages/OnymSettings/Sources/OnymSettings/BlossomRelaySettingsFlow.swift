@@ -80,7 +80,9 @@ public final class BlossomRelaySettingsFlow {
         catalog.consentedOffer(for: entry)
     }
 
-    func stop() {
+    /// Public like `RelayerSettingsFlow.stop()` — the onboarding
+    /// blob-transport step drives this flow's lifecycle too.
+    public func stop() {
         snapshotTask?.cancel()
         snapshotTask = nil
         catalog.stop()

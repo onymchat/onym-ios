@@ -15,6 +15,7 @@ import OnymModeration
 import OnymModerationUI
 import OnymDiscovery
 import OnymFoundation
+import OnymOnboarding
 
 @main
 struct OnymIOSApp: App {
@@ -177,13 +178,63 @@ struct OnymIOSApp: App {
             }
         }
 
+        // Onboarding gate — decided ONCE per launch, before the relayer
+        // repository exists because its first-launch auto-populate
+        // policy depends on the decision. `shouldOnboard` is a pure
+        // read: completed flag OR existing-user state (any
+        // `hasUserInteracted`, or a moderation mandate) means no
+        // onboarding — users who predate the flow are grandfathered,
+        // never re-onboarded (see `OnboardingGate`).
+        let onboardingStore = UserDefaultsOnboardingStore()
+        let shouldOnboard: Bool
+        #if DEBUG
+        if args.contains("--ui-testing") {
+            // `--reset-keychain` starts each UI test from the same
+            // first-launch shape — the onboarding flag resets through
+            // the store rather than a hardcoded key (OnboardingStore
+            // contract).
+            if args.contains("--reset-keychain") {
+                onboardingStore.resetOnboarding()
+            }
+            // The UI harness never onboards unless `--ui-onboarding`
+            // opts in, so every existing UI test launches exactly as
+            // before. Under the opt-in the fakes are a fresh world, so
+            // the existing-user probe answers false by construction.
+            shouldOnboard = args.contains("--ui-onboarding")
+                && OnboardingGate.shouldOnboard(store: onboardingStore, isExistingUser: { false })
+        } else {
+            shouldOnboard = OnboardingGate.shouldOnboard(
+                store: onboardingStore,
+                isExistingUser: { OnboardingLaunch.isExistingUser() }
+            )
+        }
+        #else
+        shouldOnboard = OnboardingGate.shouldOnboard(
+            store: onboardingStore,
+            isExistingUser: { OnboardingLaunch.isExistingUser() }
+        )
+        #endif
+        // While onboarding is incomplete, a background relayer fetch
+        // must not install the whole published list over the notary
+        // step's empty configuration — the step IS the choice. The
+        // policy re-reads the flag per fetch pass, so the very first
+        // refresh after `complete()` (kicked by the flow's onCompleted)
+        // installs the defaults when the user skipped the step.
+        let relayerAutoPopulatePolicy: @Sendable () -> Bool
+        if shouldOnboard {
+            relayerAutoPopulatePolicy = { onboardingStore.hasCompletedOnboarding() }
+        } else {
+            relayerAutoPopulatePolicy = { true }
+        }
+
         let relayerRepository: RelayerRepository
         let contractsRepository: ContractsRepository
         #if DEBUG
         if args.contains("--ui-testing") {
             relayerRepository = RelayerRepository(
                 fetcher: UITestKnownRelayersFetcher(),
-                store: UITestRelayerSelectionStore()
+                store: UITestRelayerSelectionStore(),
+                autoPopulatePolicy: relayerAutoPopulatePolicy
             )
             contractsRepository = ContractsRepository(
                 fetcher: UITestContractsManifestFetcher(),
@@ -196,7 +247,8 @@ struct OnymIOSApp: App {
                     catalog: discoveryCatalog,
                     makeConsentGate: makeDiscoveryConsentGate
                 ),
-                store: UserDefaultsRelayerSelectionStore()
+                store: UserDefaultsRelayerSelectionStore(),
+                autoPopulatePolicy: relayerAutoPopulatePolicy
             )
             contractsRepository = ContractsRepository(
                 fetcher: GitHubReleasesContractsManifestFetcher(),
@@ -210,7 +262,8 @@ struct OnymIOSApp: App {
                 catalog: discoveryCatalog,
                 makeConsentGate: makeDiscoveryConsentGate
             ),
-            store: UserDefaultsRelayerSelectionStore()
+            store: UserDefaultsRelayerSelectionStore(),
+            autoPopulatePolicy: relayerAutoPopulatePolicy
         )
         contractsRepository = ContractsRepository(
             fetcher: GitHubReleasesContractsManifestFetcher(),
@@ -831,6 +884,126 @@ struct OnymIOSApp: App {
             )
         }
 
+        // Settings-flow factories, declared once because the
+        // onboarding steps reuse them VERBATIM: a step surface and its
+        // Settings screen are the same flow over the same repository +
+        // catalog picker, so a choice consents and applies identically
+        // in both places.
+        let makeRelayerSettingsFlow: @MainActor () -> RelayerSettingsFlow = { @MainActor in
+            RelayerSettingsFlow(repository: relayerRepository, discovery: relayerCatalogPicker)
+        }
+        let makeNostrRelaySettingsFlow: @MainActor () -> NostrRelaySettingsFlow = { @MainActor in
+            NostrRelaySettingsFlow(repository: nostrRelaysRepository, discovery: nostrCatalogPicker)
+        }
+        let makeBlossomRelaySettingsFlow: @MainActor () -> BlossomRelaySettingsFlow = { @MainActor in
+            BlossomRelaySettingsFlow(repository: blossomServersRepository, discovery: blossomCatalogPicker)
+        }
+        let makeModerationConsentFlow: @MainActor (ModerationConsentFlow.Mode) -> ModerationConsentFlow = { @MainActor mode in
+            ModerationConsentFlow(
+                mode: mode,
+                repository: moderationRepository,
+                onConsented: { moderationGateFlow.consentCompleted() }
+            )
+        }
+        let makeDiscoverySettingsFlow = discoveryRepository.map { repo in
+            { @MainActor in DiscoverySettingsFlow(repository: repo) }
+        }
+
+        // First-launch onboarding factories. Both nil when this launch
+        // doesn't onboard (flag set, existing user, or the UI-test
+        // harness without `--ui-onboarding`).
+        let makeOnboardingFlow: (@MainActor () -> OnboardingFlow)?
+        let makeOnboardingStepContent: (@MainActor (OnboardingFlow, OnboardingStep) -> AnyView?)?
+        if shouldOnboard {
+            makeOnboardingFlow = { @MainActor in
+                OnboardingFlow(
+                    store: onboardingStore,
+                    moderationDirectoryNonEmpty: {
+                        // The flow fails closed until this answers; a
+                        // failed refresh falls back to whatever the
+                        // repository already holds (cached directory
+                        // or empty).
+                        try? await moderationRepository.refresh()
+                        return await !moderationRepository.currentState().authorities.isEmpty
+                    },
+                    onCompleted: { @MainActor in
+                        // The moderation step signed through the same
+                        // repository the gate watches; poke the gate so
+                        // it re-checks immediately instead of
+                        // re-prompting — same call the standalone
+                        // consent cover makes.
+                        moderationGateFlow.consentCompleted()
+                        // Completion flips the relayer auto-populate
+                        // policy back on — install the published notary
+                        // defaults now if the user skipped that step.
+                        Task { try? await relayerRepository.refresh() }
+                    }
+                )
+            }
+            let builder = OnboardingStepContentBuilder(
+                makeDiscoveryFlow: makeDiscoverySettingsFlow,
+                makeNostrFlow: makeNostrRelaySettingsFlow,
+                nostrPicker: nostrCatalogPicker,
+                makeBlossomFlow: makeBlossomRelaySettingsFlow,
+                blossomPicker: blossomCatalogPicker,
+                makeRelayerFlow: makeRelayerSettingsFlow,
+                relayerPicker: relayerCatalogPicker,
+                makeModerationConsentFlow: makeModerationConsentFlow,
+                loadSummary: { @MainActor in
+                    // The Done step's summary is read from the
+                    // repositories, not the walk's outcomes — what the
+                    // app will actually use is the checkable claim.
+                    var rows: [OnboardingSummaryRow] = []
+                    if let discoveryRepository {
+                        let state = await discoveryRepository.currentState()
+                        if let source = state.sources.first {
+                            rows.append(OnboardingSummaryRow(
+                                id: "discovery",
+                                title: String(localized: "Service Directory"),
+                                value: source.source.userLabel,
+                                detail: source.source.operatorKeyFingerprint
+                            ))
+                        }
+                    }
+                    let nostr = await nostrRelaysRepository.currentEndpoints().first
+                    rows.append(OnboardingSummaryRow(
+                        id: "messageTransport",
+                        title: String(localized: "Message Transport"),
+                        value: nostr?.name ?? String(localized: "None configured"),
+                        detail: nostr?.url.absoluteString
+                    ))
+                    let blossom = await blossomServersRepository.currentEndpoints().first
+                    rows.append(OnboardingSummaryRow(
+                        id: "blobTransport",
+                        title: String(localized: "File Storage"),
+                        value: blossom?.name ?? String(localized: "None configured"),
+                        detail: blossom?.url.absoluteString
+                    ))
+                    let relayer = await relayerRepository.currentState().configuration.endpoints.first
+                    rows.append(OnboardingSummaryRow(
+                        id: "notary",
+                        title: String(localized: "Notary"),
+                        value: relayer?.name ?? String(localized: "Published defaults"),
+                        detail: relayer?.url.absoluteString
+                    ))
+                    let mandate = await moderationRepository.currentState().activeMandate
+                    rows.append(OnboardingSummaryRow(
+                        id: "moderation",
+                        title: String(localized: "Moderation"),
+                        value: mandate?.authorityName ?? String(localized: "None"),
+                        detail: mandate?.mandate.manifestHash
+                    ))
+                    return rows
+                }
+            )
+            makeOnboardingStepContent = { @MainActor flow, step in
+                builder.content(for: step, flow: flow)
+            }
+        } else {
+            makeOnboardingFlow = nil
+            makeOnboardingStepContent = nil
+        }
+
         self.dependencies = AppDependencies(
             makeRecoveryPhraseBackupFlow: { @MainActor in
                 RecoveryPhraseBackupFlow(
@@ -838,15 +1011,9 @@ struct OnymIOSApp: App {
                     authenticator: authenticator
                 )
             },
-            makeRelayerSettingsFlow: { @MainActor in
-                RelayerSettingsFlow(repository: relayerRepository, discovery: relayerCatalogPicker)
-            },
-            makeNostrRelaySettingsFlow: { @MainActor in
-                NostrRelaySettingsFlow(repository: nostrRelaysRepository, discovery: nostrCatalogPicker)
-            },
-            makeBlossomRelaySettingsFlow: { @MainActor in
-                BlossomRelaySettingsFlow(repository: blossomServersRepository, discovery: blossomCatalogPicker)
-            },
+            makeRelayerSettingsFlow: makeRelayerSettingsFlow,
+            makeNostrRelaySettingsFlow: makeNostrRelaySettingsFlow,
+            makeBlossomRelaySettingsFlow: makeBlossomRelaySettingsFlow,
             makeAnchorsPickerFlow: { @MainActor in
                 AnchorsPickerFlow(repository: contractsRepository)
             },
@@ -925,13 +1092,7 @@ struct OnymIOSApp: App {
                 await groupAvatarBroadcaster.setName(groupIDHex: groupIDHex, name: name)
             },
             moderationGateFlow: moderationGateFlow,
-            makeModerationConsentFlow: { @MainActor mode in
-                ModerationConsentFlow(
-                    mode: mode,
-                    repository: moderationRepository,
-                    onConsented: { moderationGateFlow.consentCompleted() }
-                )
-            },
+            makeModerationConsentFlow: makeModerationConsentFlow,
             makeModerationSettingsFlow: { @MainActor in
                 ModerationSettingsFlow(
                     repository: moderationRepository,
@@ -996,9 +1157,9 @@ struct OnymIOSApp: App {
                     }
                 )
             },
-            makeDiscoverySettingsFlow: discoveryRepository.map { repo in
-                { @MainActor in DiscoverySettingsFlow(repository: repo) }
-            }
+            makeDiscoverySettingsFlow: makeDiscoverySettingsFlow,
+            makeOnboardingFlow: makeOnboardingFlow,
+            makeOnboardingStepContent: makeOnboardingStepContent
         )
     }
 
