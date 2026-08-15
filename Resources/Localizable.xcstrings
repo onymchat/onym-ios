@@ -6447,23 +6447,6 @@
         }
       }
     },
-    "Adding more than one service in a category gives you a fallback — Onym uses the fastest one that answers.": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Adding more than one service in a category gives you a fallback — Onym uses the fastest one that answers."
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Несколько сервисов в категории дают запасной вариант — Onym использует самый быстрый из отвечающих."
-          }
-        }
-      }
-    },
     "Use the recommended setup instead": {
       "extractionState": "manual",
       "localizations": {
@@ -6732,6 +6715,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Вы увидели 12 слов. Подтвердите несколько из них в Настройки → Резервная копия фразы восстановления, чтобы убедиться, что запись верна."
+          }
+        }
+      }
+    },
+    "More than one service works differently per category: relays all carry every message together, extra media hosts are trusted download sources, and each new group picks its notary from your list.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "More than one service works differently per category: relays all carry every message together, extra media hosts are trusted download sources, and each new group picks its notary from your list."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Несколько сервисов работают по-разному в каждой категории: релеи используются все вместе, дополнительные медиасервисы — доверенные источники для скачивания, а нотариус для каждой новой группы выбирается из вашего списка."
           }
         }
       }
