@@ -6464,23 +6464,6 @@
         }
       }
     },
-    "Anything you already added here stays configured — remove it from the lists above if you've changed your mind.": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Anything you already added here stays configured — remove it from the lists above if you've changed your mind."
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Всё, что вы уже добавили, остаётся настроенным — удалите из списков выше, если передумали."
-          }
-        }
-      }
-    },
     "No relay configured yet. Add one below, or go back to keep the default.": {
       "extractionState": "manual",
       "localizations": {
@@ -7127,6 +7110,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Несколько сервисов работают по-разному в каждой категории: релеи используются все вместе, дополнительные медиасервисы — доверенные источники для скачивания, а нотариус для каждой новой группы выбирается из вашего списка."
+          }
+        }
+      }
+    },
+    "Anything you already added here stays configured — you can remove it later in Settings → Services.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anything you already added here stays configured — you can remove it later in Settings → Services."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Всё, что вы уже добавили, остаётся настроенным — удалить это можно позже в Настройки → Сервисы."
           }
         }
       }

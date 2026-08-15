@@ -330,7 +330,12 @@ struct OnboardingIdentityContent: View {
         }
         .task(id: attempt) {
             phase = .checking
-            if await identityReady() {
+            let ready = await identityReady()
+            // A cancelled probe (navigation tore the task down while
+            // `try?` inside identityReady swallowed CancellationError)
+            // must not masquerade as a bootstrap failure.
+            guard !Task.isCancelled else { return }
+            if ready {
                 phase = .ready
                 // Unlocks the step's Continue — nothing was decided
                 // here, but the gate needs proof the keys exist.
@@ -662,7 +667,7 @@ struct OnboardingServicesHub: View {
                     // This switches the selection back, it does NOT
                     // undo anything — say so, or the affordance reads
                     // as a revert.
-                    Text("Anything you already added here stays configured — remove it from the lists above if you've changed your mind.")
+                    Text("Anything you already added here stays configured — you can remove it later in Settings → Services.")
                         .font(.system(size: 11.5))
                         .foregroundStyle(OnymTokens.text3)
                         .multilineTextAlignment(.center)
@@ -1577,7 +1582,13 @@ struct OnboardingModerationContent: View {
 /// Settings nudge behavior.
 struct OnboardingRecoveryContent: View {
     let onboarding: OnboardingFlow
-    @State private var flow: RecoveryPhraseBackupFlow
+    private let makeBackupFlow: @MainActor () -> RecoveryPhraseBackupFlow
+    /// Created fresh on every presentation and released on dismiss —
+    /// the flow holds the plaintext phrase once revealed, so it must
+    /// not outlive the sheet: a retained `.reveal` step would let
+    /// "View it again" re-show the words without the biometric gate.
+    /// Every entry starts at Intro and re-authenticates.
+    @State private var flow: RecoveryPhraseBackupFlow?
     @State private var showBackup = false
 
     /// Derived from the flow, never view-local — the step content is
@@ -1589,10 +1600,10 @@ struct OnboardingRecoveryContent: View {
 
     init(
         onboarding: OnboardingFlow,
-        makeBackupFlow: @MainActor () -> RecoveryPhraseBackupFlow
+        makeBackupFlow: @escaping @MainActor () -> RecoveryPhraseBackupFlow
     ) {
         self.onboarding = onboarding
-        _flow = State(initialValue: makeBackupFlow())
+        self.makeBackupFlow = makeBackupFlow
     }
 
     var body: some View {
@@ -1618,6 +1629,7 @@ struct OnboardingRecoveryContent: View {
             .accessibilityIdentifier("onboarding.recoveryPhrase.status")
 
             SettingsPrimaryButton(sawPhrase || backedUp ? "View it again" : "Reveal my recovery phrase") {
+                flow = makeBackupFlow()
                 showBackup = true
             }
             .padding(.top, 12)
@@ -1629,10 +1641,16 @@ struct OnboardingRecoveryContent: View {
                 .lineSpacing(2)
                 .padding(.top, 12)
         }
-        .sheet(isPresented: $showBackup) {
-            RecoveryPhraseBackupView(flow: flow)
+        .sheet(isPresented: $showBackup, onDismiss: {
+            // Release the flow — and with it the plaintext phrase —
+            // the moment the sheet goes away, however it was closed.
+            flow = nil
+        }) {
+            if let flow {
+                RecoveryPhraseBackupView(flow: flow)
+            }
         }
-        .onChange(of: flow.step) { old, step in
+        .onChange(of: flow?.step) { old, step in
             // recordOutcome writes to the flow's CURRENT step — same
             // async-callback hazard OnboardingIdentityContent guards
             // against; refuse to record from anywhere else.
@@ -1642,20 +1660,20 @@ struct OnboardingRecoveryContent: View {
             // moment the words are actually on screen. The backup
             // state never downgrades: a verified backup stays
             // verified across re-reveals.
-            if case .reveal(_, true) = step {
+            if case .reveal(_, true)? = step {
                 if onboarding.recoveryBackupState == .none {
                     onboarding.recoveryBackupState = .revealed
                 }
                 onboarding.recordOutcome(.consented(componentId: nil))
             }
-            if case .done = step {
+            if case .done? = step {
                 onboarding.recoveryBackupState = .verified
                 onboarding.recordOutcome(.consented(componentId: nil))
             }
             // The backup flow's DoneScreen "Done" resets it to .intro
             // (a Settings-era loop) — in onboarding that must dismiss
             // the sheet, not strand the user back at the intro.
-            if case .done = old, case .intro = step {
+            if case .done? = old, case .intro? = step {
                 showBackup = false
             }
         }
