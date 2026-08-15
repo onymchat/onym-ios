@@ -46,7 +46,7 @@ struct BlossomRelaySettingsView: View {
 
                 resetCard
                 SettingsFootnote(
-                    "Uploads and downloads target the active server — the first in the list. Picking a server from the catalog makes it active; tap Make Active on any other row to switch. Changes apply to the next upload or download."
+                    "Uploads and downloads use the active server. Changes apply to the next upload or download."
                 )
 
                 SettingsSectionLabel("SELF-HOST")

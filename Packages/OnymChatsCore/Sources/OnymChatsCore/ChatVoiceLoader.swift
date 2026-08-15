@@ -41,13 +41,18 @@ public actor ChatVoiceLoader {
         let key = attachment.sha256
         let dest = cacheFileURL(key)
         if FileManager.default.fileExists(atPath: dest.path) { return dest }
+        // Resolve the allowlist BEFORE the inflight lookup — the await
+        // suspends, and the check-and-insert below must stay contiguous
+        // (actor-atomic) or two concurrent requests double-download and
+        // double-write `dest`. See ChatImageLoader.
+        let allowedServers = await allowedStampServers()
         if let existing = inflight[key] { return try await existing.value }
 
         // Stamp honored only within the user's configured server set —
         // never a peer-chosen host. See BlossomServerStampPolicy.
         let client = BlossomServerStampPolicy.client(
             forStamp: attachment.server,
-            allowedServers: await allowedStampServers(),
+            allowedServers: allowedServers,
             live: blossomClient
         )
         let task = Task<URL, Error> {
@@ -55,7 +60,9 @@ public actor ChatVoiceLoader {
             let plaintext = try ChatImageCrypto.open(
                 blob: blob, key: attachment.encKey, expectedSha256Hex: attachment.sha256
             )
-            try plaintext.write(to: dest, options: .completeFileProtection)
+            // `.atomic`: a concurrent reader must never open a
+            // partially-written file.
+            try plaintext.write(to: dest, options: [.atomic, .completeFileProtection])
             return dest
         }
         inflight[key] = task

@@ -177,6 +177,90 @@ final class ChatMediaLoaderServerBindingTests: XCTestCase {
         XCTAssertEqual(downloads, [.init(server: Self.stampedServer, sha256: sealed.sha256Hex)])
     }
 
+    // MARK: - In-flight deduplication
+
+    func test_imageLoader_concurrentRequestsSameSha_downloadOnce() async throws {
+        // Two simultaneous requests for the same blob must share ONE
+        // download — the allowlist await is a suspension point, so the
+        // inflight check-and-insert has to stay contiguous after it.
+        let sealed = try ChatImageCrypto.seal(Data("dedup-image".utf8))
+        let client = ServerRecordingBlossomClient(
+            blobs: [sealed.sha256Hex: sealed.blob],
+            delayNanos: 200_000_000
+        )
+        let loader = ChatImageLoader(
+            blossomClient: client,
+            cacheDirectory: Self.tempDir(),
+            allowedStampServers: { [URL(string: Self.stampedServer)!] }
+        )
+        let attachment = Self.imageAttachment(sealed: sealed, server: Self.stampedServer)
+
+        try await withThrowingTaskGroup(of: Data.self) { group in
+            group.addTask { try await loader.plaintext(for: attachment) }
+            group.addTask { try await loader.plaintext(for: attachment) }
+            for try await plaintext in group {
+                XCTAssertEqual(plaintext, Data("dedup-image".utf8))
+            }
+        }
+
+        let downloads = await client.downloads
+        XCTAssertEqual(downloads.count, 1,
+                       "concurrent requests for one sha must share a single download")
+    }
+
+    func test_videoLoader_concurrentRequestsSameSha_downloadOnce() async throws {
+        let sealed = try ChatImageCrypto.seal(Data("dedup-video".utf8))
+        let client = ServerRecordingBlossomClient(
+            blobs: [sealed.sha256Hex: sealed.blob],
+            delayNanos: 200_000_000
+        )
+        let loader = ChatVideoLoader(blossomClient: client, cacheDirectory: Self.tempDir())
+        let poster = Self.imageAttachment(
+            sealed: try ChatImageCrypto.seal(Data("p".utf8)), server: nil
+        )
+        let attachment = ChatVideoAttachment(
+            sha256: sealed.sha256Hex, mimeType: "video/mp4",
+            byteSize: sealed.blob.count, width: 4, height: 4,
+            durationSeconds: 1, encKey: sealed.key, poster: poster, server: nil
+        )
+
+        try await withThrowingTaskGroup(of: URL.self) { group in
+            group.addTask { try await loader.fileURL(for: attachment) }
+            group.addTask { try await loader.fileURL(for: attachment) }
+            for try await url in group {
+                XCTAssertEqual(try Data(contentsOf: url), Data("dedup-video".utf8))
+            }
+        }
+
+        let downloads = await client.downloads
+        XCTAssertEqual(downloads.count, 1)
+    }
+
+    func test_voiceLoader_concurrentRequestsSameSha_downloadOnce() async throws {
+        let sealed = try ChatImageCrypto.seal(Data("dedup-voice".utf8))
+        let client = ServerRecordingBlossomClient(
+            blobs: [sealed.sha256Hex: sealed.blob],
+            delayNanos: 200_000_000
+        )
+        let loader = ChatVoiceLoader(blossomClient: client, cacheDirectory: Self.tempDir())
+        let attachment = ChatVoiceAttachment(
+            sha256: sealed.sha256Hex, mimeType: "audio/mp4",
+            byteSize: sealed.blob.count, durationSeconds: 1,
+            encKey: sealed.key, waveform: [0, 1], server: nil
+        )
+
+        try await withThrowingTaskGroup(of: URL.self) { group in
+            group.addTask { try await loader.fileURL(for: attachment) }
+            group.addTask { try await loader.fileURL(for: attachment) }
+            for try await url in group {
+                XCTAssertEqual(try Data(contentsOf: url), Data("dedup-voice".utf8))
+            }
+        }
+
+        let downloads = await client.downloads
+        XCTAssertEqual(downloads.count, 1)
+    }
+
     // MARK: - fixtures
 
     private static func imageAttachment(
@@ -209,10 +293,14 @@ final class ChatMediaLoaderServerBindingTests: XCTestCase {
         }
 
         private let blobs: [String: Data]
+        /// Artificial per-download latency so concurrency tests can
+        /// guarantee both callers overlap the in-flight window.
+        private let delayNanos: UInt64
         private(set) var downloads: [Download] = []
 
-        init(blobs: [String: Data]) {
+        init(blobs: [String: Data], delayNanos: UInt64 = 0) {
             self.blobs = blobs
+            self.delayNanos = delayNanos
         }
 
         func upload(_ blob: Data, mimeType: String) async throws -> BlobDescriptor {
@@ -220,15 +308,16 @@ final class ChatMediaLoaderServerBindingTests: XCTestCase {
         }
 
         func download(sha256: String) async throws -> Data {
-            try serve(sha256: sha256, server: nil)
+            try await serve(sha256: sha256, server: nil)
         }
 
         nonisolated func bound(toServer serverURL: String) -> any BlossomClient {
             Bound(server: serverURL, recorder: self)
         }
 
-        fileprivate func serve(sha256: String, server: String?) throws -> Data {
+        fileprivate func serve(sha256: String, server: String?) async throws -> Data {
             downloads.append(Download(server: server, sha256: sha256))
+            if delayNanos > 0 { try await Task.sleep(nanoseconds: delayNanos) }
             guard let blob = blobs[sha256] else { throw BlossomError.badStatus(404) }
             return blob
         }

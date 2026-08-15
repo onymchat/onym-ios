@@ -427,8 +427,16 @@ struct OnymIOSApp: App {
         // now*, falling back to the app default when the list is empty.
         // Shared by the client below and the `server` stamp on outgoing
         // attachments, so both always agree.
+        // https-only, matching `bound(toServer:)` and the consent
+        // apply's `requiredEndpointURL(in:scheme:"https")`: a non-https
+        // endpoint would stamp a URL the per-send pin can never bind
+        // to, silently degrading to live resolution — the exact
+        // mid-send divergence the pin exists to prevent. Unpinnable is
+        // unusable for sends, so non-https entries are skipped in
+        // favor of the first https one (or the app default).
         let resolveBlossomBaseURL: @Sendable () async -> URL = {
-            await blossomServersRepository.currentEndpoints().first?.url
+            await blossomServersRepository.currentEndpoints()
+                .first { $0.url.scheme?.lowercased() == "https" }?.url
                 ?? URLSessionBlossomClient.defaultBaseURL
         }
 

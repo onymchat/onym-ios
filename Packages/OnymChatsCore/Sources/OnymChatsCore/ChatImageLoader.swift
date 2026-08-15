@@ -87,6 +87,11 @@ public actor ChatImageLoader {
 
     private func downloadAndDecrypt(_ attachment: ChatImageAttachment) async throws -> Data {
         let key = attachment.sha256
+        // Resolve the allowlist BEFORE the inflight lookup: the await
+        // is a suspension point, and the check-and-insert below must
+        // stay contiguous (actor-atomic) or two concurrent requests
+        // for the same sha both miss `inflight` and double-download.
+        let allowedServers = await allowedStampServers()
         if let existing = inflight[key] { return try await existing.value }
         // Fetch from the server STAMPED into the attachment — the one
         // the sender actually uploaded to — but ONLY when it is one of
@@ -97,7 +102,7 @@ public actor ChatImageLoader {
         // hosts and legacy nil stamps use the live client.
         let client = BlossomServerStampPolicy.client(
             forStamp: attachment.server,
-            allowedServers: await allowedStampServers(),
+            allowedServers: allowedServers,
             live: blossomClient
         )
         let task = Task<Data, Error> {
