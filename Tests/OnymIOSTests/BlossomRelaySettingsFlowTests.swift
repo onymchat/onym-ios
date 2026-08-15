@@ -1,5 +1,7 @@
 import XCTest
 @testable import OnymIOS
+import OnymDiscovery
+import OnymFoundation
 import OnymTransportBlossom
 import OnymSettings
 
@@ -51,6 +53,136 @@ final class BlossomRelaySettingsFlowTests: XCTestCase {
         let flow = BlossomRelaySettingsFlow(repository: repo)
         flow.start()
         try await waitFor { flow.state.snapshot.endpoints.count == 1 }
+    }
+
+    // MARK: - make active
+
+    func test_tappedMakeActive_promotesEndpointToHead() async throws {
+        let a = BlossomServerEndpoint.custom(url: URL(string: "https://a.example")!)
+        let b = BlossomServerEndpoint.custom(url: URL(string: "https://b.example")!)
+        let store = InMemoryBlossomServersSelectionStore(
+            initial: BlossomServersConfiguration(endpoints: [a, b], hasUserInteracted: true)
+        )
+        let repo = BlossomServersRepository(store: store)
+        let flow = BlossomRelaySettingsFlow(repository: repo)
+
+        flow.tappedMakeActive(url: b.url)
+
+        try await waitFor { store.load().endpoints.first?.url == b.url }
+        XCTAssertEqual(store.load().endpoints.map(\.url), [b.url, a.url])
+    }
+
+    // MARK: - catalog surface
+
+    func test_start_installsCatalogEntriesFromStream() async throws {
+        let repo = BlossomServersRepository(
+            store: InMemoryBlossomServersSelectionStore(initial: .empty)
+        )
+        let entry = try Self.catalogEntry(componentId: "onym:component:blobs-one")
+        let flow = BlossomRelaySettingsFlow(
+            repository: repo,
+            discovery: Self.picker(entries: { [entry] })
+        )
+
+        XCTAssertTrue(flow.catalogEntries.isEmpty, "empty before start")
+        flow.start()
+
+        try await waitFor { flow.catalogEntries.count == 1 }
+        XCTAssertEqual(flow.catalogEntries.first?.entry.componentId, "onym:component:blobs-one")
+        XCTAssertNil(flow.activeConsent(for: entry), "no pinned consent in this fixture")
+        XCTAssertNil(flow.consentedOffer(for: entry))
+    }
+
+    func test_refreshCatalog_reReadsAggregateOnce() async throws {
+        let repo = BlossomServersRepository(
+            store: InMemoryBlossomServersSelectionStore(initial: .empty)
+        )
+        let first = try Self.catalogEntry(componentId: "onym:component:blobs-one")
+        let second = try Self.catalogEntry(componentId: "onym:component:blobs-two")
+        // Mutable backing list: the one-shot stream serves the initial
+        // aggregate; refreshCatalog must re-read and see the growth.
+        let served = ServedEntries(entries: [first])
+        let flow = BlossomRelaySettingsFlow(
+            repository: repo,
+            discovery: Self.picker(entries: { served.entries })
+        )
+        flow.start()
+        try await waitFor { flow.catalogEntries.count == 1 }
+
+        served.entries = [first, second]
+        flow.refreshCatalog()
+
+        try await waitFor { flow.catalogEntries.count == 2 }
+        XCTAssertEqual(
+            flow.catalogEntries.map(\.entry.componentId),
+            ["onym:component:blobs-one", "onym:component:blobs-two"]
+        )
+    }
+
+    func test_noDiscovery_catalogStaysEmptyAfterStartAndRefresh() async throws {
+        let repo = BlossomServersRepository(
+            store: InMemoryBlossomServersSelectionStore(initial: .empty)
+        )
+        let flow = BlossomRelaySettingsFlow(repository: repo)
+        flow.start()
+        flow.refreshCatalog()
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertTrue(flow.catalogEntries.isEmpty)
+    }
+
+    // MARK: - catalog fixtures
+
+    /// Mutable entries the picker closures read — @MainActor-confined,
+    /// the flow only calls the closures on the main actor.
+    @MainActor
+    private final class ServedEntries {
+        var entries: [AttributedCatalogEntry]
+        init(entries: [AttributedCatalogEntry]) { self.entries = entries }
+    }
+
+    private static func picker(
+        entries: @escaping @MainActor () -> [AttributedCatalogEntry]
+    ) -> DiscoveryModulePicker {
+        DiscoveryModulePicker(
+            entries: { await entries() },
+            activeConsent: { _ in nil },
+            makeConsentFlow: { _ in fatalError("consent flow not exercised by these tests") }
+        )
+    }
+
+    private static func catalogEntry(componentId: String) throws -> AttributedCatalogEntry {
+        let json: [String: Any] = [
+            "componentId": componentId,
+            "seatType": "blob.storage",
+            "manifest": [
+                "uri": "https://provider.example/manifests/"
+                    + componentId.replacingOccurrences(of: ":", with: "-") + ".json",
+                "digest": "sha256:" + String(repeating: "0", count: 64),
+            ],
+            "operator": "onym:key:" + String(repeating: "ab", count: 32),
+            "profiles": [],
+            "evidence": [],
+            "listedAt": "2026-01-01T00:00:00Z",
+            "relationship": "none",
+            "placement": "neutral",
+        ]
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let entry = try decoder.decode(
+            CatalogEntry.self,
+            from: JSONSerialization.data(withJSONObject: json)
+        )
+        return AttributedCatalogEntry(
+            entry: entry,
+            source: SourceAttribution(
+                providerId: "onym:component:test-provider",
+                sourceLabel: "Test Provider",
+                catalogId: "public",
+                snapshotDigest: "sha256:" + String(repeating: "0", count: 64),
+                relationship: "none",
+                placement: "neutral"
+            )
+        )
     }
 
     private func waitFor(

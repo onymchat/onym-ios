@@ -773,24 +773,15 @@ struct OnymIOSApp: App {
                         selectionStore: seatSelectionStore,
                         makeEntitlements: makeEntitlements,
                         apply: { manifest in
-                            let fields = SeatManifestFields(rawBytes: manifest.rawBytes)
-                            // Throws `ModuleApplyError.noUsableEndpoint`
-                            // when the manifest has no https endpoint —
-                            // surfaced by the flow, never a silent no-op.
-                            let url = try ModuleConsentAcceptance.requiredEndpointURL(
-                                in: fields.endpointURIs,
-                                scheme: "https"
+                            // Extracted (BlossomCatalogConsent) so the
+                            // endpoint extraction + make-active ordering
+                            // is unit-tested: the pick becomes the FIRST
+                            // endpoint — the upload/download target —
+                            // not an inert append behind the seed.
+                            try await BlossomCatalogConsent.apply(
+                                manifest: manifest,
+                                to: blossomServersRepository
                             )
-                            // A consent-picked server is the user's own
-                            // choice, not a published default — no
-                            // "Default" badge, and `addEndpoint` marks
-                            // the configuration user-interacted so a
-                            // refresh never auto-populates over it.
-                            await blossomServersRepository.addEndpoint(BlossomServerEndpoint(
-                                name: discoveryDisplayName(fields, componentId: manifest.componentId),
-                                url: url,
-                                isDefault: false
-                            ))
                         }
                     )
                 }

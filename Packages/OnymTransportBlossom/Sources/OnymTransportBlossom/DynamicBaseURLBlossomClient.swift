@@ -32,4 +32,14 @@ public struct DynamicBaseURLBlossomClient: BlossomClient {
     public func download(sha256: String) async throws -> Data {
         try await makeClient(await resolveBaseURL()).download(sha256: sha256)
     }
+
+    /// Pin to `serverURL`: returns the inner client built for exactly
+    /// that URL, so a multi-blob send that stamped the URL into its
+    /// metadata uploads every blob there even if the configuration
+    /// changes mid-send. Falls back to `self` (live resolution) when
+    /// the string isn't a URL.
+    public func bound(toServer serverURL: String) -> any BlossomClient {
+        guard let url = URL(string: serverURL) else { return self }
+        return makeClient(url)
+    }
 }

@@ -26,25 +26,23 @@ public final class NostrRelaySettingsFlow {
     }
 
     public private(set) var state: State
+    /// Catalog-section state (entries + memoized consent lookups),
+    /// shared plumbing with the relayer/Blossom flows.
+    private let catalog: DiscoveryCatalogState
     /// Discovery-sourced "transport.message" entries for the "From
     /// catalog" section. Empty when the app runs without discovery.
-    public private(set) var catalogEntries: [AttributedCatalogEntry] = []
-    /// Consent state per componentId, memoized once per catalog
-    /// refresh — `activeConsent` decodes the whole consent store and
-    /// the offer a pinned manifest, far too heavy per row per render.
-    private var consentRecords: [String: PinnedConsentRecord] = [:]
-    private var consentedOffers: [String: ServiceOffer] = [:]
+    public var catalogEntries: [AttributedCatalogEntry] { catalog.entries }
 
     private let repository: NostrRelaysRepository
     /// Optional discovery seam — nil keeps this screen exactly as it
     /// was before discovery existed.
     let discovery: DiscoveryModulePicker?
     private var snapshotTask: Task<Void, Never>?
-    private var catalogTask: Task<Void, Never>?
 
     public init(repository: NostrRelaysRepository, discovery: DiscoveryModulePicker? = nil) {
         self.repository = repository
         self.discovery = discovery
+        self.catalog = DiscoveryCatalogState(discovery: discovery)
         self.state = State(snapshot: .empty, customDraft: "", customDraftError: nil)
     }
 
@@ -61,63 +59,32 @@ public final class NostrRelaySettingsFlow {
                 }
             }
         }
-        if catalogTask == nil, let discovery {
-            catalogTask = Task { [weak self] in
-                for await entries in discovery.entriesStream() {
-                    self?.applyCatalog(entries)
-                }
-            }
-        }
+        catalog.start()
     }
 
     /// Re-read the discovery aggregate once (consent-sheet dismiss — a
     /// fresh consent changes the rows' badges without any catalog
     /// change to push through the stream).
     public func refreshCatalog() {
-        guard let discovery else { return }
-        Task { [weak self] in
-            let entries = await discovery.entries()
-            self?.applyCatalog(entries)
-        }
-    }
-
-    /// Install a catalog aggregate, memoizing the per-component
-    /// consent lookups so rendering a row is a dictionary hit instead
-    /// of a full consent-store decode.
-    private func applyCatalog(_ entries: [AttributedCatalogEntry]) {
-        guard let discovery else { return }
-        var records: [String: PinnedConsentRecord] = [:]
-        var offers: [String: ServiceOffer] = [:]
-        for componentId in Set(entries.map(\.entry.componentId)) {
-            guard let record = discovery.activeConsent(componentId) else { continue }
-            records[componentId] = record
-            if let offerId = record.offerId {
-                offers[componentId] = record.consentedManifest()?
-                    .offers.first { $0.offerId == offerId }
-            }
-        }
-        catalogEntries = entries
-        consentRecords = records
-        consentedOffers = offers
+        catalog.refresh()
     }
 
     /// The active pinned consent for a catalog entry's component, when
     /// discovery is wired (memoized per catalog refresh).
     public func activeConsent(for entry: AttributedCatalogEntry) -> PinnedConsentRecord? {
-        consentRecords[entry.entry.componentId]
+        catalog.activeConsent(for: entry)
     }
 
     /// The offer accepted at consent time, resolved from the pinned
     /// manifest snapshot (memoized per catalog refresh).
     public func consentedOffer(for entry: AttributedCatalogEntry) -> ServiceOffer? {
-        consentedOffers[entry.entry.componentId]
+        catalog.consentedOffer(for: entry)
     }
 
     func stop() {
         snapshotTask?.cancel()
         snapshotTask = nil
-        catalogTask?.cancel()
-        catalogTask = nil
+        catalog.stop()
     }
 
     // MARK: - Intents

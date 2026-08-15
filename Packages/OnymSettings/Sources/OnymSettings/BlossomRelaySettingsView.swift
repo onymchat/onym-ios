@@ -46,7 +46,7 @@ struct BlossomRelaySettingsView: View {
 
                 resetCard
                 SettingsFootnote(
-                    "Changes apply to the next upload or download. Uploads target the first configured server."
+                    "Uploads and downloads target the active server — the first in the list. Picking a server from the catalog makes it active; tap Make Active on any other row to switch. Changes apply to the next upload or download."
                 )
 
                 SettingsSectionLabel("SELF-HOST")
@@ -123,6 +123,20 @@ struct BlossomRelaySettingsView: View {
                                         Text(endpoint.name)
                                             .font(.system(size: 15, weight: .semibold))
                                             .foregroundStyle(OnymTokens.text)
+                                        // First endpoint is the one
+                                        // uploads/downloads target.
+                                        if idx == 0 {
+                                            Text("ACTIVE")
+                                                .font(.system(size: 10, weight: .bold))
+                                                .foregroundStyle(OnymAccent.blue.color)
+                                                .padding(.horizontal, 6)
+                                                .padding(.vertical, 2)
+                                                .background(
+                                                    OnymAccent.blue.color.opacity(0.12),
+                                                    in: RoundedRectangle(cornerRadius: 4)
+                                                )
+                                                .accessibilityIdentifier("blossom.active_badge")
+                                        }
                                         if endpoint.isDefault {
                                             Text("DEFAULT")
                                                 .font(.system(size: 10, weight: .bold))
@@ -141,6 +155,27 @@ struct BlossomRelaySettingsView: View {
                                         .lineLimit(1)
                                 }
                                 Spacer(minLength: 0)
+                                // Non-first rows can be promoted to
+                                // the upload/download target.
+                                if idx != 0 {
+                                    Button {
+                                        flow.tappedMakeActive(url: endpoint.url)
+                                    } label: {
+                                        Text("Make Active")
+                                            .font(.system(size: 12, weight: .semibold))
+                                            .foregroundStyle(OnymAccent.blue.color)
+                                            .padding(.horizontal, 10)
+                                            .padding(.vertical, 6)
+                                            .background(
+                                                OnymTokens.surface3,
+                                                in: RoundedRectangle(cornerRadius: 8)
+                                            )
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityIdentifier(
+                                        "blossom.make_active.\(endpoint.url.absoluteString)"
+                                    )
+                                }
                             }
                             .padding(.horizontal, 14)
                             .padding(.vertical, 10)

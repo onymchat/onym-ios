@@ -31,6 +31,18 @@ public protocol BlossomClient: Sendable {
     func upload(_ blob: Data, mimeType: String) async throws -> BlobDescriptor
     /// `GET /<sha256>` the blob. Callers verify the hash before use.
     func download(sha256: String) async throws -> Data
+    /// A client pinned to `serverURL` for the duration of a multi-blob
+    /// operation. Callers that stamp a server URL into metadata (e.g.
+    /// a chat message's attachments) resolve the URL once, stamp it,
+    /// and run every upload of that operation through the bound client
+    /// so the stamp and the blobs' actual location can never diverge —
+    /// even if the configured server changes mid-operation. Clients
+    /// with a fixed base URL return `self` (the default).
+    func bound(toServer serverURL: String) -> any BlossomClient
+}
+
+extension BlossomClient {
+    public func bound(toServer serverURL: String) -> any BlossomClient { self }
 }
 
 public enum BlossomError: Error, Equatable {

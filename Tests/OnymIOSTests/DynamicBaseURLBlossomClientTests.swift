@@ -75,6 +75,41 @@ final class DynamicBaseURLBlossomClientTests: XCTestCase {
         }
     }
 
+    func test_boundToServer_pinsAllOperationsToThatURL_ignoringResolver() async throws {
+        // `bound(toServer:)` is the per-send pin: even though the
+        // resolver now points at B, the bound client keeps operating
+        // against A — the URL a message's attachments were stamped with.
+        let recorder = Recorder()
+        let current = CurrentURL(serverA)
+        let client = DynamicBaseURLBlossomClient(
+            resolveBaseURL: { current.value },
+            makeClient: { recorder.make(baseURL: $0) }
+        )
+
+        let pinned = client.bound(toServer: serverA.absoluteString)
+        current.set(serverB)
+        _ = try await pinned.upload(Data([7]), mimeType: "image/jpeg")
+        _ = try await pinned.download(sha256: "feed")
+
+        XCTAssertEqual(recorder.operations, [
+            .upload(baseURL: serverA, byteCount: 1, mimeType: "image/jpeg"),
+            .download(baseURL: serverA, sha256: "feed"),
+        ])
+    }
+
+    func test_boundToServer_unparseableURL_fallsBackToLiveResolution() async throws {
+        let recorder = Recorder()
+        let client = DynamicBaseURLBlossomClient(
+            resolveBaseURL: { [serverB] in serverB },
+            makeClient: { recorder.make(baseURL: $0) }
+        )
+
+        let fallback = client.bound(toServer: "")
+        _ = try await fallback.download(sha256: "aa")
+
+        XCTAssertEqual(recorder.operations, [.download(baseURL: serverB, sha256: "aa")])
+    }
+
     // MARK: - fakes
 
     /// Records every operation, tagged with the base URL the inner

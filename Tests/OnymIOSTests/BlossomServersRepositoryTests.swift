@@ -159,6 +159,101 @@ final class BlossomServersRepositoryTests: XCTestCase {
         XCTAssertEqual(endpoints, [Self.published])
     }
 
+    // MARK: - makeActive / addEndpoint(makeActive:)
+
+    func test_addEndpoint_makeActive_insertsNewEndpointAtHead() async {
+        // First launch seeds Onym Official at index 0; a make-active
+        // add (the catalog consent pick) must land FIRST — the
+        // upload/download target — with the seed kept right behind.
+        let store = InMemoryBlossomServersSelectionStore(initial: .empty)
+        let repo = BlossomServersRepository(store: store)
+        let picked = BlossomServerEndpoint(
+            name: "Picked", url: URL(string: "https://picked.example")!, isDefault: false
+        )
+
+        let inserted = await repo.addEndpoint(picked, makeActive: true)
+
+        XCTAssertTrue(inserted)
+        let endpoints = await repo.currentEndpoints()
+        XCTAssertEqual(endpoints.first, picked,
+                       "make-active add must place the pick at the head")
+        XCTAssertEqual(endpoints.count, 2)
+        XCTAssertEqual(endpoints.last?.url.absoluteString, "https://blossom.onym.app",
+                       "the seeded default stays in the list behind the pick")
+        XCTAssertTrue(store.load().hasUserInteracted)
+    }
+
+    func test_addEndpoint_makeActive_movesExistingEndpointToHead() async {
+        let a = BlossomServerEndpoint.custom(url: URL(string: "https://a.example")!)
+        let b = BlossomServerEndpoint.custom(url: URL(string: "https://b.example")!)
+        let store = InMemoryBlossomServersSelectionStore(
+            initial: BlossomServersConfiguration(endpoints: [a, b], hasUserInteracted: true)
+        )
+        let repo = BlossomServersRepository(store: store)
+
+        let renamed = BlossomServerEndpoint(name: "B renamed", url: b.url, isDefault: false)
+        let inserted = await repo.addEndpoint(renamed, makeActive: true)
+
+        XCTAssertFalse(inserted, "same URL is an update, not an insert")
+        let endpoints = await repo.currentEndpoints()
+        XCTAssertEqual(endpoints.map(\.url), [b.url, a.url],
+                       "existing endpoint moves to the head, others keep order")
+        XCTAssertEqual(endpoints.first?.name, "B renamed",
+                       "metadata still updates on a make-active re-add")
+    }
+
+    func test_addEndpoint_withoutMakeActive_stillAppends() async {
+        let store = InMemoryBlossomServersSelectionStore(initial: .empty)
+        let repo = BlossomServersRepository(store: store)
+        let added = BlossomServerEndpoint.custom(url: URL(string: "https://added.example")!)
+
+        await repo.addEndpoint(added)
+
+        let endpoints = await repo.currentEndpoints()
+        XCTAssertEqual(endpoints.first?.url.absoluteString, "https://blossom.onym.app",
+                       "plain add keeps the current active server")
+        XCTAssertEqual(endpoints.last, added)
+    }
+
+    func test_makeActive_movesConfiguredEndpointToHead() async {
+        let a = BlossomServerEndpoint.custom(url: URL(string: "https://a.example")!)
+        let b = BlossomServerEndpoint.custom(url: URL(string: "https://b.example")!)
+        let c = BlossomServerEndpoint.custom(url: URL(string: "https://c.example")!)
+        let store = InMemoryBlossomServersSelectionStore(
+            initial: BlossomServersConfiguration(endpoints: [a, b, c], hasUserInteracted: true)
+        )
+        let repo = BlossomServersRepository(store: store)
+
+        await repo.makeActive(url: c.url)
+
+        let endpoints = await repo.currentEndpoints()
+        XCTAssertEqual(endpoints, [c, a, b],
+                       "promoted endpoint heads the list; the rest keep relative order")
+        XCTAssertEqual(store.load().endpoints, [c, a, b], "promotion is persisted")
+    }
+
+    func test_makeActive_unknownURL_isNoOp() async {
+        let store = InMemoryBlossomServersSelectionStore(initial: .empty)
+        let repo = BlossomServersRepository(store: store)  // seeds Onym Official
+
+        await repo.makeActive(url: URL(string: "https://stranger.example")!)
+
+        let endpoints = await repo.currentEndpoints()
+        XCTAssertEqual(endpoints.first?.url.absoluteString, "https://blossom.onym.app")
+        XCTAssertFalse(store.load().hasUserInteracted,
+                       "a no-op promotion must not count as user interaction")
+    }
+
+    func test_makeActive_alreadyFirst_doesNotFlipUserInteracted() async {
+        let store = InMemoryBlossomServersSelectionStore(initial: .empty)
+        let repo = BlossomServersRepository(store: store)  // seeds Onym Official at head
+
+        await repo.makeActive(url: URL(string: "https://blossom.onym.app")!)
+
+        XCTAssertFalse(store.load().hasUserInteracted,
+                       "promoting the already-active server changes nothing")
+    }
+
     func test_resetToDefault_offline_fallsBackToSeed() async {
         struct Boom: Error {}
         let store = InMemoryBlossomServersSelectionStore(initial: .empty)

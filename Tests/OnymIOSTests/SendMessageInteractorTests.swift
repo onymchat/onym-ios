@@ -227,6 +227,121 @@ final class SendMessageInteractorTests: XCTestCase {
         XCTAssertNotNil(result.imageAttachment)
     }
 
+    // MARK: - Per-send server binding
+
+    func test_sendAlbum_serverChangeMidSend_stampAndAllUploadsUseSendStartURL() async throws {
+        // The resolver returns the send-start URL exactly once, then a
+        // "changed" URL forever after — simulating a configuration
+        // change immediately after the send began. The guarantee: the
+        // URL is resolved ONCE, stamped, and every upload goes through
+        // a client BOUND to it; nothing re-resolves live mid-send.
+        let groupID = await seedGroupWithTwoPeers()
+        let tagging = ServerTaggingBlossomClient()
+        let provider = FlippingURLProvider(
+            first: "https://send-start.test", rest: "https://changed.test"
+        )
+        let boundInteractor = SendMessageInteractor(
+            identity: identity,
+            inboxTransport: transport,
+            messageRepository: messages,
+            groupRepository: groups,
+            blossomClient: tagging,
+            blossomServerURL: { provider.next() },
+            outbox: outbox
+        )
+
+        let result = try await boundInteractor.sendAlbum(
+            groupID: groupID,
+            sources: [.image(Self.makeJPEG()), .image(Self.makeJPEG())],
+            caption: "album"
+        )
+
+        XCTAssertEqual(result.status, .sent)
+        let album = try XCTUnwrap(result.albumAttachments)
+        for item in album {
+            switch item {
+            case .image(let image):
+                XCTAssertEqual(image.server, "https://send-start.test",
+                               "every attachment stamps the send-start URL")
+            case .video(let video):
+                XCTAssertEqual(video.server, "https://send-start.test")
+            }
+        }
+        let uploadServers = await tagging.uploadServers
+        XCTAssertEqual(uploadServers,
+                       ["https://send-start.test", "https://send-start.test"],
+                       "both blobs upload through the client bound to the send-start URL")
+        let unbound = await tagging.unboundUploads
+        XCTAssertEqual(unbound, 0,
+                       "no upload may bypass the bound client and re-resolve live")
+    }
+
+    /// `BlossomClient` that tags every upload with the server URL the
+    /// client was `bound(toServer:)` to; direct (unbound) uploads are
+    /// counted separately because the per-send guarantee forbids them.
+    private actor ServerTaggingBlossomClient: BlossomClient {
+        private(set) var uploadServers: [String] = []
+        private(set) var unboundUploads = 0
+
+        func upload(_ blob: Data, mimeType: String) async throws -> BlobDescriptor {
+            unboundUploads += 1
+            return Self.descriptor(for: blob)
+        }
+
+        func download(sha256: String) async throws -> Data {
+            throw BlossomError.badStatus(404)
+        }
+
+        nonisolated func bound(toServer serverURL: String) -> any BlossomClient {
+            Bound(server: serverURL, recorder: self)
+        }
+
+        fileprivate func recordBoundUpload(server: String) {
+            uploadServers.append(server)
+        }
+
+        static func descriptor(for blob: Data) -> BlobDescriptor {
+            let sha = ChatImageCrypto.sha256Hex(blob)
+            return BlobDescriptor(sha256: sha, url: "https://tagged.test/\(sha)", size: blob.count)
+        }
+
+        private struct Bound: BlossomClient {
+            let server: String
+            let recorder: ServerTaggingBlossomClient
+
+            func upload(_ blob: Data, mimeType: String) async throws -> BlobDescriptor {
+                await recorder.recordBoundUpload(server: server)
+                return ServerTaggingBlossomClient.descriptor(for: blob)
+            }
+
+            func download(sha256: String) async throws -> Data {
+                throw BlossomError.badStatus(404)
+            }
+        }
+    }
+
+    /// Returns `first` exactly once, then `rest` forever — the seam
+    /// for simulating a configuration change mid-send.
+    private final class FlippingURLProvider: @unchecked Sendable {
+        private let lock = NSLock()
+        private var served = false
+        private let first: String
+        private let rest: String
+
+        init(first: String, rest: String) {
+            self.first = first
+            self.rest = rest
+        }
+
+        func next() -> String {
+            lock.withLock {
+                if served { return rest }
+                served = true
+                return first
+            }
+        }
+    }
+
     nonisolated private static func makeJPEG() -> Data {
         let format = UIGraphicsImageRendererFormat.default()
         format.scale = 1
