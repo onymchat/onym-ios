@@ -50,12 +50,28 @@ final class OnboardingFlowTests: XCTestCase {
         return flow
     }
 
+    /// Walk to `target`, recording a consent wherever the flow
+    /// requires an outcome to advance (the recovery step always; a
+    /// mandatory moderation step) — the same thing the step surfaces
+    /// do in the app.
+    private func walk(_ flow: OnboardingFlow, to target: OnboardingStep) {
+        while flow.step != target {
+            if flow.requiresOutcomeToAdvance(flow.step), flow.outcomes[flow.step] == nil {
+                flow.recordOutcome(.consented(componentId: nil))
+            }
+            flow.advance()
+        }
+    }
+
     // MARK: - Step order
 
     func testStepsAdvanceInDocumentedOrder() async {
         let flow = await makeResolvedFlow()
         var visited: [OnboardingStep] = [flow.step]
         while flow.step != .done {
+            if flow.requiresOutcomeToAdvance(flow.step) {
+                flow.recordOutcome(.consented(componentId: nil))
+            }
             flow.advance()
             visited.append(flow.step)
         }
@@ -67,7 +83,7 @@ final class OnboardingFlowTests: XCTestCase {
 
     func testAdvanceOnDoneIsANoOp() async {
         let flow = await makeResolvedFlow()
-        while flow.step != .done { flow.advance() }
+        walk(flow, to: .done)
         flow.advance()
         XCTAssertEqual(flow.step, .done)
     }
@@ -169,7 +185,7 @@ final class OnboardingFlowTests: XCTestCase {
 
     func testDoneIsNeverSkippable() async {
         let flow = await makeResolvedFlow()
-        while flow.step != .done { flow.advance() }
+        walk(flow, to: .done)
         XCTAssertFalse(flow.isSkippable(.done))
         flow.skip()
         XCTAssertEqual(flow.step, .done)
@@ -254,7 +270,7 @@ final class OnboardingFlowTests: XCTestCase {
     func testCompleteWritesFlagAndFiresOnCompleted() async {
         var completedCalls = 0
         let flow = await makeResolvedFlow(onCompleted: { completedCalls += 1 })
-        while flow.step != .done { flow.advance() }
+        walk(flow, to: .done)
         XCTAssertFalse(store.hasCompletedOnboarding())
         flow.complete()
         XCTAssertTrue(store.hasCompletedOnboarding())
@@ -271,7 +287,7 @@ final class OnboardingFlowTests: XCTestCase {
         flow.advance()
         flow.complete() // mid-sequence — refused
         XCTAssertFalse(flow.isCompleted)
-        while flow.step != .done { flow.advance() }
+        walk(flow, to: .done)
         flow.complete()
         XCTAssertTrue(flow.isCompleted)
     }
@@ -289,7 +305,7 @@ final class OnboardingFlowTests: XCTestCase {
     /// `OnboardingGate.shouldOnboard` answers false next launch.
     func testCompletionClosesTheGate() async {
         let flow = await makeResolvedFlow()
-        while flow.step != .done { flow.advance() }
+        walk(flow, to: .done)
         flow.complete()
         XCTAssertFalse(OnboardingGate.shouldOnboard(store: store, isExistingUser: { false }))
     }
@@ -384,6 +400,59 @@ final class OnboardingFlowTests: XCTestCase {
         flow.advance()
         XCTAssertEqual(flow.step, .recoveryPhrase)
         XCTAssertEqual(flow.outcomes[.moderation], .consented(componentId: "onym:component:onym-moderation"))
+    }
+
+    // MARK: - Recovery phrase requires an outcome
+
+    /// "I've written it down" must not advance before the phrase was
+    /// ever revealed: without a recorded outcome the advance is
+    /// refused; the honest exits are the reveal (which records) or
+    /// "Remind me later" (skip).
+    func testRecoveryPhraseAdvanceRefusedWithoutOutcome() async {
+        let flow = await makeResolvedFlow()
+        walk(flow, to: .recoveryPhrase)
+        flow.advance() // refused — nothing revealed, nothing recorded
+        XCTAssertEqual(flow.step, .recoveryPhrase)
+        XCTAssertNil(flow.outcomes[.recoveryPhrase],
+                     "a refused advance must not backfill an outcome")
+
+        flow.recordOutcome(.consented(componentId: nil)) // the reveal
+        flow.advance()
+        XCTAssertEqual(flow.step, .done)
+    }
+
+    /// The outcome-gate matrix: recovery always; moderation only while
+    /// mandatory; nothing else ever.
+    func testRequiresOutcomeToAdvanceMatrix() async {
+        let empty = await makeResolvedFlow(directoryNonEmpty: false)
+        for step in OnboardingStep.allCases {
+            XCTAssertEqual(empty.requiresOutcomeToAdvance(step),
+                           step == .recoveryPhrase,
+                           "\(step) with empty directory")
+        }
+        let nonEmpty = await makeResolvedFlow(directoryNonEmpty: true)
+        for step in OnboardingStep.allCases {
+            XCTAssertEqual(nonEmpty.requiresOutcomeToAdvance(step),
+                           step == .recoveryPhrase || step == .moderation,
+                           "\(step) with non-empty directory")
+        }
+    }
+
+    // MARK: - Services choice
+
+    /// The services path lives on the flow so Back/forward navigation
+    /// can't reset the step body's selection chip: recommended by
+    /// default, and a written choice survives leaving the step.
+    func testServicesChoiceDefaultsToRecommendedAndPersists() async {
+        let flow = await makeResolvedFlow()
+        XCTAssertEqual(flow.servicesChoice, .recommended)
+        walk(flow, to: .services)
+        flow.servicesChoice = .custom
+        flow.recordOutcome(.consented(componentId: nil))
+        flow.advance() // moderation
+        flow.back() // revisit services
+        XCTAssertEqual(flow.servicesChoice, .custom,
+                       "the choice must survive navigation")
     }
 
     func testRecordingAgainOverwrites() {

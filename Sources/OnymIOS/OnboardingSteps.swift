@@ -40,6 +40,10 @@ struct OnboardingStepContentBuilder {
     let relayerPicker: DiscoveryModulePicker?
     let makeModerationConsentFlow: @MainActor (ModerationConsentFlow.Mode) -> ModerationConsentFlow
     let makeBackupFlow: @MainActor () -> RecoveryPhraseBackupFlow
+    /// Awaits the identity bootstrap and answers whether a snapshot
+    /// exists — the identity step's checklist binds to this instead of
+    /// asserting success it can't know about.
+    let identityReady: @MainActor () async -> Bool
     let loadSummary: @MainActor () async -> [OnboardingSummaryRow]
 
     func content(for step: OnboardingStep, flow: OnboardingFlow) -> AnyView? {
@@ -47,7 +51,7 @@ struct OnboardingStepContentBuilder {
         case .welcome:
             return AnyView(OnboardingWelcomeContent())
         case .identity:
-            return AnyView(OnboardingIdentityContent())
+            return AnyView(OnboardingIdentityContent(identityReady: identityReady))
         case .services:
             return AnyView(OnboardingServicesContent(
                 onboarding: flow,
@@ -246,24 +250,34 @@ struct OnboardingWelcomeContent: View {
 
 // MARK: - Identity
 
-/// "Making your keys" — the identity bootstrap already ran silently in
-/// the WindowGroup task; this step surfaces what happened instead of
-/// hiding it behind the old Welcome footnote. Informational: nothing
-/// to decide, nothing recorded.
+/// "Making your keys" — the identity bootstrap already runs in the
+/// WindowGroup task; this step BINDS to it instead of asserting
+/// success it can't know about. The checklist shows progress while the
+/// bootstrap resolves, checks once a snapshot exists, and an explicit
+/// failure state (with retry) if it doesn't — a failed bootstrap must
+/// not hand the user a recovery step that can't reveal. Informational:
+/// nothing to decide, nothing recorded.
 struct OnboardingIdentityContent: View {
+    let identityReady: @MainActor () async -> Bool
+
+    private enum Phase {
+        case checking
+        case ready
+        case failed
+    }
+
+    @State private var phase: Phase = .checking
+    @State private var attempt = 0
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(spacing: 0) {
-                row(symbol: "checkmark.circle.fill",
-                    color: OnymTokens.green,
-                    title: "Identity key created",
+                row(title: "Identity key created",
                     subtitle: "Held in this device's secure enclave")
                 Divider()
                     .background(OnymTokens.hairline)
                     .padding(.leading, 46)
-                row(symbol: "checkmark.circle.fill",
-                    color: OnymTokens.green,
-                    title: "Recovery phrase generated",
+                row(title: "Recovery phrase generated",
                     subtitle: "12 words — you'll back these up in a moment")
             }
             .background(OnymTokens.surface2,
@@ -271,25 +285,67 @@ struct OnboardingIdentityContent: View {
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("onboarding.identity.checklist")
 
+            if case .failed = phase {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(OnymTokens.red)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Your keys couldn't be created. Nothing was sent anywhere — try again.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(OnymTokens.text2)
+                            .lineSpacing(2)
+                        Button {
+                            attempt += 1
+                        } label: {
+                            Text("Try again")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(OnymAccent.blue.color)
+                        }
+                        .accessibilityIdentifier("onboarding.identity.retry")
+                    }
+                }
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(OnymTokens.red.opacity(0.10),
+                            in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .padding(.top, 12)
+                .accessibilityIdentifier("onboarding.identity.failed")
+            }
+
             Text("Your key is the only thing that proves this account is yours. No server holds a copy of it.")
                 .font(.system(size: 12.5))
                 .foregroundStyle(OnymTokens.text2)
                 .lineSpacing(2)
                 .padding(.top, 12)
         }
+        .task(id: attempt) {
+            phase = .checking
+            phase = await identityReady() ? .ready : .failed
+        }
     }
 
     private func row(
-        symbol: String,
-        color: Color,
         title: LocalizedStringKey,
         subtitle: LocalizedStringKey
     ) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: symbol)
-                .font(.system(size: 20))
-                .foregroundStyle(color)
-                .frame(width: 24)
+            switch phase {
+            case .checking:
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(width: 24)
+            case .ready:
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 20))
+                    .foregroundStyle(OnymTokens.green)
+                    .frame(width: 24)
+            case .failed:
+                Image(systemName: "xmark.circle")
+                    .font(.system(size: 20))
+                    .foregroundStyle(OnymTokens.red)
+                    .frame(width: 24)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.system(size: 15, weight: .semibold))
@@ -315,8 +371,14 @@ struct OnboardingIdentityContent: View {
 struct OnboardingServicesContent: View {
     let onboarding: OnboardingFlow
     let builder: OnboardingStepContentBuilder
-    @State private var usingCustom = false
     @State private var showHub = false
+
+    /// Derived from the flow, never view-local — Back/forward
+    /// navigation rebuilds this view, and the chip must keep telling
+    /// the truth about what the user configured.
+    private var usingCustom: Bool {
+        onboarding.servicesChoice == .custom
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -333,16 +395,24 @@ struct OnboardingServicesContent: View {
                 onboarding: onboarding,
                 builder: builder,
                 onUseRecommended: {
-                    usingCustom = false
-                    onboarding.recordOutcome(.notApplicable)
+                    // Only the choice reverts — consent pins and
+                    // endpoints the sub-surfaces persisted stay (the
+                    // hub's footnote says so); explicitly accepting
+                    // the recommended path is still a consent.
+                    onboarding.servicesChoice = .recommended
+                    onboarding.recordOutcome(.consented(componentId: nil))
                     showHub = false
                 },
                 onDone: {
-                    usingCustom = true
+                    onboarding.servicesChoice = .custom
                     // The hub's per-seat surfaces record specific
-                    // consents as they happen; closing the hub without
-                    // one still means "I set things up myself".
-                    if onboarding.outcomes[.services] == nil {
+                    // consents (with componentIds) as they happen —
+                    // keep those; otherwise closing the hub still
+                    // means "I set things up myself".
+                    if case .consented(let componentId)? = onboarding.outcomes[.services],
+                       componentId != nil {
+                        // keep the specific consent
+                    } else {
                         onboarding.recordOutcome(.consented(componentId: nil))
                     }
                     showHub = false
@@ -353,8 +423,11 @@ struct OnboardingServicesContent: View {
 
     private var recommendedCard: some View {
         Button {
-            usingCustom = false
-            onboarding.recordOutcome(.notApplicable)
+            // An explicit affirmative pick of the recommended setup is
+            // a consent — distinct from walking past the screen, which
+            // advance() backfills as `.notApplicable`.
+            onboarding.servicesChoice = .recommended
+            onboarding.recordOutcome(.consented(componentId: nil))
         } label: {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 10) {
@@ -375,6 +448,10 @@ struct OnboardingServicesContent: View {
                     .foregroundStyle(OnymTokens.text2)
                     .lineSpacing(2)
                     .padding(.bottom, 10)
+                // These lines name the FIXED recommended set (the
+                // seeded defaults plus the published lists installed
+                // on completion) — they are a promise, not live state;
+                // the Done step's summary is the live, checkable view.
                 summaryLine(label: "Delivery", value: "Onym Official relays")
                 summaryLine(label: "Media delivery", value: "Onym Official")
                 summaryLine(label: "Group integrity", value: "Published defaults")
@@ -543,6 +620,16 @@ struct OnboardingServicesHub: View {
                     }
                     .padding(.top, 20)
                     .accessibilityIdentifier("onboarding.services.hub.use_recommended")
+
+                    // This switches the selection back, it does NOT
+                    // undo anything — say so, or the affordance reads
+                    // as a revert.
+                    Text("Anything you already added here stays configured — remove it from the lists above if you've changed your mind.")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(OnymTokens.text3)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 6)
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
@@ -1367,13 +1454,19 @@ struct OnboardingModerationContent: View {
 /// "Save your recovery phrase" — the backup walk, promoted from the
 /// old Done-step footnote to a real step. The reveal itself runs the
 /// SAME `RecoveryPhraseBackupFlow` Settings uses (biometric gate,
-/// scene-phase obscuring, verify quiz), presented as a sheet; a
-/// completed walk records the consent. "Remind me later" (the step's
-/// skip) keeps the Settings nudge behavior.
+/// scene-phase obscuring, verify quiz), presented as a sheet.
+///
+/// The step's primary ("I've written it down") stays disabled until an
+/// outcome is recorded (`OnboardingFlow.requiresOutcomeToAdvance`) —
+/// and the outcome is recorded when the phrase is actually REVEALED,
+/// so the button can't assert something the user never saw. "Remind me
+/// later" (the step's skip) is the honest escape and keeps the
+/// Settings nudge behavior.
 struct OnboardingRecoveryContent: View {
     let onboarding: OnboardingFlow
     @State private var flow: RecoveryPhraseBackupFlow
     @State private var showBackup = false
+    @State private var sawPhrase = false
     @State private var backedUp = false
 
     init(
@@ -1391,12 +1484,10 @@ struct OnboardingRecoveryContent: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(backedUp ? OnymTokens.green : SettingsTile.amber)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(backedUp ? "Backed up" : "Not backed up yet")
+                    Text(backedUp ? "Backed up" : (sawPhrase ? "Revealed — write it down" : "Not backed up yet"))
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(OnymTokens.text)
-                    Text(backedUp
-                         ? "You revealed and verified your phrase. Keep it somewhere safe — off screenshots and out of chats."
-                         : "Reveal the 12 words, write them down, then verify a few of them. Takes about a minute.")
+                    Text(statusSubtitle)
                         .font(.system(size: 12.5))
                         .foregroundStyle(OnymTokens.text2)
                         .lineSpacing(2)
@@ -1408,7 +1499,7 @@ struct OnboardingRecoveryContent: View {
                         in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .accessibilityIdentifier("onboarding.recoveryPhrase.status")
 
-            SettingsPrimaryButton(backedUp ? "View it again" : "Reveal my recovery phrase") {
+            SettingsPrimaryButton(sawPhrase || backedUp ? "View it again" : "Reveal my recovery phrase") {
                 showBackup = true
             }
             .padding(.top, 12)
@@ -1423,12 +1514,35 @@ struct OnboardingRecoveryContent: View {
         .sheet(isPresented: $showBackup) {
             RecoveryPhraseBackupView(flow: flow)
         }
-        .onChange(of: flow.step) { _, step in
+        .onChange(of: flow.step) { old, step in
+            // The reveal is what makes "I've written it down" honest —
+            // record the outcome (unlocking the step's primary) the
+            // moment the words are actually on screen.
+            if case .reveal(_, true) = step {
+                sawPhrase = true
+                onboarding.recordOutcome(.consented(componentId: nil))
+            }
             if case .done = step {
                 backedUp = true
                 onboarding.recordOutcome(.consented(componentId: nil))
             }
+            // The backup flow's DoneScreen "Done" resets it to .intro
+            // (a Settings-era loop) — in onboarding that must dismiss
+            // the sheet, not strand the user back at the intro.
+            if case .done = old, case .intro = step {
+                showBackup = false
+            }
         }
+    }
+
+    private var statusSubtitle: LocalizedStringKey {
+        if backedUp {
+            return "You revealed and verified your phrase. Keep it somewhere safe — off screenshots and out of chats."
+        }
+        if sawPhrase {
+            return "You've seen the 12 words. Verifying a few of them makes sure your copy is right."
+        }
+        return "Reveal the 12 words, write them down, then verify a few of them. Takes about a minute."
     }
 }
 

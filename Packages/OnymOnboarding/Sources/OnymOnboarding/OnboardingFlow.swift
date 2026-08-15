@@ -51,6 +51,18 @@ public enum StepOutcome: Equatable, Sendable {
     case unavailable
 }
 
+/// Which path the services step is on. Lives on the flow (not the step
+/// view) so the selection survives Back/forward navigation — the step
+/// body derives its "Selected" chip from this, never from view-local
+/// state.
+public enum ServicesSetupChoice: Equatable, Sendable {
+    /// The preselected default: seeded services plus the published
+    /// lists installed on completion.
+    case recommended
+    /// The user went through the "choose services myself" hub.
+    case custom
+}
+
 /// State machine for the first-launch onboarding sequence. Modeled on
 /// `ModuleConsentFlow` / `ModerationConsentFlow`: `@MainActor
 /// @Observable`, every collaborator injected as a closure so the
@@ -84,6 +96,11 @@ public final class OnboardingFlow {
     /// answers `false`. Racing the probe must never open a skip window
     /// that a resolved `true` would have closed.
     public private(set) var moderationDirectoryHasEntries: Bool?
+    /// The services step's path, written by its step content. On the
+    /// flow (not the step view) so Back/forward navigation can't reset
+    /// the selection chip to a state that contradicts what the user
+    /// actually configured.
+    public var servicesChoice: ServicesSetupChoice = .recommended
     /// Flips exactly once, inside `complete()` — the observable signal
     /// the presenter dismisses its cover on. `onCompleted` alone can't
     /// carry the dismissal: it is bound at the composition root, which
@@ -162,6 +179,22 @@ public final class OnboardingFlow {
         return moderationDirectoryHasEntries != false
     }
 
+    /// A step whose primary refuses to advance without a recorded
+    /// outcome (the view disables the button; `advance()` carries the
+    /// same guard as the second layer):
+    /// - `moderation` while mandatory (see `isMandatory`);
+    /// - `recoveryPhrase` always — its primary reads "I've written it
+    ///   down", which must not be tappable before the phrase was ever
+    ///   revealed. The step content records the outcome on reveal;
+    ///   "Remind me later" (skip) is the honest escape.
+    public func requiresOutcomeToAdvance(_ step: OnboardingStep) -> Bool {
+        switch step {
+        case .moderation: return isMandatory(step)
+        case .recoveryPhrase: return true
+        default: return false
+        }
+    }
+
     // MARK: - Lifecycle
 
     /// Kick the async moderation-directory probe. Idempotent.
@@ -187,13 +220,13 @@ public final class OnboardingFlow {
     /// Continue-only acknowledgment records the distinct
     /// `.unavailable` (moderation wasn't offered; the user did not opt
     /// out). No-op on `done` (`complete()` is the terminal action),
-    /// and a no-op on a mandatory step with no recorded outcome — the
-    /// primary button must not be a back door around the must-consent
-    /// moderation rule (the view also disables it; this guard is the
-    /// second layer).
+    /// and a no-op on a step that requires an outcome and has none —
+    /// the primary button must not be a back door around the
+    /// must-consent moderation rule or the must-reveal recovery rule
+    /// (the view also disables it; this guard is the second layer).
     public func advance() {
         guard let next = neighbor(offset: 1) else { return }
-        guard !isMandatory(step) || outcomes[step] != nil else { return }
+        guard !requiresOutcomeToAdvance(step) || outcomes[step] != nil else { return }
         if outcomes[step] == nil {
             outcomes[step] = step == .moderation && moderationDirectoryHasEntries == false
                 ? .unavailable
