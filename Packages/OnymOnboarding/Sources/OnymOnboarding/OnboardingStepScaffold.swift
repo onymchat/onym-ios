@@ -24,6 +24,9 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
     /// is the second layer of the same rule).
     private let primaryDisabled: Bool
     private let primaryAction: () -> Void
+    /// Label for the Skip affordance — the recovery step reads
+    /// "Remind me later"; the default is "Skip".
+    private let skipTitle: String
     /// nil hides the Skip affordance (unskippable steps).
     private let skipAction: (() -> Void)?
     /// Renders a small progress indicator in the Skip slot — used
@@ -42,6 +45,7 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
         primaryTitle: String,
         primaryDisabled: Bool = false,
         primaryAction: @escaping () -> Void,
+        skipTitle: String = String(localized: "Skip"),
         skipAction: (() -> Void)? = nil,
         showsSkipProgress: Bool = false,
         backAction: (() -> Void)? = nil,
@@ -54,6 +58,7 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
         self.primaryTitle = primaryTitle
         self.primaryDisabled = primaryDisabled
         self.primaryAction = primaryAction
+        self.skipTitle = skipTitle
         self.skipAction = skipAction
         self.showsSkipProgress = showsSkipProgress
         self.backAction = backAction
@@ -106,7 +111,7 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
                     }
                     Spacer()
                     if let skipAction {
-                        Button("Skip", action: skipAction)
+                        Button(action: skipAction) { Text(verbatim: skipTitle) }
                             .accessibilityIdentifier("onboarding.\(step.rawValue).skip")
                     } else if showsSkipProgress {
                         ProgressView()

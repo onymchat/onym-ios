@@ -1,32 +1,45 @@
 import Foundation
 import Observation
 
-/// The seven first-launch steps, in presentation order.
+/// The first-launch steps, in presentation order. The user-facing
+/// story is "three steps" — identity, services, reports & safety —
+/// bracketed by an unnumbered welcome, the recovery-phrase backup,
+/// and the closing summary. `indicatorPosition(for:)` reflects that:
+/// only the three core steps carry a position.
 public enum OnboardingStep: String, CaseIterable, Equatable, Hashable, Sendable {
     case welcome
-    case discoveryConfirm
-    case messageTransport
-    case blobTransport
-    case notary
+    /// "Making your keys" — identity creation status. Informational:
+    /// the bootstrap already runs at app start; this step shows it.
+    case identity
+    /// "Your services" — the recommended-setup card, with the
+    /// "choose services myself" hub as an in-step branch. Collapses
+    /// the old discoveryConfirm / messageTransport / blobTransport /
+    /// notary wizard steps.
+    case services
+    /// "Reports & safety" — the moderation-authority pick + mandate.
     case moderation
+    /// "Save your recovery phrase" — the backup reveal, promoted from
+    /// the old Done-step footnote nudge.
+    case recoveryPhrase
     case done
 }
 
 /// What happened at one step, modeled abstractly — the flow never
 /// links against the packages whose surfaces produce these outcomes
 /// (OnymDiscovery's module consent, OnymModerationUI's mandate flow).
-/// The app-layer step content (PR 3) reports back through this enum.
+/// The app-layer step content reports back through this enum.
 public enum StepOutcome: Equatable, Sendable {
     /// The user consented at this step. `componentId` names the chosen
     /// component when the step's surface knows one (catalog picks);
-    /// nil for consents without a component identity (e.g. confirming
-    /// the seeded discovery source).
+    /// nil for consents without a component identity (accepting the
+    /// recommended setup, confirming a source, backing up the phrase).
     case consented(componentId: String?)
     /// The user skipped the step; the seat falls back to today's
-    /// defaults.
+    /// defaults. Only the recovery-phrase step is skippable now
+    /// ("Remind me later") — Settings keeps nudging until backed up.
     case skipped
     /// The step had nothing to decide (informational steps: welcome,
-    /// done).
+    /// identity, done).
     case notApplicable
     /// The step's obligation exists but could not be offered — today
     /// exactly moderation with an EMPTY authority directory: there is
@@ -43,17 +56,16 @@ public enum StepOutcome: Equatable, Sendable {
 /// @Observable`, every collaborator injected as a closure so the
 /// machine is unit-testable and the package stays dependency-free.
 ///
-/// Presentation contract (PR 3): RootView presents `OnboardingView` as
-/// a `fullScreenCover` with `.interactiveDismissDisabled(true)` — the
-/// only exits are `complete()` on the Done step and the per-step Skip
-/// affordances; there is no swipe-to-dismiss.
+/// Presentation contract: RootView presents `OnboardingView` as a
+/// `fullScreenCover` with `.interactiveDismissDisabled(true)` — the
+/// only exits are `complete()` on the Done step and the recovery
+/// step's "Remind me later"; there is no swipe-to-dismiss.
 ///
 /// Partial progress is deliberately NOT persisted: the flow lives in
 /// memory, and an app killed mid-onboarding starts over at `welcome`
 /// on next launch. Individual consents the step content applied
 /// before the kill are persisted by their own stores (consent pins,
-/// mandate) — only the walk position restarts. Revisit in PR 3 if the
-/// wired flow turns out long enough to warrant resume.
+/// mandate) — only the walk position restarts.
 @MainActor
 @Observable
 public final class OnboardingFlow {
@@ -104,22 +116,23 @@ public final class OnboardingFlow {
 
     // MARK: - Step indicator
 
-    /// Zero-based position of the current step, for the indicator.
-    public var stepIndex: Int {
-        OnboardingStep.allCases.firstIndex(of: step) ?? 0
-    }
+    /// The three steps the indicator counts — the user-facing "step N
+    /// of 3". Welcome, the recovery phrase, and Done are unnumbered.
+    private static let indicatorSteps: [OnboardingStep] = [.identity, .services, .moderation]
 
-    /// Total number of steps (7), for the indicator.
-    public var stepCount: Int {
-        OnboardingStep.allCases.count
+    /// Zero-based indicator position for a step, or nil when the step
+    /// carries no indicator (welcome, recoveryPhrase, done).
+    public func indicatorPosition(for step: OnboardingStep) -> (index: Int, count: Int)? {
+        guard let index = Self.indicatorSteps.firstIndex(of: step) else { return nil }
+        return (index, Self.indicatorSteps.count)
     }
 
     // MARK: - Skippability
 
-    /// Every step is skippable except:
-    /// - `welcome` — its primary Continue is the only path forward; a
-    ///   separate Skip would be redundant (and the view never renders
-    ///   one);
+    /// Only the recovery-phrase step is skippable ("Remind me later"):
+    /// - `welcome`, `identity`, `services` — their primary Continue is
+    ///   the only path forward; the recommended setup IS the default,
+    ///   so a separate Skip would be redundant;
     /// - `moderation` — NEVER skippable, in any directory state.
     ///   Moderation-authority selection is not optional: with entries
     ///   present the user must pick and sign (the gate would block
@@ -131,12 +144,7 @@ public final class OnboardingFlow {
     /// - `done`, which is terminal — there is nothing after it to skip
     ///   to (its primary action is `complete()`).
     public func isSkippable(_ step: OnboardingStep) -> Bool {
-        switch step {
-        case .welcome, .moderation, .done:
-            return false
-        default:
-            return true
-        }
+        step == .recoveryPhrase
     }
 
     /// A mandatory step cannot be walked past without a recorded
@@ -148,9 +156,7 @@ public final class OnboardingFlow {
     /// RESOLVED-empty directory relaxes this — there is no authority
     /// to pick, so hard-blocking would brick onboarding; the step
     /// becomes Continue-only informational and `advance()` records
-    /// the distinct `.unavailable` outcome. Note this is deliberately
-    /// NOT the complement of `isSkippable` anymore: moderation is
-    /// never skippable in any state.
+    /// the distinct `.unavailable` outcome.
     public func isMandatory(_ step: OnboardingStep) -> Bool {
         guard step == .moderation else { return false }
         return moderationDirectoryHasEntries != false
@@ -177,14 +183,14 @@ public final class OnboardingFlow {
 
     /// Move to the next step. A step walked past without any recorded
     /// outcome is backfilled — `.notApplicable` for the informational
-    /// steps (welcome), except moderation over a RESOLVED-empty
-    /// directory, whose Continue-only acknowledgment records the
-    /// distinct `.unavailable` (moderation wasn't offered; the user
-    /// did not opt out). No-op on `done` (`complete()` is the
-    /// terminal action), and a no-op on a mandatory step with no
-    /// recorded outcome — the primary button must not be a back door
-    /// around the must-consent moderation rule (the view also
-    /// disables it; this guard is the second layer).
+    /// steps, except moderation over a RESOLVED-empty directory, whose
+    /// Continue-only acknowledgment records the distinct
+    /// `.unavailable` (moderation wasn't offered; the user did not opt
+    /// out). No-op on `done` (`complete()` is the terminal action),
+    /// and a no-op on a mandatory step with no recorded outcome — the
+    /// primary button must not be a back door around the must-consent
+    /// moderation rule (the view also disables it; this guard is the
+    /// second layer).
     public func advance() {
         guard let next = neighbor(offset: 1) else { return }
         guard !isMandatory(step) || outcomes[step] != nil else { return }
@@ -197,8 +203,7 @@ public final class OnboardingFlow {
     }
 
     /// Skip the current step, recording `.skipped`. Guarded by
-    /// `isSkippable` — a no-op on an unskippable step (moderation with
-    /// a non-empty directory, done).
+    /// `isSkippable` — a no-op on every step except recoveryPhrase.
     public func skip() {
         guard isSkippable(step), let next = neighbor(offset: 1) else { return }
         outcomes[step] = .skipped
@@ -213,9 +218,10 @@ public final class OnboardingFlow {
         step = previous
     }
 
-    /// "Start" on the Done step: persist the completion flag, then let
-    /// the presenter dismiss. Guarded to the `done` step so no
-    /// programming error can mark onboarding complete mid-sequence.
+    /// "Start messaging" on the Done step: persist the completion
+    /// flag, then let the presenter dismiss. Guarded to the `done`
+    /// step so no programming error can mark onboarding complete
+    /// mid-sequence.
     public func complete() {
         guard step == .done else { return }
         if outcomes[step] == nil {

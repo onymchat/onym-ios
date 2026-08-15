@@ -3,30 +3,32 @@ import SwiftUI
 /// The first-launch onboarding cover: one scaffolded screen per
 /// `OnboardingStep`, driven by `OnboardingFlow`.
 ///
-/// Presentation contract: RootView (PR 3) presents this as a
+/// Presentation contract: RootView presents this as a
 /// `fullScreenCover` with `.interactiveDismissDisabled(true)` applied
 /// at the presentation site — a full-screen cover has no interactive
 /// dismissal of its own, but the modifier documents intent and guards
 /// against a future switch to `.sheet`. The only exits are
-/// `flow.complete()` on the Done step and the per-step Skip
-/// affordances; onboarding is never swiped away half-done.
+/// `flow.complete()` on the Done step and the recovery step's
+/// "Remind me later"; onboarding is never swiped away half-done.
 ///
 /// Dependency posture: this package renders the *frame* of each step.
-/// The middle steps' real content — discovery confirm, catalog
-/// pickers, the moderation mandate flow — lives at the app layer and
-/// arrives through `stepContent` in PR 3, so this view stays free of
-/// OnymDiscovery / OnymModerationUI / OnymDesign. Likewise the step
-/// indicator arrives through `stepIndicator` (PR 3 passes
-/// `SettingsStepIndicator` once it is public); the default is a plain
-/// dot indicator so the package previews and tests stand alone.
+/// The middle steps' real content — the services hub, the moderation
+/// mandate flow, the recovery-phrase reveal — lives at the app layer
+/// and arrives through `stepContent`, so this view stays free of
+/// OnymDiscovery / OnymModerationUI / OnymDesign / OnymRecovery.
+/// Likewise the step indicator arrives through `stepIndicator`; the
+/// default is a plain dot indicator so the package previews and tests
+/// stand alone.
 public struct OnboardingView: View {
     @State private var flow: OnboardingFlow
     /// App-supplied content slot, consulted for EVERY step (Welcome
     /// and Done included). Return nil to fall back to the built-ins:
     /// the Welcome/Done bodies, and a placeholder card for the middle
-    /// steps until PR 3 supplies the real surfaces.
+    /// steps.
     private let stepContent: (OnboardingStep) -> AnyView?
     /// App-supplied step indicator, given (zero-based index, count).
+    /// Only rendered on the steps the indicator counts — the three
+    /// core steps; welcome, recoveryPhrase and done are unnumbered.
     private let stepIndicator: (Int, Int) -> AnyView
 
     public init(
@@ -54,20 +56,25 @@ public struct OnboardingView: View {
             step: step,
             title: Self.title(for: step),
             subtitle: Self.subtitle(for: step),
-            primaryTitle: step == .done ? String(localized: "Start") : String(localized: "Continue"),
+            primaryTitle: Self.primaryTitle(for: step),
             // Mandatory steps render Continue disabled until the step
             // content records an outcome; `flow.advance()` carries the
             // same guard as the second layer.
             primaryDisabled: flow.isMandatory(step) && flow.outcomes[step] == nil,
             primaryAction: { primaryTapped() },
+            skipTitle: Self.skipTitle(for: step),
             skipAction: flow.isSkippable(step) ? { flow.skip() } : nil,
             // While the directory probe is unresolved, moderation's
-            // skippability is unknown (failed closed) — show progress
-            // where Skip would be instead of nothing.
+            // mandatory state is unknown (failed closed) — show
+            // progress where Skip would be instead of nothing.
             showsSkipProgress: step == .moderation && !flow.moderationProbeResolved,
             backAction: step == .welcome ? nil : { flow.back() },
             content: { content(for: step) },
-            indicator: { stepIndicator(flow.stepIndex, flow.stepCount) }
+            indicator: {
+                if let position = flow.indicatorPosition(for: step) {
+                    stepIndicator(position.index, position.count)
+                }
+            }
         )
     }
 
@@ -101,64 +108,93 @@ public struct OnboardingView: View {
 
     static func title(for step: OnboardingStep) -> String {
         switch step {
-        case .welcome: return String(localized: "Welcome to Onym")
-        case .discoveryConfirm: return String(localized: "Service Directory")
-        case .messageTransport: return String(localized: "Message Transport")
-        case .blobTransport: return String(localized: "File Storage")
-        case .notary: return String(localized: "Notary")
-        case .moderation: return String(localized: "Moderation")
-        case .done: return String(localized: "You're Set")
+        case .welcome: return String(localized: "Onym")
+        case .identity: return String(localized: "Making your keys")
+        case .services: return String(localized: "Your services")
+        case .moderation: return String(localized: "Reports & safety")
+        case .recoveryPhrase: return String(localized: "Save your recovery phrase")
+        case .done: return String(localized: "You're ready")
         }
     }
 
     static func subtitle(for step: OnboardingStep) -> String? {
         switch step {
         case .welcome:
-            return String(localized: "Your keys, your services. Pick who carries your messages, stores your files, and vouches for your history — every choice is yours, and every one can change later in Settings.")
-        case .discoveryConfirm:
-            return String(localized: "Confirm the directory your app uses to find services, or add your own provider.")
-        case .messageTransport:
-            return String(localized: "Choose who relays your messages.")
-        case .blobTransport:
-            return String(localized: "Choose where your attachments are stored.")
-        case .notary:
-            return String(localized: "Choose who timestamps your conversation history.")
+            return String(localized: "Messaging that answers to you — not to a company.")
+        case .identity:
+            return String(localized: "This takes a second. Everything happens on your iPhone — nothing has been sent anywhere yet.")
+        case .services:
+            return String(localized: "Onym runs on independent services for delivery, files and timestamps. Start with a set that works, or pick your own.")
         case .moderation:
-            return String(localized: "Choose a moderation authority and review its terms.")
+            return String(localized: "If someone reports illegal content, an authority you choose reviews the report. Pick one to continue — you'll see exactly what it can do before you agree.")
+        case .recoveryPhrase:
+            return String(localized: "These 12 words are the only way back into your account if you lose this iPhone. Onym cannot reset them for you.")
         case .done:
-            return String(localized: "Your choices are saved. You can revisit any of them in Settings.")
+            return String(localized: "Your identity is on this device and your services are connected.")
+        }
+    }
+
+    static func primaryTitle(for step: OnboardingStep) -> String {
+        switch step {
+        case .welcome: return String(localized: "Create my identity")
+        case .recoveryPhrase: return String(localized: "I've written it down")
+        case .done: return String(localized: "Start messaging")
+        default: return String(localized: "Continue")
+        }
+    }
+
+    /// The skip affordance's label — only the recovery step has one,
+    /// and it reads as a deferral, not a skip.
+    static func skipTitle(for step: OnboardingStep) -> String {
+        switch step {
+        case .recoveryPhrase: return String(localized: "Remind me later")
+        default: return String(localized: "Skip")
         }
     }
 }
 
 // MARK: - Built-in step content
 
-/// Welcome step body: brand framing. PR 3 may replace the mark via
-/// `stepContent` if richer branding (OnymMark) is wanted; the built-in
+/// Welcome step body: brand framing. The app layer replaces this via
+/// `stepContent` with the OnymMark-branded version; the built-in
 /// keeps the package standalone.
 struct WelcomeStepContent: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             Image(systemName: "key.horizontal")
                 .font(.system(size: 44))
                 .foregroundStyle(.tint)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 24)
-            Text("The next few screens set up the services this app runs on. Each one shows exactly what you're agreeing to before anything is turned on.")
+            bullet(symbol: "lock.fill",
+                   text: "Your identity key is made on this device and stays here.")
+            bullet(symbol: "antenna.radiowaves.left.and.right",
+                   text: "You pick who carries your messages — and can swap them any time.")
+            bullet(symbol: "shield.fill",
+                   text: "You pick who handles reports, and see exactly what they can do.")
+        }
+    }
+
+    private func bullet(symbol: String, text: LocalizedStringKey) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: symbol)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.tint)
+                .frame(width: 24)
+            Text(text)
                 .font(.callout)
                 .foregroundStyle(.secondary)
         }
     }
 }
 
-/// Done step body: summary of what was chosen per step, plus the
-/// backup nudge (identity was created silently; the phrase flow lives
-/// in Settings and is nudged here, never forced).
+/// Done step body: summary of what was decided, plus a reminder that
+/// everything stays editable in Settings.
 struct DoneStepContent: View {
     let outcomes: [OnboardingStep: StepOutcome]
 
     private static let summarySteps: [OnboardingStep] = [
-        .discoveryConfirm, .messageTransport, .blobTransport, .notary, .moderation,
+        .services, .moderation, .recoveryPhrase,
     ]
 
     var body: some View {
@@ -177,7 +213,7 @@ struct DoneStepContent: View {
                 .padding(.vertical, 4)
             }
             Divider()
-            Text("Your identity key was created on this device. Back it up from Settings so you can recover your account.")
+            Text("Tap any line to change it later in Settings. Nothing here is permanent except your recovery phrase.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
@@ -200,15 +236,15 @@ struct DoneStepContent: View {
     private func label(for outcome: StepOutcome?) -> String {
         switch outcome {
         case .consented: return String(localized: "Chosen")
-        case .skipped: return String(localized: "Default")
+        case .skipped: return String(localized: "Later")
         case .unavailable: return String(localized: "Unavailable")
-        case .notApplicable, nil: return String(localized: "—")
+        case .notApplicable, nil: return String(localized: "Default")
         }
     }
 }
 
-/// Placeholder body for the middle steps until PR 3 injects the real
-/// surfaces through `stepContent`.
+/// Placeholder body for the middle steps when the app doesn't inject
+/// real surfaces through `stepContent` (package previews and tests).
 struct PlaceholderStepContent: View {
     let step: OnboardingStep
 
@@ -230,7 +266,7 @@ struct PlaceholderStepContent: View {
     }
 }
 
-/// Fallback step indicator: plain dots. PR 3 replaces it with
+/// Fallback step indicator: plain dots. The app replaces it with
 /// `SettingsStepIndicator` via the `stepIndicator` slot.
 struct DefaultStepIndicator: View {
     let index: Int

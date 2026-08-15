@@ -982,6 +982,14 @@ struct OnymIOSApp: App {
                 makeRelayerFlow: makeRelayerSettingsFlow,
                 relayerPicker: relayerCatalogPicker,
                 makeModerationConsentFlow: makeModerationConsentFlow,
+                // The recovery step runs the same backup walk Settings
+                // offers — same biometric gate, same verify quiz.
+                makeBackupFlow: { @MainActor in
+                    RecoveryPhraseBackupFlow(
+                        repository: repository,
+                        authenticator: authenticator
+                    )
+                },
                 loadSummary: { @MainActor in
                     // The Done step's summary is read from the
                     // repositories, not the walk's outcomes — what the

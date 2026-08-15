@@ -60,8 +60,8 @@ final class OnboardingFlowTests: XCTestCase {
             visited.append(flow.step)
         }
         XCTAssertEqual(visited, [
-            .welcome, .discoveryConfirm, .messageTransport,
-            .blobTransport, .notary, .moderation, .done,
+            .welcome, .identity, .services,
+            .moderation, .recoveryPhrase, .done,
         ])
     }
 
@@ -72,14 +72,19 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertEqual(flow.step, .done)
     }
 
-    func testStepIndexAndCountDriveTheIndicator() async {
-        let flow = await makeResolvedFlow()
-        XCTAssertEqual(flow.stepCount, 7)
-        XCTAssertEqual(flow.stepIndex, 0)
-        flow.advance()
-        XCTAssertEqual(flow.stepIndex, 1)
-        while flow.step != .done { flow.advance() }
-        XCTAssertEqual(flow.stepIndex, 6)
+    // MARK: - Step indicator
+
+    /// The indicator counts the three core steps only — welcome, the
+    /// recovery phrase, and Done are unnumbered.
+    func testIndicatorCoversExactlyTheThreeCoreSteps() {
+        let flow = makeFlow()
+        XCTAssertNil(flow.indicatorPosition(for: .welcome))
+        XCTAssertNil(flow.indicatorPosition(for: .recoveryPhrase))
+        XCTAssertNil(flow.indicatorPosition(for: .done))
+        XCTAssertEqual(flow.indicatorPosition(for: .identity)?.index, 0)
+        XCTAssertEqual(flow.indicatorPosition(for: .services)?.index, 1)
+        XCTAssertEqual(flow.indicatorPosition(for: .moderation)?.index, 2)
+        XCTAssertEqual(flow.indicatorPosition(for: .identity)?.count, 3)
     }
 
     // MARK: - Back
@@ -88,9 +93,9 @@ final class OnboardingFlowTests: XCTestCase {
         let flow = makeFlow()
         flow.advance()
         flow.advance()
-        XCTAssertEqual(flow.step, .messageTransport)
+        XCTAssertEqual(flow.step, .services)
         flow.back()
-        XCTAssertEqual(flow.step, .discoveryConfirm)
+        XCTAssertEqual(flow.step, .identity)
         flow.back()
         XCTAssertEqual(flow.step, .welcome)
     }
@@ -103,23 +108,45 @@ final class OnboardingFlowTests: XCTestCase {
 
     func testBackKeepsThePriorOutcomeUntilOverwritten() {
         let flow = makeFlow()
-        flow.advance() // discoveryConfirm
+        flow.advance() // identity
+        flow.advance() // services
         flow.recordOutcome(.consented(componentId: nil))
-        flow.advance() // messageTransport
-        flow.back() // revisit discoveryConfirm
-        XCTAssertEqual(flow.outcomes[.discoveryConfirm], .consented(componentId: nil))
-        flow.skip()
-        XCTAssertEqual(flow.outcomes[.discoveryConfirm], .skipped)
+        flow.back() // revisit identity
+        flow.advance() // services again
+        XCTAssertEqual(flow.outcomes[.services], .consented(componentId: nil))
+        flow.recordOutcome(.notApplicable)
+        XCTAssertEqual(flow.outcomes[.services], .notApplicable)
     }
 
     // MARK: - Skip
 
-    func testSkipRecordsSkippedAndAdvances() {
+    /// The recovery phrase is the ONLY skippable step ("Remind me
+    /// later") — everything else advances through Continue alone.
+    func testOnlyRecoveryPhraseIsSkippable() {
         let flow = makeFlow()
-        flow.advance() // discoveryConfirm
+        for step in OnboardingStep.allCases {
+            XCTAssertEqual(
+                flow.isSkippable(step),
+                step == .recoveryPhrase,
+                "\(step) skippability"
+            )
+        }
+    }
+
+    func testSkipOnRecoveryPhraseRecordsSkippedAndAdvances() async {
+        let flow = await makeResolvedFlow()
+        while flow.step != .recoveryPhrase { flow.advance() }
         flow.skip()
-        XCTAssertEqual(flow.step, .messageTransport)
-        XCTAssertEqual(flow.outcomes[.discoveryConfirm], .skipped)
+        XCTAssertEqual(flow.step, .done)
+        XCTAssertEqual(flow.outcomes[.recoveryPhrase], .skipped)
+    }
+
+    func testSkipOnUnskippableStepIsANoOp() {
+        let flow = makeFlow()
+        flow.advance() // identity
+        flow.skip()
+        XCTAssertEqual(flow.step, .identity)
+        XCTAssertNil(flow.outcomes[.identity])
     }
 
     func testAdvanceWithoutDecisionBackfillsNotApplicable() {
@@ -130,11 +157,12 @@ final class OnboardingFlowTests: XCTestCase {
 
     func testAdvanceDoesNotOverwriteARecordedOutcome() {
         let flow = makeFlow()
-        flow.advance() // discoveryConfirm
+        flow.advance() // identity
+        flow.advance() // services
         flow.recordOutcome(.consented(componentId: "onym:component:onym-discovery"))
         flow.advance()
         XCTAssertEqual(
-            flow.outcomes[.discoveryConfirm],
+            flow.outcomes[.services],
             .consented(componentId: "onym:component:onym-discovery")
         )
     }
@@ -182,7 +210,7 @@ final class OnboardingFlowTests: XCTestCase {
 
         while flow.step != .moderation { flow.advance() }
         flow.advance() // plain Continue
-        XCTAssertEqual(flow.step, .done)
+        XCTAssertEqual(flow.step, .recoveryPhrase)
         XCTAssertEqual(flow.outcomes[.moderation], .unavailable)
     }
 
@@ -194,10 +222,6 @@ final class OnboardingFlowTests: XCTestCase {
         await flow.moderationProbeTask?.value
         XCTAssertFalse(flow.isSkippable(.moderation))
         XCTAssertTrue(flow.isMandatory(.moderation))
-        // Every other middle step stays skippable.
-        for step: OnboardingStep in [.discoveryConfirm, .messageTransport, .blobTransport, .notary] {
-            XCTAssertTrue(flow.isSkippable(step), "\(step) should stay skippable")
-        }
 
         while flow.step != .moderation { flow.advance() }
         flow.skip() // must be a no-op
@@ -208,7 +232,7 @@ final class OnboardingFlowTests: XCTestCase {
 
         flow.recordOutcome(.consented(componentId: "onym:component:authority"))
         flow.advance()
-        XCTAssertEqual(flow.step, .done)
+        XCTAssertEqual(flow.step, .recoveryPhrase)
     }
 
     func testStartIsIdempotent() async {
@@ -255,7 +279,7 @@ final class OnboardingFlowTests: XCTestCase {
     func testCompleteBeforeDoneIsANoOp() {
         var completedCalls = 0
         let flow = makeFlow(onCompleted: { completedCalls += 1 })
-        flow.advance() // discoveryConfirm — mid-sequence
+        flow.advance() // identity — mid-sequence
         flow.complete()
         XCTAssertFalse(store.hasCompletedOnboarding())
         XCTAssertEqual(completedCalls, 0)
@@ -274,22 +298,18 @@ final class OnboardingFlowTests: XCTestCase {
 
     func testRecordOutcomePerStepAcrossTheWholeWalk() async {
         let flow = await makeResolvedFlow()
-        flow.advance() // discoveryConfirm
-        flow.recordOutcome(.consented(componentId: nil))
-        flow.advance() // messageTransport
+        flow.advance() // identity
+        flow.advance() // services
         flow.recordOutcome(.consented(componentId: "onym:component:onym-nostr"))
-        flow.advance() // blobTransport
-        flow.skip() // notary
-        flow.recordOutcome(.consented(componentId: "onym:component:onym-relayer"))
         flow.advance() // moderation
-        flow.advance() // done (Continue-only moderation, directory empty)
+        flow.advance() // recoveryPhrase (Continue-only moderation, directory empty)
+        flow.skip() // remind me later
 
         XCTAssertEqual(flow.outcomes[.welcome], .notApplicable)
-        XCTAssertEqual(flow.outcomes[.discoveryConfirm], .consented(componentId: nil))
-        XCTAssertEqual(flow.outcomes[.messageTransport], .consented(componentId: "onym:component:onym-nostr"))
-        XCTAssertEqual(flow.outcomes[.blobTransport], .skipped)
-        XCTAssertEqual(flow.outcomes[.notary], .consented(componentId: "onym:component:onym-relayer"))
+        XCTAssertEqual(flow.outcomes[.identity], .notApplicable)
+        XCTAssertEqual(flow.outcomes[.services], .consented(componentId: "onym:component:onym-nostr"))
         XCTAssertEqual(flow.outcomes[.moderation], .unavailable)
+        XCTAssertEqual(flow.outcomes[.recoveryPhrase], .skipped)
     }
 
     // MARK: - Welcome skippability
@@ -328,7 +348,7 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertFalse(flow.isSkippable(.moderation))
         XCTAssertFalse(flow.isMandatory(.moderation))
         flow.advance()
-        XCTAssertEqual(flow.step, .done)
+        XCTAssertEqual(flow.step, .recoveryPhrase)
         XCTAssertEqual(flow.outcomes[.moderation], .unavailable)
     }
 
@@ -347,8 +367,8 @@ final class OnboardingFlowTests: XCTestCase {
 
     // MARK: - Mandatory moderation blocks advance()
 
-    /// The substantive review finding: Continue must not be a back
-    /// door around the unskippable-moderation rule.
+    /// Continue must not be a back door around the
+    /// unskippable-moderation rule.
     func testAdvanceOnMandatoryModerationWithoutOutcomeIsANoOp() async {
         let flow = await makeResolvedFlow(directoryNonEmpty: true)
         while flow.step != .moderation { flow.advance() }
@@ -362,16 +382,17 @@ final class OnboardingFlowTests: XCTestCase {
         while flow.step != .moderation { flow.advance() }
         flow.recordOutcome(.consented(componentId: "onym:component:onym-moderation"))
         flow.advance()
-        XCTAssertEqual(flow.step, .done)
+        XCTAssertEqual(flow.step, .recoveryPhrase)
         XCTAssertEqual(flow.outcomes[.moderation], .consented(componentId: "onym:component:onym-moderation"))
     }
 
     func testRecordingAgainOverwrites() {
         let flow = makeFlow()
-        flow.advance() // discoveryConfirm
+        flow.advance() // identity
+        flow.advance() // services
         flow.recordOutcome(.consented(componentId: "onym:component:a"))
         flow.recordOutcome(.consented(componentId: "onym:component:b"))
-        XCTAssertEqual(flow.outcomes[.discoveryConfirm], .consented(componentId: "onym:component:b"))
+        XCTAssertEqual(flow.outcomes[.services], .consented(componentId: "onym:component:b"))
     }
 }
 

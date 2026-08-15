@@ -5,6 +5,7 @@ import OnymDiscovery
 import OnymFoundation
 import OnymModerationUI
 import OnymOnboarding
+import OnymRecovery
 import OnymSettings
 import OnymTransportBlossom
 import OnymTransportNostr
@@ -38,39 +39,29 @@ struct OnboardingStepContentBuilder {
     let makeRelayerFlow: @MainActor () -> RelayerSettingsFlow
     let relayerPicker: DiscoveryModulePicker?
     let makeModerationConsentFlow: @MainActor (ModerationConsentFlow.Mode) -> ModerationConsentFlow
+    let makeBackupFlow: @MainActor () -> RecoveryPhraseBackupFlow
     let loadSummary: @MainActor () async -> [OnboardingSummaryRow]
 
     func content(for step: OnboardingStep, flow: OnboardingFlow) -> AnyView? {
         switch step {
         case .welcome:
             return AnyView(OnboardingWelcomeContent())
-        case .discoveryConfirm:
-            return AnyView(OnboardingDiscoveryContent(
+        case .identity:
+            return AnyView(OnboardingIdentityContent())
+        case .services:
+            return AnyView(OnboardingServicesContent(
                 onboarding: flow,
-                makeFlow: makeDiscoveryFlow
-            ))
-        case .messageTransport:
-            return AnyView(OnboardingNostrContent(
-                onboarding: flow,
-                makeFlow: makeNostrFlow,
-                picker: nostrPicker
-            ))
-        case .blobTransport:
-            return AnyView(OnboardingBlossomContent(
-                onboarding: flow,
-                makeFlow: makeBlossomFlow,
-                picker: blossomPicker
-            ))
-        case .notary:
-            return AnyView(OnboardingNotaryContent(
-                onboarding: flow,
-                makeFlow: makeRelayerFlow,
-                picker: relayerPicker
+                builder: self
             ))
         case .moderation:
             return AnyView(OnboardingModerationContent(
                 onboarding: flow,
                 makeConsentFlow: makeModerationConsentFlow
+            ))
+        case .recoveryPhrase:
+            return AnyView(OnboardingRecoveryContent(
+                onboarding: flow,
+                makeBackupFlow: makeBackupFlow
             ))
         case .done:
             return AnyView(OnboardingDoneContent(loadSummary: loadSummary))
@@ -227,12 +218,12 @@ struct OnboardingWelcomeContent: View {
                 .padding(.vertical, 28)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 14) {
-                row(symbol: "key.fill",
-                    text: "Your identity key is created on this device. No account, no phone number.")
+                row(symbol: "lock.fill",
+                    text: "Your identity key is made on this device and stays here. No account, no phone number.")
                 row(symbol: "antenna.radiowaves.left.and.right",
-                    text: "The next screens set up the services this app runs on. Each one shows exactly what you're agreeing to before anything is turned on.")
-                row(symbol: "gearshape",
-                    text: "Nothing is final — every choice can change later in Settings.")
+                    text: "You pick who carries your messages — and can swap them any time in Settings.")
+                row(symbol: "shield.fill",
+                    text: "You pick who handles reports, and see exactly what they can do before you agree.")
             }
             .padding(16)
             .background(OnymTokens.surface2,
@@ -251,6 +242,382 @@ struct OnboardingWelcomeContent: View {
                 .foregroundStyle(OnymTokens.text2)
                 .lineSpacing(2)
         }
+    }
+}
+
+// MARK: - Identity
+
+/// "Making your keys" — the identity bootstrap already ran silently in
+/// the WindowGroup task; this step surfaces what happened instead of
+/// hiding it behind the old Welcome footnote. Informational: nothing
+/// to decide, nothing recorded.
+struct OnboardingIdentityContent: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(spacing: 0) {
+                row(symbol: "checkmark.circle.fill",
+                    color: OnymTokens.green,
+                    title: "Identity key created",
+                    subtitle: "Held in this device's secure enclave")
+                Divider()
+                    .background(OnymTokens.hairline)
+                    .padding(.leading, 46)
+                row(symbol: "checkmark.circle.fill",
+                    color: OnymTokens.green,
+                    title: "Recovery phrase generated",
+                    subtitle: "12 words — you'll back these up in a moment")
+            }
+            .background(OnymTokens.surface2,
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("onboarding.identity.checklist")
+
+            Text("Your key is the only thing that proves this account is yours. No server holds a copy of it.")
+                .font(.system(size: 12.5))
+                .foregroundStyle(OnymTokens.text2)
+                .lineSpacing(2)
+                .padding(.top, 12)
+        }
+    }
+
+    private func row(
+        symbol: String,
+        color: Color,
+        title: LocalizedStringKey,
+        subtitle: LocalizedStringKey
+    ) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol)
+                .font(.system(size: 20))
+                .foregroundStyle(color)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(OnymTokens.text)
+                Text(subtitle)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(OnymTokens.text2)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+}
+
+// MARK: - Services (recommended vs. choose myself)
+
+/// "Your services" — one screen instead of the old four wizard steps.
+/// The recommended setup (the seeded defaults plus whatever the
+/// published lists install) is preselected; "Choose services myself"
+/// opens the hub sheet, whose per-seat screens are the SAME surfaces
+/// the old wizard steps rendered, backed by the same Settings flows.
+struct OnboardingServicesContent: View {
+    let onboarding: OnboardingFlow
+    let builder: OnboardingStepContentBuilder
+    @State private var usingCustom = false
+    @State private var showHub = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            recommendedCard
+            customCard
+            Text("Whichever you choose, every service can be added, replaced or removed later in Settings.")
+                .font(.system(size: 12.5))
+                .foregroundStyle(OnymTokens.text2)
+                .lineSpacing(2)
+                .padding(.top, 4)
+        }
+        .sheet(isPresented: $showHub) {
+            OnboardingServicesHub(
+                onboarding: onboarding,
+                builder: builder,
+                onUseRecommended: {
+                    usingCustom = false
+                    onboarding.recordOutcome(.notApplicable)
+                    showHub = false
+                },
+                onDone: {
+                    usingCustom = true
+                    // The hub's per-seat surfaces record specific
+                    // consents as they happen; closing the hub without
+                    // one still means "I set things up myself".
+                    if onboarding.outcomes[.services] == nil {
+                        onboarding.recordOutcome(.consented(componentId: nil))
+                    }
+                    showHub = false
+                }
+            )
+        }
+    }
+
+    private var recommendedCard: some View {
+        Button {
+            usingCustom = false
+            onboarding.recordOutcome(.notApplicable)
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 10) {
+                    Text("Recommended setup")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(OnymTokens.text)
+                    if !usingCustom {
+                        SettingsChip(
+                            text: String(localized: "Selected"),
+                            fg: OnymTokens.onAccent,
+                            bg: OnymAccent.blue.color
+                        )
+                    }
+                    Spacer(minLength: 0)
+                }
+                Text("Services published by Onym, verified on this device. Ready in a second.")
+                    .font(.system(size: 13.5))
+                    .foregroundStyle(OnymTokens.text2)
+                    .lineSpacing(2)
+                    .padding(.bottom, 10)
+                summaryLine(label: "Delivery", value: "Onym Official relays")
+                summaryLine(label: "Media delivery", value: "Onym Official")
+                summaryLine(label: "Group integrity", value: "Published defaults")
+                summaryLine(label: "Directory", value: "Onym Discovery")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(16)
+            .background(OnymTokens.surface2,
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(usingCustom ? Color.clear : OnymAccent.blue.color, lineWidth: 2)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("onboarding.services.recommended")
+    }
+
+    private var customCard: some View {
+        Button {
+            showHub = true
+        } label: {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 10) {
+                        Text("Choose services myself")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(OnymTokens.text)
+                        if usingCustom {
+                            SettingsChip(
+                                text: String(localized: "Selected"),
+                                fg: OnymTokens.onAccent,
+                                bg: OnymAccent.blue.color
+                            )
+                        }
+                    }
+                    Text("Pick your own directories, relays, storage and notaries. About two minutes.")
+                        .font(.system(size: 13.5))
+                        .foregroundStyle(OnymTokens.text2)
+                        .lineSpacing(2)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(OnymTokens.text3)
+            }
+            .padding(16)
+            .background(OnymTokens.surface2,
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(usingCustom ? OnymAccent.blue.color : Color.clear, lineWidth: 2)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("onboarding.services.custom")
+    }
+
+    private func summaryLine(label: LocalizedStringKey, value: LocalizedStringKey) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(label)
+                .font(.system(size: 13.5))
+                .foregroundStyle(OnymTokens.text2)
+                .frame(width: 108, alignment: .leading)
+            Text(value)
+                .font(.system(size: 13.5, weight: .medium))
+                .foregroundStyle(OnymTokens.text)
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+/// The "choose services myself" hub: each seat is a pushed screen
+/// hosting the exact surface the old wizard step rendered. Replaces
+/// the old forced discovery → transport → storage → notary sequence
+/// with set-up-as-much-as-you-like navigation.
+struct OnboardingServicesHub: View {
+    let onboarding: OnboardingFlow
+    let builder: OnboardingStepContentBuilder
+    let onUseRecommended: () -> Void
+    let onDone: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Set up as much or as little as you like — anything you leave alone keeps the recommended default.")
+                        .font(.system(size: 14))
+                        .foregroundStyle(OnymTokens.text2)
+                        .lineSpacing(2)
+                        .padding(.bottom, 4)
+
+                    OnboardingSectionLabel(text: "NEEDED TO SEND MESSAGES")
+                    VStack(spacing: 0) {
+                        hubRow(
+                            symbol: "antenna.radiowaves.left.and.right",
+                            color: OnymAccent.purple.color,
+                            title: "Message delivery",
+                            subtitle: "Who carries your sealed messages"
+                        ) {
+                            AnyView(OnboardingNostrContent(
+                                onboarding: onboarding,
+                                makeFlow: builder.makeNostrFlow,
+                                picker: builder.nostrPicker
+                            ))
+                        }
+                        divider
+                        hubRow(
+                            symbol: "photo.on.rectangle.angled",
+                            color: OnymAccent.pink.color,
+                            title: "Media delivery",
+                            subtitle: "Carries photos, video and voice notes"
+                        ) {
+                            AnyView(OnboardingBlossomContent(
+                                onboarding: onboarding,
+                                makeFlow: builder.makeBlossomFlow,
+                                picker: builder.blossomPicker
+                            ))
+                        }
+                        divider
+                        hubRow(
+                            symbol: "magnifyingglass",
+                            color: OnymAccent.blue.color,
+                            title: "Directory",
+                            subtitle: "Where Onym looks services up"
+                        ) {
+                            AnyView(OnboardingDiscoveryContent(
+                                onboarding: onboarding,
+                                makeFlow: builder.makeDiscoveryFlow
+                            ))
+                        }
+                    }
+                    .background(OnymTokens.surface2,
+                                in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                    OnboardingSectionLabel(text: "OPTIONAL")
+                    VStack(spacing: 0) {
+                        hubRow(
+                            symbol: "checkmark.seal",
+                            color: OnymAccent.green.color,
+                            title: "Group integrity",
+                            subtitle: "Keeps group membership provably honest"
+                        ) {
+                            AnyView(OnboardingNotaryContent(
+                                onboarding: onboarding,
+                                makeFlow: builder.makeRelayerFlow,
+                                picker: builder.relayerPicker
+                            ))
+                        }
+                    }
+                    .background(OnymTokens.surface2,
+                                in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                    Text("Adding more than one service in a category gives you a fallback — Onym uses the fastest one that answers.")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(OnymTokens.text2)
+                        .lineSpacing(2)
+                        .padding(.top, 12)
+
+                    Button(action: onUseRecommended) {
+                        Text("Use the recommended setup instead")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(OnymAccent.blue.color)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .padding(.top, 20)
+                    .accessibilityIdentifier("onboarding.services.hub.use_recommended")
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+            }
+            .navigationTitle(Text("Your services"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done", action: onDone)
+                        .accessibilityIdentifier("onboarding.services.hub.done")
+                }
+            }
+        }
+        .interactiveDismissDisabled(true)
+    }
+
+    private var divider: some View {
+        Divider()
+            .background(OnymTokens.hairline)
+            .padding(.leading, 50)
+    }
+
+    private func hubRow(
+        symbol: String,
+        color: Color,
+        title: LocalizedStringKey,
+        subtitle: LocalizedStringKey,
+        destination: @escaping () -> AnyView
+    ) -> some View {
+        NavigationLink {
+            OnboardingHubDetail(title: title, content: destination)
+        } label: {
+            HStack(spacing: 12) {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(color)
+                    .frame(width: 30, height: 30)
+                    .overlay(Image(systemName: symbol)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(OnymTokens.onAccent))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(OnymTokens.text)
+                    Text(subtitle)
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(OnymTokens.text2)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(OnymTokens.text3)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// One pushed hub screen: the seat's surface inside a scroll view with
+/// the page insets the scaffold used to provide.
+private struct OnboardingHubDetail: View {
+    let title: LocalizedStringKey
+    let content: () -> AnyView
+
+    var body: some View {
+        ScrollView {
+            content()
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+        }
+        .navigationTitle(Text(title))
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -545,7 +912,7 @@ struct OnboardingNostrContent: View {
         let endpoints = flow.state.snapshot.endpoints
         if endpoints.isEmpty {
             OnboardingInfoCard(
-                text: "No relay configured yet. Add one below, or skip to use the default.",
+                text: "No relay configured yet. Add one below, or go back to keep the default.",
                 accessibilityID: "onboarding.messageTransport.empty"
             )
         } else {
@@ -672,7 +1039,7 @@ struct OnboardingBlossomContent: View {
         let endpoints = flow.state.snapshot.endpoints
         if endpoints.isEmpty {
             OnboardingInfoCard(
-                text: "No server configured yet. Add one below, or skip to use the default.",
+                text: "No server configured yet. Add one below, or go back to keep the default.",
                 accessibilityID: "onboarding.blobTransport.empty"
             )
         } else {
@@ -770,7 +1137,7 @@ struct OnboardingNotaryContent: View {
                 }
             )
 
-            Text("Skip to use the published defaults — they're installed automatically once setup finishes.")
+            Text("Leave this empty to use the published defaults — they're installed automatically once setup finishes.")
                 .font(.system(size: 12.5))
                 .foregroundStyle(OnymTokens.text2)
                 .padding(.top, 10)
@@ -789,7 +1156,7 @@ struct OnboardingNotaryContent: View {
         let endpoints = flow.state.snapshot.configuration.endpoints
         if endpoints.isEmpty {
             OnboardingInfoCard(
-                text: "No notary chosen yet. Pick one below, or skip to use the published defaults.",
+                text: "No notary chosen yet. Pick one below, or leave this empty to use the published defaults.",
                 accessibilityID: "onboarding.notary.empty"
             )
         } else {
@@ -951,6 +1318,76 @@ struct OnboardingModerationContent: View {
                 else { return }
                 onboarding.recordOutcome(.consented(componentId: current))
             }
+    }
+}
+
+// MARK: - Recovery phrase
+
+/// "Save your recovery phrase" — the backup walk, promoted from the
+/// old Done-step footnote to a real step. The reveal itself runs the
+/// SAME `RecoveryPhraseBackupFlow` Settings uses (biometric gate,
+/// scene-phase obscuring, verify quiz), presented as a sheet; a
+/// completed walk records the consent. "Remind me later" (the step's
+/// skip) keeps the Settings nudge behavior.
+struct OnboardingRecoveryContent: View {
+    let onboarding: OnboardingFlow
+    @State private var flow: RecoveryPhraseBackupFlow
+    @State private var showBackup = false
+    @State private var backedUp = false
+
+    init(
+        onboarding: OnboardingFlow,
+        makeBackupFlow: @MainActor () -> RecoveryPhraseBackupFlow
+    ) {
+        self.onboarding = onboarding
+        _flow = State(initialValue: makeBackupFlow())
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: backedUp ? "checkmark.seal.fill" : "key.viewfinder")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(backedUp ? OnymTokens.green : SettingsTile.amber)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(backedUp ? "Backed up" : "Not backed up yet")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(OnymTokens.text)
+                    Text(backedUp
+                         ? "You revealed and verified your phrase. Keep it somewhere safe — off screenshots and out of chats."
+                         : "Reveal the 12 words, write them down, then verify a few of them. Takes about a minute.")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(OnymTokens.text2)
+                        .lineSpacing(2)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background((backedUp ? OnymTokens.green : SettingsTile.amber).opacity(0.10),
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .accessibilityIdentifier("onboarding.recoveryPhrase.status")
+
+            SettingsPrimaryButton(backedUp ? "View it again" : "Reveal my recovery phrase") {
+                showBackup = true
+            }
+            .padding(.top, 12)
+            .accessibilityIdentifier("onboarding.recoveryPhrase.reveal")
+
+            Text("Anyone with these words can read your future messages. Keep them off screenshots and out of chats.")
+                .font(.system(size: 12.5))
+                .foregroundStyle(OnymTokens.text2)
+                .lineSpacing(2)
+                .padding(.top, 12)
+        }
+        .sheet(isPresented: $showBackup) {
+            RecoveryPhraseBackupView(flow: flow)
+        }
+        .onChange(of: flow.step) { _, step in
+            if case .done = step {
+                backedUp = true
+                onboarding.recordOutcome(.consented(componentId: nil))
+            }
+        }
     }
 }
 
