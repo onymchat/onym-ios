@@ -51,6 +51,21 @@ public enum StepOutcome: Equatable, Sendable {
     case unavailable
 }
 
+/// How far the recovery-phrase backup got. Lives on the flow (not the
+/// step view) for the same reason as `ServicesSetupChoice`: the step
+/// body is rebuilt on every navigation, and the status card must not
+/// reset to "Not backed up yet" after Back from Done. Also what lets
+/// the Done summary tell "saw the words" apart from "verified them".
+public enum RecoveryBackupState: Equatable, Sendable {
+    /// The phrase was never shown.
+    case none
+    /// The words were on screen — enough to honestly tap "I've
+    /// written it down", not enough to claim a verified backup.
+    case revealed
+    /// The reveal + verify quiz completed.
+    case verified
+}
+
 /// Which path the services step is on. Lives on the flow (not the step
 /// view) so the selection survives Back/forward navigation — the step
 /// body derives its "Selected" chip from this, never from view-local
@@ -101,6 +116,10 @@ public final class OnboardingFlow {
     /// the selection chip to a state that contradicts what the user
     /// actually configured.
     public var servicesChoice: ServicesSetupChoice = .recommended
+    /// How far the recovery backup got, written by the recovery step's
+    /// content as the backup sheet progresses. Never downgrades:
+    /// `verified` stays `verified` across navigation and re-reveals.
+    public var recoveryBackupState: RecoveryBackupState = .none
     /// Flips exactly once, inside `complete()` — the observable signal
     /// the presenter dismisses its cover on. `onCompleted` alone can't
     /// carry the dismissal: it is bound at the composition root, which
@@ -182,6 +201,10 @@ public final class OnboardingFlow {
     /// A step whose primary refuses to advance without a recorded
     /// outcome (the view disables the button; `advance()` carries the
     /// same guard as the second layer):
+    /// - `identity` always — its content records once the key
+    ///   bootstrap actually produced a snapshot; a failed bootstrap
+    ///   must not walk the user on to services and a recovery step
+    ///   whose reveal cannot work;
     /// - `moderation` while mandatory (see `isMandatory`);
     /// - `recoveryPhrase` always — its primary reads "I've written it
     ///   down", which must not be tappable before the phrase was ever
@@ -189,6 +212,7 @@ public final class OnboardingFlow {
     ///   "Remind me later" (skip) is the honest escape.
     public func requiresOutcomeToAdvance(_ step: OnboardingStep) -> Bool {
         switch step {
+        case .identity: return true
         case .moderation: return isMandatory(step)
         case .recoveryPhrase: return true
         default: return false
