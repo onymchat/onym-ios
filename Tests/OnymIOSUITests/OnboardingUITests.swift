@@ -171,17 +171,38 @@ final class OnboardingUITests: XCTestCase {
         onboarding.continueFrom("moderation")
 
         // Step 5 — Recovery phrase. Unnumbered; the deferral reads
-        // "Remind me later" (the only skippable step) and the reveal
-        // affordance is present. The full reveal + verify quiz has its
-        // own coverage in OnymRecovery; here the walk advances via the
-        // primary ("I've written it down").
+        // "Remind me later" (the only skippable step). The primary
+        // ("I've written it down") is OUTCOME-GATED: disabled until
+        // the phrase was actually revealed. Walk the reveal through
+        // the real backup sheet (mock biometric), then advance — the
+        // verify quiz has its own coverage in OnymRecovery.
         XCTAssertTrue(onboarding.title("recoveryPhrase").waitForExistence(timeout: 5))
         XCTAssertTrue(onboarding.recoveryStatus.waitForExistence(timeout: 5),
                       "recovery status card never appeared")
-        XCTAssertTrue(onboarding.recoveryReveal.exists,
-                      "reveal affordance never appeared")
         XCTAssertTrue(onboarding.skip("recoveryPhrase").exists,
                       "recovery phrase must offer the Remind-me-later deferral")
+        let recoveryPrimary = onboarding.primary("recoveryPhrase")
+        XCTAssertTrue(recoveryPrimary.waitForExistence(timeout: 5))
+        XCTAssertFalse(recoveryPrimary.isEnabled,
+                       "\"I've written it down\" must stay disabled before the reveal")
+        onboarding.recoveryReveal.tap()
+        let introContinue = app.buttons["intro.continue_button"]
+        XCTAssertTrue(introContinue.waitForExistence(timeout: 5),
+                      "backup intro never appeared")
+        XCTAssertTrue(waitUntilEnabled(introContinue, timeout: 5),
+                      "backup intro Continue never became ready")
+        introContinue.tap()
+        let revealTap = app.buttons["reveal.tap_button"]
+        XCTAssertTrue(revealTap.waitForExistence(timeout: 10),
+                      "reveal screen never appeared (mock biometric should auto-pass)")
+        revealTap.tap()
+        XCTAssertTrue(app.staticTexts["reveal.word.1"].waitForExistence(timeout: 5),
+                      "revealed words never appeared")
+        // Close the sheet without the quiz — the reveal alone is what
+        // unlocks the step's primary.
+        app.swipeDown(velocity: .fast)
+        XCTAssertTrue(waitUntilEnabled(recoveryPrimary, timeout: 5),
+                      "primary should be enabled after the reveal")
         onboarding.continueFrom("recoveryPhrase")
 
         // Step 6 — Done. Summary card renders; "Start messaging"
