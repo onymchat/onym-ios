@@ -9,5 +9,10 @@ let package = Package(
     ],
     targets: [
         .target(name: "OnymFoundation"),
+        .testTarget(
+            name: "OnymFoundationTests",
+            dependencies: ["OnymFoundation"],
+            resources: [.copy("Fixtures")]
+        ),
     ]
 )
