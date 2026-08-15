@@ -22,9 +22,16 @@ public actor SendMessageInteractor {
     private let messageRepository: MessageRepository
     private let groupRepository: GroupRepository
     private let blossomClient: any BlossomClient
-    /// Base URL stamped into `ChatImageAttachment.server` so receivers
-    /// fetch from the same server the sender uploaded to.
-    private let blossomServerURL: String
+    /// Resolves the base URL stamped into `ChatImageAttachment.server`
+    /// so receivers fetch from the same server the sender uploaded to.
+    /// A provider (not a frozen string) so it can re-read the current
+    /// Blossom configuration — a server change in Settings applies to
+    /// the next send, not the next launch. Resolved ONCE per send;
+    /// the stamp and every upload of that send go through a client
+    /// bound to the resolved URL (`bound(toServer:)`), so one
+    /// message's attachments and blobs always land together even if
+    /// the configuration changes mid-send.
+    private let resolveBlossomServerURL: @Sendable () async -> String
     /// Transcodes + extracts a poster from a picked video. Injected so
     /// the UI-test harness can supply a canned encoding instead of
     /// running AVFoundation on a real clip. Defaults to the real encoder.
@@ -86,7 +93,9 @@ public actor SendMessageInteractor {
             baseURL: URLSessionBlossomClient.defaultBaseURL,
             signerProvider: OnymNostrSignerProvider()
         ),
-        blossomServerURL: String = URLSessionBlossomClient.defaultBaseURL.absoluteString,
+        blossomServerURL: @escaping @Sendable () async -> String = {
+            URLSessionBlossomClient.defaultBaseURL.absoluteString
+        },
         videoEncoder: @escaping @Sendable (URL) async -> ChatVideoEncoder.Encoded? = ChatVideoEncoder.encode(fromVideoURL:),
         voiceEncoder: @escaping @Sendable (URL) async -> ChatVoiceEncoder.Encoded? = ChatVoiceEncoder.encode(fromAudioURL:),
         outbox: ChatOutbox? = nil,
@@ -97,7 +106,7 @@ public actor SendMessageInteractor {
         self.messageRepository = messageRepository
         self.groupRepository = groupRepository
         self.blossomClient = blossomClient
-        self.blossomServerURL = blossomServerURL
+        self.resolveBlossomServerURL = blossomServerURL
         self.outbox = outbox
         self.imageLoader = imageLoader
         self.videoEncoder = videoEncoder
@@ -324,6 +333,8 @@ public actor SendMessageInteractor {
             throw SendError.imageUploadFailed("encrypt: \(error)")
         }
 
+        let blossomServerURL = await resolveBlossomServerURL()
+        let sendClient = blossomClient.bound(toServer: blossomServerURL)
         let attachment = ChatImageAttachment(
             sha256: sealed.sha256Hex,
             mimeType: "image/jpeg",
@@ -394,6 +405,7 @@ public actor SendMessageInteractor {
             .filter { $0.key != myBlsHex }
             .map { $0.value.inboxPublicKey }
         let finalStatus = await uploadAndFanOut(
+            via: sendClient,
             blobs: [(sealed.blob, "image/jpeg")],
             payload: payload,
             recipients: recipients,
@@ -460,6 +472,8 @@ public actor SendMessageInteractor {
             throw SendError.videoTooLarge
         }
 
+        let blossomServerURL = await resolveBlossomServerURL()
+        let sendClient = blossomClient.bound(toServer: blossomServerURL)
         let poster = ChatImageAttachment(
             sha256: posterSealed.sha256Hex,
             mimeType: "image/jpeg",
@@ -552,6 +566,7 @@ public actor SendMessageInteractor {
         // Poster first (small, so the recipient's bubble renders quickly),
         // then the video.
         let finalStatus = await uploadAndFanOut(
+            via: sendClient,
             blobs: [
                 (posterSealed.blob, "image/jpeg"),
                 (videoSealed.blob, "video/mp4"),
@@ -616,6 +631,8 @@ public actor SendMessageInteractor {
         // from both, which keeps the commitment describing exactly what
         // was sent rather than what was picked.
         var commitments: [ChatModerationProof.MediaCommitment] = []
+        let blossomServerURL = await resolveBlossomServerURL()
+        let sendClient = blossomClient.bound(toServer: blossomServerURL)
         for source in sources {
             switch source {
             case .image(let data):
@@ -728,6 +745,7 @@ public actor SendMessageInteractor {
             .filter { $0.key != myBlsHex }
             .map { $0.value.inboxPublicKey }
         let finalStatus = await uploadAndFanOut(
+            via: sendClient,
             blobs: uploads, payload: payload, recipients: recipients,
             messageID: messageID, groupID: groupID, owner: group.ownerIdentityID,
             sentBlobShas: shas
@@ -786,6 +804,8 @@ public actor SendMessageInteractor {
             throw SendError.videoTooLarge
         }
 
+        let blossomServerURL = await resolveBlossomServerURL()
+        let sendClient = blossomClient.bound(toServer: blossomServerURL)
         let voiceAttachment = ChatVoiceAttachment(
             sha256: sealed.sha256Hex,
             mimeType: "audio/mp4",
@@ -849,6 +869,7 @@ public actor SendMessageInteractor {
             .filter { $0.key != myBlsHex }
             .map { $0.value.inboxPublicKey }
         let finalStatus = await uploadAndFanOut(
+            via: sendClient,
             blobs: [(sealed.blob, "audio/mp4")],
             payload: payload,
             recipients: recipients,
@@ -944,7 +965,31 @@ public actor SendMessageInteractor {
             .filter { $0.key != myBlsHex }
             .map { $0.value.inboxPublicKey }
 
+        // Re-uploads go to the server already STAMPED into the message's
+        // attachments (the descriptor recipients will read), not the
+        // currently-configured one — a config change between the failed
+        // send and the retry must not strand the descriptor. Falls back
+        // to the live client for legacy rows without a stamp.
+        //
+        // Taking the FIRST stamp is deliberate: every send since the
+        // per-send binding landed resolves the URL exactly once, so all
+        // of one message's attachments carry the same stamp and any of
+        // them is representative. A mixed-stamp message could only be a
+        // legacy row from before that guarantee; per-blob binding for
+        // that vanishing case isn't worth the complexity — the retry
+        // then re-uploads all blobs to the first stamp's server, which
+        // at worst re-homes a legacy blob alongside its siblings.
+        let stampedServer = message.media.lazy.compactMap { item -> String? in
+            switch item {
+            case .image(let image): return image.server
+            case .video(let video): return video.server
+            }
+        }.first ?? message.voiceAttachment?.server
+        let retryClient = stampedServer.map { blossomClient.bound(toServer: $0) }
+            ?? blossomClient
+
         _ = await uploadAndFanOut(
+            via: retryClient,
             blobs: blobs.map { ($0.blob, $0.mimeType) },
             payload: payload,
             recipients: recipients,
@@ -1021,7 +1066,11 @@ public actor SendMessageInteractor {
     /// the outbox blob(s) for a later resend (no fan-out — recipients
     /// never get a descriptor pointing at a missing blob). On a confirmed
     /// `.sent` the outbox blob(s) in `sentBlobShas` are evicted.
+    /// `via` is the client every blob of this operation uploads
+    /// through — bound to the URL stamped into the message's
+    /// attachments, so blobs and stamp can't diverge mid-operation.
     private func uploadAndFanOut(
+        via client: any BlossomClient,
         blobs: [(Data, String)],
         payload: ChatMessagePayload,
         recipients: [Data],
@@ -1032,7 +1081,7 @@ public actor SendMessageInteractor {
     ) async -> MessageStatus {
         for (blob, mimeType) in blobs {
             do {
-                _ = try await blossomClient.upload(blob, mimeType: mimeType)
+                _ = try await client.upload(blob, mimeType: mimeType)
             } catch {
                 await messageRepository.updateStatus(
                     id: messageID, status: .failed, groupID: groupID,

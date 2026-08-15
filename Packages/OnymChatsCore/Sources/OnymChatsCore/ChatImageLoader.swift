@@ -12,12 +12,22 @@ import OnymTransportBlossom
 /// message never touches the network.
 public actor ChatImageLoader {
     private let blossomClient: any BlossomClient
+    /// The user's configured Blossom endpoints — the ONLY servers an
+    /// attachment's `server` stamp may route a download to (see
+    /// `BlossomServerStampPolicy`). Defaults to empty: stamps are
+    /// ignored unless the composition root wires the configured set.
+    private let allowedStampServers: @Sendable () async -> [URL]
     private let cacheDir: URL
     private var memory: [String: UIImage] = [:]
     private var inflight: [String: Task<Data, Error>] = [:]
 
-    public init(blossomClient: any BlossomClient, cacheDirectory: URL? = nil) {
+    public init(
+        blossomClient: any BlossomClient,
+        cacheDirectory: URL? = nil,
+        allowedStampServers: @escaping @Sendable () async -> [URL] = { [] }
+    ) {
         self.blossomClient = blossomClient
+        self.allowedStampServers = allowedStampServers
         self.cacheDir = cacheDirectory ?? FileManager.default
             .urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("OnymChatImages", isDirectory: true)
@@ -77,8 +87,24 @@ public actor ChatImageLoader {
 
     private func downloadAndDecrypt(_ attachment: ChatImageAttachment) async throws -> Data {
         let key = attachment.sha256
+        // Resolve the allowlist BEFORE the inflight lookup: the await
+        // is a suspension point, and the check-and-insert below must
+        // stay contiguous (actor-atomic) or two concurrent requests
+        // for the same sha both miss `inflight` and double-download.
+        let allowedServers = await allowedStampServers()
         if let existing = inflight[key] { return try await existing.value }
-        let client = blossomClient
+        // Fetch from the server STAMPED into the attachment — the one
+        // the sender actually uploaded to — but ONLY when it is one of
+        // the user's own configured servers: the stamp arrives off the
+        // wire, so it is a hint for multi-server consistency among
+        // servers the USER trusts, never a peer-chosen download host
+        // (BlossomServerStampPolicy has the full rationale). Unknown
+        // hosts and legacy nil stamps use the live client.
+        let client = BlossomServerStampPolicy.client(
+            forStamp: attachment.server,
+            allowedServers: allowedServers,
+            live: blossomClient
+        )
         let task = Task<Data, Error> {
             let blob = try await client.download(sha256: attachment.sha256)
             return try ChatImageCrypto.open(

@@ -90,11 +90,12 @@ Every `public` below is justified by a consumer outside Packages/OnymDesign
   ShareInviteView, tests. Public init(value:size:).
 - `settingsInviteURL(blsPublicKey:)` — ShareKeyView, IdentityCarouselCard,
   IdentityDetailView, SettingsQRCodeTests.
+- `SettingsStepIndicator` — made public (public init(step:count:) + public
+  body) for the onboarding flow's step progress; originally kept internal
+  with zero external consumers.
 
 ## Kept internal / private
 
-- `SettingsStepIndicator` — zero consumers outside the package (appears
-  unused everywhere right now); left internal, not deleted.
 - `PulseModifier` — already `private`.
 - `OnymUIGovernance.sub/.oneLine/.tooltip` — no consumers (CreateGroupView's
   `step.sub` at line 872 is `CreateGroupCreatingStep`, a different type);

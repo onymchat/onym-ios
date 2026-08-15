@@ -5,10 +5,11 @@ import Foundation
 /// sticky "user has interacted" flag so the next app boot doesn't
 /// re-seed the default if the user explicitly cleared the list.
 ///
-/// V1 uploads to the **first** configured server (the client takes one
-/// base URL); the rest of the list is there so a user can swap Onym's
-/// default for their own self-hosted Blossom server. Changes apply on
-/// the next app launch. Mirrors `NostrRelaysConfiguration`.
+/// V1 uploads to the **first** configured server (the client resolves
+/// one base URL per operation); the rest of the list is there so a user
+/// can swap Onym's default for their own self-hosted Blossom server.
+/// Changes apply to the next upload/download. Mirrors
+/// `NostrRelaysConfiguration`.
 public struct BlossomServersConfiguration: Codable, Equatable, Sendable {
     public var endpoints: [BlossomServerEndpoint]
     /// Flips to `true` after the first user mutation (add / remove).

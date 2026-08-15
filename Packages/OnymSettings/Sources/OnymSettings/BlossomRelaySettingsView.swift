@@ -1,16 +1,19 @@
 import SwiftUI
 import OnymDesign
+import OnymDiscovery
 
 /// Settings → Transport → Blossom Relays. Lists configured Blossom
 /// media servers, lets the user add a custom URL or remove any entry,
 /// and surfaces a "Restore default" affordance that re-installs the
 /// Onym Official seed. Mirrors `NostrRelaySettingsView`.
 ///
-/// V1 limitation: changes apply on the next app launch — the Blossom
-/// client's base URL is chosen once at boot (the first configured
-/// server). A footnote at the bottom surfaces this.
+/// Changes apply immediately — the Blossom client re-reads the first
+/// configured server per upload/download, so the next media operation
+/// targets whatever is configured right now.
 struct BlossomRelaySettingsView: View {
     @State private var flow: BlossomRelaySettingsFlow
+    /// The catalog entry whose consent sheet is presented, if any.
+    @State private var consentEntry: AttributedCatalogEntry?
 
     init(flow: BlossomRelaySettingsFlow) {
         _flow = State(initialValue: flow)
@@ -26,6 +29,15 @@ struct BlossomRelaySettingsView: View {
                 )
                 configuredCard
 
+                DiscoveryCatalogSection(
+                    entries: flow.catalogEntries,
+                    activeConsent: { flow.activeConsent(for: $0) },
+                    consentedOffer: { flow.consentedOffer(for: $0) },
+                    tileSymbol: "photo.on.rectangle.angled",
+                    accessibilityPrefix: "blossom.catalog",
+                    onSelect: { consentEntry = $0 }
+                )
+
                 SettingsSectionLabel("ADD CUSTOM URL")
                 customURLCard
                 SettingsFootnote(
@@ -34,7 +46,7 @@ struct BlossomRelaySettingsView: View {
 
                 resetCard
                 SettingsFootnote(
-                    "Changes apply on the next app launch. Uploads target the first configured server."
+                    "Uploads and downloads use the active server. Changes apply to the next upload or download."
                 )
 
                 SettingsSectionLabel("SELF-HOST")
@@ -66,6 +78,13 @@ struct BlossomRelaySettingsView: View {
         // finishes on its own, so without this the continuation would
         // accumulate on every visit.
         .onDisappear { flow.stop() }
+        // Consent runs as a sheet; on dismiss the catalog badges
+        // refresh so a fresh consent shows immediately.
+        .sheet(item: $consentEntry, onDismiss: { flow.refreshCatalog() }) { entry in
+            if let discovery = flow.discovery {
+                ModuleConsentView(flow: discovery.makeConsentFlow(entry))
+            }
+        }
     }
 
     // MARK: - Configured list
@@ -104,6 +123,20 @@ struct BlossomRelaySettingsView: View {
                                         Text(endpoint.name)
                                             .font(.system(size: 15, weight: .semibold))
                                             .foregroundStyle(OnymTokens.text)
+                                        // First endpoint is the one
+                                        // uploads/downloads target.
+                                        if idx == 0 {
+                                            Text("ACTIVE")
+                                                .font(.system(size: 10, weight: .bold))
+                                                .foregroundStyle(OnymAccent.blue.color)
+                                                .padding(.horizontal, 6)
+                                                .padding(.vertical, 2)
+                                                .background(
+                                                    OnymAccent.blue.color.opacity(0.12),
+                                                    in: RoundedRectangle(cornerRadius: 4)
+                                                )
+                                                .accessibilityIdentifier("blossom.active_badge")
+                                        }
                                         if endpoint.isDefault {
                                             Text("DEFAULT")
                                                 .font(.system(size: 10, weight: .bold))
@@ -122,6 +155,27 @@ struct BlossomRelaySettingsView: View {
                                         .lineLimit(1)
                                 }
                                 Spacer(minLength: 0)
+                                // Non-first rows can be promoted to
+                                // the upload/download target.
+                                if idx != 0 {
+                                    Button {
+                                        flow.tappedMakeActive(url: endpoint.url)
+                                    } label: {
+                                        Text("Make Active")
+                                            .font(.system(size: 12, weight: .semibold))
+                                            .foregroundStyle(OnymAccent.blue.color)
+                                            .padding(.horizontal, 10)
+                                            .padding(.vertical, 6)
+                                            .background(
+                                                OnymTokens.surface3,
+                                                in: RoundedRectangle(cornerRadius: 8)
+                                            )
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityIdentifier(
+                                        "blossom.make_active.\(endpoint.url.absoluteString)"
+                                    )
+                                }
                             }
                             .padding(.horizontal, 14)
                             .padding(.vertical, 10)

@@ -414,10 +414,10 @@ struct OnymIOSApp: App {
 
         // User-configurable Blossom servers (Settings → Transport →
         // Blossom Relays). Constructing the repository seeds the store on
-        // first launch, so reading it back synchronously here yields the
-        // effective server list. Uploads/downloads target the first
-        // configured server; changes apply on the next launch (the client
-        // base URL is chosen once here).
+        // first launch. Uploads/downloads target the first configured
+        // server; the client re-reads the repository per operation, so
+        // changes in Settings (or an onboarding pick) apply to the very
+        // next upload/download — no relaunch needed.
         let blossomStore = UserDefaultsBlossomServersSelectionStore()
         // No network fetch under the UI harness — the hardcoded seed
         // stays the default so tests are deterministic + offline.
@@ -442,34 +442,71 @@ struct OnymIOSApp: App {
             fetcher: blossomFetcher
         )
         self.blossomServersRepository = blossomServersRepository
-        let blossomBaseURL = blossomStore.load().endpoints.first?.url
-            ?? URLSessionBlossomClient.defaultBaseURL
+        // Live base-URL resolution: the first configured server *right
+        // now*, falling back to the app default when the list is empty.
+        // Shared by the client below and the `server` stamp on outgoing
+        // attachments, so both always agree.
+        // Plain first endpoint: the user's OWN configuration is
+        // trusted as typed — the scheme is not second-guessed here
+        // (`BlossomRelaySettingsFlow.validate` deliberately accepts
+        // http for local dev / loopback), and Settings' ACTIVE badge
+        // is first-row-based, so badge and target agree by
+        // construction. https-only enforcement belongs to the
+        // PEER-influenced paths (download stamps via
+        // BlossomServerStampPolicy, catalog applies via
+        // requiredEndpointURL) — never to hand-typed endpoints.
+        let resolveBlossomBaseURL: @Sendable () async -> URL = {
+            await blossomServersRepository.currentEndpoints().first?.url
+                ?? URLSessionBlossomClient.defaultBaseURL
+        }
 
         // Blossom client + image loader for image messages. Swapped for
         // an in-memory store under `--ui-loopback` so image send/receive
         // round-trips with no network; one shared instance so the loader
-        // can read back what the sender uploaded.
+        // can read back what the sender uploaded. The production client
+        // resolves its base URL per operation via the repository, so a
+        // server change takes effect without a relaunch.
+        let makeLiveBlossomClient: () -> any BlossomClient = {
+            DynamicBaseURLBlossomClient(
+                resolveBaseURL: resolveBlossomBaseURL,
+                makeClient: {
+                    URLSessionBlossomClient(
+                        baseURL: $0,
+                        signerProvider: OnymNostrSignerProvider()
+                    )
+                }
+            )
+        }
         let blossomClient: any BlossomClient
         #if DEBUG
         if args.contains("--ui-loopback") {
             blossomClient = UITestBlossomClient()
         } else {
-            blossomClient = URLSessionBlossomClient(
-                baseURL: blossomBaseURL,
-                signerProvider: OnymNostrSignerProvider()
-            )
+            blossomClient = makeLiveBlossomClient()
         }
         #else
-        blossomClient = URLSessionBlossomClient(
-            baseURL: blossomBaseURL,
-            signerProvider: OnymNostrSignerProvider()
-        )
+        blossomClient = makeLiveBlossomClient()
         #endif
-        let imageLoader = ChatImageLoader(blossomClient: blossomClient)
+        // The loaders may honor an attachment's `server` stamp only
+        // within this set — the user's own configured servers — never
+        // a peer-chosen host (see BlossomServerStampPolicy).
+        let allowedStampServers: @Sendable () async -> [URL] = {
+            await blossomServersRepository.currentEndpoints().map(\.url)
+        }
+        let imageLoader = ChatImageLoader(
+            blossomClient: blossomClient,
+            allowedStampServers: allowedStampServers
+        )
         self.imageLoader = imageLoader
-        let videoLoader = ChatVideoLoader(blossomClient: blossomClient)
+        let videoLoader = ChatVideoLoader(
+            blossomClient: blossomClient,
+            allowedStampServers: allowedStampServers
+        )
         self.videoLoader = videoLoader
-        let voiceLoader = ChatVoiceLoader(blossomClient: blossomClient)
+        let voiceLoader = ChatVoiceLoader(
+            blossomClient: blossomClient,
+            allowedStampServers: allowedStampServers
+        )
         self.voiceLoader = voiceLoader
 
         // Video encoder for outgoing videos. The real encoder runs
@@ -764,6 +801,36 @@ struct OnymIOSApp: App {
             )
         }
 
+        let blossomCatalogPicker = discoveryCatalog.map { catalog in
+            DiscoveryModulePicker(
+                entries: { await catalog.entries(DiscoveryBackedKnownBlossomServersFetcher.seatType) },
+                activeConsent: { try? pinnedConsentStore.activeRecord(componentId: $0) },
+                entriesStream: makeSeatEntriesStream.map { make in
+                    { make(DiscoveryBackedKnownBlossomServersFetcher.seatType) }
+                },
+                makeConsentFlow: { entry in
+                    ModuleConsentFlow(
+                        entry: entry,
+                        fetchManifestBytes: catalog.fetchManifestBytes,
+                        consentStore: pinnedConsentStore,
+                        selectionStore: seatSelectionStore,
+                        makeEntitlements: makeEntitlements,
+                        apply: { manifest in
+                            // Extracted (BlossomCatalogConsent) so the
+                            // endpoint extraction + make-active ordering
+                            // is unit-tested: the pick becomes the FIRST
+                            // endpoint — the upload/download target —
+                            // not an inert append behind the seed.
+                            try await BlossomCatalogConsent.apply(
+                                manifest: manifest,
+                                to: blossomServersRepository
+                            )
+                        }
+                    )
+                }
+            )
+        }
+
         self.dependencies = AppDependencies(
             makeRecoveryPhraseBackupFlow: { @MainActor in
                 RecoveryPhraseBackupFlow(
@@ -778,7 +845,7 @@ struct OnymIOSApp: App {
                 NostrRelaySettingsFlow(repository: nostrRelaysRepository, discovery: nostrCatalogPicker)
             },
             makeBlossomRelaySettingsFlow: { @MainActor in
-                BlossomRelaySettingsFlow(repository: blossomServersRepository)
+                BlossomRelaySettingsFlow(repository: blossomServersRepository, discovery: blossomCatalogPicker)
             },
             makeAnchorsPickerFlow: { @MainActor in
                 AnchorsPickerFlow(repository: contractsRepository)
@@ -841,7 +908,7 @@ struct OnymIOSApp: App {
                 messageRepository: messageRepository,
                 groupRepository: groupRepository,
                 blossomClient: blossomClient,
-                blossomServerURL: blossomBaseURL.absoluteString,
+                blossomServerURL: { await resolveBlossomBaseURL().absoluteString },
                 videoEncoder: videoEncoder,
                 voiceEncoder: voiceEncoder,
                 outbox: chatOutbox,

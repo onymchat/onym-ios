@@ -571,12 +571,18 @@ extension SettingsPrimaryButton where Label == Text {
     }
 }
 
-/// Step indicator for the multi-step backup flow. Active dot expands
-/// into a 22pt capsule; visited dots stay filled at 6pt.
-struct SettingsStepIndicator: View {
+/// Step indicator for multi-step flows (backup, onboarding). Active
+/// dot expands into a 22pt capsule; visited dots stay filled at 6pt.
+public struct SettingsStepIndicator: View {
     let step: Int
     var count: Int = 3
-    var body: some View {
+
+    public init(step: Int, count: Int = 3) {
+        self.step = step
+        self.count = count
+    }
+
+    public var body: some View {
         HStack(spacing: 6) {
             ForEach(0..<count, id: \.self) { i in
                 Capsule()

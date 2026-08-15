@@ -10,12 +10,12 @@ import Foundation
 ///   2. On init, if the persisted config is empty and the user hasn't
 ///      interacted yet, seed with `.seed` (Onym's official Blossom
 ///      server). Subsequent launches restore the user's actual list.
-///   3. App boot reads `currentEndpoints()` once and points the
-///      `URLSessionBlossomClient` base URL at the first configured
-///      server (uploads + downloads).
+///   3. The app's `DynamicBaseURLBlossomClient` re-reads
+///      `currentEndpoints()` per operation and targets the first
+///      configured server (uploads + downloads).
 ///   4. Settings → Transport → Blossom drives `addEndpoint` /
-///      `removeEndpoint`. Changes apply on the next app launch (V1
-///      doesn't rebuild the client live — Settings shows a banner).
+///      `removeEndpoint`. Changes apply to the very next
+///      upload/download — no relaunch needed.
 public actor BlossomServersRepository {
     private let store: any BlossomServersSelectionStore
     /// Fetches the Onym-published default list from GitHub. `nil` disables
@@ -85,15 +85,31 @@ public actor BlossomServersRepository {
     /// Idempotent on URL — re-adding an existing URL replaces its
     /// metadata (display name) but doesn't duplicate the row.
     /// Returns true on insert, false on update.
+    ///
+    /// `makeActive: true` places the endpoint at the HEAD of the list
+    /// (moving it there when it already exists). The first endpoint is
+    /// the one uploads/downloads target, so this is how a pick — e.g.
+    /// a consented catalog module — actually takes effect; a plain
+    /// append behind the seeded default would be silently inert.
+    /// Other entries keep their relative order.
     @discardableResult
-    public func addEndpoint(_ endpoint: BlossomServerEndpoint) -> Bool {
+    public func addEndpoint(_ endpoint: BlossomServerEndpoint, makeActive: Bool = false) -> Bool {
         var endpoints = cached.endpoints
         let inserted: Bool
         if let index = endpoints.firstIndex(where: { $0.url == endpoint.url }) {
-            endpoints[index] = endpoint
+            if makeActive {
+                endpoints.remove(at: index)
+                endpoints.insert(endpoint, at: 0)
+            } else {
+                endpoints[index] = endpoint
+            }
             inserted = false
         } else {
-            endpoints.append(endpoint)
+            if makeActive {
+                endpoints.insert(endpoint, at: 0)
+            } else {
+                endpoints.append(endpoint)
+            }
             inserted = true
         }
         applyConfiguration(BlossomServersConfiguration(
@@ -101,6 +117,24 @@ public actor BlossomServersRepository {
             hasUserInteracted: true
         ))
         return inserted
+    }
+
+    /// Move the configured endpoint with `url` to the head of the list
+    /// so it becomes the upload/download target. No-op when the URL
+    /// isn't configured (callers add first) or is already active — in
+    /// both cases nothing is persisted and `hasUserInteracted` is left
+    /// alone. An actual move counts as a user mutation.
+    public func makeActive(url: URL) {
+        guard let index = cached.endpoints.firstIndex(where: { $0.url == url }),
+              index != 0
+        else { return }
+        var endpoints = cached.endpoints
+        let endpoint = endpoints.remove(at: index)
+        endpoints.insert(endpoint, at: 0)
+        applyConfiguration(BlossomServersConfiguration(
+            endpoints: endpoints,
+            hasUserInteracted: true
+        ))
     }
 
     public func removeEndpoint(url: URL) {

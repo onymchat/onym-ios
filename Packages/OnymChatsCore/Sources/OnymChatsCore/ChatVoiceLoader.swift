@@ -12,11 +12,19 @@ import OnymTransportBlossom
 /// descriptor alone, so nothing downloads on receipt.
 public actor ChatVoiceLoader {
     private let blossomClient: any BlossomClient
+    /// See `ChatImageLoader.allowedStampServers` — the only servers a
+    /// wire-decoded `server` stamp may route a download to.
+    private let allowedStampServers: @Sendable () async -> [URL]
     private let cacheDir: URL
     private var inflight: [String: Task<URL, Error>] = [:]
 
-    public init(blossomClient: any BlossomClient, cacheDirectory: URL? = nil) {
+    public init(
+        blossomClient: any BlossomClient,
+        cacheDirectory: URL? = nil,
+        allowedStampServers: @escaping @Sendable () async -> [URL] = { [] }
+    ) {
         self.blossomClient = blossomClient
+        self.allowedStampServers = allowedStampServers
         self.cacheDir = cacheDirectory ?? FileManager.default
             .urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("OnymChatVoice", isDirectory: true)
@@ -33,15 +41,28 @@ public actor ChatVoiceLoader {
         let key = attachment.sha256
         let dest = cacheFileURL(key)
         if FileManager.default.fileExists(atPath: dest.path) { return dest }
+        // Resolve the allowlist BEFORE the inflight lookup — the await
+        // suspends, and the check-and-insert below must stay contiguous
+        // (actor-atomic) or two concurrent requests double-download and
+        // double-write `dest`. See ChatImageLoader.
+        let allowedServers = await allowedStampServers()
         if let existing = inflight[key] { return try await existing.value }
 
-        let client = blossomClient
+        // Stamp honored only within the user's configured server set —
+        // never a peer-chosen host. See BlossomServerStampPolicy.
+        let client = BlossomServerStampPolicy.client(
+            forStamp: attachment.server,
+            allowedServers: allowedServers,
+            live: blossomClient
+        )
         let task = Task<URL, Error> {
             let blob = try await client.download(sha256: attachment.sha256)
             let plaintext = try ChatImageCrypto.open(
                 blob: blob, key: attachment.encKey, expectedSha256Hex: attachment.sha256
             )
-            try plaintext.write(to: dest, options: .completeFileProtection)
+            // `.atomic`: a concurrent reader must never open a
+            // partially-written file.
+            try plaintext.write(to: dest, options: [.atomic, .completeFileProtection])
             return dest
         }
         inflight[key] = task

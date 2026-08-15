@@ -1,6 +1,8 @@
 import Foundation
 import Observation
 import OnymTransportBlossom
+import OnymDiscovery
+import OnymFoundation
 
 /// `@Observable @MainActor` view-model for the Blossom-servers Settings
 /// screen. Drains `BlossomServersRepository` snapshots into local
@@ -23,29 +25,65 @@ public final class BlossomRelaySettingsFlow {
     }
 
     public private(set) var state: State
+    /// Catalog-section state (entries + memoized consent lookups),
+    /// shared plumbing with the relayer/Nostr flows.
+    private let catalog: DiscoveryCatalogState
+    /// Discovery-sourced "blob.storage" entries for the "From catalog"
+    /// section. Empty when the app runs without discovery.
+    public var catalogEntries: [AttributedCatalogEntry] { catalog.entries }
 
     private let repository: BlossomServersRepository
+    /// Optional discovery seam — nil keeps this screen exactly as it
+    /// was before discovery existed.
+    let discovery: DiscoveryModulePicker?
     private var snapshotTask: Task<Void, Never>?
 
-    public init(repository: BlossomServersRepository) {
+    public init(repository: BlossomServersRepository, discovery: DiscoveryModulePicker? = nil) {
         self.repository = repository
+        self.discovery = discovery
+        self.catalog = DiscoveryCatalogState(discovery: discovery)
         self.state = State(snapshot: .empty, customDraft: "", customDraftError: nil)
     }
 
-    /// Begin draining repository snapshots. Idempotent.
+    /// Begin draining repository snapshots AND discovery catalog
+    /// updates. Idempotent. The catalog is a stream, not a one-shot
+    /// read, so the "From catalog" section populates when the
+    /// boot-time discovery refresh lands while this screen is open.
     public func start() {
-        guard snapshotTask == nil else { return }
-        snapshotTask = Task { [weak self] in
-            guard let self else { return }
-            for await snapshot in self.repository.snapshots {
-                self.state.snapshot = snapshot
+        if snapshotTask == nil {
+            snapshotTask = Task { [weak self] in
+                guard let self else { return }
+                for await snapshot in self.repository.snapshots {
+                    self.state.snapshot = snapshot
+                }
             }
         }
+        catalog.start()
+    }
+
+    /// Re-read the discovery aggregate once (consent-sheet dismiss — a
+    /// fresh consent changes the rows' badges without any catalog
+    /// change to push through the stream).
+    public func refreshCatalog() {
+        catalog.refresh()
+    }
+
+    /// The active pinned consent for a catalog entry's component, when
+    /// discovery is wired (memoized per catalog refresh).
+    public func activeConsent(for entry: AttributedCatalogEntry) -> PinnedConsentRecord? {
+        catalog.activeConsent(for: entry)
+    }
+
+    /// The offer accepted at consent time, resolved from the pinned
+    /// manifest snapshot (memoized per catalog refresh).
+    public func consentedOffer(for entry: AttributedCatalogEntry) -> ServiceOffer? {
+        catalog.consentedOffer(for: entry)
     }
 
     func stop() {
         snapshotTask?.cancel()
         snapshotTask = nil
+        catalog.stop()
     }
 
     // MARK: - Intents
@@ -71,6 +109,12 @@ public final class BlossomRelaySettingsFlow {
     /// Swipe-to-delete on a configured row.
     func tappedRemove(url: URL) {
         Task { await repository.removeEndpoint(url: url) }
+    }
+
+    /// "Make Active" on a non-first configured row — moves the server
+    /// to the head of the list, i.e. the upload/download target.
+    public func tappedMakeActive(url: URL) {
+        Task { await repository.makeActive(url: url) }
     }
 
     /// Restore default — re-installs the Onym Official seed and clears

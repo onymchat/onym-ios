@@ -4,7 +4,7 @@ import OnymDiscovery
 import OnymFoundation
 
 /// "FROM CATALOG" section shared by the per-seat pickers (relayer,
-/// nostr): discovery-sourced entries with their source label,
+/// nostr, blossom): discovery-sourced entries with their source label,
 /// relationship disclosure, consent state, and — once consented — the
 /// accepted offer's badge. Tapping a row hands the entry to the
 /// presenting view, which runs `ModuleConsentFlow` as a sheet.

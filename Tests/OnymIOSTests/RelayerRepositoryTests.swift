@@ -306,6 +306,75 @@ final class RelayerRepositoryTests: XCTestCase {
                        "the known-list cache still updates so the picker can offer them via Add From Published List")
     }
 
+    func test_refresh_autoPopulateSuppressed_updatesKnownListButNotConfiguration() async throws {
+        // Onboarding seam: while the policy returns false, a first-launch
+        // fetch must NOT install endpoints nor flip hasUserInteracted —
+        // the published list only lands in knownList so a picker can
+        // still offer it.
+        let store = InMemoryRelayerSelectionStore()  // .empty config; not interacted
+        let fetcher = FakeKnownRelayersFetcher(mode: .succeeds([a, b, c]))
+        let repo = RelayerRepository(
+            fetcher: fetcher,
+            store: store,
+            autoPopulatePolicy: { false }
+        )
+
+        try await repo.refresh()
+
+        let state = await repo.currentState()
+        XCTAssertTrue(state.configuration.endpoints.isEmpty,
+                      "suppressed auto-populate must not install any endpoints")
+        XCTAssertFalse(state.configuration.hasUserInteracted,
+                       "suppressed auto-populate must not flip hasUserInteracted — a later fetch (policy allowing) can still populate")
+        XCTAssertEqual(state.knownList, [a, b, c],
+                       "the fetched list still lands in knownList")
+        XCTAssertEqual(state.fetchStatus, .success)
+        XCTAssertEqual(store.loadCachedKnownList(), [a, b, c],
+                       "the fetched list is still cached on disk")
+        XCTAssertTrue(store.loadConfiguration().endpoints.isEmpty,
+                      "no configuration write while suppressed")
+    }
+
+    func test_refresh_autoPopulatePolicyFlipsToTrue_nextRefreshPopulates() async throws {
+        // Deferred, not cancelled: once the policy allows it again
+        // (e.g. onboarding finished without an explicit pick), the next
+        // refresh performs the normal first-launch auto-populate.
+        let store = InMemoryRelayerSelectionStore()
+        let fetcher = FakeKnownRelayersFetcher(mode: .succeeds([a, b]))
+        let allow = AllowFlag()
+        let repo = RelayerRepository(
+            fetcher: fetcher,
+            store: store,
+            autoPopulatePolicy: { allow.value }
+        )
+
+        try await repo.refresh()
+        var state = await repo.currentState()
+        XCTAssertTrue(state.configuration.endpoints.isEmpty)
+
+        allow.set(true)
+        try await repo.refresh()
+        state = await repo.currentState()
+        XCTAssertEqual(state.configuration.endpoints, [a, b],
+                       "auto-populate proceeds once the policy allows it")
+        XCTAssertTrue(state.configuration.hasUserInteracted)
+    }
+
+    func test_refresh_defaultPolicy_behavesAsBefore() async throws {
+        // The seam's default preserves the historical behavior — same
+        // assertions as test_refresh_onEmptyConfig_autoPopulates…, but
+        // through the defaulted initializer explicitly.
+        let store = InMemoryRelayerSelectionStore()
+        let fetcher = FakeKnownRelayersFetcher(mode: .succeeds([a]))
+        let repo = RelayerRepository(fetcher: fetcher, store: store)
+
+        try await repo.refresh()
+
+        let state = await repo.currentState()
+        XCTAssertEqual(state.configuration.endpoints, [a])
+        XCTAssertTrue(state.configuration.hasUserInteracted)
+    }
+
     func test_addEndpoint_promotesHasUserInteracted() async {
         let store = InMemoryRelayerSelectionStore()  // .empty / not interacted
         let repo = makeRepo(store: store)
@@ -396,6 +465,14 @@ final class RelayerRepositoryTests: XCTestCase {
     }
 
     // MARK: - helpers
+
+    /// Mutable `@Sendable`-capturable flag for the auto-populate policy.
+    private final class AllowFlag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _value = false
+        var value: Bool { lock.withLock { _value } }
+        func set(_ newValue: Bool) { lock.withLock { _value = newValue } }
+    }
 
     private func makeRepo(
         store: InMemoryRelayerSelectionStore = InMemoryRelayerSelectionStore(),
