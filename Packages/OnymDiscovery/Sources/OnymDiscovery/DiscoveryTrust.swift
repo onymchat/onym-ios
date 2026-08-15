@@ -447,7 +447,10 @@ public enum DiscoveryTrust {
 
 extension Data {
     /// Strict lowercase-hex decode (the profile's key encoding).
-    init?(lowercaseHex: String) {
+    /// Public for the same reason as `DiscoveryFormat.operatorKeyHex`:
+    /// the app target's seat adapters decode key hex with THIS
+    /// decoder, not a second one.
+    public init?(lowercaseHex: String) {
         guard lowercaseHex.count % 2 == 0,
               DiscoveryFormat.isLowercaseHex(lowercaseHex)
         else { return nil }

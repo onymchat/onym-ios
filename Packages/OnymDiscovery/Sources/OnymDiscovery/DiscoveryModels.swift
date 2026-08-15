@@ -688,11 +688,13 @@ struct AnyCodingKey: CodingKey {
 // MARK: - Format rules
 
 /// Identifier / digest / URI syntax from §2 and §7 of the profile.
-enum DiscoveryFormat {
+public enum DiscoveryFormat {
     static let implementationProfileId = "onym:discovery-implementation:static-ed25519-v1"
 
-    /// `onym:key:<64-lowercase-hex>` → the hex, or nil.
-    static func operatorKeyHex(_ value: String) -> String? {
+    /// `onym:key:<64-lowercase-hex>` → the hex, or nil. Public for the
+    /// same reason as `isValidURI`: the app target's seat adapters
+    /// must parse operator keys with THIS parser, not a second one.
+    public static func operatorKeyHex(_ value: String) -> String? {
         guard value.hasPrefix("onym:key:") else { return nil }
         let hex = String(value.dropFirst("onym:key:".count))
         guard hex.count == 64, isLowercaseHex(hex) else { return nil }
@@ -739,15 +741,21 @@ enum DiscoveryFormat {
         }
     }
 
-    /// §7 URI rules: https only, DNS host (no IP literal, including
-    /// integer/hex single-label forms), no userinfo, no query, no
-    /// fragment, no port component in the **raw string** (URL
-    /// libraries normalize a redundant `:443` away before any
-    /// parsed-port check is reachable, so the raw string is checked
-    /// directly).
-    static func isValidURI(_ value: String) -> Bool {
+    /// §7 URI rules: a single allowed scheme (https for every URI the
+    /// discovery documents themselves carry; seat adapters pass "wss"
+    /// for WebSocket endpoints where the seat expects it), DNS host
+    /// (no IP literal, including integer/hex single-label forms), no
+    /// userinfo, no query, no fragment, no port component in the
+    /// **raw string** (URL libraries normalize a redundant default
+    /// port away before any parsed-port check is reachable, so the
+    /// raw string is checked directly).
+    public static func isValidURI(_ value: String, scheme allowedScheme: String = "https") -> Bool {
         guard let components = URLComponents(string: value) else { return false }
-        guard components.scheme == "https" else { return false }
+        // Schemes are case-insensitive (RFC 3986 §3.1) and
+        // `URLComponents` preserves the published case, so compare
+        // lowercased — `WSS://relay.example` must validate, not be
+        // silently dropped.
+        guard components.scheme?.lowercased() == allowedScheme else { return false }
         guard components.user == nil, components.password == nil else { return false }
         guard components.query == nil, components.fragment == nil else { return false }
         guard components.port == nil else { return false }
