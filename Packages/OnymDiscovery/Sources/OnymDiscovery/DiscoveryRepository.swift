@@ -152,6 +152,12 @@ public actor DiscoveryRepository {
     private var continuations: [UUID: AsyncStream<DiscoveryState>.Continuation] = [:]
     private var startTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
+    /// providerIds the most recent full pass ATTEMPTED (enabled +
+    /// pinned at its entry). `refresh()` compares the live source list
+    /// against this after joining a pass: a source confirmed while the
+    /// pass was in flight is absent, and triggers a follow-up pass
+    /// instead of a stale `.success`.
+    private var lastPassAttemptedIds: Set<String> = []
 
     public init(
         fetcher: any DiscoveryFetching,
@@ -172,6 +178,7 @@ public actor DiscoveryRepository {
     /// released on completion so a failed bootstrap can be retried.
     public func start() {
         seedDefaultIfNeeded()
+        surfaceInvalidPersistedSources()
         rebuildAggregateFromRetained()
         publish()
         guard startTask == nil else { return }
@@ -211,18 +218,34 @@ public actor DiscoveryRepository {
     /// overlapping callers coalesce onto the in-flight pass instead of
     /// interleaving two passes whose stale source copies would
     /// overwrite each other's accepted sequences.
+    ///
+    /// Coalescing alone is not enough for the add-then-refresh
+    /// sequence: an in-flight pass captured its source list at entry,
+    /// so `confirmAddSource` + `refresh()` during that pass would join
+    /// a pass that never saw the new source and still return
+    /// `.success`. After joining, any enabled + pinned source the
+    /// finished pass never attempted (`lastPassAttemptedIds`) queues a
+    /// follow-up full pass; the loop exits once a pass has covered the
+    /// then-current source list.
     public func refresh() async {
-        let task: Task<Void, Never>
-        if let refreshTask {
-            task = refreshTask
-        } else {
-            task = Task { [weak self] in
-                await self?.performRefresh()
-                await self?.clearRefreshTask()
+        while true {
+            let task: Task<Void, Never>
+            if let refreshTask {
+                task = refreshTask
+            } else {
+                task = Task { [weak self] in
+                    await self?.performRefresh()
+                    await self?.clearRefreshTask()
+                }
+                refreshTask = task
             }
-            refreshTask = task
+            await task.value
+            let uncovered = configuration.sources.contains {
+                $0.isEnabled && $0.pinnedOperatorKeyHex != nil
+                    && !lastPassAttemptedIds.contains($0.providerId)
+            }
+            guard uncovered else { return }
         }
-        await task.value
     }
 
     private func clearRefreshTask() {
@@ -247,6 +270,11 @@ public actor DiscoveryRepository {
               source.isEnabled,
               let pinnedKey = source.pinnedOperatorKeyHex
         else { return }
+        guard DiscoveryFormat.isValidURI(source.manifestURL.absoluteString) else {
+            lastErrors[providerId] = Self.invalidManifestURLFailure()
+            publish()
+            return
+        }
         do {
             try await refreshSource(source, pinnedKey: pinnedKey)
             lastErrors[providerId] = nil
@@ -268,7 +296,15 @@ public actor DiscoveryRepository {
         var failures = 0
         var awaitingConfirmation = 0
 
-        for source in configuration.sources where source.isEnabled {
+        // Captured once at entry: the pass refreshes exactly this list.
+        // Recorded (enabled + pinned only) so `refresh()` can detect
+        // sources confirmed after this point and queue a follow-up.
+        let sources = configuration.sources.filter(\.isEnabled)
+        lastPassAttemptedIds = Set(
+            sources.compactMap { $0.pinnedOperatorKeyHex == nil ? nil : $0.providerId }
+        )
+
+        for source in sources {
             // A source without a pinned key (an unconfirmed seeded
             // default) is skipped: hard enforcement means we never
             // build an aggregate on an unpinned identity. The skip is
@@ -276,6 +312,16 @@ public actor DiscoveryRepository {
             guard let pinnedKey = source.pinnedOperatorKeyHex else {
                 lastNotes[source.providerId] = [String(localized: "Needs confirmation: confirm this source's operator key to start using it.")]
                 awaitingConfirmation += 1
+                continue
+            }
+            // §7 applies to the persisted manifest URL as much as to a
+            // freshly typed one: a rehydrated configuration carrying an
+            // http/IP-literal/query URL is surfaced as the source's
+            // error state and never fetched (validated on add, so this
+            // only trips on hostile or corrupted persistence).
+            guard DiscoveryFormat.isValidURI(source.manifestURL.absoluteString) else {
+                lastErrors[source.providerId] = Self.invalidManifestURLFailure()
+                failures += 1
                 continue
             }
             do {
@@ -348,7 +394,14 @@ public actor DiscoveryRepository {
         // regress sequences another interleaved pass already advanced.
         var firstCatalogError: Error?
         for catalog in signedManifest.manifest.catalogs {
-            guard let snapshotURL = catalog.snapshotURL else { continue }
+            guard let snapshotURL = catalog.snapshotURL else {
+                // Should be unreachable (the descriptor's snapshot URI
+                // is §7-validated at decode), but if `URL` ever refuses
+                // the validated string, the skip is surfaced like every
+                // other partial outcome — never a silent one.
+                notes.append(String(localized: "Catalog \(catalog.catalogId): its snapshot URL couldn't be parsed, so the catalog was skipped."))
+                continue
+            }
             do {
                 let snapshotBytes = try await fetcher.fetchSnapshot(url: snapshotURL)
                 // §8 retained state: last accepted digest + sequence, and
@@ -383,7 +436,8 @@ public actor DiscoveryRepository {
                         digest: accepted.digest,
                         sequence: accepted.snapshot.sequence,
                         acceptedAt: now(),
-                        policyDigest: catalog.policy
+                        policyDigest: catalog.policy,
+                        seatTypes: catalog.seatTypes
                     ),
                     forCatalog: catalog.catalogId,
                     providerId: source.providerId
@@ -435,6 +489,16 @@ public actor DiscoveryRepository {
     /// preview carries the key fingerprint for the user to confirm;
     /// pass it to `confirmAddSource` to persist.
     public func addSource(manifestURL: URL) async throws -> DiscoveryProviderPreview {
+        // §7 URI rules on the USER-SUPPLIED URL, checked before any
+        // network touch: https only, DNS host (no IP literal), no
+        // userinfo/query/fragment/port. The fetcher's redirect policy
+        // enforces the same rules on redirect targets only — nothing
+        // else guards the initial hop.
+        guard DiscoveryFormat.isValidURI(manifestURL.absoluteString) else {
+            throw DiscoveryTrustError.providerManifestInvalid(
+                reason: Self.invalidManifestURLReason
+            )
+        }
         let bytes = try await fetcher.fetchProviderManifest(url: manifestURL)
         let signed = try DiscoveryTrust.verifyProviderManifest(
             raw: bytes,
@@ -456,12 +520,26 @@ public actor DiscoveryRepository {
     /// forward. `lastAccepted` is the per-catalog rollback/equivocation
     /// chain state (§8); resetting it here would let the next refresh
     /// accept an older snapshot the chain had already advanced past.
+    ///
+    /// The chain state carries forward only while the operator
+    /// identity is unchanged (an unpinned seeded default has accepted
+    /// nothing, so it always "matches"). A preview pinning a DIFFERENT
+    /// key is the rotation path — "re-adding the source as new" — so
+    /// the chain restarts, and the old identity's retained blobs are
+    /// purged rather than left orphaned. A genuinely fresh add purges
+    /// too, clearing any orphan a mid-pass removal may have left.
     @discardableResult
     public func confirmAddSource(
         _ preview: DiscoveryProviderPreview,
         userLabel: String? = nil
     ) -> DiscoverySource {
         let existing = currentSource(preview.providerId)
+        let carriesChainForward = existing != nil
+            && (existing?.pinnedOperatorKeyHex == nil
+                || existing?.pinnedOperatorKeyHex == preview.signed.operatorPublicKeyHex)
+        if !carriesChainForward {
+            store.removeRetainedSnapshots(providerId: preview.providerId)
+        }
         let source = DiscoverySource(
             providerId: preview.providerId,
             userLabel: userLabel
@@ -472,7 +550,7 @@ public actor DiscoveryRepository {
             pinnedOperatorKeyHex: preview.signed.operatorPublicKeyHex,
             addedAt: existing?.addedAt ?? now(),
             isEnabled: existing?.isEnabled ?? true,
-            lastAccepted: existing?.lastAccepted ?? [:]
+            lastAccepted: carriesChainForward ? (existing?.lastAccepted ?? [:]) : [:]
         )
         var sources = configuration.sources.filter { $0.providerId != source.providerId }
         sources.append(source)
@@ -481,6 +559,8 @@ public actor DiscoveryRepository {
             removedDefaultProviderIds: configuration.removedDefaultProviderIds
                 .subtracting([source.providerId])
         ))
+        rebuildAggregateFromRetained()
+        publish()
         return source
     }
 
@@ -552,6 +632,33 @@ public actor DiscoveryRepository {
 
     // MARK: - Private
 
+    static let invalidManifestURLReason =
+        "manifest URL violates the profile URI rules (https, DNS host, no IP literal/userinfo/query/fragment/port)"
+
+    private static func invalidManifestURLFailure() -> SourceFailure {
+        let error = DiscoveryTrustError.providerManifestInvalid(
+            reason: invalidManifestURLReason
+        )
+        return SourceFailure(
+            message: DiscoveryUserMessage.message(for: error),
+            isIntegrity: DiscoveryUserMessage.isIntegrityFailure(error)
+        )
+    }
+
+    /// §7 on REHYDRATED configuration: `addSource` validates the URL on
+    /// entry, so a persisted source with a rule-violating manifest URL
+    /// is hostile or corrupted persistence. It surfaces as the source's
+    /// error state right at `start()` — before any refresh — and is
+    /// excluded from fetching (`performRefresh`/`refreshSource`) and
+    /// from the offline aggregate (`rebuildAggregateFromRetained`):
+    /// an error card, never silent use.
+    private func surfaceInvalidPersistedSources() {
+        for source in configuration.sources
+        where !DiscoveryFormat.isValidURI(source.manifestURL.absoluteString) {
+            lastErrors[source.providerId] = Self.invalidManifestURLFailure()
+        }
+    }
+
     /// Rebuild the aggregate from the retained (already verified)
     /// snapshots of every enabled source, in source order then the
     /// snapshot's policy-rank entry order. Entries from all sources
@@ -559,6 +666,10 @@ public actor DiscoveryRepository {
     private func rebuildAggregateFromRetained() {
         var result: [AttributedCatalogEntry] = []
         for source in configuration.sources where source.isEnabled {
+            // See `surfaceInvalidPersistedSources`: a source whose
+            // persisted manifest URL violates §7 is in error state and
+            // contributes nothing, not even offline.
+            guard DiscoveryFormat.isValidURI(source.manifestURL.absoluteString) else { continue }
             for (catalogId, record) in source.lastAccepted.sorted(by: { $0.key < $1.key }) {
                 guard let raw = store.loadRetainedSnapshot(
                     providerId: source.providerId,
@@ -574,7 +685,17 @@ public actor DiscoveryRepository {
                 // Entries from an expired retained snapshot are stale
                 // history, not current recommendations (§8).
                 guard snapshot.expiresAt > now() else { continue }
+                // Re-apply the §4.1 seat-type binding verifySnapshot
+                // applied at acceptance: the retained bytes still carry
+                // any violating entries, and the offline view must not
+                // resurrect what the refresh skipped.
+                let admittedSeatTypes = record.seatTypes.flatMap {
+                    $0.contains("*") ? nil : Set($0)
+                }
                 for entry in snapshot.entries {
+                    if let admittedSeatTypes, !admittedSeatTypes.contains(entry.seatType) {
+                        continue
+                    }
                     result.append(AttributedCatalogEntry(
                         entry: entry,
                         source: SourceAttribution(

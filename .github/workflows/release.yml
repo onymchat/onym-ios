@@ -197,7 +197,10 @@ jobs:
         # `-only-testing:OnymIOSTests` above never runs it. Run the
         # package's own scheme from the package directory to gate its
         # conformance/trust suite here. Same pre-clean rationale as the
-        # unit step.
+        # unit step. `always()` (like the xcresult uploads) so a red
+        # unit step doesn't short-circuit this suite — its results
+        # must exist for `report-to-issue` even when unit tests fail.
+        if: always()
         working-directory: Packages/OnymDiscovery
         run: |
           rm -rf /tmp/onym-discovery-tests /tmp/onym-discovery.xcresult

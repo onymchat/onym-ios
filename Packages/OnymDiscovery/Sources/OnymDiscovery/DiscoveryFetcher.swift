@@ -76,7 +76,13 @@ public struct URLSessionDiscoveryFetcher: DiscoveryFetching {
         private let maxBytes: Int
         private let lock = NSLock()
         private var continuation: CheckedContinuation<Data, Error>?
-        /// Touched only on the session's serial delegate queue.
+        /// `body` and `redirects` are guarded by `lock`, like
+        /// `continuation`: the `async` delegate variants
+        /// (`willPerformHTTPRedirection`, `didReceive response`) resume
+        /// on the Swift-concurrency executor, NOT the session's serial
+        /// delegate queue, so queue serialization cannot be assumed for
+        /// state they touch. The lock is what the `@unchecked Sendable`
+        /// conformance rests on.
         private var body = Data()
         private var redirects = 0
 
@@ -106,8 +112,11 @@ public struct URLSessionDiscoveryFetcher: DiscoveryFetching {
             willPerformHTTPRedirection response: HTTPURLResponse,
             newRequest request: URLRequest
         ) async -> URLRequest? {
-            redirects += 1
-            guard redirects <= 3 else { return nil }
+            let redirectCount = lock.withLock { () -> Int in
+                redirects += 1
+                return redirects
+            }
+            guard redirectCount <= 3 else { return nil }
             guard let target = request.url,
                   target.scheme?.lowercased() == "https",
                   let host = target.host(), !Self.isIPLiteral(host)
@@ -134,10 +143,12 @@ public struct URLSessionDiscoveryFetcher: DiscoveryFetching {
                 finish(.failure(DiscoveryFetchError.oversize))
                 return .cancel
             }
-            body.reserveCapacity(min(
-                maxBytes,
-                response.expectedContentLength > 0 ? Int(response.expectedContentLength) : 0
-            ))
+            lock.withLock {
+                body.reserveCapacity(min(
+                    maxBytes,
+                    response.expectedContentLength > 0 ? Int(response.expectedContentLength) : 0
+                ))
+            }
             return .allow
         }
 
@@ -145,18 +156,21 @@ public struct URLSessionDiscoveryFetcher: DiscoveryFetching {
             // Mid-stream cap: an undeclared (or lying) oversize body is
             // cut off on the chunk that crosses the bound, never fully
             // buffered.
-            guard body.count + data.count <= maxBytes else {
-                finish(.failure(DiscoveryFetchError.oversize), cancelling: dataTask)
-                return
+            let overflowed = lock.withLock { () -> Bool in
+                guard body.count + data.count <= maxBytes else { return true }
+                body.append(data)
+                return false
             }
-            body.append(data)
+            if overflowed {
+                finish(.failure(DiscoveryFetchError.oversize), cancelling: dataTask)
+            }
         }
 
         func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
             if let error {
                 finish(.failure(error))
             } else {
-                finish(.success(body))
+                finish(.success(lock.withLock { body }))
             }
         }
 

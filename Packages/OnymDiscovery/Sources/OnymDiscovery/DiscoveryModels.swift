@@ -258,11 +258,14 @@ public struct CatalogSnapshot: Decodable, Equatable, Sendable {
     public let expiresAt: Date
     /// Valid entries in provider policy-rank order. Malformed entries
     /// are skipped, not defaulted (`skippedEntryCount` says how many).
-    public let entries: [CatalogEntry]
+    /// `internal(set)` so `DiscoveryTrust.verifySnapshot` can strip
+    /// entries whose `seatType` the declaring descriptor does not
+    /// admit (§4.1) — skipped and counted like any malformed entry.
+    public internal(set) var entries: [CatalogEntry]
     public let signature: String
-    /// How many entries failed lossy decoding and were dropped. Not a
-    /// wire field.
-    public let skippedEntryCount: Int
+    /// How many entries failed lossy decoding — or the §4.1 seat-type
+    /// cross-check — and were dropped. Not a wire field.
+    public internal(set) var skippedEntryCount: Int
 
     static let allowedTopLevelKeys: Set<String> = [
         "version", "implementationProfileId", "catalogId", "providerId",
@@ -387,6 +390,15 @@ public struct CatalogEntry: Decodable, Equatable, Sendable {
             throw DecodingError.dataCorrupted(.init(
                 codingPath: decoder.codingPath,
                 debugDescription: "malformed operator key"
+            ))
+        }
+        // §4.1 token form, `[a-z0-9.-]{1,64}`. The `"*"` wildcard is a
+        // DESCRIPTOR-side construct only — an entry claims exactly one
+        // concrete seat type, never "any".
+        guard DiscoveryFormat.isSeatTypeMember(seatType), seatType != "*" else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: decoder.codingPath,
+                debugDescription: "malformed seatType"
             ))
         }
         guard DiscoveryFormat.isValidURI(manifest.uri) else {

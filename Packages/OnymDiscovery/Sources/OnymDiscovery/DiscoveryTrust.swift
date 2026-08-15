@@ -293,6 +293,23 @@ public enum DiscoveryTrust {
             }
         }
 
+        // §4.1 seat-type binding: every entry's `seatType` must be one
+        // the declaring descriptor's `seatTypes` admits (the literal
+        // `"*"` wildcard admits all). A catalog declaring `["notary"]`
+        // must not smuggle `transport.message` entries into the
+        // aggregate. Violations are per-entry, same lossiness model as
+        // decode: the entry is skipped and counted, never
+        // document-fatal. Runs AFTER the duplicate check so a
+        // duplicate componentId stays fatal even when one copy would
+        // be stripped here.
+        var boundSnapshot = snapshot
+        if !descriptor.seatTypes.contains("*") {
+            let admitted = Set(descriptor.seatTypes)
+            let surviving = boundSnapshot.entries.filter { admitted.contains($0.seatType) }
+            boundSnapshot.skippedEntryCount += boundSnapshot.entries.count - surviving.count
+            boundSnapshot.entries = surviving
+        }
+
         // Structural chain rules (§4.2): sequence starts at 1;
         // previousDigest is present (and digest-shaped) iff
         // sequence > 1.
@@ -354,7 +371,7 @@ public enum DiscoveryTrust {
         )
 
         return SignedCatalogSnapshot(
-            snapshot: snapshot,
+            snapshot: boundSnapshot,
             rawBytes: raw,
             digest: digest,
             outcome: outcome,

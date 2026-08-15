@@ -124,6 +124,27 @@ private final class URLGatedFetcher: DiscoveryFetching, @unchecked Sendable {
     }
 }
 
+/// Records every requested URL and 404s — for asserting a URL is
+/// NEVER fetched (§7 validation must run before any network touch).
+private final class RecordingFetcher: DiscoveryFetching, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _requestedURLs: [URL] = []
+
+    var requestedURLs: [URL] {
+        lock.withLock { _requestedURLs }
+    }
+
+    func fetchProviderManifest(url: URL) async throws -> Data {
+        lock.withLock { _requestedURLs.append(url) }
+        throw DiscoveryFetchError.badStatus(404)
+    }
+
+    func fetchSnapshot(url: URL) async throws -> Data {
+        lock.withLock { _requestedURLs.append(url) }
+        throw DiscoveryFetchError.badStatus(404)
+    }
+}
+
 /// In-memory store; no UserDefaults so tests stay hermetic.
 private final class MemoryStore: DiscoveryStore, @unchecked Sendable {
     private let lock = NSLock()
@@ -175,7 +196,7 @@ private enum SignedFixtureFactory {
 
     /// Re-serialize `object` with a fresh signature over its §3
     /// canonical bytes.
-    static func resign(_ object: [String: Any]) throws -> Data {
+    static func resign(_ object: [String: Any], seedHex: String = seedHex) throws -> Data {
         var object = object
         object["signature"] = ""
         let unsigned = try JSONSerialization.data(withJSONObject: object)
@@ -185,6 +206,49 @@ private enum SignedFixtureFactory {
         )
         object["signature"] = try key.signature(for: signingBytes).base64EncodedString()
         return try JSONSerialization.data(withJSONObject: object)
+    }
+
+    /// The pinned `provider-manifest.json` fixture re-signed under a
+    /// DIFFERENT operator seed, `operator` updated to match — the
+    /// key-rotation re-add case.
+    static func manifest(operatorSeedHex: String) throws -> Data {
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Fixture.bytes("provider-manifest.json"))
+                as? [String: Any]
+        )
+        let key = try Curve25519.Signing.PrivateKey(
+            rawRepresentation: Data(lowercaseHex: operatorSeedHex)!
+        )
+        let publicHex = key.publicKey.rawRepresentation
+            .map { String(format: "%02x", $0) }.joined()
+        object["operator"] = "onym:key:" + publicHex
+        return try resign(object, seedHex: operatorSeedHex)
+    }
+
+    /// The pinned `provider-manifest.json` fixture with its single
+    /// catalog's `seatTypes` replaced, re-signed.
+    static func manifest(catalogSeatTypes: [String]) throws -> Data {
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Fixture.bytes("provider-manifest.json"))
+                as? [String: Any]
+        )
+        var catalogs = try XCTUnwrap(object["catalogs"] as? [[String: Any]])
+        catalogs[0]["seatTypes"] = catalogSeatTypes
+        object["catalogs"] = catalogs
+        return try resign(object)
+    }
+
+    /// The pinned `snapshot-1.json` fixture with its single entry's
+    /// `seatType` replaced, re-signed.
+    static func snapshot(entrySeatType: String) throws -> Data {
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Fixture.bytes("snapshot-1.json"))
+                as? [String: Any]
+        )
+        var entries = try XCTUnwrap(object["entries"] as? [[String: Any]])
+        entries[0]["seatType"] = entrySeatType
+        object["entries"] = entries
+        return try resign(object)
     }
 
     /// The pinned `provider-manifest.json` fixture re-published under
@@ -656,6 +720,297 @@ final class DiscoveryRepositoryTests: XCTestCase {
                 "a targeted refresh must not overwrite the full pass's status, got \(state.fetchStatus)"
             )
         }
+    }
+
+    func testConfirmAddSourcePublishesToSnapshotSubscribers() async throws {
+        // `confirmAddSource` mutates configuration like every other
+        // mutator, so it must rebuild + publish: a subscriber on
+        // `snapshots` sees the new source immediately, not after some
+        // unrelated refresh.
+        let store = MemoryStore()
+        let fetcher = FakeFetcher(responses: [
+            manifestURL: try Fixture.bytes("provider-manifest.json"),
+        ])
+        let repository = DiscoveryRepository(fetcher: fetcher, store: store) { Fixture.now }
+
+        var iterator = repository.snapshots.makeAsyncIterator()
+        let replay = await iterator.next()
+        XCTAssertEqual(replay?.sources.count, 0, "replay of the pre-add state")
+
+        let preview = try await repository.addSource(manifestURL: manifestURL)
+        await repository.confirmAddSource(preview)
+
+        let published = await iterator.next()
+        XCTAssertEqual(
+            published?.sources.map(\.id), [providerId],
+            "confirmAddSource must publish the mutated state to live subscribers"
+        )
+    }
+
+    func testConfirmThenRefreshDuringInFlightPassRunsFollowUpPass() async throws {
+        // The repository-level half of the reviewed race: a full pass
+        // captured its source list before the add, so a `refresh()`
+        // issued after `confirmAddSource` would coalesce onto that
+        // stale pass and return `.success` without ever fetching the
+        // new source. After joining, `refresh()` must detect the
+        // uncovered source and run a follow-up pass.
+        let secondProviderId = "onym:component:second-provider"
+        let secondManifestURL = URL(string: "https://second.example/manifest.json")!
+        let secondSnapshotURL = URL(string: "https://second.example/catalogs/public-all-seats.json")!
+        let store = MemoryStore()
+        store.saveConfiguration(pinnedConfiguration())
+        let fetcher = URLGatedFetcher(gatedURL: manifestURL, responses: [
+            manifestURL: try Fixture.bytes("provider-manifest.json"),
+            snapshotURL: try Fixture.bytes("snapshot-1.json"),
+            secondManifestURL: try SignedFixtureFactory.manifest(
+                providerId: secondProviderId,
+                snapshotURL: secondSnapshotURL.absoluteString
+            ),
+            secondSnapshotURL: try SignedFixtureFactory.snapshot(providerId: secondProviderId),
+        ])
+        let repository = DiscoveryRepository(fetcher: fetcher, store: store) { Fixture.now }
+
+        // Hold a full pass mid-flight on the first source's manifest.
+        let inFlight = Task { await repository.refresh() }
+        while fetcher.gatedFetchCount < 1 { await Task.yield() }
+
+        // Add + confirm the second provider while the pass is held,
+        // then ask for a plain refresh — the UI path with no targeted
+        // refresh in between.
+        let preview = try await repository.addSource(manifestURL: secondManifestURL)
+        await repository.confirmAddSource(preview)
+        let joined = Task { await repository.refresh() }
+
+        await fetcher.gate.open()
+        await inFlight.value
+        await joined.value
+
+        let state = await repository.currentState()
+        XCTAssertEqual(
+            Set(state.aggregate.map(\.source.providerId)),
+            [providerId, secondProviderId],
+            "the joined refresh must run a follow-up pass covering the source the stale pass never saw"
+        )
+        XCTAssertNil(state.sources.first { $0.id == secondProviderId }?.lastError)
+        XCTAssertEqual(state.fetchStatus, .success)
+    }
+
+    func testAddSourceRejectsProfileURIRuleViolations() async throws {
+        // §7 on the USER-SUPPLIED manifest URL, before any network
+        // touch: http, IP literal, query, userinfo, and explicit port
+        // are all rejected — and nothing is ever fetched.
+        let store = MemoryStore()
+        let fetcher = RecordingFetcher()
+        let repository = DiscoveryRepository(fetcher: fetcher, store: store) { Fixture.now }
+
+        for bad in [
+            "http://second.example/manifest.json",
+            "https://192.168.1.1/manifest.json",
+            "https://second.example/manifest.json?x=1",
+            "https://second.example/manifest.json#frag",
+            "https://user@second.example/manifest.json",
+            "https://second.example:8443/manifest.json",
+        ] {
+            do {
+                _ = try await repository.addSource(manifestURL: URL(string: bad)!)
+                XCTFail("expected rejection for \(bad)")
+            } catch let error as DiscoveryTrustError {
+                guard case .providerManifestInvalid = error else {
+                    return XCTFail("unexpected error \(error) for \(bad)")
+                }
+            }
+        }
+        XCTAssertTrue(
+            fetcher.requestedURLs.isEmpty,
+            "a rule-violating URL must never reach the fetcher"
+        )
+    }
+
+    func testHostilePersistedManifestURLIsSurfacedNeverUsed() async throws {
+        // §7 applies to the REHYDRATED configuration too: a persisted
+        // source with a rule-violating manifest URL (hostile or
+        // corrupted persistence — add-time validation would have
+        // refused it) surfaces as that source's error state and is
+        // excluded from fetching AND from the offline aggregate.
+        let hostileURL = URL(string: "http://192.168.1.1/manifest.json")!
+        let snapshot1 = try Fixture.bytes("snapshot-1.json")
+        let store = MemoryStore()
+        store.saveConfiguration(DiscoverySourcesConfiguration(
+            sources: [DiscoverySource(
+                providerId: providerId,
+                userLabel: "Onym Discovery",
+                manifestURL: hostileURL,
+                pinnedOperatorKeyHex: Fixture.operatorKeyHex,
+                addedAt: Fixture.now,
+                isEnabled: true,
+                lastAccepted: ["public-all-seats": AcceptedSnapshotRecord(
+                    digest: DiscoveryFormat.sha256Digest(of: snapshot1),
+                    sequence: 1,
+                    acceptedAt: Fixture.now
+                )]
+            )],
+            removedDefaultProviderIds: [],
+            hasUserInteracted: true
+        ))
+        store.saveRetainedSnapshot(snapshot1, providerId: providerId, catalogId: "public-all-seats")
+        let fetcher = RecordingFetcher()
+        let repository = DiscoveryRepository(fetcher: fetcher, store: store) { Fixture.now }
+
+        await repository.start()
+        await repository.refresh()
+        let state = await repository.currentState()
+
+        let sourceError = try XCTUnwrap(state.sources.first?.lastError)
+        XCTAssertTrue(sourceError.contains("rejected"), sourceError)
+        XCTAssertTrue(
+            state.aggregate.isEmpty,
+            "retained snapshots of a source with a rule-violating URL must not feed the offline aggregate"
+        )
+        XCTAssertTrue(
+            fetcher.requestedURLs.isEmpty,
+            "a rule-violating persisted URL must never be fetched"
+        )
+    }
+
+    func testEntrySeatTypeFormatIsCheckedAtDecode() async throws {
+        // §4.1 token form on the ENTRY side: a malformed seatType (or
+        // the descriptor-only "*" wildcard) skips the entry — counted,
+        // never passed through.
+        let manifest = try DiscoveryTrust.verifyProviderManifest(
+            raw: try Fixture.bytes("provider-manifest.json"),
+            pinnedOperatorKeyHex: nil,
+            now: Fixture.now
+        )
+        for bad in ["Transport.Message", "*", "trans port", String(repeating: "a", count: 65)] {
+            let accepted = try DiscoveryTrust.verifySnapshot(
+                raw: try SignedFixtureFactory.snapshot(entrySeatType: bad),
+                manifest: manifest,
+                expectedCatalogId: "public-all-seats",
+                retained: nil,
+                now: Fixture.now
+            )
+            XCTAssertTrue(accepted.snapshot.entries.isEmpty, "seatType \(bad) must skip the entry")
+            XCTAssertEqual(accepted.snapshot.skippedEntryCount, 1, bad)
+        }
+    }
+
+    func testEntrySeatTypeMustBeAdmittedByDeclaringDescriptor() async throws {
+        // §4.1 cross-check: a catalog declaring `["notary"]` cannot
+        // list `transport.message` entries — the violating entry is
+        // skipped and counted. `"*"` (and an explicit match) admit.
+        let snapshot1 = try Fixture.bytes("snapshot-1.json") // entry seatType transport.message
+        func verified(_ seatTypes: [String]) throws -> SignedCatalogSnapshot {
+            let manifest = try DiscoveryTrust.verifyProviderManifest(
+                raw: try SignedFixtureFactory.manifest(catalogSeatTypes: seatTypes),
+                pinnedOperatorKeyHex: nil,
+                now: Fixture.now
+            )
+            return try DiscoveryTrust.verifySnapshot(
+                raw: snapshot1,
+                manifest: manifest,
+                expectedCatalogId: "public-all-seats",
+                retained: nil,
+                now: Fixture.now
+            )
+        }
+
+        let violating = try verified(["notary"])
+        XCTAssertTrue(violating.snapshot.entries.isEmpty)
+        XCTAssertEqual(violating.snapshot.skippedEntryCount, 1)
+
+        let wildcard = try verified(["*"])
+        XCTAssertEqual(wildcard.snapshot.entries.count, 1)
+        XCTAssertEqual(wildcard.snapshot.skippedEntryCount, 0)
+
+        let matching = try verified(["transport.message"])
+        XCTAssertEqual(matching.snapshot.entries.count, 1)
+        XCTAssertEqual(matching.snapshot.skippedEntryCount, 0)
+    }
+
+    func testSeatTypeViolationsStayOutOfAggregateAndOfflineRebuild() async throws {
+        // Repository level: the violating entry never enters the
+        // aggregate — not on refresh, and not on a later offline
+        // rebuild from the retained bytes (which still contain it).
+        let store = MemoryStore()
+        store.saveConfiguration(pinnedConfiguration())
+        let fetcher = FakeFetcher(responses: [
+            manifestURL: try SignedFixtureFactory.manifest(catalogSeatTypes: ["notary"]),
+            snapshotURL: try Fixture.bytes("snapshot-1.json"),
+        ])
+        let repository = DiscoveryRepository(fetcher: fetcher, store: store) { Fixture.now }
+
+        await repository.refresh()
+        let state = await repository.currentState()
+        XCTAssertNil(state.sources.first?.lastError)
+        XCTAssertTrue(state.aggregate.isEmpty, "transport.message entry in a notary catalog must be skipped")
+        XCTAssertFalse(
+            state.sources.first?.notes.isEmpty ?? true,
+            "the skipped entry must be counted and surfaced as a note"
+        )
+
+        // Fresh instance, no network: the offline rebuild applies the
+        // same binding via the record's retained seatTypes.
+        let offline = DiscoveryRepository(fetcher: FakeFetcher(responses: [:]), store: store) { Fixture.now }
+        await offline.start()
+        let offlineState = await offline.currentState()
+        XCTAssertTrue(
+            offlineState.aggregate.isEmpty,
+            "the offline rebuild must not resurrect entries the refresh skipped"
+        )
+    }
+
+    func testRotationReconfirmResetsChainAndPurgesRetainedBlobs() async throws {
+        // Re-confirming the same providerId with a DIFFERENT operator
+        // key is the rotation path — "re-adding the source as new". The
+        // chain restarts (carrying it forward would wedge on the new
+        // operator's sequence numbering), and the old identity's
+        // retained blobs are purged rather than left orphaned.
+        let store = MemoryStore()
+        store.saveConfiguration(pinnedConfiguration())
+        let fetcher = MutableFetcher(responses: [
+            manifestURL: try Fixture.bytes("provider-manifest.json"),
+            snapshotURL: try Fixture.bytes("snapshot-1.json"),
+        ])
+        let repository = DiscoveryRepository(fetcher: fetcher, store: store) { Fixture.now }
+        await repository.refresh()
+        XCTAssertFalse(store.storedSnapshotKeys.isEmpty)
+
+        let rotatedSeed = String(repeating: "0b", count: 32)
+        fetcher.set(try SignedFixtureFactory.manifest(operatorSeedHex: rotatedSeed), for: manifestURL)
+        let preview = try await repository.addSource(manifestURL: manifestURL)
+        await repository.confirmAddSource(preview)
+
+        let saved = try XCTUnwrap(store.loadConfiguration().sources.first)
+        XCTAssertNotEqual(saved.pinnedOperatorKeyHex, Fixture.operatorKeyHex)
+        XCTAssertTrue(saved.lastAccepted.isEmpty, "rotation re-add restarts the chain")
+        XCTAssertTrue(
+            store.storedSnapshotKeys.isEmpty,
+            "the replaced identity's retained blobs must be purged, not orphaned"
+        )
+    }
+
+    func testFreshConfirmPurgesOrphanedRetainedBlobs() async throws {
+        // A genuinely fresh add (no configured source) also purges any
+        // retained blobs under its providerId — e.g. an orphan a
+        // mid-pass removal left behind.
+        let store = MemoryStore()
+        store.saveRetainedSnapshot(
+            try Fixture.bytes("snapshot-1.json"),
+            providerId: providerId,
+            catalogId: "public-all-seats"
+        )
+        let fetcher = FakeFetcher(responses: [
+            manifestURL: try Fixture.bytes("provider-manifest.json"),
+        ])
+        let repository = DiscoveryRepository(fetcher: fetcher, store: store) { Fixture.now }
+
+        let preview = try await repository.addSource(manifestURL: manifestURL)
+        await repository.confirmAddSource(preview)
+
+        XCTAssertTrue(
+            store.storedSnapshotKeys.isEmpty,
+            "a fresh confirm must start from a clean retained state"
+        )
     }
 
     func testManifestStageFailureClearsStaleNotes() async throws {

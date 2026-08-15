@@ -15,12 +15,25 @@ public struct AcceptedSnapshotRecord: Codable, Equatable, Hashable, Sendable {
     /// note on the next refresh. `nil` on records persisted by older
     /// builds.
     public let policyDigest: String?
+    /// The declaring descriptor's `seatTypes` at acceptance time, so
+    /// the OFFLINE aggregate rebuild applies the same §4.1 seat-type
+    /// binding `DiscoveryTrust.verifySnapshot` applied on refresh (the
+    /// retained bytes still contain any violating entries). `nil` on
+    /// records persisted by older builds — treated as unconstrained.
+    public let seatTypes: [String]?
 
-    public init(digest: String, sequence: Int, acceptedAt: Date, policyDigest: String? = nil) {
+    public init(
+        digest: String,
+        sequence: Int,
+        acceptedAt: Date,
+        policyDigest: String? = nil,
+        seatTypes: [String]? = nil
+    ) {
         self.digest = digest
         self.sequence = sequence
         self.acceptedAt = acceptedAt
         self.policyDigest = policyDigest
+        self.seatTypes = seatTypes
     }
 
     public init(from decoder: Decoder) throws {
@@ -29,10 +42,11 @@ public struct AcceptedSnapshotRecord: Codable, Equatable, Hashable, Sendable {
         sequence = try c.decode(Int.self, forKey: .sequence)
         acceptedAt = try c.decode(Date.self, forKey: .acceptedAt)
         policyDigest = try c.decodeIfPresent(String.self, forKey: .policyDigest)
+        seatTypes = try c.decodeIfPresent([String].self, forKey: .seatTypes)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case digest, sequence, acceptedAt, policyDigest
+        case digest, sequence, acceptedAt, policyDigest, seatTypes
     }
 }
 
