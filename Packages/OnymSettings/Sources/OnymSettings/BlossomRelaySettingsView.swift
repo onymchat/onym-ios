@@ -126,7 +126,10 @@ struct BlossomRelaySettingsView: View {
                                         // First endpoint is the one
                                         // uploads/downloads target.
                                         if idx == 0 {
-                                            Text("ACTIVE")
+                                            // Keyed: bare "ACTIVE"'s ru
+                                            // is feminine (identity);
+                                            // a server is masculine.
+                                            Text("ACTIVE_SERVICE_CHIP")
                                                 .font(.system(size: 10, weight: .bold))
                                                 .foregroundStyle(OnymAccent.blue.color)
                                                 .padding(.horizontal, 6)

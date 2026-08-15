@@ -61,7 +61,7 @@ public struct OnboardingView: View {
             // the step content records one (moderation's consent, the
             // recovery reveal); `flow.advance()` carries the same
             // guard as the second layer.
-            primaryDisabled: flow.requiresOutcomeToAdvance(step) && flow.outcomes[step] == nil,
+            primaryDisabled: flow.requiresOutcomeToAdvance(step) && !flow.outcomeSatisfiesGate(step),
             primaryAction: { primaryTapped() },
             skipTitle: Self.skipTitle(for: step),
             skipAction: flow.isSkippable(step) ? { flow.skip() } : nil,

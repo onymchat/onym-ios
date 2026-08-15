@@ -86,17 +86,32 @@ public final class RecoveryPhraseBackupFlow {
         }
     }
 
-    /// Cancel any in-flight tasks. Call on view disappear if the flow's
-    /// lifetime exceeds the view's; for the first-cut single-screen app,
-    /// the flow lives for the App's lifetime so this is mostly a hook for
-    /// future composition.
+    /// Tear down AND scrub. Called on view disappear (the view pairs
+    /// it with `start()`): cancels the retaining tasks so the flow can
+    /// deallocate, drops the cached identity, and rewinds to `.intro`
+    /// so the revealed phrase never outlives the screen and every
+    /// re-entry goes back through the biometric gate. `start()` is
+    /// idempotent, so a reappearing view simply re-arms.
     public func stop() {
+        // `snapshotTask` strongly retains self for the life of a
+        // never-finishing AsyncStream — cancelling it here is what
+        // actually lets the flow deallocate when the presenting view
+        // releases its reference.
         snapshotTask?.cancel()
         snapshotTask = nil
         verifyAdvanceTask?.cancel()
         verifyAdvanceTask = nil
-        clipboardClearTask?.cancel()
-        clipboardClearTask = nil
+        // The clipboard clear task is deliberately NOT cancelled: it
+        // captures only the pasteboard and the phrase (no self, so no
+        // retain), and cancelling it would skip the early in-app clear.
+        // It self-completes; the OS-enforced expiry remains the real
+        // guarantee either way.
+        // Scrub: drop the plaintext phrase and the cached identity so
+        // the secret does not stay resident even if something else
+        // still holds the flow, and so any re-entry starts at Intro
+        // behind the biometric gate.
+        currentIdentity = nil
+        step = .intro
     }
 
     // MARK: - Intents (called from the view)
