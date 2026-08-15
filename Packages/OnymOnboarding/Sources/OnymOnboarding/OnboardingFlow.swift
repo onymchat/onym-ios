@@ -26,8 +26,16 @@ public enum StepOutcome: Equatable, Sendable {
     /// defaults.
     case skipped
     /// The step had nothing to decide (informational steps: welcome,
-    /// done, moderation-with-empty-directory).
+    /// done).
     case notApplicable
+    /// The step's obligation exists but could not be offered — today
+    /// exactly moderation with an EMPTY authority directory: there is
+    /// no authority to pick, so the user acknowledges with Continue.
+    /// Distinct from `.skipped` (a choice the user declined to make)
+    /// and `.notApplicable` (nothing to decide at all) so downstream
+    /// state never mistakes "moderation wasn't available" for
+    /// "the user opted out" — opting out of moderation is not a thing.
+    case unavailable
 }
 
 /// State machine for the first-launch onboarding sequence. Modeled on
@@ -112,22 +120,19 @@ public final class OnboardingFlow {
     /// - `welcome` — its primary Continue is the only path forward; a
     ///   separate Skip would be redundant (and the view never renders
     ///   one);
-    /// - `moderation` unless the directory probe has ANSWERED that the
-    ///   authority directory is empty — with entries present the
-    ///   moderation gate would block right after onboarding anyway, so
-    ///   letting the user skip here would be a lie, and while the
-    ///   probe is still unresolved we fail closed rather than open a
-    ///   racy skip window (this mirrors the existing gate: consent is
-    ///   only optional while the directory is empty/operational);
+    /// - `moderation` — NEVER skippable, in any directory state.
+    ///   Moderation-authority selection is not optional: with entries
+    ///   present the user must pick and sign (the gate would block
+    ///   right after onboarding anyway), and with an EMPTY directory
+    ///   there is nothing to decline — the step turns Continue-only
+    ///   informational instead (`isMandatory` answers false and
+    ///   `advance()` records `.unavailable`), which is an
+    ///   acknowledgment, not a skip;
     /// - `done`, which is terminal — there is nothing after it to skip
     ///   to (its primary action is `complete()`).
     public func isSkippable(_ step: OnboardingStep) -> Bool {
         switch step {
-        case .welcome:
-            return false
-        case .moderation:
-            return moderationDirectoryHasEntries == false
-        case .done:
+        case .welcome, .moderation, .done:
             return false
         default:
             return true
@@ -137,10 +142,15 @@ public final class OnboardingFlow {
     /// A mandatory step cannot be walked past without a recorded
     /// outcome — `advance()` refuses until the step content reports
     /// one. Today that is exactly `moderation` while the directory has
-    /// entries (or the probe hasn't answered yet — fail-closed, the
-    /// complement of `isSkippable`): its consent is the one obligation
-    /// onboarding must not silently drop, because the gate behind it
-    /// would block anyway.
+    /// entries (or the probe hasn't answered yet — fail-closed): its
+    /// consent is the one obligation onboarding must not silently
+    /// drop, because the gate behind it would block anyway. Only a
+    /// RESOLVED-empty directory relaxes this — there is no authority
+    /// to pick, so hard-blocking would brick onboarding; the step
+    /// becomes Continue-only informational and `advance()` records
+    /// the distinct `.unavailable` outcome. Note this is deliberately
+    /// NOT the complement of `isSkippable` anymore: moderation is
+    /// never skippable in any state.
     public func isMandatory(_ step: OnboardingStep) -> Bool {
         guard step == .moderation else { return false }
         return moderationDirectoryHasEntries != false
@@ -166,18 +176,22 @@ public final class OnboardingFlow {
     }
 
     /// Move to the next step. A step walked past without any recorded
-    /// outcome is backfilled as `.notApplicable` — the informational
-    /// steps (welcome; moderation with an empty directory) advance
-    /// through here without ever recording. No-op on `done`
-    /// (`complete()` is the terminal action), and a no-op on a
-    /// mandatory step with no recorded outcome — the primary button
-    /// must not be a back door around the unskippable-moderation rule
-    /// (the view also disables it; this guard is the second layer).
+    /// outcome is backfilled — `.notApplicable` for the informational
+    /// steps (welcome), except moderation over a RESOLVED-empty
+    /// directory, whose Continue-only acknowledgment records the
+    /// distinct `.unavailable` (moderation wasn't offered; the user
+    /// did not opt out). No-op on `done` (`complete()` is the
+    /// terminal action), and a no-op on a mandatory step with no
+    /// recorded outcome — the primary button must not be a back door
+    /// around the must-consent moderation rule (the view also
+    /// disables it; this guard is the second layer).
     public func advance() {
         guard let next = neighbor(offset: 1) else { return }
         guard !isMandatory(step) || outcomes[step] != nil else { return }
         if outcomes[step] == nil {
-            outcomes[step] = .notApplicable
+            outcomes[step] = step == .moderation && moderationDirectoryHasEntries == false
+                ? .unavailable
+                : .notApplicable
         }
         step = next
     }
