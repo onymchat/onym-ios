@@ -68,10 +68,11 @@ struct DiscoverySettingsScreen {
     }
 
     /// The source row's verified-entry count line ("1 catalog entry").
-    /// Matched by CONTAINS: the count string goes through automatic
-    /// grammar agreement (`^[…](inflect: true)`), and under the UI-test
-    /// language override the label can surface as the raw inflection
-    /// markup — the count + noun substring is the stable part.
+    /// Matched by CONTAINS so the assertion doesn't care whether the
+    /// plural rule picked "entry" or "entries" — the count + noun stem
+    /// is the stable part. (The line uses the catalog's plural
+    /// variations for `%lld catalog entries`; the tests launch under
+    /// the `en` override, where both forms start with this substring.)
     func entryCountText(_ count: Int) -> XCUIElement {
         app.staticTexts.matching(
             NSPredicate(format: "label CONTAINS %@", "\(count) catalog entr")

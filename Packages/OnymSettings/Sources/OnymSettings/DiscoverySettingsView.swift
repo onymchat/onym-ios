@@ -224,9 +224,20 @@ struct DiscoverySettingsView: View {
     }
 
     private func entriesLine(for status: DiscoverySourceStatus) -> String {
-        let count = flow.entryCount(providerId: status.source.providerId)
-        // Automatic grammar agreement — a real plural rule, not an
-        // English-only `== 1` branch.
-        return String(localized: "^[\(count) catalog entries](inflect: true)")
+        DiscoveryEntriesLabel.text(count: flow.entryCount(providerId: status.source.providerId))
+    }
+}
+
+/// Localized "N catalog entries" line for a source row. Pluralization
+/// comes from the app catalog's plural variations for the
+/// `%lld catalog entries` key (`Resources/Localizable.xcstrings`) — a
+/// real per-locale plural rule, not an English-only `== 1` branch.
+/// Deliberately not `^[…](inflect: true)`: that markup had no catalog
+/// entry, so lookup fell through to the literal key and the raw
+/// inflection markup reached the screen under a language override.
+/// Public so the hosted unit tests can pin the rendered forms.
+public enum DiscoveryEntriesLabel {
+    public static func text(count: Int) -> String {
+        String(localized: "\(count) catalog entries")
     }
 }
