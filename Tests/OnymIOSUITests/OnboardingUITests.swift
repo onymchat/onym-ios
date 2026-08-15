@@ -302,7 +302,19 @@ final class OnboardingUITests: XCTestCase {
         XCTAssertTrue(onboarding.skip("recoveryPhrase").waitForExistence(timeout: 5))
         onboarding.skip("recoveryPhrase").tap()
 
-        // Done → Start messaging → tab bar.
+        // Done. Leaving the services step on the recommended path
+        // auto-ran the seeded directory's TOFU confirm (fetch →
+        // verify → pin against the fixture manifest), so the summary
+        // must show the pinned operator-key fingerprint — not the
+        // "Not confirmed" state an unpinned seed would report.
+        XCTAssertTrue(onboarding.title("done").waitForExistence(timeout: 5))
+        XCTAssertTrue(onboarding.doneSummary.waitForExistence(timeout: 5),
+                      "done summary card never appeared")
+        XCTAssertTrue(app.staticTexts[fingerprint].waitForExistence(timeout: 10),
+                      "recommended-path accept should have pinned the seeded directory; "
+                      + "its fingerprint never appeared in the summary. Hierarchy:\n\(app.debugDescription)")
+
+        // Start messaging → tab bar.
         onboarding.continueFrom("done")
         let chats = ChatsScreen(app: app)
         XCTAssertTrue(chats.chatsTab.waitForExistence(timeout: 10),

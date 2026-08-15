@@ -997,6 +997,16 @@ struct OnymIOSApp: App {
                 identityReady: { @MainActor in
                     (try? await repository.bootstrap()) != nil
                 },
+                // Recommended-path accept = the seeded source's TOFU
+                // confirm (trust rationale on the helper). Nil
+                // discovery (UI-test harness without --ui-discovery)
+                // makes it a no-op.
+                confirmSeededDiscovery: { @MainActor in
+                    guard let discoveryRepository else { return }
+                    await SeededDiscoveryConfirmation.confirmIfUnpinned(
+                        repository: discoveryRepository
+                    )
+                },
                 loadSummary: { @MainActor in
                     // The Done step's summary is read from the
                     // repositories, not the walk's outcomes — what the
@@ -1044,13 +1054,21 @@ struct OnymIOSApp: App {
                     if let discoveryRepository {
                         let state = await discoveryRepository.currentState()
                         if let source = state.sources.first {
+                            // An unpinned source must read visibly
+                            // different from an active one: no
+                            // fingerprint detail (there is no pinned
+                            // key to show) and "Not confirmed" where
+                            // the count would imply working sources.
+                            let pinned = source.source.pinnedOperatorKeyHex != nil
                             rows.append(OnboardingSummaryRow(
                                 id: "discovery",
                                 title: String(localized: "Directory"),
                                 value: source.source.userLabel,
                                 detail: source.source.operatorKeyFingerprint,
                                 symbol: "magnifyingglass",
-                                trailing: String(localized: "\(state.sources.count) sources")
+                                trailing: pinned
+                                    ? String(localized: "\(state.sources.count) sources")
+                                    : String(localized: "Not confirmed")
                             ))
                         }
                     }

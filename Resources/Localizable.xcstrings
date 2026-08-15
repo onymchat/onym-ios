@@ -7130,6 +7130,23 @@
           }
         }
       }
+    },
+    "Not confirmed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not confirmed"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не подтверждён"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

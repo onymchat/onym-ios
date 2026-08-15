@@ -44,6 +44,12 @@ struct OnboardingStepContentBuilder {
     /// exists — the identity step's checklist binds to this instead of
     /// asserting success it can't know about.
     let identityReady: @MainActor () async -> Bool
+    /// TOFU-pins the SEEDED default discovery source when the user
+    /// leaves the services step on the recommended path — accepting
+    /// the recommended setup is the explicit confirm (see
+    /// `SeededDiscoveryConfirmation`). Idempotent; a no-op when
+    /// discovery is absent or the source is already pinned.
+    let confirmSeededDiscovery: @MainActor () async -> Void
     let loadSummary: @MainActor () async -> [OnboardingSummaryRow]
 
     func content(for step: OnboardingStep, flow: OnboardingFlow) -> AnyView? {
@@ -420,6 +426,23 @@ struct OnboardingServicesContent: View {
                 onboarding.recordOutcome(.consented(componentId: nil))
             }
         }
+        // Accepting the recommended setup IS the seeded directory's
+        // TOFU confirm. `onDisappear` fires once the walk moved on
+        // (flow.step is already the destination), so this catches
+        // exactly the forward-leave with the recommended card
+        // selected — the moment the acceptance becomes final — and
+        // runs the same fetch → verify → pin path the hub's manual
+        // "Verify & Confirm" uses. Back-navigation doesn't trigger it
+        // (the user may still switch to custom), a possible double
+        // fire is harmless (the confirm is idempotent), and failure
+        // never blocks the walk — an offline first run leaves the
+        // source unpinned and the Done summary says "Not confirmed".
+        .onDisappear {
+            guard onboarding.servicesChoice == .recommended,
+                  stepIsAfterServices(onboarding.step)
+            else { return }
+            Task { await builder.confirmSeededDiscovery() }
+        }
         .sheet(isPresented: $showHub) {
             OnboardingServicesHub(
                 onboarding: onboarding,
@@ -453,6 +476,16 @@ struct OnboardingServicesContent: View {
                 }
             )
         }
+    }
+
+    /// Whether `step` comes after `.services` in presentation order —
+    /// the forward-leave test for the trigger above.
+    private func stepIsAfterServices(_ step: OnboardingStep) -> Bool {
+        let all = OnboardingStep.allCases
+        guard let services = all.firstIndex(of: .services),
+              let current = all.firstIndex(of: step)
+        else { return false }
+        return current > services
     }
 
     private var recommendedCard: some View {
