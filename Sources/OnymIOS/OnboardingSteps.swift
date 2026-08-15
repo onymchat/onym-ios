@@ -1004,7 +1004,7 @@ struct OnboardingNostrContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Relays pass sealed messages along. They can't read them, and they never learn who you're talking to. Two or more keeps you reachable if one goes down.")
+            Text("Relays pass sealed messages along. They can't read them, and they never learn who you're talking to. Every message is sent through all of your relays at once — any one of them is enough to reach you.")
                 .font(.system(size: 14))
                 .foregroundStyle(OnymTokens.text2)
                 .lineSpacing(3)
@@ -1057,9 +1057,13 @@ struct OnboardingNostrContent: View {
                     OnboardingEndpointRow(
                         name: endpoint.name,
                         url: endpoint.url,
-                        badge: idx == 0 ? "PRIMARY" : "BACKUP",
-                        selected: idx == 0,
-                        badgeColor: idx == 0 ? OnymTokens.green : OnymTokens.text2,
+                        // No per-row role: Nostr has no failover order.
+                        // NostrMessageTransport fans every event out to
+                        // ALL connected relays concurrently — claiming
+                        // "backup" here would be a false privacy
+                        // statement about which relays see traffic.
+                        badge: nil,
+                        selected: true,
                         last: idx == endpoints.count - 1
                     )
                     .accessibilityElement(children: .contain)
@@ -1069,9 +1073,10 @@ struct OnboardingNostrContent: View {
             .background(OnymTokens.surface2,
                         in: RoundedRectangle(cornerRadius: 14, style: .continuous))
 
-            Text("The top relay is tried first; the rest are fallbacks.")
+            Text("Every relay in this list carries every message — they're used together, not as fallbacks. Any one that's up is enough to reach you.")
                 .font(.system(size: 12.5))
                 .foregroundStyle(OnymTokens.text2)
+                .lineSpacing(2)
                 .padding(.top, 8)
         }
     }
@@ -1086,6 +1091,10 @@ struct OnboardingNostrContent: View {
                 consentedOffer: { flow.consentedOffer(for: $0) },
                 tileSymbol: "antenna.radiowaves.left.and.right.circle.fill",
                 accessibilityPrefix: prefix,
+                // The hub screens draw their own "SUGGESTED BY YOUR
+                // DIRECTORIES" header; nil avoids the section's
+                // built-in "FROM CATALOG" doubling it.
+                label: nil,
                 onSelect: { entry in
                     lastConsentEntry = entry
                     consentEntry = entry
@@ -1148,6 +1157,10 @@ struct OnboardingBlossomContent: View {
                     consentedOffer: { flow.consentedOffer(for: $0) },
                     tileSymbol: "photo.on.rectangle.angled",
                     accessibilityPrefix: "onboarding.services.mediaDelivery.catalog",
+                    // The hub screens draw their own "SUGGESTED BY YOUR
+                    // DIRECTORIES" header; nil avoids the section's
+                    // built-in "FROM CATALOG" doubling it.
+                    label: nil,
                     onSelect: { entry in
                         lastConsentEntry = entry
                         consentEntry = entry
@@ -1197,12 +1210,15 @@ struct OnboardingBlossomContent: View {
                     OnboardingEndpointRow(
                         name: endpoint.name,
                         url: endpoint.url,
-                        // First endpoint is the upload/download
-                        // target; the rest are fallbacks — same role
-                        // vocabulary as the other seats.
-                        badge: idx == 0 ? "ACTIVE" : "BACKUP",
+                        // Only the FIRST endpoint ever receives your
+                        // uploads (BlossomCatalogConsent makes a pick
+                        // active by putting it first). The rest are an
+                        // allowlist of hosts you'll accept downloads
+                        // from — not upload fallbacks, so no "backup"
+                        // chip.
+                        badge: idx == 0 ? "ACTIVE" : nil,
                         selected: idx == 0,
-                        badgeColor: idx == 0 ? OnymTokens.green : OnymTokens.text2,
+                        badgeColor: OnymTokens.green,
                         last: idx == endpoints.count - 1
                     )
                     .accessibilityElement(children: .contain)
@@ -1211,6 +1227,12 @@ struct OnboardingBlossomContent: View {
             }
             .background(OnymTokens.surface2,
                         in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+            Text("Your uploads go through the active service only. Any others in the list are hosts you trust for downloading what people send you.")
+                .font(.system(size: 12.5))
+                .foregroundStyle(OnymTokens.text2)
+                .lineSpacing(2)
+                .padding(.top, 8)
         }
     }
 
@@ -1270,6 +1292,10 @@ struct OnboardingNotaryContent: View {
                     consentedOffer: { flow.consentedOffer(for: $0) },
                     tileSymbol: "antenna.radiowaves.left.and.right",
                     accessibilityPrefix: "onboarding.services.groupIntegrity.catalog",
+                    // The hub screens draw their own "SUGGESTED BY YOUR
+                    // DIRECTORIES" header; nil avoids the section's
+                    // built-in "FROM CATALOG" doubling it.
+                    label: nil,
                     onSelect: { entry in
                         lastConsentEntry = entry
                         consentEntry = entry
@@ -1318,19 +1344,22 @@ struct OnboardingNotaryContent: View {
                 accessibilityID: "onboarding.services.groupIntegrity.empty"
             )
         } else {
+            let configuration = flow.state.snapshot.configuration
             OnboardingSectionLabel(text: "IN USE")
             VStack(spacing: 0) {
                 ForEach(Array(endpoints.enumerated()), id: \.element.url) { idx, endpoint in
                     OnboardingEndpointRow(
                         name: endpoint.name,
                         url: endpoint.url,
-                        // Same role vocabulary as the other seats:
-                        // the first endpoint is tried first
-                        // (RelayerConfiguration falls back to
-                        // endpoints.first), the rest are fallbacks.
-                        badge: idx == 0 ? "PRIMARY" : "BACKUP",
-                        selected: idx == 0,
-                        badgeColor: idx == 0 ? OnymTokens.green : OnymTokens.text2,
+                        // The chip reflects the ACTUAL selection
+                        // strategy: under `.primary` exactly the
+                        // endpoint `selectURL` would resolve is
+                        // marked; under `.random` (the auto-populated
+                        // default) no row is special — a new group
+                        // picks one of these at random.
+                        badge: isPrimary(endpoint, at: idx, in: configuration) ? "PRIMARY" : nil,
+                        selected: true,
+                        badgeColor: OnymTokens.green,
                         last: idx == endpoints.count - 1
                     )
                     .accessibilityElement(children: .contain)
@@ -1339,7 +1368,33 @@ struct OnboardingNotaryContent: View {
             }
             .background(OnymTokens.surface2,
                         in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+            Text(configuration.strategy == .primary
+                 ? "New groups are notarised by your primary notary."
+                 : "When you create a group, Onym picks one of these notaries at random for it — everyone in that group then uses the same one.")
+                .font(.system(size: 12.5))
+                .foregroundStyle(OnymTokens.text2)
+                .lineSpacing(2)
+                .padding(.top, 8)
         }
+    }
+
+    /// Whether this row is the endpoint `RelayerConfiguration.selectURL`
+    /// would actually resolve under the `.primary` strategy: the
+    /// matching `primaryURL`, or `endpoints.first` when no primary is
+    /// pinned (selectURL's documented fallback). Never true under
+    /// `.random`.
+    private func isPrimary(
+        _ endpoint: RelayerEndpoint,
+        at index: Int,
+        in configuration: RelayerConfiguration
+    ) -> Bool {
+        guard configuration.strategy == .primary else { return false }
+        if let primaryURL = configuration.primaryURL,
+           configuration.endpoints.contains(where: { $0.url == primaryURL }) {
+            return endpoint.url == primaryURL
+        }
+        return index == 0
     }
 
     /// The legacy published list — tap to add, no consent sheet: these

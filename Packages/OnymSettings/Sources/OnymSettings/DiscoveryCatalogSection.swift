@@ -25,6 +25,10 @@ public struct DiscoveryCatalogSection: View {
     let consentedOffer: (AttributedCatalogEntry) -> ServiceOffer?
     let tileSymbol: String
     let accessibilityPrefix: String
+    /// Section header above the card. Defaults to the Settings pages'
+    /// "FROM CATALOG"; hosts that draw their own header (the
+    /// onboarding hub screens) pass nil to avoid a double label.
+    let label: LocalizedStringKey?
     let onSelect: (AttributedCatalogEntry) -> Void
 
     public init(
@@ -33,8 +37,10 @@ public struct DiscoveryCatalogSection: View {
         consentedOffer: @escaping (AttributedCatalogEntry) -> ServiceOffer?,
         tileSymbol: String,
         accessibilityPrefix: String,
+        label: LocalizedStringKey? = "FROM CATALOG",
         onSelect: @escaping (AttributedCatalogEntry) -> Void
     ) {
+        self.label = label
         self.entries = entries
         self.activeConsent = activeConsent
         self.consentedOffer = consentedOffer
@@ -45,7 +51,9 @@ public struct DiscoveryCatalogSection: View {
 
     public var body: some View {
         if !entries.isEmpty {
-            SettingsSectionLabel("FROM CATALOG")
+            if let label {
+                SettingsSectionLabel(label)
+            }
             SettingsCard {
                 ForEach(Array(entries.enumerated()), id: \.element.id) { idx, entry in
                     row(entry, last: idx == entries.count - 1)
