@@ -21,22 +21,21 @@ import SwiftUI
 /// dot indicator so the package previews and tests stand alone.
 public struct OnboardingView: View {
     @State private var flow: OnboardingFlow
-    /// App-supplied content slot for the middle steps. The closure
-    /// receives the step being rendered; the default is a placeholder
-    /// card naming the step.
-    private let stepContent: (OnboardingStep) -> AnyView
+    /// App-supplied content slot, consulted for EVERY step (Welcome
+    /// and Done included). Return nil to fall back to the built-ins:
+    /// the Welcome/Done bodies, and a placeholder card for the middle
+    /// steps until PR 3 supplies the real surfaces.
+    private let stepContent: (OnboardingStep) -> AnyView?
     /// App-supplied step indicator, given (zero-based index, count).
     private let stepIndicator: (Int, Int) -> AnyView
 
     public init(
         flow: OnboardingFlow,
-        stepContent: ((OnboardingStep) -> AnyView)? = nil,
+        stepContent: ((OnboardingStep) -> AnyView?)? = nil,
         stepIndicator: ((Int, Int) -> AnyView)? = nil
     ) {
         _flow = State(initialValue: flow)
-        self.stepContent = stepContent ?? { step in
-            AnyView(PlaceholderStepContent(step: step))
-        }
+        self.stepContent = stepContent ?? { _ in nil }
         self.stepIndicator = stepIndicator ?? { index, count in
             AnyView(DefaultStepIndicator(index: index, count: count))
         }
@@ -56,8 +55,16 @@ public struct OnboardingView: View {
             title: Self.title(for: step),
             subtitle: Self.subtitle(for: step),
             primaryTitle: step == .done ? String(localized: "Start") : String(localized: "Continue"),
+            // Mandatory steps render Continue disabled until the step
+            // content records an outcome; `flow.advance()` carries the
+            // same guard as the second layer.
+            primaryDisabled: flow.isMandatory(step) && flow.outcomes[step] == nil,
             primaryAction: { primaryTapped() },
-            skipAction: showsSkip(step) ? { flow.skip() } : nil,
+            skipAction: flow.isSkippable(step) ? { flow.skip() } : nil,
+            // While the directory probe is unresolved, moderation's
+            // skippability is unknown (failed closed) — show progress
+            // where Skip would be instead of nothing.
+            showsSkipProgress: step == .moderation && !flow.moderationProbeResolved,
             backAction: step == .welcome ? nil : { flow.back() },
             content: { content(for: step) },
             indicator: { stepIndicator(flow.stepIndex, flow.stepCount) }
@@ -72,23 +79,21 @@ public struct OnboardingView: View {
         }
     }
 
-    /// Welcome's primary IS the advance, so a separate Skip would be
-    /// redundant; Done is terminal. Everything else defers to the
-    /// flow's skippability rule (moderation hides Skip while the
-    /// directory has entries).
-    private func showsSkip(_ step: OnboardingStep) -> Bool {
-        step != .welcome && step != .done && flow.isSkippable(step)
-    }
-
+    /// Injected slot first — the app may override ANY step's body,
+    /// Welcome and Done included. nil falls back to the built-ins.
     @ViewBuilder
     private func content(for step: OnboardingStep) -> some View {
-        switch step {
-        case .welcome:
-            WelcomeStepContent()
-        case .done:
-            DoneStepContent(outcomes: flow.outcomes)
-        default:
-            stepContent(step)
+        if let injected = stepContent(step) {
+            injected
+        } else {
+            switch step {
+            case .welcome:
+                WelcomeStepContent()
+            case .done:
+                DoneStepContent(outcomes: flow.outcomes)
+            default:
+                PlaceholderStepContent(step: step)
+            }
         }
     }
 

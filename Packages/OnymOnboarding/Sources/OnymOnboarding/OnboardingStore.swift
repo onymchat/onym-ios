@@ -7,6 +7,10 @@ public protocol OnboardingStore: Sendable {
     func hasCompletedOnboarding() -> Bool
     /// Set the completion flag. Idempotent.
     func markOnboardingCompleted()
+    /// Clear the completion flag, so the next launch onboards again.
+    /// The app's `--reset-keychain` test path calls this instead of
+    /// hardcoding the storage key. Idempotent.
+    func resetOnboarding()
 }
 
 /// Production `OnboardingStore`. Single boolean under
@@ -34,6 +38,10 @@ public struct UserDefaultsOnboardingStore: OnboardingStore, @unchecked Sendable 
 
     public func markOnboardingCompleted() {
         defaults.set(true, forKey: Self.key)
+    }
+
+    public func resetOnboarding() {
+        defaults.removeObject(forKey: Self.key)
     }
 }
 

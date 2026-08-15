@@ -39,6 +39,13 @@ public enum StepOutcome: Equatable, Sendable {
 /// a `fullScreenCover` with `.interactiveDismissDisabled(true)` — the
 /// only exits are `complete()` on the Done step and the per-step Skip
 /// affordances; there is no swipe-to-dismiss.
+///
+/// Partial progress is deliberately NOT persisted: the flow lives in
+/// memory, and an app killed mid-onboarding starts over at `welcome`
+/// on next launch. Individual consents the step content applied
+/// before the kill are persisted by their own stores (consent pins,
+/// mandate) — only the walk position restarts. Revisit in PR 3 if the
+/// wired flow turns out long enough to warrant resume.
 @MainActor
 @Observable
 public final class OnboardingFlow {
@@ -51,11 +58,18 @@ public final class OnboardingFlow {
     /// recorded over it.
     public private(set) var outcomes: [OnboardingStep: StepOutcome] = [:]
     /// Whether the moderation directory has entries — resolved once by
-    /// `start()` via the injected probe. Until (or unless) the probe
-    /// answers true, moderation behaves as skippable/informational,
-    /// matching today's gate semantics (empty directory ⇒ the gate
-    /// reads operational and never blocks).
-    public private(set) var moderationDirectoryHasEntries = false
+    /// `start()` via the injected probe. Tri-state and FAIL-CLOSED:
+    /// nil (unresolved) is treated exactly like "has entries" — the
+    /// moderation step reads unskippable/mandatory until the probe
+    /// answers `false`. Racing the probe must never open a skip window
+    /// that a resolved `true` would have closed.
+    public private(set) var moderationDirectoryHasEntries: Bool?
+
+    /// Whether the directory probe has answered — the view shows a
+    /// progress state on the skip affordance while this is false.
+    public var moderationProbeResolved: Bool {
+        moderationDirectoryHasEntries != nil
+    }
 
     private let store: any OnboardingStore
     private let moderationDirectoryNonEmpty: () async -> Bool
@@ -90,22 +104,41 @@ public final class OnboardingFlow {
     // MARK: - Skippability
 
     /// Every step is skippable except:
-    /// - `moderation` when the authority directory has entries — the
+    /// - `welcome` — its primary Continue is the only path forward; a
+    ///   separate Skip would be redundant (and the view never renders
+    ///   one);
+    /// - `moderation` unless the directory probe has ANSWERED that the
+    ///   authority directory is empty — with entries present the
     ///   moderation gate would block right after onboarding anyway, so
-    ///   letting the user skip here would be a lie (this mirrors the
-    ///   existing gate: consent is only optional while the directory
-    ///   is empty/operational);
+    ///   letting the user skip here would be a lie, and while the
+    ///   probe is still unresolved we fail closed rather than open a
+    ///   racy skip window (this mirrors the existing gate: consent is
+    ///   only optional while the directory is empty/operational);
     /// - `done`, which is terminal — there is nothing after it to skip
     ///   to (its primary action is `complete()`).
     public func isSkippable(_ step: OnboardingStep) -> Bool {
         switch step {
+        case .welcome:
+            return false
         case .moderation:
-            return !moderationDirectoryHasEntries
+            return moderationDirectoryHasEntries == false
         case .done:
             return false
         default:
             return true
         }
+    }
+
+    /// A mandatory step cannot be walked past without a recorded
+    /// outcome — `advance()` refuses until the step content reports
+    /// one. Today that is exactly `moderation` while the directory has
+    /// entries (or the probe hasn't answered yet — fail-closed, the
+    /// complement of `isSkippable`): its consent is the one obligation
+    /// onboarding must not silently drop, because the gate behind it
+    /// would block anyway.
+    public func isMandatory(_ step: OnboardingStep) -> Bool {
+        guard step == .moderation else { return false }
+        return moderationDirectoryHasEntries != false
     }
 
     // MARK: - Lifecycle
@@ -131,9 +164,13 @@ public final class OnboardingFlow {
     /// outcome is backfilled as `.notApplicable` — the informational
     /// steps (welcome; moderation with an empty directory) advance
     /// through here without ever recording. No-op on `done`
-    /// (`complete()` is the terminal action).
+    /// (`complete()` is the terminal action), and a no-op on a
+    /// mandatory step with no recorded outcome — the primary button
+    /// must not be a back door around the unskippable-moderation rule
+    /// (the view also disables it; this guard is the second layer).
     public func advance() {
         guard let next = neighbor(offset: 1) else { return }
+        guard !isMandatory(step) || outcomes[step] != nil else { return }
         if outcomes[step] == nil {
             outcomes[step] = .notApplicable
         }

@@ -19,9 +19,17 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
     private let title: String
     private let subtitle: String?
     private let primaryTitle: String
+    /// Disables the primary button — mandatory steps with no recorded
+    /// outcome render Continue disabled (the flow's `advance()` guard
+    /// is the second layer of the same rule).
+    private let primaryDisabled: Bool
     private let primaryAction: () -> Void
     /// nil hides the Skip affordance (unskippable steps).
     private let skipAction: (() -> Void)?
+    /// Renders a small progress indicator in the Skip slot — used
+    /// while the flow's moderation-directory probe is unresolved and
+    /// skippability is not yet known.
+    private let showsSkipProgress: Bool
     /// nil hides the Back affordance (the first step).
     private let backAction: (() -> Void)?
     private let content: Content
@@ -32,8 +40,10 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
         title: String,
         subtitle: String? = nil,
         primaryTitle: String,
+        primaryDisabled: Bool = false,
         primaryAction: @escaping () -> Void,
         skipAction: (() -> Void)? = nil,
+        showsSkipProgress: Bool = false,
         backAction: (() -> Void)? = nil,
         @ViewBuilder content: () -> Content,
         @ViewBuilder indicator: () -> Indicator
@@ -42,8 +52,10 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
         self.title = title
         self.subtitle = subtitle
         self.primaryTitle = primaryTitle
+        self.primaryDisabled = primaryDisabled
         self.primaryAction = primaryAction
         self.skipAction = skipAction
+        self.showsSkipProgress = showsSkipProgress
         self.backAction = backAction
         self.content = content()
         self.indicator = indicator()
@@ -84,6 +96,7 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
                         .padding(.vertical, 6)
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(primaryDisabled)
                 .accessibilityIdentifier("onboarding.\(step.rawValue).primary")
 
                 HStack {
@@ -95,6 +108,10 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
                     if let skipAction {
                         Button("Skip", action: skipAction)
                             .accessibilityIdentifier("onboarding.\(step.rawValue).skip")
+                    } else if showsSkipProgress {
+                        ProgressView()
+                            .controlSize(.small)
+                            .accessibilityIdentifier("onboarding.\(step.rawValue).skip_pending")
                     }
                 }
                 .font(.subheadline)

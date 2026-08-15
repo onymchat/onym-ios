@@ -44,6 +44,25 @@ final class OnboardingStoreTests: XCTestCase {
         XCTAssertTrue(defaults.bool(forKey: "app.onym.ios.onboarding.completed"))
     }
 
+    /// The seam the app's `--reset-keychain` path calls — clears the
+    /// flag without the app hardcoding the key string.
+    func testResetOnboardingClearsTheFlag() {
+        store.markOnboardingCompleted()
+        store.resetOnboarding()
+        XCTAssertFalse(store.hasCompletedOnboarding())
+        XCTAssertNil(defaults.object(forKey: UserDefaultsOnboardingStore.key))
+        // Idempotent on an already-clear store.
+        store.resetOnboarding()
+        XCTAssertFalse(store.hasCompletedOnboarding())
+    }
+
+    /// After a reset, the gate onboards again.
+    func testResetReopensTheGate() {
+        store.markOnboardingCompleted()
+        store.resetOnboarding()
+        XCTAssertTrue(OnboardingGate.shouldOnboard(store: store, isExistingUser: { false }))
+    }
+
     // MARK: - Grandfathering probe truth table
 
     /// flag absent, no existing-user state → onboard.
