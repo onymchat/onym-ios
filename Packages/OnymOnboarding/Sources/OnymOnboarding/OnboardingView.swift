@@ -101,7 +101,10 @@ public struct OnboardingView: View {
             case .welcome:
                 WelcomeStepContent()
             case .done:
-                DoneStepContent(outcomes: flow.outcomes)
+                DoneStepContent(
+                    outcomes: flow.outcomes,
+                    recoveryBackupState: flow.recoveryBackupState
+                )
             default:
                 PlaceholderStepContent(step: step)
             }
@@ -196,6 +199,7 @@ struct WelcomeStepContent: View {
 /// everything stays editable in Settings.
 struct DoneStepContent: View {
     let outcomes: [OnboardingStep: StepOutcome]
+    let recoveryBackupState: RecoveryBackupState
 
     private static let summarySteps: [OnboardingStep] = [
         .services, .moderation, .recoveryPhrase,
@@ -210,7 +214,7 @@ struct DoneStepContent: View {
                     Text(verbatim: OnboardingView.title(for: step))
                         .font(.callout)
                     Spacer()
-                    Text(verbatim: label(for: outcomes[step]))
+                    Text(verbatim: label(for: step))
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -237,8 +241,18 @@ struct DoneStepContent: View {
         }
     }
 
-    private func label(for outcome: StepOutcome?) -> String {
-        switch outcome {
+    private func label(for step: OnboardingStep) -> String {
+        // The recovery row reports how far the backup ACTUALLY got —
+        // "saw the words" and "verified them" both record the same
+        // consent outcome, so the outcome alone can't tell them apart.
+        if step == .recoveryPhrase {
+            switch recoveryBackupState {
+            case .verified: return String(localized: "Backed up")
+            case .revealed: return String(localized: "Revealed")
+            case .none: return String(localized: "Later")
+            }
+        }
+        switch outcomes[step] {
         case .consented: return String(localized: "Chosen")
         case .skipped: return String(localized: "Later")
         case .unavailable: return String(localized: "Unavailable")
