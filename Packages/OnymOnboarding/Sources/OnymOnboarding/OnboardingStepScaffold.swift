@@ -35,6 +35,10 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
     private let showsSkipProgress: Bool
     /// nil hides the Back affordance (the first step).
     private let backAction: (() -> Void)?
+    /// False drops the indicator slot entirely — the unnumbered steps
+    /// (welcome, recovery, done) must not carry a blank 24pt band
+    /// where the indicator would sit.
+    private let showsIndicator: Bool
     private let content: Content
     private let indicator: Indicator
 
@@ -49,6 +53,7 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
         skipAction: (() -> Void)? = nil,
         showsSkipProgress: Bool = false,
         backAction: (() -> Void)? = nil,
+        showsIndicator: Bool = true,
         @ViewBuilder content: () -> Content,
         @ViewBuilder indicator: () -> Indicator
     ) {
@@ -62,6 +67,7 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
         self.skipAction = skipAction
         self.showsSkipProgress = showsSkipProgress
         self.backAction = backAction
+        self.showsIndicator = showsIndicator
         self.content = content()
         self.indicator = indicator()
     }
@@ -70,14 +76,16 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    indicator
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 24)
+                    if showsIndicator {
+                        indicator
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 24)
+                    }
 
                     Text(verbatim: title)
                         .font(.largeTitle.bold())
                         .accessibilityIdentifier("onboarding.\(step.rawValue).title")
-                        .padding(.top, 8)
+                        .padding(.top, showsIndicator ? 8 : 24)
 
                     if let subtitle {
                         Text(verbatim: subtitle)

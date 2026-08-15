@@ -57,10 +57,11 @@ public struct OnboardingView: View {
             title: Self.title(for: step),
             subtitle: Self.subtitle(for: step),
             primaryTitle: Self.primaryTitle(for: step),
-            // Mandatory steps render Continue disabled until the step
-            // content records an outcome; `flow.advance()` carries the
-            // same guard as the second layer.
-            primaryDisabled: flow.isMandatory(step) && flow.outcomes[step] == nil,
+            // Outcome-gated steps render their primary disabled until
+            // the step content records one (moderation's consent, the
+            // recovery reveal); `flow.advance()` carries the same
+            // guard as the second layer.
+            primaryDisabled: flow.requiresOutcomeToAdvance(step) && flow.outcomes[step] == nil,
             primaryAction: { primaryTapped() },
             skipTitle: Self.skipTitle(for: step),
             skipAction: flow.isSkippable(step) ? { flow.skip() } : nil,
@@ -69,6 +70,9 @@ public struct OnboardingView: View {
             // progress where Skip would be instead of nothing.
             showsSkipProgress: step == .moderation && !flow.moderationProbeResolved,
             backAction: step == .welcome ? nil : { flow.back() },
+            // Unnumbered steps opt out entirely so the scaffold never
+            // reserves a blank indicator band.
+            showsIndicator: flow.indicatorPosition(for: step) != nil,
             content: { content(for: step) },
             indicator: {
                 if let position = flow.indicatorPosition(for: step) {
