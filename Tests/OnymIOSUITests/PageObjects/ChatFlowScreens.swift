@@ -242,7 +242,20 @@ struct ChatThreadScreen {
 
     @discardableResult
     func waitForMessage(_ text: String, timeout: TimeInterval = 25) -> Bool {
-        app.staticTexts[text].waitForExistence(timeout: timeout)
+        // Bubble bodies render in a link-aware UITextView, which
+        // XCUITest exposes as a text view whose `value` is the text —
+        // not as a static text. Other message renderings (system
+        // notices, quotes) remain labels, so accept either.
+        let bubble = app.textViews.matching(
+            NSPredicate(format: "value == %@", text)
+        ).firstMatch
+        let label = app.staticTexts[text]
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if bubble.exists || label.exists { return true }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        } while Date() < deadline
+        return false
     }
 
     /// The delivery-status glyph exposes its state via accessibilityLabel

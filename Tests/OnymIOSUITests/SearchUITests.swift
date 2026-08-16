@@ -62,7 +62,7 @@ final class SearchUITests: XCTestCase {
         hit.tap()
         XCTAssertTrue(app.textViews["chat.input.textview"].waitForExistence(timeout: 15),
                       "tapping a search result never opened the chat thread")
-        XCTAssertTrue(app.staticTexts["lunch plans today"].waitForExistence(timeout: 15),
+        XCTAssertTrue(ChatThreadScreen(app: app).waitForMessage("lunch plans today", timeout: 15),
                       "the searched message wasn't shown in the opened thread")
     }
 

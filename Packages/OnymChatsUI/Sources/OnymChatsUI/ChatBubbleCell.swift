@@ -103,7 +103,7 @@ final class ChatBubbleCell: UITableViewCell {
     private let maxWidthFraction: CGFloat = 0.75
 
     private let bubble = UIView()
-    private let bodyLabel = UILabel()
+    private let bodyView = LinkTextView()
     /// Image attachment view (shown when `message.imageAttachment != nil`).
     /// Sits above the caption; the blurhash placeholder renders first,
     /// then the decrypted image swaps in from `ChatImageLoader`.
@@ -333,14 +333,17 @@ final class ChatBubbleCell: UITableViewCell {
         // Reuse safety: a cell recycled mid-drag must start at rest.
         resetSwipeState()
         self.onSwipeToReply = onSwipeToReply
-        bodyLabel.text = message.body
         switch message.direction {
         case .outgoing:
             // Own messages: solid fill in the user's own accent (so
             // "your color" is consistent with the members list and
             // every group). Right-aligned, status glyph below.
             bubble.backgroundColor = UIColor(sender.accent.color)
-            bodyLabel.textColor = UIColor(OnymTokens.onAccent)
+            bodyView.setBody(
+                message.body,
+                font: .preferredFont(forTextStyle: .body),
+                color: UIColor(OnymTokens.onAccent)
+            )
             NSLayoutConstraint.deactivate(incomingConstraints)
             NSLayoutConstraint.activate(outgoingConstraints)
             bubbleBottomConstraint.isActive = false
@@ -350,7 +353,11 @@ final class ChatBubbleCell: UITableViewCell {
             // — distinguishable per person while keeping body text on
             // the regular text token readable.
             bubble.backgroundColor = UIColor(sender.accent.color.opacity(incomingTintAlpha))
-            bodyLabel.textColor = UIColor(OnymTokens.text)
+            bodyView.setBody(
+                message.body,
+                font: .preferredFont(forTextStyle: .body),
+                color: UIColor(OnymTokens.text)
+            )
             NSLayoutConstraint.deactivate(outgoingConstraints)
             NSLayoutConstraint.activate(incomingConstraints)
             statusBottomConstraint.isActive = false
@@ -883,20 +890,17 @@ final class ChatBubbleCell: UITableViewCell {
         bubble.layer.cornerCurve = .continuous
         contentView.addSubview(bubble)
 
-        bodyLabel.translatesAutoresizingMaskIntoConstraints = false
-        bodyLabel.numberOfLines = 0
-        bodyLabel.font = .preferredFont(forTextStyle: .body)
-        bodyLabel.adjustsFontForContentSizeCategory = true
+        bodyView.translatesAutoresizingMaskIntoConstraints = false
         // Hug the text horizontally with a decisive priority so a text
-        // bubble shrinks to fit its content. Without this the label sits at
-        // the default hugging (251), tying with the hidden media siblings
+        // bubble shrinks to fit its content. Without this the body view
+        // sits at its default hugging, tying with the hidden media siblings
         // (image/album/voice) that are also pinned edge-to-edge on the
         // bubble — autolayout resolves the tie inconsistently, so *some*
         // short text bubbles stretch toward the 75% cap. `.defaultHigh`
         // (750) beats those siblings while still yielding to the fixed
         // 75%-width constraint (1000) a real media message installs.
-        bodyLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
-        bubble.addSubview(bodyLabel)
+        bodyView.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        bubble.addSubview(bodyView)
 
         attachmentImageView.translatesAutoresizingMaskIntoConstraints = false
         attachmentImageView.contentMode = .scaleAspectFill
@@ -1136,10 +1140,10 @@ final class ChatBubbleCell: UITableViewCell {
 
         // Body-top toggle — `configure` activates exactly one depending
         // on whether a reply quote is shown.
-        bodyTopToBubbleConstraint = bodyLabel.topAnchor.constraint(
+        bodyTopToBubbleConstraint = bodyView.topAnchor.constraint(
             equalTo: bubble.topAnchor, constant: 8
         )
-        bodyTopToQuoteConstraint = bodyLabel.topAnchor.constraint(
+        bodyTopToQuoteConstraint = bodyView.topAnchor.constraint(
             equalTo: quoteContainer.bottomAnchor, constant: 6
         )
 
@@ -1147,7 +1151,7 @@ final class ChatBubbleCell: UITableViewCell {
         imageTopToBubbleConstraint = attachmentImageView.topAnchor.constraint(
             equalTo: bubble.topAnchor, constant: 4
         )
-        bodyTopToImageConstraint = bodyLabel.topAnchor.constraint(
+        bodyTopToImageConstraint = bodyView.topAnchor.constraint(
             equalTo: attachmentImageView.bottomAnchor, constant: 6
         )
         // Fixed bubble width for attachment messages (toggled in
@@ -1161,7 +1165,7 @@ final class ChatBubbleCell: UITableViewCell {
         albumTopToBubbleConstraint = albumGridView.topAnchor.constraint(
             equalTo: bubble.topAnchor, constant: 4
         )
-        bodyTopToAlbumConstraint = bodyLabel.topAnchor.constraint(
+        bodyTopToAlbumConstraint = bodyView.topAnchor.constraint(
             equalTo: albumGridView.bottomAnchor, constant: 6
         )
 
@@ -1169,7 +1173,7 @@ final class ChatBubbleCell: UITableViewCell {
         voiceTopToBubbleConstraint = voiceView.topAnchor.constraint(
             equalTo: bubble.topAnchor, constant: 6
         )
-        bodyTopToVoiceConstraint = bodyLabel.topAnchor.constraint(
+        bodyTopToVoiceConstraint = bodyView.topAnchor.constraint(
             equalTo: voiceView.bottomAnchor, constant: 2
         )
 
@@ -1184,9 +1188,9 @@ final class ChatBubbleCell: UITableViewCell {
                 lessThanOrEqualTo: contentView.widthAnchor,
                 multiplier: maxWidthFraction
             ),
-            bodyLabel.leadingAnchor.constraint(equalTo: bubble.leadingAnchor, constant: 12),
-            bodyLabel.trailingAnchor.constraint(equalTo: bubble.trailingAnchor, constant: -12),
-            bodyLabel.bottomAnchor.constraint(equalTo: bubble.bottomAnchor, constant: -8),
+            bodyView.leadingAnchor.constraint(equalTo: bubble.leadingAnchor, constant: 12),
+            bodyView.trailingAnchor.constraint(equalTo: bubble.trailingAnchor, constant: -12),
+            bodyView.bottomAnchor.constraint(equalTo: bubble.bottomAnchor, constant: -8),
 
             // Reply quote — pinned across the top of the bubble. Only
             // drives the body's top when `bodyTopToQuoteConstraint` is

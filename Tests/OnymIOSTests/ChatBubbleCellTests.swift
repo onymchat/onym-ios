@@ -41,11 +41,36 @@ final class ChatBubbleCellTests: XCTestCase {
         XCTAssertFalse(activeTrailingAlignment(in: cell))
     }
 
-    func test_body_writesThroughToLabel() {
+    func test_body_writesThroughToBodyView() {
         let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
         cell.configure(message: makeMessage(direction: .incoming, body: "hello, world"))
-        let label = findLabel(in: cell.contentView)
-        XCTAssertEqual(label?.text, "hello, world")
+        let body = findTextView(in: cell.contentView)
+        XCTAssertEqual(body?.text, "hello, world")
+    }
+
+    func test_body_urlGetsLinkAttribute_plainTextDoesNot() throws {
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+        cell.configure(message: makeMessage(
+            direction: .incoming,
+            body: "docs at https://onym.foundation ok"
+        ))
+        let attributed = try XCTUnwrap(findTextView(in: cell.contentView)?.attributedText)
+
+        // The URL run carries `.link` with the parsed URL…
+        let urlStart = ("docs at " as NSString).length
+        let link = attributed.attribute(.link, at: urlStart, effectiveRange: nil) as? URL
+        XCTAssertEqual(link?.host, "onym.foundation")
+        // …and the surrounding prose does not.
+        XCTAssertNil(attributed.attribute(.link, at: 0, effectiveRange: nil))
+        XCTAssertNil(attributed.attribute(.link, at: attributed.length - 1, effectiveRange: nil))
+    }
+
+    private func findTextView(in view: UIView) -> UITextView? {
+        if let textView = view as? UITextView { return textView }
+        for sub in view.subviews {
+            if let found = findTextView(in: sub) { return found }
+        }
+        return nil
     }
 
     // MARK: - Sender name header
@@ -540,14 +565,6 @@ final class ChatBubbleCellTests: XCTestCase {
             found.append(contentsOf: collectActiveConstraints(in: sub))
         }
         return found
-    }
-
-    private func findLabel(in view: UIView) -> UILabel? {
-        if let label = view as? UILabel { return label }
-        for sub in view.subviews {
-            if let found = findLabel(in: sub) { return found }
-        }
-        return nil
     }
 
     private func makeMessage(
