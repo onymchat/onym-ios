@@ -153,11 +153,31 @@ final class ChatThreadViewControllerTests: XCTestCase {
         XCTAssertNotNil(configuration)
     }
 
-    func test_longPress_unreportableMessageHasNoContextMenu() {
+    func test_longPress_unreportableMessageStillOffersCopyMenu() {
+        // Not reportable (own message), but it has text — the menu
+        // must still appear for Copy.
         let vc = ChatThreadViewController()
         vc.loadViewIfNeeded()
         vc.canReportMessage = { $0.direction == .incoming }
         vc.update(messages: [makeMessage(body: "mine", direction: .outgoing)])
+        let table = tableView(in: vc)!
+
+        let configuration = vc.tableView(
+            table,
+            contextMenuConfigurationForRowAt: IndexPath(row: 0, section: 0),
+            point: .zero
+        )
+
+        XCTAssertNotNil(configuration,
+                        "a message with a body is copyable even when it isn't reportable")
+    }
+
+    func test_longPress_unreportableEmptyBodyHasNoContextMenu() {
+        // Nothing to copy AND nothing to report → no menu at all.
+        let vc = ChatThreadViewController()
+        vc.loadViewIfNeeded()
+        vc.canReportMessage = { _ in false }
+        vc.update(messages: [makeMessage(body: "  ", direction: .outgoing)])
         let table = tableView(in: vc)!
 
         let configuration = vc.tableView(
@@ -1025,7 +1045,15 @@ final class ChatThreadViewControllerTests: XCTestCase {
     }
 
     private func findLabelText(in view: UIView) -> String? {
-        if let label = view as? UILabel { return label.text }
+        // The body moved from a UILabel to the link-aware UITextView;
+        // labels remain for headers/status, so prefer the text view
+        // and only fall back to a label with actual content.
+        if let textView = view as? UITextView, let text = textView.text, !text.isEmpty {
+            return text
+        }
+        if let label = view as? UILabel, let text = label.text, !text.isEmpty {
+            return text
+        }
         for sub in view.subviews {
             if let text = findLabelText(in: sub) { return text }
         }

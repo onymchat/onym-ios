@@ -229,7 +229,7 @@ final class MultiIdentityChatUITests: XCTestCase {
         // matched message rendered — proving search → open-at-message.
         XCTAssertTrue(app.textViews["chat.input.textview"].waitForExistence(timeout: 15),
                       "tapping a search result never opened the chat thread")
-        XCTAssertTrue(app.staticTexts["Hello from Bob"].waitForExistence(timeout: 15),
+        XCTAssertTrue(ChatThreadScreen(app: app).waitForMessage("Hello from Bob", timeout: 15),
                       "the searched message wasn't shown in the opened thread")
     }
 

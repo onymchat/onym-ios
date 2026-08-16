@@ -1,6 +1,7 @@
 import CryptoKit
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 import OnymDesign
 import OnymGroup
 import OnymChatsCore
@@ -971,25 +972,47 @@ extension ChatThreadViewController: UITableViewDelegate {
         // `apply` commits, so during an in-flight insert the committed
         // rows and the array can disagree and a positional index would
         // attach Report to the wrong message.
-        // A system notice has no author to report and isn't evidence of
-        // anything — no menu on it, regardless of what the host's
-        // reportability predicate says.
+        // A system notice has no author to report and no user-authored
+        // text worth copying — no menu on it, regardless of what the
+        // host's reportability predicate says.
         guard let id = dataSource.itemIdentifier(for: indexPath),
               let message = messagesByID[id],
-              !message.isSystem,
-              canReportMessage?(message) == true else { return nil }
+              !message.isSystem else { return nil }
+        let canReport = canReportMessage?(message) == true
+        let copyableBody = message.body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard canReport || !copyableBody.isEmpty else { return nil }
         return UIContextMenuConfiguration(
             identifier: message.id as NSUUID,
             previewProvider: nil
         ) { [weak self] _ in
-            let report = UIAction(
-                title: String(localized: "Report"),
-                image: UIImage(systemName: "exclamationmark.bubble"),
-                attributes: .destructive
-            ) { [weak self] _ in
-                self?.onReportRequested?(message)
+            var actions: [UIAction] = []
+            if !copyableBody.isEmpty {
+                actions.append(UIAction(
+                    title: String(localized: "Copy"),
+                    image: UIImage(systemName: "doc.on.doc")
+                ) { _ in
+                    // The untrimmed body: trimming was only the "is
+                    // there anything to copy" test, the user gets the
+                    // message text as written. `localOnly` keeps an
+                    // E2E-encrypted message from crossing Universal
+                    // Clipboard to the user's other Apple devices —
+                    // same posture as the recovery-phrase copy.
+                    UIPasteboard.general.setItems(
+                        [[UTType.utf8PlainText.identifier: message.body]],
+                        options: [.localOnly: true]
+                    )
+                })
             }
-            return UIMenu(children: [report])
+            if canReport {
+                actions.append(UIAction(
+                    title: String(localized: "Report"),
+                    image: UIImage(systemName: "exclamationmark.bubble"),
+                    attributes: .destructive
+                ) { [weak self] _ in
+                    self?.onReportRequested?(message)
+                })
+            }
+            return UIMenu(children: actions)
         }
     }
 }
