@@ -271,6 +271,35 @@ public actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelop
         return try privateKey.signature(for: message)
     }
 
+    /// Ed25519 detached signature over `message` with the signing key
+    /// of whichever stored identity's derived Stellar public key is
+    /// `publicKeyHex` — NOT the currently-selected identity. The
+    /// moderation layer uses this for mandate-scoped sessions: the
+    /// mandate names the identity that consented, and that identity
+    /// must sign even while another one is selected in the picker.
+    /// Throws `.noIdentityForKey` when no stored identity matches
+    /// (removed, or quarantined by a fresh-install verdict).
+    public func signWithStellarKey(
+        _ message: Data,
+        matchingPublicKeyHex publicKeyHex: String
+    ) async throws -> Data {
+        try await ensureLoaded()
+        let target = publicKeyHex.lowercased()
+        for id in orderedIDs {
+            guard let identity = cache[id] else { continue }
+            let hex = identity.stellarPublicKey
+                .map { String(format: "%02x", $0) }
+                .joined()
+            guard hex == target else { continue }
+            guard let snapshot = try keychain.read(id) else { continue }
+            let privateKey = try Self.stellarSigningPrivateKey(
+                fromNostrSecret: snapshot.nostrSecretKey
+            )
+            return try privateKey.signature(for: message)
+        }
+        throw IdentityError.noIdentityForKey(publicKeyHex)
+    }
+
     // MARK: - Streams
 
     public nonisolated var snapshots: AsyncStream<Identity?> {

@@ -113,6 +113,9 @@ final class ModerationRepositoryTests: XCTestCase {
     private struct FakeSigner: ModerationSigner {
         func userKeyID() async throws -> String { "onym:key:test-user" }
         func sign(_ message: Data) async throws -> Data { Data("fake-signature".utf8) }
+        func sign(_ message: Data, as userKey: String) async throws -> Data {
+            Data("fake-signature".utf8)
+        }
     }
 
     private enum RegistrationFailure: Error {

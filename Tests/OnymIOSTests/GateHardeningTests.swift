@@ -223,6 +223,58 @@ final class GateHardeningTests: XCTestCase {
         return await gate.currentStatus()
     }
 
+    func testGateSessionIsSignedAsTheMandateIdentity() async {
+        // With several identities on one device, the selected identity
+        // and the mandate's identity can diverge. The gate session
+        // names `mandate.user`, so it must be signed AS that key —
+        // signing with whichever identity is selected produced
+        // sessions the backend refused as `signature_invalid`, and the
+        // blocking screen with it.
+        let signer = KeyCapturingSigner()
+        let backend = ThrowingBackend(error: AuthorityClientError.rejected(
+            AuthorityRejection(statusCode: 500, rawCode: "internal_error", message: "boom")
+        ))
+        let moderation = ModerationRepository(
+            authoritiesFetcher: EmptyAuthoritiesFetcher(),
+            manifestFetcher: UnusedManifestFetcher(),
+            mandateStore: SeededMandateStore(records: [seededActiveRecord()]),
+            backend: backend,
+            authorityClients: StubModerationAuthorityClientFactory(),
+            attestation: FixedAttestation(),
+            signer: signer,
+            clock: { [now] in now }
+        )
+        let gate = GateCheckRepository(
+            attestation: FixedAttestation(),
+            backend: backend,
+            moderation: moderation,
+            signer: signer,
+            store: InMemoryGateStateStore(),
+            clock: { [now] in now }
+        )
+        await gate.checkNow()
+        XCTAssertEqual(signer.signedAs, ["onym:key:user"])
+    }
+
+    /// Records which identity every signature was requested as.
+    /// Plain `sign(_:)` records the sentinel `<selected>` so a gate
+    /// session regressing to selected-identity signing fails the
+    /// assertion above.
+    private final class KeyCapturingSigner: ModerationSigner, @unchecked Sendable {
+        private let lock = NSLock()
+        private var _signedAs: [String] = []
+        var signedAs: [String] { lock.withLock { _signedAs } }
+        func userKeyID() async throws -> String { "onym:key:selected" }
+        func sign(_ message: Data) async throws -> Data {
+            lock.withLock { _signedAs.append("<selected>") }
+            return Data("sig".utf8)
+        }
+        func sign(_ message: Data, as userKey: String) async throws -> Data {
+            lock.withLock { _signedAs.append(userKey) }
+            return Data("sig".utf8)
+        }
+    }
+
     func testReplayedSignature401BlocksAsBackendRefused() async {
         let status = await gateStatus(afterBackendError: AuthorityClientError.rejected(
             AuthorityRejection(statusCode: 401, rawCode: "signature_invalid", message: "replayed")
@@ -392,6 +444,9 @@ final class GateHardeningTests: XCTestCase {
     private struct FixedSigner: ModerationSigner {
         func userKeyID() async throws -> String { "onym:key:user" }
         func sign(_ message: Data) async throws -> Data { Data("sig".utf8) }
+        func sign(_ message: Data, as userKey: String) async throws -> Data {
+            Data("sig".utf8)
+        }
     }
 
     private final class InMemoryGateStateStore: GateStateStore, @unchecked Sendable {

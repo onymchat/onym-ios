@@ -665,6 +665,10 @@ final class DeviceRecoveryTests: XCTestCase {
             lock.withLock { _lastMessage = message }
             return Data("sig".utf8)
         }
+        func sign(_ message: Data, as userKey: String) async throws -> Data {
+            lock.withLock { _lastMessage = message }
+            return Data("sig".utf8)
+        }
     }
 
     private struct TokenAttestation: DeviceAttestationProvider {

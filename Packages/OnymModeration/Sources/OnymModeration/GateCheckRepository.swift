@@ -260,13 +260,18 @@ public actor GateCheckRepository {
             let timestamp = max(clock(), lastSessionTimestamp.addingTimeInterval(1))
             lastSessionTimestamp = timestamp
             let mandateRef = try? record.mandate.mandateHash()
+            // Signed AS the mandate's identity, not the selected one:
+            // with several identities on the device, the selected key
+            // and `mandate.user` diverge, and a session naming one but
+            // signed by the other is refused as `signature_invalid`.
             let signature = try await signer.sign(
                 GateCheckRequest.signedPayload(
                     deviceToken: token,
                     userKey: record.mandate.user,
                     mandateRef: mandateRef,
                     timestamp: timestamp
-                )
+                ),
+                as: record.mandate.user
             )
             let request = GateCheckRequest(
                 deviceToken: token,

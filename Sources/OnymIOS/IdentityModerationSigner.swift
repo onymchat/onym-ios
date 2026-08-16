@@ -20,4 +20,14 @@ struct IdentityModerationSigner: ModerationSigner {
     func sign(_ message: Data) async throws -> Data {
         try await repository.signWithStellarKey(message)
     }
+
+    func sign(_ message: Data, as userKey: String) async throws -> Data {
+        let hex = userKey.hasPrefix("onym:key:")
+            ? String(userKey.dropFirst("onym:key:".count))
+            : userKey
+        return try await repository.signWithStellarKey(
+            message,
+            matchingPublicKeyHex: hex
+        )
+    }
 }
