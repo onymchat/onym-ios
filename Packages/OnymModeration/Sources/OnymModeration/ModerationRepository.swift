@@ -1180,7 +1180,10 @@ public actor ModerationRepository {
             statement: statement,
             evidence: []
         )
-        response.signature = try await signer.sign(response.signingBytes())
+        // Signed as the mandate's identity — the case is bound to
+        // `mandate.user`, which may not be the selected identity.
+        response.signature = try await signer
+            .sign(response.signingBytes(), as: record.mandate.user)
             .base64EncodedString()
         let submission = CaseSubmissionRecord(
             caseId: caseId,
@@ -1223,7 +1226,8 @@ public actor ModerationRepository {
         // A new-holder claim is signed too — the reference ignores the
         // signature by design, but signing costs nothing and keeps the
         // artifact self-describing if the endpoint ever authenticates.
-        appeal.signature = try await signer.sign(appeal.signingBytes())
+        appeal.signature = try await signer
+            .sign(appeal.signingBytes(), as: submittingUser)
             .base64EncodedString()
         let submission = CaseSubmissionRecord(
             caseId: caseId,
@@ -1516,7 +1520,9 @@ public actor ModerationRepository {
             )],
             filedAt: clock()
         )
-        report.signature = try await signer.sign(report.signingBytes()).base64EncodedString()
+        report.signature = try await signer
+            .sign(report.signingBytes(), as: reporter)
+            .base64EncodedString()
         let record = ReportFilingRecord(
             sourceMessageId: message.id,
             report: report,

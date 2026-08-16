@@ -15,6 +15,9 @@ final class ModerationAuthorityClientTests: XCTestCase {
             )
             return Data("status-signature".utf8)
         }
+        func sign(_ message: Data, as userKey: String) async throws -> Data {
+            Data("status-signature".utf8)
+        }
     }
 
     private final class RecordedBodies: @unchecked Sendable {

@@ -7,6 +7,9 @@ public enum IdentityError: Error, Equatable {
     case storedSnapshotInvalid(reason: String)
     case invalidMnemonic
     case identityNotLoaded
+    /// No stored identity's Stellar public key matches the requested
+    /// hex — it was removed, or quarantined by a fresh-install verdict.
+    case noIdentityForKey(String)
     case sdkFailure(String)
 }
 
@@ -25,6 +28,8 @@ extension IdentityError: LocalizedError {
             return "Invalid recovery phrase"
         case .identityNotLoaded:
             return "No identity is loaded — bootstrap or restore first"
+        case let .noIdentityForKey(hex):
+            return "No stored identity has the public key \(hex)"
         case let .sdkFailure(message):
             return "OnymSDK call failed: \(message)"
         }
