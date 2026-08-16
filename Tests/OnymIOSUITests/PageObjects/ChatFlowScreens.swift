@@ -250,12 +250,11 @@ struct ChatThreadScreen {
             NSPredicate(format: "value == %@", text)
         ).firstMatch
         let label = app.staticTexts[text]
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if bubble.exists || label.exists { return true }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
-        } while Date() < deadline
-        return false
+        let either = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in bubble.exists || label.exists },
+            object: nil
+        )
+        return XCTWaiter().wait(for: [either], timeout: timeout) == .completed
     }
 
     /// The delivery-status glyph exposes its state via accessibilityLabel

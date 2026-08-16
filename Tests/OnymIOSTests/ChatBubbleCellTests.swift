@@ -65,6 +65,30 @@ final class ChatBubbleCellTests: XCTestCase {
         XCTAssertNil(attributed.attribute(.link, at: attributed.length - 1, effectiveRange: nil))
     }
 
+    func test_multilineBody_measuresTallerThanSingleLine() {
+        // UITextView self-sizing is not UILabel self-sizing: the
+        // intrinsic height depends on the container width resolved in
+        // a prior layout pass. A wrapping body must measure several
+        // lines taller than a one-liner at the same fitting width, or
+        // the label→text-view swap silently truncated the thread.
+        let single = measuredHeight(body: "hi")
+        let multi = measuredHeight(
+            body: String(repeating: "wrap this message body ", count: 12)
+        )
+        XCTAssertGreaterThan(multi, single * 2,
+                             "a long body must wrap and grow the cell")
+    }
+
+    private func measuredHeight(body: String) -> CGFloat {
+        let cell = ChatBubbleCell(style: .default, reuseIdentifier: ChatBubbleCell.reuseID)
+        cell.configure(message: makeMessage(direction: .incoming, body: body))
+        return cell.contentView.systemLayoutSizeFitting(
+            CGSize(width: 320, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        ).height
+    }
+
     private func findTextView(in view: UIView) -> UITextView? {
         if let textView = view as? UITextView { return textView }
         for sub in view.subviews {

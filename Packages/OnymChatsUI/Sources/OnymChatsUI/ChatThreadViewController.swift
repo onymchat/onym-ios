@@ -1,6 +1,7 @@
 import CryptoKit
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 import OnymDesign
 import OnymGroup
 import OnymChatsCore
@@ -992,8 +993,14 @@ extension ChatThreadViewController: UITableViewDelegate {
                 ) { _ in
                     // The untrimmed body: trimming was only the "is
                     // there anything to copy" test, the user gets the
-                    // message text as written.
-                    UIPasteboard.general.string = message.body
+                    // message text as written. `localOnly` keeps an
+                    // E2E-encrypted message from crossing Universal
+                    // Clipboard to the user's other Apple devices —
+                    // same posture as the recovery-phrase copy.
+                    UIPasteboard.general.setItems(
+                        [[UTType.utf8PlainText.identifier: message.body]],
+                        options: [.localOnly: true]
+                    )
                 })
             }
             if canReport {

@@ -40,18 +40,36 @@ final class LinkTextView: UITextView {
     }
 
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        // `hitTest` probes subviews with out-of-bounds points too (the
+        // "enlarged tap area" mechanism) — without this guard, a tap
+        // in the bubble's padding beside a body that ends in a link
+        // would count as a hit on the link below.
+        guard bounds.contains(point) else { return false }
         guard let attributed = attributedText, attributed.length > 0 else { return false }
-        // Character index under the touch; `closestPosition` snaps to
-        // the nearest glyph, so also reject touches past the line end
-        // that would otherwise "hit" a trailing link from whitespace.
-        guard let position = closestPosition(to: point),
-              let range = tokenizer.rangeEnclosingPosition(
-                position, with: .character, inDirection: .layout(.left)
-              )
-        else { return false }
-        let index = offset(from: beginningOfDocument, to: range.start)
-        guard index < attributed.length else { return false }
-        return attributed.attribute(.link, at: index, effectiveRange: nil) != nil
+        // Hit-test the links' rendered rects directly. Position-based
+        // probing (`closestPosition` + tokenizer) is unreliable here:
+        // it clamps empty-space touches onto the nearest glyph, and
+        // inside a link TextKit 2 snaps positions to the link's
+        // boundary — both produce wrong answers at the edges. The
+        // per-line `selectionRects(for:)` of each link range are the
+        // exact area where a tap visually lands on the link.
+        var hit = false
+        attributed.enumerateAttribute(
+            .link, in: NSRange(location: 0, length: attributed.length)
+        ) { value, range, stop in
+            guard value != nil,
+                  let start = position(from: beginningOfDocument, offset: range.location),
+                  let end = position(from: start, offset: range.length),
+                  let textRange = textRange(from: start, to: end)
+            else { return }
+            for selection in selectionRects(for: textRange)
+            where !selection.rect.isNull && selection.rect.contains(point) {
+                hit = true
+                stop.pointee = true
+                return
+            }
+        }
+        return hit
     }
 
     /// One shared detector — `NSDataDetector` construction is costly

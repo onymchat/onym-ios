@@ -333,17 +333,14 @@ final class ChatBubbleCell: UITableViewCell {
         // Reuse safety: a cell recycled mid-drag must start at rest.
         resetSwipeState()
         self.onSwipeToReply = onSwipeToReply
+        let bodyColor: UIColor
         switch message.direction {
         case .outgoing:
             // Own messages: solid fill in the user's own accent (so
             // "your color" is consistent with the members list and
             // every group). Right-aligned, status glyph below.
             bubble.backgroundColor = UIColor(sender.accent.color)
-            bodyView.setBody(
-                message.body,
-                font: .preferredFont(forTextStyle: .body),
-                color: UIColor(OnymTokens.onAccent)
-            )
+            bodyColor = UIColor(OnymTokens.onAccent)
             NSLayoutConstraint.deactivate(incomingConstraints)
             NSLayoutConstraint.activate(outgoingConstraints)
             bubbleBottomConstraint.isActive = false
@@ -353,11 +350,7 @@ final class ChatBubbleCell: UITableViewCell {
             // — distinguishable per person while keeping body text on
             // the regular text token readable.
             bubble.backgroundColor = UIColor(sender.accent.color.opacity(incomingTintAlpha))
-            bodyView.setBody(
-                message.body,
-                font: .preferredFont(forTextStyle: .body),
-                color: UIColor(OnymTokens.text)
-            )
+            bodyColor = UIColor(OnymTokens.text)
             NSLayoutConstraint.deactivate(outgoingConstraints)
             NSLayoutConstraint.activate(incomingConstraints)
             statusBottomConstraint.isActive = false
@@ -368,6 +361,11 @@ final class ChatBubbleCell: UITableViewCell {
             failureLabel.isHidden = true
             failureLabel.text = nil
         }
+        bodyView.setBody(
+            message.body,
+            font: .preferredFont(forTextStyle: .body),
+            color: bodyColor
+        )
         applyNameHeader(sender)
         applyReplyQuote(reply, direction: message.direction, onTap: onQuoteTapped)
         let media = message.media
