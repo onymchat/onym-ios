@@ -21,34 +21,17 @@ public actor SwiftDataMessageStore: MessageStore {
     /// `Application Support/OnymIOS/Messages.store`, with
     /// `FileProtectionType.complete` on the directory.
     ///
-    /// Schema-mismatch at `ModelContainer(...)` init wipes the
-    /// on-disk store and retries once. Pre-1.0 install base, no real
-    /// users to preserve — matches the policy on `SwiftDataGroupStore`.
+    /// Open failures go through `PersistentStoreOpener`: logged,
+    /// moved aside as `.bak` (never deleted), retried once — and left
+    /// completely untouched when the file is merely unreadable
+    /// (locked-device launch).
     public init() throws {
-        let appSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory, in: .userDomainMask
-        )[0]
-        let storeDir = appSupport.appendingPathComponent("OnymIOS", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: storeDir,
-            withIntermediateDirectories: true,
-            attributes: [.protectionKey: FileProtectionType.complete]
+        let url = try PersistentStoreOpener.storeDirectory()
+            .appendingPathComponent("Messages.store")
+        let container = try PersistentStoreOpener.openContainer(
+            schema: Schema([PersistedMessage.self]),
+            url: url
         )
-        let url = storeDir.appendingPathComponent("Messages.store")
-        let schema = Schema([PersistedMessage.self])
-        let config = ModelConfiguration(schema: schema, url: url, cloudKitDatabase: .none)
-        let container: ModelContainer
-        do {
-            container = try ModelContainer(for: schema, configurations: [config])
-        } catch {
-            for suffix in ["", "-shm", "-wal"] {
-                try? FileManager.default.removeItem(
-                    at: url.deletingPathExtension().appendingPathExtension("store\(suffix)")
-                )
-            }
-            try? FileManager.default.removeItem(at: url)
-            container = try ModelContainer(for: schema, configurations: [config])
-        }
         self.container = container
         self.context = ModelContext(container)
     }

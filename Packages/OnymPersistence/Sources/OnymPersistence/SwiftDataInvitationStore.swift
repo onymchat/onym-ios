@@ -45,37 +45,17 @@ public actor SwiftDataInvitationStore: InvitationStore {
     /// `Application Support/OnymIOS/Invitations.store`, with
     /// `FileProtectionType.complete` on the directory.
     ///
-    /// Per the multi-identity no-backcompat licence, schema-mismatch
-    /// errors at `ModelContainer(...)` init wipe the on-disk store and
-    /// retry once. Same pattern as `SwiftDataGroupStore`.
+    /// Open failures go through `PersistentStoreOpener`: logged,
+    /// moved aside as `.bak` (never deleted), retried once — and left
+    /// completely untouched when the file is merely unreadable
+    /// (locked-device launch).
     public init() throws {
-        let appSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory, in: .userDomainMask
-        )[0]
-        let storeDir = appSupport.appendingPathComponent("OnymIOS", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: storeDir,
-            withIntermediateDirectories: true,
-            attributes: [.protectionKey: FileProtectionType.complete]
+        let url = try PersistentStoreOpener.storeDirectory()
+            .appendingPathComponent("Invitations.store")
+        let container = try PersistentStoreOpener.openContainer(
+            schema: Schema([PersistedInvitation.self]),
+            url: url
         )
-        let url = storeDir.appendingPathComponent("Invitations.store")
-        let schema = Schema([PersistedInvitation.self])
-        let config = ModelConfiguration(schema: schema, url: url, cloudKitDatabase: .none)
-        let container: ModelContainer
-        do {
-            container = try ModelContainer(for: schema, configurations: [config])
-        } catch {
-            // Schema migration failure — wipe + retry. SwiftData's
-            // SQLite trio (`.store`, `.store-shm`, `.store-wal`) all
-            // need to go.
-            for suffix in ["", "-shm", "-wal"] {
-                try? FileManager.default.removeItem(
-                    at: url.deletingPathExtension().appendingPathExtension("store\(suffix)")
-                )
-            }
-            try? FileManager.default.removeItem(at: url)
-            container = try ModelContainer(for: schema, configurations: [config])
-        }
         self.container = container
         self.context = ModelContext(container)
     }
