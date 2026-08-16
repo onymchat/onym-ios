@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymChain
 import OnymIdentity
 import OnymGroup
 import OnymPersistence
@@ -357,6 +358,151 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
                        "second delivery of the same message id must be a no-op")
     }
 
+    // MARK: - Replay backfill (parking)
+
+    /// The relay replays the stored inbox newest-first, so after a
+    /// store loss the thread's messages arrive before the invitation
+    /// that materializes their group. They must park and then persist
+    /// when the invitation lands — not silently drop.
+    func test_chatMessage_beforeInvitation_parksThenPersistsOnMaterialize() async throws {
+        let lot = ChatMessageParkingLot()
+        let newGroupBytes = Data(repeating: 0x99, count: 32)
+        let newGroupHex = newGroupBytes.map { String(format: "%02x", $0) }.joined()
+
+        // 1. Chat message for a group this device doesn't know yet.
+        let payload = makePayload(body: "from before the wipe", groupIDBytes: newGroupBytes)
+        let msgDispatcher = makeDispatcher(
+            plaintext: try JSONEncoder().encode(payload),
+            envelopeSigner: senderEd25519,
+            parkedMessages: lot
+        )
+        await msgDispatcher.dispatch(
+            messageID: "msg-early",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+        let before = await messages.currentMessages(groupID: newGroupHex, owner: owner)
+        XCTAssertTrue(before.isEmpty, "no group yet — the message parks, it does not persist")
+
+        // 2. The invitation materializes the group with the sender in
+        // the roster; the parked message must drain into the store.
+        let invitation = makeTyrannyInvitation(
+            groupID: newGroupBytes,
+            memberProfiles: [
+                senderBlsHex: MemberProfile(
+                    alias: "Alice",
+                    inboxPublicKey: senderInbox,
+                    sendingPubkey: senderEd25519
+                )
+            ]
+        )
+        let inviteDispatcher = makeDispatcher(
+            plaintext: try JSONEncoder().encode(invitation),
+            envelopeSigner: Data(repeating: 0xAD, count: 32),
+            parkedMessages: lot
+        )
+        await inviteDispatcher.dispatch(
+            messageID: "msg-invite",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+
+        let after = await messages.currentMessages(groupID: newGroupHex, owner: owner)
+        XCTAssertEqual(after.map(\.body), ["from before the wipe"],
+                       "materializing the group must drain the parked message")
+    }
+
+    /// Known group, unknown sender: the message waits for the roster
+    /// to catch up (here via a re-delivered invitation carrying the
+    /// fuller roster) instead of being dropped.
+    func test_chatMessage_unknownSender_parksThenPersistsWhenRosterCatchesUp() async throws {
+        let lot = ChatMessageParkingLot()
+        let lateBlsHex = "22".repeated(48)
+        let lateEd25519 = Data(repeating: 0xE2, count: 32)
+
+        // 1. Message from a member whose roster entry hasn't arrived.
+        let payload = makePayload(body: "hello from the latecomer", senderBlsHex: lateBlsHex)
+        let msgDispatcher = makeDispatcher(
+            plaintext: try JSONEncoder().encode(payload),
+            envelopeSigner: lateEd25519,
+            parkedMessages: lot
+        )
+        await msgDispatcher.dispatch(
+            messageID: "msg-unknown-sender",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+        let before = await messages.currentMessages(groupID: groupIDHex, owner: owner)
+        XCTAssertTrue(before.isEmpty, "unknown sender — the message parks")
+
+        // 2. A re-delivered invitation for the SAME group now carries
+        // the sender; re-materializing drains the parked message.
+        let invitation = makeTyrannyInvitation(
+            groupID: groupIDBytes,
+            memberProfiles: [
+                senderBlsHex: MemberProfile(
+                    alias: "Alice",
+                    inboxPublicKey: senderInbox,
+                    sendingPubkey: senderEd25519
+                ),
+                lateBlsHex: MemberProfile(
+                    alias: "Bob",
+                    inboxPublicKey: Data(repeating: 0x22, count: 32),
+                    sendingPubkey: lateEd25519
+                )
+            ]
+        )
+        let inviteDispatcher = makeDispatcher(
+            plaintext: try JSONEncoder().encode(invitation),
+            envelopeSigner: Data(repeating: 0xAD, count: 32),
+            parkedMessages: lot
+        )
+        await inviteDispatcher.dispatch(
+            messageID: "msg-reinvite",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+
+        let after = await messages.currentMessages(groupID: groupIDHex, owner: owner)
+        XCTAssertEqual(after.map(\.body), ["hello from the latecomer"],
+                       "the roster catching up must drain the parked message")
+    }
+
+    /// A verified Tyranny invitation: commitment recomputed from the
+    /// (empty) member set and mirrored on the stub chain, so
+    /// `materializeGroup` actually runs instead of rejecting.
+    private func makeTyrannyInvitation(
+        groupID: Data,
+        memberProfiles: [String: MemberProfile]
+    ) -> GroupInvitationPayload {
+        let salt = Data(repeating: 0x66, count: 32)
+        let commitment = try! GroupCommitmentBuilder.computePoseidonCommitment(
+            poseidonRoot: GroupCommitmentBuilder.computeMerkleRoot(members: [], tier: .small),
+            epoch: 0,
+            salt: salt
+        )
+        chainState.setNext(commitment: commitment, epoch: 0)
+        return GroupInvitationPayload(
+            version: 1,
+            groupID: groupID,
+            groupSecret: Data(repeating: 0x55, count: 32),
+            name: "Recovered",
+            members: [],
+            epoch: 0,
+            salt: salt,
+            commitment: commitment,
+            tierRaw: SEPTier.small.rawValue,
+            groupTypeRaw: SEPGroupType.tyranny.rawValue,
+            adminPubkeyHex: nil,
+            peerBlsSecret: nil,
+            memberProfiles: memberProfiles
+        )
+    }
+
     // MARK: - Helpers
 
     private func makePayload(
@@ -383,7 +529,8 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
         plaintext: Data,
         envelopeSigner: Data?,
         receiptSender: any ChatReceiptSending = NoopChatReceiptSender(),
-        readReceiptsEnabled: @escaping @Sendable () -> Bool = { true }
+        readReceiptsEnabled: @escaping @Sendable () -> Bool = { true },
+        parkedMessages: ChatMessageParkingLot = ChatMessageParkingLot()
     ) -> IncomingMessageDispatcher {
         let decrypter = FakeInvitationEnvelopeDecrypter(
             mode: .fixed(plaintext),
@@ -397,7 +544,8 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
             chainState: chainState,
             messageRepository: messages,
             receiptSender: receiptSender,
-            readReceiptsEnabled: readReceiptsEnabled
+            readReceiptsEnabled: readReceiptsEnabled,
+            parkedMessages: parkedMessages
         )
     }
 

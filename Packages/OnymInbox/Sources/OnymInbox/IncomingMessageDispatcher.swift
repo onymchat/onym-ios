@@ -79,6 +79,13 @@ public struct IncomingMessageDispatcher: Sendable {
     /// raises a message to `.read` when this device also sends read
     /// receipts. Defaulted to `true` (the shipping default).
     let readReceiptsEnabled: @Sendable () -> Bool
+    /// Chat messages that arrived before their group (or their
+    /// sender's roster entry) wait here instead of being dropped, and
+    /// are re-driven when `materializeGroup` / `applyAnnouncement`
+    /// catches the local state up — see `ChatMessageParkingLot`.
+    /// Defaulted so existing constructions get the behaviour without
+    /// a new parameter.
+    let parkedMessages: ChatMessageParkingLot
 
     /// Mints the membership notices this device is entitled to render:
     /// "X joined" off a verified announcement, "You joined X" off a
@@ -100,7 +107,8 @@ public struct IncomingMessageDispatcher: Sendable {
         pendingInvites: any PendingInvitesRecording = PendingInvitesStore(),
         groupStateRefresher: any GroupStateRefreshing = NoopGroupStateRefresher(),
         receiptSender: any ChatReceiptSending = NoopChatReceiptSender(),
-        readReceiptsEnabled: @escaping @Sendable () -> Bool = { true }
+        readReceiptsEnabled: @escaping @Sendable () -> Bool = { true },
+        parkedMessages: ChatMessageParkingLot = ChatMessageParkingLot()
     ) {
         self.envelopeDecrypter = envelopeDecrypter
         self.identities = identities
@@ -112,6 +120,7 @@ public struct IncomingMessageDispatcher: Sendable {
         self.groupStateRefresher = groupStateRefresher
         self.receiptSender = receiptSender
         self.readReceiptsEnabled = readReceiptsEnabled
+        self.parkedMessages = parkedMessages
     }
 
     public func dispatch(
@@ -461,6 +470,10 @@ public struct IncomingMessageDispatcher: Sendable {
         }
 
         await groupRepository.insert(group)
+
+        // The group exists now — re-drive any chat messages that
+        // arrived ahead of this invitation in the replay stream.
+        await drainParkedMessages(groupIDHex: groupIDHex)
 
         // Open the joiner's brand-new thread with a line explaining
         // what it is, instead of a blank screen, once the invitation has
@@ -836,6 +849,10 @@ public struct IncomingMessageDispatcher: Sendable {
         )
         await groupRepository.insert(updated)
 
+        // The roster caught up — re-drive any of this member's chat
+        // messages that arrived ahead of their announcement.
+        await drainParkedMessages(groupIDHex: updated.id)
+
         // "X joined", for every existing member. Reached only past the
         // dedup guard above (`memberProfiles[key] != nil`), the admin
         // signature check, and the on-chain commitment check — so a
@@ -907,6 +924,22 @@ public struct IncomingMessageDispatcher: Sendable {
         await groupRepository.insert(updated)
     }
 
+    /// Re-drive every parked message for `groupIDHex` through the
+    /// normal persist path now that the group or its roster caught
+    /// up. Entries that are still blocked (e.g. their sender's
+    /// announcement hasn't landed yet) re-park themselves; each
+    /// drain removes the batch first, so a still-blocked entry is
+    /// processed once per drain, never in a loop.
+    private func drainParkedMessages(groupIDHex: String) async {
+        for entry in await parkedMessages.takeMatching(groupIDHex: groupIDHex) {
+            await persistChatMessage(
+                entry.payload,
+                ownerIdentityID: entry.ownerIdentityID,
+                senderEd25519PublicKey: entry.senderEd25519PublicKey
+            )
+        }
+    }
+
     /// Persist an incoming chat message after authenticating the
     /// sender. The trust chain:
     ///
@@ -931,23 +964,41 @@ public struct IncomingMessageDispatcher: Sendable {
         // are not part of the v1 trust model.
         guard let senderEd25519PublicKey else { return }
 
-        // Look up the local group. Drop if we don't know it (stale
-        // delivery for a group we left, or routing mistake) or if it
-        // belongs to a different identity than the receiving inbox.
+        // Look up the local group. An unknown group is NOT dropped:
+        // relays replay the inbox newest-first, so on a fresh (or
+        // store-lost) device the thread's messages routinely arrive
+        // before the invitation that materializes the group. Park them;
+        // `materializeGroup` drains the lot once the group exists. A
+        // genuinely stale delivery (group we left for good) just ages
+        // out of the session-scoped lot.
         let groupIDHex = payload.groupID
             .map { String(format: "%02x", $0) }.joined()
         let groups = await groupRepository.currentGroups()
         guard let group = groups.first(where: {
             $0.id == groupIDHex && $0.ownerIdentityID == ownerIdentityID
         }) else {
+            await parkedMessages.park(.init(
+                groupIDHex: groupIDHex,
+                payload: payload,
+                ownerIdentityID: ownerIdentityID,
+                senderEd25519PublicKey: senderEd25519PublicKey
+            ))
             return
         }
 
         // Sender must be a known member. `memberProfiles` is keyed by
         // lowercase BLS pubkey hex; normalize the payload's claim
-        // before lookup.
+        // before lookup. Unknown senders park too — during a replay
+        // the member's announcement may simply not have been applied
+        // yet; `applyAnnouncement` drains the lot when it lands.
         let senderKey = payload.senderBlsPubkeyHex.lowercased()
         guard let senderProfile = group.memberProfiles[senderKey] else {
+            await parkedMessages.park(.init(
+                groupIDHex: groupIDHex,
+                payload: payload,
+                ownerIdentityID: ownerIdentityID,
+                senderEd25519PublicKey: senderEd25519PublicKey
+            ))
             return
         }
 
