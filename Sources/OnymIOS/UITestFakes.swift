@@ -375,6 +375,23 @@ struct UITestAuthorityManifestFetcher: AuthorityManifestFetcher {
 /// by default so the consent gate doesn't block every unrelated UI
 /// test; `--moderation-needs-consent` starts it empty to exercise the
 /// consent flow itself.
+/// Signer for the stubbed moderation seat. The seeded mandate names
+/// `onym:key:uitest-user` — a key no real identity owns — so the real
+/// `IdentityModerationSigner`'s identity-addressed `sign(_:as:)`
+/// throws `noIdentityForKey` for it and every gate check degrades to
+/// "unreachable", blocking the whole app behind the verification
+/// screen. Nothing in the stub seat verifies signatures, so a
+/// constant answers both methods.
+struct UITestModerationSigner: ModerationSigner {
+    func userKeyID() async throws -> String { "onym:key:uitest-user" }
+    func sign(_ message: Data) async throws -> Data {
+        Data("uitest-signature".utf8)
+    }
+    func sign(_ message: Data, as userKey: String) async throws -> Data {
+        Data("uitest-signature".utf8)
+    }
+}
+
 final class UITestMandateStore: MandateStore, @unchecked Sendable {
     private let lock = NSLock()
     private var records: [MandateRecord]
