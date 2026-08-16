@@ -335,6 +335,11 @@ struct OnymIOSApp: App {
             let backend = StubEnforcementBackendClient(
                 scenario: Self.resolveModerationScenario(args: args)
             )
+            // The stub seat signs with a stub: the seeded mandate's
+            // `onym:key:uitest-user` belongs to no real identity, so
+            // the real signer's identity-addressed `sign(_:as:)`
+            // cannot answer for it (see `UITestModerationSigner`).
+            let stubSigner = UITestModerationSigner()
             moderationManifestFetcher = UITestAuthorityManifestFetcher()
             moderationRepository = ModerationRepository(
                 authoritiesFetcher: UITestKnownAuthoritiesFetcher(),
@@ -345,13 +350,13 @@ struct OnymIOSApp: App {
                 backend: backend,
                 authorityClients: StubModerationAuthorityClientFactory(),
                 attestation: UITestDeviceAttestationProvider(),
-                signer: moderationSigner
+                signer: stubSigner
             )
             gateCheckRepository = GateCheckRepository(
                 attestation: UITestDeviceAttestationProvider(),
                 backend: backend,
                 moderation: moderationRepository,
-                signer: moderationSigner,
+                signer: stubSigner,
                 store: UITestGateStateStore(),
                 // Scenario fixtures are stage props (sentinel
                 // signatures, fixed refs), not authenticated
