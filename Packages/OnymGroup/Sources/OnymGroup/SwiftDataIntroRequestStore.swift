@@ -29,35 +29,17 @@ public actor SwiftDataIntroRequestStore: IntroRequestStore {
 
     /// Production initializer — on-disk SQLite under
     /// `Application Support/OnymIOS/IntroRequests.store` with
-    /// `FileProtectionType.complete`. Schema mismatch wipes and retries
-    /// once, matching the policy on the message + group stores (pre-1.0
-    /// install base; a dropped pending request is recoverable by the
-    /// joiner re-sharing).
+    /// `FileProtectionType.complete`. Open failures go through
+    /// `PersistentStoreOpener`: logged, moved aside as `.bak` (never
+    /// deleted), retried once — and left completely untouched when
+    /// the file is merely unreadable (locked-device launch).
     public init() throws {
-        let appSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory, in: .userDomainMask
-        )[0]
-        let storeDir = appSupport.appendingPathComponent("OnymIOS", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: storeDir,
-            withIntermediateDirectories: true,
-            attributes: [.protectionKey: FileProtectionType.complete]
+        let url = try PersistentStoreOpener.storeDirectory()
+            .appendingPathComponent("IntroRequests.store")
+        let container = try PersistentStoreOpener.openContainer(
+            schema: Schema([PersistedIntroRequest.self]),
+            url: url
         )
-        let url = storeDir.appendingPathComponent("IntroRequests.store")
-        let schema = Schema([PersistedIntroRequest.self])
-        let config = ModelConfiguration(schema: schema, url: url, cloudKitDatabase: .none)
-        let container: ModelContainer
-        do {
-            container = try ModelContainer(for: schema, configurations: [config])
-        } catch {
-            for suffix in ["", "-shm", "-wal"] {
-                try? FileManager.default.removeItem(
-                    at: url.deletingPathExtension().appendingPathExtension("store\(suffix)")
-                )
-            }
-            try? FileManager.default.removeItem(at: url)
-            container = try ModelContainer(for: schema, configurations: [config])
-        }
         self.container = container
         self.context = ModelContext(container)
     }
