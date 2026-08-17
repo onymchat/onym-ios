@@ -1591,15 +1591,21 @@ struct OnymIOSApp: App {
                             )
                         }
                         let tee = Task {
-                            // Diff successive snapshots and prune only what
-                            // actually disappeared. This stream is scoped to
-                            // ONE identity while the request store spans the
-                            // process, so passing the snapshot as a keep-set
-                            // would delete every other identity's tombstones
-                            // and replay their handled requests as pending.
+                            // The diff is taken over EVERY owner's keys,
+                            // never the per-identity snapshot this stream
+                            // carries. "Absent from an owner-scoped
+                            // snapshot" is not "retired": it is also what
+                            // an identity switch, or a keychain read that
+                            // fails closed, looks like — and treating it
+                            // as retirement deletes the other identity's
+                            // tombstones, replaying their handled joiners
+                            // as pending. That is precisely the wipe
+                            // `retiring:` was phrased to make
+                            // inexpressible, so the phrasing has to be
+                            // fed the right set.
                             var live: Set<Data> = []
                             for await snapshot in entries {
-                                let current = Set(snapshot.map(\.introPublicKey))
+                                let current = await keyStore.allLivePublicKeys()
                                 await store.pruneTombstones(
                                     retiring: live.subtracting(current)
                                 )

@@ -433,7 +433,7 @@ public actor JoinRequestApprover: JoinRequestApproving {
         // redeemable by anyone it leaked to — retire it here rather
         // than hoping the host finds the invite list. The shared link
         // is untouched: that one is meant to be multi-use.
-        await revokeSpentOfferKey(for: req)
+        await revokeSpentOfferKey(forRequestID: requestId, in: anchored)
 
         // Drop the request and its siblings. The shared key stays
         // alive, or every other joiner's row would silently vanish.
@@ -797,18 +797,27 @@ public actor JoinRequestApprover: JoinRequestApproving {
     /// The intro key is left alive — see the type doc.
     /// Revoke the per-invitee offer key this joiner came in on, if
     /// any. Matched on the label, which `CreateGroupInteractor` stamps
-    /// with the invitee's inbox fingerprint — so this only ever fires
-    /// for the person that key was minted for.
-    private func revokeSpentOfferKey(for req: PendingRequest) async {
-        let fingerprint = IntroKeyEntry.fingerprint(of: req.joinerInboxPublicKey)
-        let owner = await groupRepository.currentGroups()
-            .first { $0.groupIDData == req.groupId }?
-            .ownerIdentityID
-        guard let owner else { return }
-        for entry in await introKeyStore.listForOwner(owner)
-        where entry.groupId == req.groupId && entry.label == fingerprint {
-            await introKeyStore.revoke(introPublicKey: entry.introPublicKey)
-        }
+    /// with the invitee's inbox fingerprint.
+    ///
+    /// Matched on the link the request actually arrived on, NOT the
+    /// joiner's fingerprint. A fingerprint match broke twice: a
+    /// reinstalled joiner presents a fresh inbox key, so their offer
+    /// key would never be retired and would hold a private link and its
+    /// subscription open for good; and two invitees can collide on four
+    /// bytes, so it would revoke a bystander's link alongside the spent
+    /// one. The intro pubkey is unambiguous.
+    ///
+    /// `label != nil` is what separates a create-time offer from the
+    /// group's shared link, which is meant to be multi-use and is never
+    /// retired here.
+    private func revokeSpentOfferKey(forRequestID requestID: String, in group: ChatGroup) async {
+        let raw = await introRequestStore.current()
+        guard let introPub = raw.first(where: { $0.id == requestID })?.targetIntroPublicKey,
+              let entry = await introKeyStore.find(introPublicKey: introPub),
+              entry.label != nil,
+              entry.groupId == group.groupIDData
+        else { return }
+        await introKeyStore.revoke(introPublicKey: introPub)
     }
 
     private func consumeRequestAndSiblings(_ requestId: String) async {
