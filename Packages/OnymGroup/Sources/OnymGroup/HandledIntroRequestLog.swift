@@ -12,8 +12,14 @@ public protocol HandledIntroRequestLog: Sendable {
     func handledIDs() -> Set<String>
     /// Remember `id`, attributed to the link it arrived on.
     func record(id: String, introPublicKey: Data)
-    /// Drop tombstones whose link no longer exists.
-    func prune(keeping livePublicKeys: Set<Data>)
+    /// Drop the tombstones belonging to links that were just retired.
+    ///
+    /// Phrased as "these died", not "these are all that live": the
+    /// only snapshots available are scoped to ONE identity, while this
+    /// log spans every identity in the process. A keep-set from one
+    /// owner would delete every other owner's tombstones, and their
+    /// handled requests would replay as pending on the next reconnect.
+    func prune(retiring retiredPublicKeys: Set<Data>)
 }
 
 /// UserDefaults-backed: event ids are not secrets, so the Keychain
@@ -46,9 +52,10 @@ public struct UserDefaultsHandledIntroRequestLog: HandledIntroRequestLog, @unche
         save(rows)
     }
 
-    public func prune(keeping livePublicKeys: Set<Data>) {
+    public func prune(retiring retiredPublicKeys: Set<Data>) {
+        guard !retiredPublicKeys.isEmpty else { return }
         let rows = load()
-        let kept = rows.filter { livePublicKeys.contains($0.introPub) }
+        let kept = rows.filter { !retiredPublicKeys.contains($0.introPub) }
         if kept.count != rows.count { save(kept) }
     }
 
@@ -86,7 +93,7 @@ public final class InMemoryHandledIntroRequestLog: HandledIntroRequestLog, @unch
         lock.withLock { rows[id] = introPublicKey }
     }
 
-    public func prune(keeping livePublicKeys: Set<Data>) {
-        lock.withLock { rows = rows.filter { livePublicKeys.contains($0.value) } }
+    public func prune(retiring retiredPublicKeys: Set<Data>) {
+        lock.withLock { rows = rows.filter { !retiredPublicKeys.contains($0.value) } }
     }
 }

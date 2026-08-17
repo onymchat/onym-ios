@@ -679,12 +679,14 @@ struct OnymIOSApp: App {
         // container can't be opened, so a storage failure degrades to
         // the old behaviour instead of blocking launch.
         //
-        // Either store tombstones handled ids durably (supplied inside
-        // OnymGroup): a multi-use link keeps its relay subscription for
-        // good, and the REQ carries no `since`, so every reconnect
-        // replays requests that were already acted on.
+        // Both stores tombstone handled ids in the same durable log: a
+        // multi-use link keeps its relay subscription for good, and the
+        // REQ carries no `since`, so every reconnect replays requests
+        // that were already acted on. The fallback needs it too — its
+        // rows are gone after a restart, so the tombstones are all that
+        // stop the replay refilling the queue.
         self.introRequestStore = (try? SwiftDataIntroRequestStore())
-            ?? InMemoryIntroRequestStore()
+            ?? InMemoryIntroRequestStore(handledLog: UserDefaultsHandledIntroRequestLog())
 
         // Single shared IdentitiesFlow so the toolbar picker on Chats
         // and the Settings → Identities screen observe the same state.
@@ -1575,10 +1577,19 @@ struct OnymIOSApp: App {
                         // so a retired link's tombstones go with it.
                         let (forPump, pumpFeed) = AsyncStream.makeStream(of: [IntroKeyEntry].self)
                         let tee = Task {
+                            // Diff successive snapshots and prune only what
+                            // actually disappeared. This stream is scoped to
+                            // ONE identity while the request store spans the
+                            // process, so passing the snapshot as a keep-set
+                            // would delete every other identity's tombstones
+                            // and replay their handled requests as pending.
+                            var live: Set<Data> = []
                             for await snapshot in entries {
+                                let current = Set(snapshot.map(\.introPublicKey))
                                 await store.pruneTombstones(
-                                    keeping: Set(snapshot.map(\.introPublicKey))
+                                    retiring: live.subtracting(current)
                                 )
+                                live = current
                                 pumpFeed.yield(snapshot)
                             }
                             pumpFeed.finish()

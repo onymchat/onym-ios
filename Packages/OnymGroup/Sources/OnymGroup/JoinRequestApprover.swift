@@ -388,30 +388,36 @@ public actor JoinRequestApprover: JoinRequestApproving {
                 sendingPub: req.joinerSendingPublicKey,
                 alias: req.joinerDisplayLabel
             )
-            // Both skipped on re-join: receivers bail on a known BLS
-            // hex, so the broadcast would be N seals and N publishes
-            // for nothing — and the admin's own notice would be a
-            // second "X joined" for someone already in the room.
-            if !alreadyInRoster {
-                await broadcastJoin(
-                    in: anchored,
-                    joinerBlsPub: blsPub,
-                    joinerInboxPub: req.joinerInboxPublicKey,
-                    joinerSendingPub: req.joinerSendingPublicKey,
-                    joinerAlias: req.joinerDisplayLabel
-                )
-                // The admin's own "X joined" row. Everyone else derives
-                // theirs from the announcement fanned out just above,
-                // which the admin — as its sender — never receives.
-                await systemEvents.recordMemberJoined(
-                    groupID: anchored.id,
-                    ownerIdentityID: anchored.ownerIdentityID,
-                    groupType: anchored.groupType,
-                    joinerBlsPubkeyHex: blsPub.map { String(format: "%02x", $0) }.joined(),
-                    alias: req.joinerDisplayLabel,
-                    at: Date()
-                )
-            }
+            // Deliberately NOT gated on `alreadyInRoster`. That flag
+            // reads `members` (the crypto roster, advanced by the
+            // anchor), while receivers dedupe on `memberProfiles` —
+            // and those two diverge in exactly the case retry exists
+            // to repair: the anchor persisted, then seal/send failed,
+            // so the joiner is in `members` while no other member has
+            // heard of them. Skipping here would leave their messages
+            // parked forever. Both calls are idempotent at the
+            // receiver — `applyAnnouncement` bails on a known BLS hex,
+            // and the notice's id derives from `member-joined:<hex>`
+            // over an idempotent insert — so a genuine re-join costs
+            // some wasted seals, never a duplicate.
+            await broadcastJoin(
+                in: anchored,
+                joinerBlsPub: blsPub,
+                joinerInboxPub: req.joinerInboxPublicKey,
+                joinerSendingPub: req.joinerSendingPublicKey,
+                joinerAlias: req.joinerDisplayLabel
+            )
+            // The admin's own "X joined" row. Everyone else derives
+            // theirs from the announcement fanned out just above,
+            // which the admin — as its sender — never receives.
+            await systemEvents.recordMemberJoined(
+                groupID: anchored.id,
+                ownerIdentityID: anchored.ownerIdentityID,
+                groupType: anchored.groupType,
+                joinerBlsPubkeyHex: blsPub.map { String(format: "%02x", $0) }.joined(),
+                alias: req.joinerDisplayLabel,
+                at: Date()
+            )
         }
         // Drop the request and its siblings. The key stays alive, or
         // every other joiner's row would silently vanish.
@@ -789,8 +795,13 @@ public actor JoinRequestApprover: JoinRequestApproving {
 
     private func decode(_ raw: IntroRequest) async -> PendingRequest? {
         guard let entry = await introKeyStore.find(introPublicKey: raw.targetIntroPublicKey) else {
-            // Entry was already revoked, or the request landed on a
-            // pubkey we never minted (forged). Drop silently.
+            // Entry was revoked or rotated away, or the request landed
+            // on a pubkey we never minted (forged). Counted like every
+            // other decode failure: now that links are retired only
+            // deliberately, this is what a request against a retired
+            // link looks like, and it was the one drop with no signal
+            // at all.
+            decryptFailures += 1
             return nil
         }
         let privKey: Curve25519.KeyAgreement.PrivateKey

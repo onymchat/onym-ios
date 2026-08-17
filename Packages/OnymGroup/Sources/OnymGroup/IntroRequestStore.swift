@@ -28,7 +28,7 @@ public protocol IntroRequestStore: Sendable {
 
     /// Drop tombstones for links that no longer exist, so the durable
     /// set stays bounded by the live invites.
-    func pruneTombstones(keeping livePublicKeys: Set<Data>) async
+    func pruneTombstones(retiring retiredPublicKeys: Set<Data>) async
 
     /// Snapshot read used by tests + bootstrap reads. UI prefers
     /// the stream.
@@ -70,16 +70,28 @@ public actor InMemoryIntroRequestStore: IntroRequestStore {
         consumed.insert(id)
         // Attribute to the link it arrived on so `pruneTombstones` can
         // drop it when that link is retired.
-        if let raw = pending.first(where: { $0.id == id }) {
-            handledLog.record(id: id, introPublicKey: raw.targetIntroPublicKey)
-        }
+        // Durable even when the row is absent (a tombstone laid ahead
+        // of a replay, or a stale sibling id). Without the row there is
+        // no link to attribute it to, so it goes in unattributed: it can
+        // never be pruned by a retired link, and is bounded only by the
+        // log's own cap — the right trade, since losing it means the
+        // handled request comes back as pending on the next cold start.
+        handledLog.record(
+            id: id,
+            introPublicKey: pending.first(where: { $0.id == id })?.targetIntroPublicKey
+                ?? Self.unattributedLink
+        )
         let before = pending.count
         pending.removeAll { $0.id == id }
         if pending.count != before { publish() }
     }
 
-    public func pruneTombstones(keeping livePublicKeys: Set<Data>) async {
-        handledLog.prune(keeping: livePublicKeys)
+    /// Stands in for "no link known". Never 32 bytes, so it can never
+    /// collide with a real intro pubkey in a retired set.
+    static let unattributedLink = Data()
+
+    public func pruneTombstones(retiring retiredPublicKeys: Set<Data>) async {
+        handledLog.prune(retiring: retiredPublicKeys)
         consumed = handledLog.handledIDs()
     }
 

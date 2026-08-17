@@ -138,17 +138,25 @@ public actor SwiftDataIntroRequestStore: IntroRequestStore {
         let rows = (try? context.fetch(descriptor)) ?? []
         // Attribute to the link it arrived on so `pruneTombstones` can
         // drop it when that link is retired.
-        if let row = rows.first, let introPub = Self.decode(row)?.targetIntroPublicKey {
-            handledLog.record(id: id, introPublicKey: introPub)
-        }
+        // Durable even when the row is absent (a tombstone laid ahead
+        // of a replay, or a stale sibling id). Without the row there is
+        // no link to attribute it to, so it goes in unattributed: it can
+        // never be pruned by a retired link, and is bounded only by the
+        // log's own cap — the right trade, since losing it means the
+        // handled request comes back as pending on the next cold start.
+        let introPub = rows.first.flatMap { Self.decode($0)?.targetIntroPublicKey }
+        handledLog.record(
+            id: id,
+            introPublicKey: introPub ?? InMemoryIntroRequestStore.unattributedLink
+        )
         guard !rows.isEmpty else { return }
         for row in rows { context.delete(row) }
         try? context.save()
         publish()
     }
 
-    public func pruneTombstones(keeping livePublicKeys: Set<Data>) async {
-        handledLog.prune(keeping: livePublicKeys)
+    public func pruneTombstones(retiring retiredPublicKeys: Set<Data>) async {
+        handledLog.prune(retiring: retiredPublicKeys)
         consumed = handledLog.handledIDs()
     }
 
@@ -252,13 +260,17 @@ public actor SwiftDataIntroRequestStore: IntroRequestStore {
     /// Rows that fail to decrypt are skipped rather than failing the
     /// whole read — a single corrupted row shouldn't hide every other
     /// pending request.
+    /// Tombstoned ids are filtered here as well as in `record`: the
+    /// tombstone is written before the row is deleted, so a crash in
+    /// that window leaves a handled request on disk. Filtering on read
+    /// makes the two halves self-healing instead of resurrecting it.
     private func loadAll() -> [IntroRequest] {
         pruneExpired()
         let descriptor = FetchDescriptor<PersistedIntroRequest>(
             sortBy: [SortDescriptor(\.receivedAt, order: .reverse)]
         )
         guard let rows = try? context.fetch(descriptor) else { return [] }
-        return rows.compactMap(Self.decode)
+        return rows.compactMap(Self.decode).filter { !consumed.contains($0.id) }
     }
 
     // MARK: - Mapping

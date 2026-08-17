@@ -46,6 +46,13 @@ public final class ShareInviteFlow: Identifiable {
     /// button — rotating twice in a row would strand a live key.
     public private(set) var isRotating = false
 
+    /// The intro pubkey behind the link currently on screen, remembered
+    /// rather than re-parsed. Deriving it from `state` meant any
+    /// non-`.ready` state (a failed revoke, say) resolved to nil and the
+    /// live link showed up in the revokable list — one tap from killing
+    /// the link the user is in the middle of sharing.
+    private var currentIntroPub: Data?
+
     private let identity: IdentityRepository
     private let introducer: InviteIntroducer
     private let groupRepository: GroupRepository
@@ -88,6 +95,7 @@ public final class ShareInviteFlow: Identifiable {
                 groupId: group.groupIDData,
                 groupName: group.name
             )
+            currentIntroPub = cap.introPublicKey
             state = .ready(link: cap.toAppLink(), groupName: group.name)
             await refreshOtherInvites(ownerIdentityID: activeID, groupId: group.groupIDData)
         } catch {
@@ -122,7 +130,13 @@ public final class ShareInviteFlow: Identifiable {
                 groupId: group.groupIDData,
                 groupName: group.name
             )
+            currentIntroPub = cap.introPublicKey
             state = .ready(link: cap.toAppLink(), groupName: group.name)
+            // Same refresh mint and revoke do. Without it a key
+            // stranded by a crash mid-rotate stays invisible until the
+            // sheet is dismissed and reopened — the exact "listed
+            // nowhere" state the mint-then-revoke order exists to avoid.
+            await refreshOtherInvites(ownerIdentityID: activeID, groupId: group.groupIDData)
         } catch {
             state = .failed(reason: "\(error)")
         }
@@ -160,6 +174,8 @@ public final class ShareInviteFlow: Identifiable {
 
     /// Intro pubkey behind the rendered link, so the list excludes it.
     private func currentIntroPublicKey() -> Data? {
+        if let currentIntroPub { return currentIntroPub }
+        // Only reached before the first mint resolves.
         guard case .ready(let link, _) = state,
               let cap = IntroCapability.fromLink(link)
         else { return nil }

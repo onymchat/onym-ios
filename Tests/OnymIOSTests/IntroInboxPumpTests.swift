@@ -227,8 +227,10 @@ final class IntroInboxPumpTests: XCTestCase {
         }
 
         // The retired link's tombstones go with it, so the set stays
-        // bounded by the invites that still exist.
-        await store.pruneTombstones(keeping: [livePub])
+        // bounded by the invites that still exist. Named by what died,
+        // not what lived: this stream is one identity's, while the log
+        // spans the process.
+        await store.pruneTombstones(retiring: [retiredPub])
 
         let after = InMemoryIntroRequestStore(handledLog: log)
         let liveStillBlocked = await after.record(IntroRequest(

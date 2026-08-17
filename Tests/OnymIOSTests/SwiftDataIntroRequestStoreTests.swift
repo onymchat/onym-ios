@@ -189,8 +189,9 @@ final class SwiftDataIntroRequestStoreTests: XCTestCase {
         _ = await store.record(makeRequest(id: "evt-retired"))
         await store.consume(id: "evt-retired")
 
-        // The link this request arrived on is revoked.
-        await store.pruneTombstones(keeping: [Data(repeating: 0x11, count: 32)])
+        // The link this request arrived on is revoked. makeRequest
+        // targets 0xAB…, so that is what retires.
+        await store.pruneTombstones(retiring: [Data(repeating: 0xAB, count: 32)])
 
         XCTAssertTrue(log.handledIDs().isEmpty, "a retired link takes its tombstones with it")
         let reinserted = await store.record(makeRequest(id: "evt-retired"))
@@ -203,11 +204,48 @@ final class SwiftDataIntroRequestStoreTests: XCTestCase {
         _ = await store.record(makeRequest(id: "evt-live"))
         await store.consume(id: "evt-live")
 
-        // makeRequest targets 0xAB… — still live.
-        await store.pruneTombstones(keeping: [Data(repeating: 0xAB, count: 32)])
+        // An unrelated link retires; makeRequest's 0xAB… is untouched.
+        await store.pruneTombstones(retiring: [Data(repeating: 0x11, count: 32)])
 
         let reinserted = await store.record(makeRequest(id: "evt-live"))
         XCTAssertFalse(reinserted, "a live link keeps its tombstones")
+    }
+
+    /// The pump's entries stream is scoped to ONE identity, but the
+    /// request store spans the process. Pruning by "everything still
+    /// live" therefore used to delete every other identity's
+    /// tombstones — and on a locked-device launch, where the keychain
+    /// read returns nothing, it deleted all of them. Both replay as
+    /// pending on the next reconnect. Pruning by what actually retired
+    /// cannot express either wipe.
+    func test_pruneTombstones_withNothingRetired_keepsEverything() async {
+        let log = InMemoryHandledIntroRequestLog()
+        let store = SwiftDataIntroRequestStore.inMemory(handledLog: log)
+        _ = await store.record(makeRequest(id: "evt-other-identity"))
+        await store.consume(id: "evt-other-identity")
+
+        // What an empty snapshot now produces: nothing died.
+        await store.pruneTombstones(retiring: [])
+
+        XCTAssertEqual(log.handledIDs(), ["evt-other-identity"])
+        let reinserted = await store.record(makeRequest(id: "evt-other-identity"))
+        XCTAssertFalse(reinserted, "an unrelated identity's snapshot must not wipe tombstones")
+    }
+
+    /// `consume` is documented to tombstone durably even when the row
+    /// is absent — the ordering a consume racing a reconnect produces.
+    /// Only the in-memory half used to happen, so the id came back on
+    /// the next cold start.
+    func test_consume_withNoStoredRow_stillTombstonesDurably() async {
+        let log = InMemoryHandledIntroRequestLog()
+        let before = SwiftDataIntroRequestStore.inMemory(handledLog: log)
+
+        await before.consume(id: "evt-ahead-of-replay")
+        XCTAssertEqual(log.handledIDs(), ["evt-ahead-of-replay"])
+
+        let after = SwiftDataIntroRequestStore.inMemory(handledLog: log)
+        let late = await after.record(makeRequest(id: "evt-ahead-of-replay"))
+        XCTAssertFalse(late, "the tombstone must survive without a row to attribute it to")
     }
 
     private func makeRequest(
