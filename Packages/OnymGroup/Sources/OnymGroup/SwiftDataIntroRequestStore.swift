@@ -57,12 +57,16 @@ public actor SwiftDataIntroRequestStore: IntroRequestStore {
         self.context = ModelContext(container)
     }
 
-    /// In-memory factory for tests.
-    public static func inMemory() -> SwiftDataIntroRequestStore {
+    /// In-memory factory for tests. `handledLog` is injectable so a
+    /// test can share one across two stores and model a relaunch —
+    /// the tombstones are the half that is meant to outlive the rows.
+    public static func inMemory(
+        handledLog: any HandledIntroRequestLog = InMemoryHandledIntroRequestLog()
+    ) -> SwiftDataIntroRequestStore {
         let schema = Schema([PersistedIntroRequest.self])
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         let container = try! ModelContainer(for: schema, configurations: [config])
-        return SwiftDataIntroRequestStore(container: container)
+        return SwiftDataIntroRequestStore(container: container, handledLog: handledLog)
     }
 
     private init(

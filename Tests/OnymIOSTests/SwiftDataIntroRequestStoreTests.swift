@@ -147,6 +147,69 @@ final class SwiftDataIntroRequestStoreTests: XCTestCase {
     /// Relative to now, not a fixed epoch: the store sweeps rows past
     /// `retention`, so a hardcoded past date would age out from under
     /// these tests as the wall clock moves.
+    // MARK: - handled-request tombstones
+
+    /// Multi-use links keep their relay subscription after an approval,
+    /// and the REQ carries no `since` — so the inbox replays requests
+    /// that were already acted on. Deleting the pending row is not
+    /// enough on its own; without a tombstone the replay re-inserts it
+    /// and the founder sees a request they already answered.
+    func test_consumedRequest_doesNotReappearOnReplay() async {
+        let store = SwiftDataIntroRequestStore.inMemory()
+        _ = await store.record(makeRequest(id: "evt-handled"))
+
+        await store.consume(id: "evt-handled")
+        let reinserted = await store.record(makeRequest(id: "evt-handled"))
+
+        XCTAssertFalse(reinserted, "a replay of a handled request must not re-insert")
+        let current = await store.current()
+        XCTAssertTrue(current.isEmpty)
+    }
+
+    /// The rows are process-durable, but the tombstones have to outlive
+    /// them: a cold start replays the whole inbox.
+    func test_tombstoneSurvivesARelaunch() async {
+        let log = InMemoryHandledIntroRequestLog()
+        let before = SwiftDataIntroRequestStore.inMemory(handledLog: log)
+        _ = await before.record(makeRequest(id: "evt-across"))
+        await before.consume(id: "evt-across")
+
+        // Fresh store, same durable log — the relaunch case.
+        let after = SwiftDataIntroRequestStore.inMemory(handledLog: log)
+        let reinserted = await after.record(makeRequest(id: "evt-across"))
+
+        XCTAssertFalse(reinserted, "the tombstone must outlive the store instance")
+    }
+
+    /// Tombstones are attributed to the link they arrived on, so
+    /// retiring that link drops them rather than growing forever.
+    func test_pruneTombstones_dropsRetiredLinksAndKeepsLiveOnes() async {
+        let log = InMemoryHandledIntroRequestLog()
+        let store = SwiftDataIntroRequestStore.inMemory(handledLog: log)
+        _ = await store.record(makeRequest(id: "evt-retired"))
+        await store.consume(id: "evt-retired")
+
+        // The link this request arrived on is revoked.
+        await store.pruneTombstones(keeping: [Data(repeating: 0x11, count: 32)])
+
+        XCTAssertTrue(log.handledIDs().isEmpty, "a retired link takes its tombstones with it")
+        let reinserted = await store.record(makeRequest(id: "evt-retired"))
+        XCTAssertTrue(reinserted, "with the tombstone gone the id is insertable again")
+    }
+
+    func test_pruneTombstones_keepsTombstonesForLiveLinks() async {
+        let log = InMemoryHandledIntroRequestLog()
+        let store = SwiftDataIntroRequestStore.inMemory(handledLog: log)
+        _ = await store.record(makeRequest(id: "evt-live"))
+        await store.consume(id: "evt-live")
+
+        // makeRequest targets 0xAB… — still live.
+        await store.pruneTombstones(keeping: [Data(repeating: 0xAB, count: 32)])
+
+        let reinserted = await store.record(makeRequest(id: "evt-live"))
+        XCTAssertFalse(reinserted, "a live link keeps its tombstones")
+    }
+
     private func makeRequest(
         id: String,
         receivedAt: Date = Date()
