@@ -44,6 +44,14 @@ public protocol IntroKeyStore: Sendable {
     /// per-row revoke. No-op if the pubkey isn't present.
     func revoke(introPublicKey: Data) async
 
+    /// Every live intro pubkey this device holds, across ALL owners.
+    ///
+    /// Exists for the tombstone reconcile: a per-owner snapshot cannot
+    /// tell "this link was retired" from "this link belongs to another
+    /// identity", so a reconcile driven by one owner's view would
+    /// delete the other's tombstones. This is the only safe input.
+    func allLivePublicKeys() async -> Set<Data>
+
     /// Cascade for the identity-removal flow. Returns the count of
     /// entries deleted so the caller can log the cleanup size.
     /// Hooked into `IdentityRepository`'s removal listeners.

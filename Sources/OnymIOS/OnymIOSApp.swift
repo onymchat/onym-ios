@@ -1576,6 +1576,20 @@ struct OnymIOSApp: App {
                         // Tee the same snapshots the pump reconciles on,
                         // so a retired link's tombstones go with it.
                         let (forPump, pumpFeed) = AsyncStream.makeStream(of: [IntroKeyEntry].self)
+                        // One owner-agnostic reconcile per subscribe.
+                        // The diff below only sees retirements that
+                        // happen while this identity is subscribed —
+                        // links retired with the app closed, or under
+                        // another identity, would otherwise linger until
+                        // `maxEntries` evicted them oldest-first, which
+                        // can drop a LIVE link's tombstone and bring a
+                        // handled request back as pending.
+                        let keyStore = introKeyStore
+                        Task {
+                            await store.reconcileTombstones(
+                                livePublicKeys: await keyStore.allLivePublicKeys()
+                            )
+                        }
                         let tee = Task {
                             // Diff successive snapshots and prune only what
                             // actually disappeared. This stream is scoped to

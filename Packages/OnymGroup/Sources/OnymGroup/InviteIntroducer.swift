@@ -92,8 +92,11 @@ public actor InviteIntroducer {
         return try await serializingLink(ownerIdentityID, groupId) {
             // `label == nil` is the shared link. Create-with-invitees
             // would otherwise hand out the last invitee's offer key.
+            // `isLegacy` excludes rows written before labels existed —
+            // they are also `label == nil`, and the newest of them on
+            // such a group IS that last invitee's private offer key.
             let live = await self.store.listForOwner(ownerIdentityID).first {
-                $0.groupId == groupId && $0.label == nil
+                $0.groupId == groupId && $0.label == nil && !$0.isLegacy
             }
             if let live {
                 return try IntroCapability(
@@ -144,8 +147,11 @@ public actor InviteIntroducer {
         return try await serializingLink(ownerIdentityID, groupId) {
             // Only the shared link rotates; offer keys are revoked one
             // at a time from the invite list.
+            // Legacy rows are excluded for the same reason: rotating
+            // the shared link must not silently kill every outstanding
+            // pre-upgrade invite.
             let superseded = await self.store.listForOwner(ownerIdentityID)
-                .filter { $0.groupId == groupId && $0.label == nil }
+                .filter { $0.groupId == groupId && $0.label == nil && !$0.isLegacy }
                 .map(\.introPublicKey)
 
             let fresh = try await self.mint(
@@ -173,7 +179,12 @@ public actor InviteIntroducer {
         ownerIdentityID: IdentityID,
         groupId: Data
     ) async -> [IntroKeyEntry] {
-        await store.listForOwner(ownerIdentityID).filter { $0.groupId == groupId }
+        // Sorted here rather than relying on the store: newest-first is
+        // `KeychainIntroKeyStore`'s behaviour, not an `IntroKeyStore`
+        // guarantee, and the in-memory double doesn't sort.
+        await store.listForOwner(ownerIdentityID)
+            .filter { $0.groupId == groupId }
+            .sorted { $0.createdAt > $1.createdAt }
     }
 }
 

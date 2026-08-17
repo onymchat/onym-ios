@@ -30,6 +30,27 @@ public protocol IntroRequestStore: Sendable {
     /// set stays bounded by the live invites.
     func pruneTombstones(retiring retiredPublicKeys: Set<Data>) async
 
+    /// Drop every tombstone whose link is not in `livePublicKeys`.
+    ///
+    /// Unlike `pruneTombstones(retiring:)` this IS a keep-set, and is
+    /// safe only because the caller passes every owner's live keys —
+    /// see `IntroKeyStore.allLivePublicKeys`. Run once at startup: the
+    /// diff-based prune only observes retirements that happen while
+    /// this identity is subscribed, so links retired with the app
+    /// closed, or under another identity, would otherwise linger until
+    /// `maxEntries` evicted them oldest-first — which can drop a LIVE
+    /// link's tombstone and resurface a handled request.
+    func reconcileTombstones(livePublicKeys: Set<Data>) async
+
+    /// Joiners declined for a group, so a decline means something
+    /// durable. Keyed by collapse key, not event id: a retry arrives as
+    /// a fresh Nostr event and would sail past an id tombstone.
+    func recordDeclined(collapseKey: String) async
+
+    /// Collapse keys the host has declined; `refresh` filters on these.
+    func declinedCollapseKeys() async -> Set<String>
+
+
     /// Snapshot read used by tests + bootstrap reads. UI prefers
     /// the stream.
     func current() async -> [IntroRequest]
@@ -93,6 +114,20 @@ public actor InMemoryIntroRequestStore: IntroRequestStore {
     public func pruneTombstones(retiring retiredPublicKeys: Set<Data>) async {
         handledLog.prune(retiring: retiredPublicKeys)
         consumed = handledLog.handledIDs()
+    }
+
+
+    public func reconcileTombstones(livePublicKeys: Set<Data>) async {
+        handledLog.reconcile(livePublicKeys: livePublicKeys)
+        consumed = handledLog.handledIDs()
+    }
+
+    public func recordDeclined(collapseKey: String) async {
+        handledLog.recordDeclined(collapseKey: collapseKey)
+    }
+
+    public func declinedCollapseKeys() async -> Set<String> {
+        handledLog.declinedCollapseKeys()
     }
 
     public func current() async -> [IntroRequest] {

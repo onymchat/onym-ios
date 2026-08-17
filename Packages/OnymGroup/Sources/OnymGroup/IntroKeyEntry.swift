@@ -28,13 +28,24 @@ public struct IntroKeyEntry: Equatable, Sendable {
     /// aimed at one invitee.
     public let label: String?
 
+    /// True for entries persisted before labels existed. Those decode
+    /// with `label == nil`, which is indistinguishable from a shared
+    /// link — and on a create-with-invitees group the newest of them is
+    /// the LAST INVITEE'S PRIVATE OFFER KEY. Without this flag
+    /// `currentOrMint` would adopt it as the group's public link, and
+    /// the first rotate would revoke every outstanding legacy invite.
+    /// Never adopted, never mass-revoked; listed and individually
+    /// revokable like any other superseded key.
+    public let isLegacy: Bool
+
     public init(
         introPublicKey: Data,
         introPrivateKey: Data,
         ownerIdentityID: IdentityID,
         groupId: Data,
         createdAt: Date,
-        label: String? = nil
+        label: String? = nil,
+        isLegacy: Bool = false
     ) {
         precondition(introPublicKey.count == 32,
                      "introPublicKey: expected 32 bytes, got \(introPublicKey.count)")
@@ -48,6 +59,7 @@ public struct IntroKeyEntry: Equatable, Sendable {
         self.groupId = groupId
         self.createdAt = createdAt
         self.label = label
+        self.isLegacy = isLegacy
     }
 
     /// First 4 bytes of the inbox key — same fingerprint shape the

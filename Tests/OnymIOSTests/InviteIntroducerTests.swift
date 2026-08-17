@@ -15,6 +15,45 @@ final class InviteIntroducerTests: XCTestCase {
     private let bob = IdentityID("22222222-2222-2222-2222-222222222222")!
     private let sampleGroupId = Data(repeating: 0x42, count: 32)
 
+    /// Everything written before labels existed decodes as
+    /// `label == nil`, i.e. indistinguishable from a shared link — and
+    /// `listForOwner` is newest-first, so on a create-with-invitees
+    /// group the one `currentOrMint` would pick is the LAST INVITEE'S
+    /// private offer key. Adopting it hands one person's private link
+    /// to everyone; rotating then revokes every legacy invite at once.
+    func test_legacyEntries_areNeverAdoptedAsTheSharedLink() async throws {
+        let store = InMemoryIntroKeyStore()
+        let owner = IdentityID()
+        let groupId = Data(repeating: 0x11, count: 32)
+        let legacyOffer = IntroKeyEntry(
+            introPublicKey: Data(repeating: 0x22, count: 32),
+            introPrivateKey: Data(repeating: 0x23, count: 32),
+            ownerIdentityID: owner,
+            groupId: groupId,
+            createdAt: Date(),          // newest, so it would win
+            label: nil,
+            isLegacy: true
+        )
+        await store.save(legacyOffer)
+        let introducer = InviteIntroducer(store: store)
+
+        let cap = try await introducer.currentOrMint(
+            ownerIdentityID: owner, groupId: groupId
+        )
+        XCTAssertNotEqual(
+            cap.introPublicKey, legacyOffer.introPublicKey,
+            "a pre-upgrade key must never become the group's public link"
+        )
+
+        // And rotating the shared link must leave it alone.
+        _ = try await introducer.rotate(ownerIdentityID: owner, groupId: groupId)
+        let live = await introducer.liveInvites(ownerIdentityID: owner, groupId: groupId)
+        XCTAssertTrue(
+            live.contains { $0.introPublicKey == legacyOffer.introPublicKey },
+            "rotate must not mass-revoke outstanding pre-upgrade invites"
+        )
+    }
+
     func test_mint_producesDistinctKeypairs_acrossInvocations() async throws {
         let store = InMemoryIntroKeyStore()
         let introducer = InviteIntroducer(store: store)

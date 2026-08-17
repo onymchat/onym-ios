@@ -78,6 +78,10 @@ public actor KeychainIntroKeyStore: IntroKeyStore {
     }
 
     @discardableResult
+    public func allLivePublicKeys() async -> Set<Data> {
+        Set(loadAll().compactMap { $0.toEntry()?.introPublicKey })
+    }
+
     public func deleteForOwner(_ ownerIdentityID: IdentityID) async -> Int {
         var current = loadAll()
         let before = current.count
@@ -207,6 +211,14 @@ private struct StoredIntroKey: Codable {
     /// MUST stay optional: the decode is `(try? …) ?? []`, so a
     /// required field would wipe every existing invite on upgrade.
     let label: String?
+    /// Absent on rows written before labels existed. Optional so the
+    /// `(try? …) ?? []` decode can't wipe every stored invite on
+    /// upgrade, and so its absence is exactly the legacy signal.
+    let labelVersion: Int?
+
+    /// Bumped only if the meaning of `label` changes; its presence is
+    /// what marks a row as written by a label-aware build.
+    static let currentLabelVersion = 1
 
     enum CodingKeys: String, CodingKey {
         case introPub = "intro_pub"
@@ -215,6 +227,7 @@ private struct StoredIntroKey: Codable {
         case groupId = "group_id"
         case createdAtMillis = "created_at_millis"
         case label
+        case labelVersion = "label_version"
     }
 
     init(from entry: IntroKeyEntry) {
@@ -224,6 +237,9 @@ private struct StoredIntroKey: Codable {
         self.groupId = entry.groupId
         self.createdAtMillis = Int64(entry.createdAt.timeIntervalSince1970 * 1000)
         self.label = entry.label
+        // Stamped on every write, so a row without it is one this
+        // build never wrote — i.e. from before labels existed.
+        self.labelVersion = StoredIntroKey.currentLabelVersion
     }
 
     func toEntry() -> IntroKeyEntry? {
@@ -236,7 +252,8 @@ private struct StoredIntroKey: Codable {
             ownerIdentityID: owner,
             groupId: groupId,
             createdAt: Date(timeIntervalSince1970: TimeInterval(createdAtMillis) / 1000),
-            label: label
+            label: label,
+            isLegacy: labelVersion == nil
         )
     }
 }

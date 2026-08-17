@@ -160,6 +160,19 @@ public actor SwiftDataIntroRequestStore: IntroRequestStore {
         consumed = handledLog.handledIDs()
     }
 
+    public func reconcileTombstones(livePublicKeys: Set<Data>) async {
+        handledLog.reconcile(livePublicKeys: livePublicKeys)
+        consumed = handledLog.handledIDs()
+    }
+
+    public func recordDeclined(collapseKey: String) async {
+        handledLog.recordDeclined(collapseKey: collapseKey)
+    }
+
+    public func declinedCollapseKeys() async -> Set<String> {
+        handledLog.declinedCollapseKeys()
+    }
+
     public func current() async -> [IntroRequest] {
         loadAll()
     }

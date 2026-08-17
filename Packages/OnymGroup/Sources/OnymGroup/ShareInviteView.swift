@@ -116,8 +116,13 @@ public struct ShareInviteView: View {
                         }
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.red)
+                        // Keyed on the intro pubkey, not the label: two
+                        // invitees can share a 4-byte fingerprint (or be
+                        // the same person invited twice), and duplicate
+                        // ids leave the user unable to tell which Revoke
+                        // kills which link.
                         .accessibilityIdentifier(
-                            "share_invite.revoke_button.\(row.label ?? "superseded")"
+                            "share_invite.revoke_button.\(row.id.prefix(8).map { String(format: "%02x", $0) }.joined())"
                         )
                     }
                     .padding(.vertical, 10)

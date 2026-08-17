@@ -248,6 +248,43 @@ final class SwiftDataIntroRequestStoreTests: XCTestCase {
         XCTAssertFalse(late, "the tombstone must survive without a row to attribute it to")
     }
 
+    /// A decline has to survive the joiner's retry. Each retry is a
+    /// fresh Nostr event, so an id-keyed tombstone never matches; the
+    /// collapse key (joiner ⊕ group) is what does.
+    func test_declinedCollapseKey_isRememberedAcrossInstances() async {
+        let log = InMemoryHandledIntroRequestLog()
+        let before = SwiftDataIntroRequestStore.inMemory(handledLog: log)
+        await before.recordDeclined(collapseKey: "joiner-a:group-1")
+
+        let after = SwiftDataIntroRequestStore.inMemory(handledLog: log)
+        let declined = await after.declinedCollapseKeys()
+        XCTAssertEqual(declined, ["joiner-a:group-1"])
+    }
+
+    /// The diff-based prune only sees retirements that happen while
+    /// this identity is subscribed. The reconcile is what catches a
+    /// link retired with the app closed — and it must not touch an
+    /// unattributed tombstone, which has no link to be checked against.
+    func test_reconcile_dropsDeadLinksAndKeepsLiveAndUnattributed() async {
+        let log = InMemoryHandledIntroRequestLog()
+        let store = SwiftDataIntroRequestStore.inMemory(handledLog: log)
+        _ = await store.record(makeRequest(id: "evt-live"))
+        await store.consume(id: "evt-live")                 // 0xAB… link
+        await store.consume(id: "evt-unattributed")         // no row → unattributed
+
+        await store.reconcileTombstones(
+            livePublicKeys: [Data(repeating: 0xAB, count: 32)]
+        )
+        XCTAssertEqual(log.handledIDs(), ["evt-live", "evt-unattributed"])
+
+        // Now that link is gone from the device entirely.
+        await store.reconcileTombstones(livePublicKeys: [])
+        XCTAssertEqual(
+            log.handledIDs(), ["evt-unattributed"],
+            "a dead link's tombstone goes; an unattributed one has nothing to check"
+        )
+    }
+
     private func makeRequest(
         id: String,
         receivedAt: Date = Date()

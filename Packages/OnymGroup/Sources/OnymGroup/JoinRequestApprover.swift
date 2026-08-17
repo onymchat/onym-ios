@@ -154,6 +154,9 @@ public actor JoinRequestApprover: JoinRequestApproving {
     private var collapsedRequestIDs: [String: [String]] = [:]
     private var pendingContinuations: [UUID: AsyncStream<[PendingRequest]>.Continuation] = [:]
     private var decryptFailures: Int = 0
+    /// Request ids already counted in `decryptFailures`, so a re-decode
+    /// of the same undecodable row doesn't inflate the signal.
+    private var countedDecodeFailures: Set<String> = []
     private var collectorTask: Task<Void, Never>?
     /// Serializes `approve` calls. Each approval reads `group.epoch`,
     /// proves an `update_commitment` from it, submits, then persists
@@ -213,6 +216,11 @@ public actor JoinRequestApprover: JoinRequestApproving {
     /// decode (forged link campaign, corrupted intro key, etc.).
     /// Wired to a Settings → Diagnostics view in a follow-up.
     func decryptFailureCount() -> Int { decryptFailures }
+
+    private func countDecodeFailureOnce(_ requestID: String) {
+        guard countedDecodeFailures.insert(requestID).inserted else { return }
+        decryptFailures += 1
+    }
 
     /// Subscribe to `IntroRequestStore.requests` and keep `pending`
     /// in sync. Idempotent — a second call replaces the prior
@@ -419,8 +427,16 @@ public actor JoinRequestApprover: JoinRequestApproving {
                 at: Date()
             )
         }
-        // Drop the request and its siblings. The key stays alive, or
-        // every other joiner's row would silently vanish.
+        // A create-time offer key is 1:1 with one named invitee and is
+        // spent the moment that invitee is in. Leaving it live would
+        // hold a relay subscription for good and leave a private link
+        // redeemable by anyone it leaked to — retire it here rather
+        // than hoping the host finds the invite list. The shared link
+        // is untouched: that one is meant to be multi-use.
+        await revokeSpentOfferKey(for: req)
+
+        // Drop the request and its siblings. The shared key stays
+        // alive, or every other joiner's row would silently vanish.
         await consumeRequestAndSiblings(requestId)
         return .sent
     }
@@ -700,9 +716,20 @@ public actor JoinRequestApprover: JoinRequestApproving {
         }
     }
 
-    /// Drop that one request and its siblings, nothing else: a decline
-    /// judges one requester, not the link. No NACK to the joiner.
+    /// Drop that one request and its siblings, and remember the
+    /// joiner. A decline judges one requester, not the link — the link
+    /// stays live for everyone else — but it has to mean something:
+    /// the joiner's screen offers a retry, and each retry is a fresh
+    /// Nostr event, so an id-keyed tombstone would let a declined
+    /// stranger refill the queue indefinitely. Keyed on the collapse
+    /// key (joiner identity ⊕ group), which survives that.
+    /// No NACK to the joiner.
     public func decline(requestId: String) async {
+        if let target = pendingValue.first(where: { $0.id == requestId }) {
+            await introRequestStore.recordDeclined(
+                collapseKey: Self.collapseKey(for: target)
+            )
+        }
         await consumeRequestAndSiblings(requestId)
     }
 
@@ -736,12 +763,16 @@ public actor JoinRequestApprover: JoinRequestApproving {
         // received copy, positioned at the first-seen index.
         // Re-decodes each emission, so a row lives only while its key
         // does — stable now that approve no longer revokes.
+        let declined = await introRequestStore.declinedCollapseKeys()
         var collapsed: [String: (request: PendingRequest, receivedAt: Date)] = [:]
         var siblings: [String: [String]] = [:]
         var order: [String] = []
         for r in raw {
             guard let p = await decode(r) else { continue }
             let key = Self.collapseKey(for: p)
+            // Declined joiners stay declined across retries and
+            // relaunches; the link itself is unaffected.
+            if declined.contains(key) { continue }
             siblings[key, default: []].append(r.id)
             if let existing = collapsed[key] {
                 if r.receivedAt > existing.receivedAt {
@@ -764,6 +795,22 @@ public actor JoinRequestApprover: JoinRequestApproving {
 
     /// Drop `requestId` plus every sibling that collapsed into its row.
     /// The intro key is left alive — see the type doc.
+    /// Revoke the per-invitee offer key this joiner came in on, if
+    /// any. Matched on the label, which `CreateGroupInteractor` stamps
+    /// with the invitee's inbox fingerprint — so this only ever fires
+    /// for the person that key was minted for.
+    private func revokeSpentOfferKey(for req: PendingRequest) async {
+        let fingerprint = IntroKeyEntry.fingerprint(of: req.joinerInboxPublicKey)
+        let owner = await groupRepository.currentGroups()
+            .first { $0.groupIDData == req.groupId }?
+            .ownerIdentityID
+        guard let owner else { return }
+        for entry in await introKeyStore.listForOwner(owner)
+        where entry.groupId == req.groupId && entry.label == fingerprint {
+            await introKeyStore.revoke(introPublicKey: entry.introPublicKey)
+        }
+    }
+
     private func consumeRequestAndSiblings(_ requestId: String) async {
         var ids = Set(collapsedRequestIDs[requestId] ?? [requestId])
         // The cached map is only as fresh as the last `refresh`, so
@@ -801,7 +848,13 @@ public actor JoinRequestApprover: JoinRequestApproving {
             // deliberately, this is what a request against a retired
             // link looks like, and it was the one drop with no signal
             // at all.
-            decryptFailures += 1
+            //
+            // Counted once per request id. `refresh` re-decodes the
+            // whole raw set on every store publish and a request
+            // against a retired link is never consumed, so a running
+            // total would climb without bound off one dead link and
+            // couldn't be told apart from a thousand real replays.
+            countDecodeFailureOnce(raw.id)
             return nil
         }
         let privKey: Curve25519.KeyAgreement.PrivateKey

@@ -12,6 +12,19 @@ public protocol HandledIntroRequestLog: Sendable {
     func handledIDs() -> Set<String>
     /// Remember `id`, attributed to the link it arrived on.
     func record(id: String, introPublicKey: Data)
+
+    /// Drop tombstones for links that no longer exist anywhere on the
+    /// device. Safe as a keep-set only because the caller supplies
+    /// EVERY owner's live keys; unattributed tombstones are kept.
+    func reconcile(livePublicKeys: Set<Data>)
+
+    /// Joiners the host declined, keyed by collapse key (joiner
+    /// identity ⊕ group) rather than event id — a retry arrives as a
+    /// fresh Nostr event, so an id-keyed tombstone would not catch it.
+    func declinedCollapseKeys() -> Set<String>
+
+    /// Remember that this joiner was declined for this group.
+    func recordDeclined(collapseKey: String)
     /// Drop the tombstones belonging to links that were just retired.
     ///
     /// Phrased as "these died", not "these are all that live": the
@@ -30,6 +43,7 @@ public struct UserDefaultsHandledIntroRequestLog: HandledIntroRequestLog, @unche
     public static let maxEntries = 2_000
 
     private static let storageKey = "app.onym.ios.intro_requests.handled"
+    private static let declinedKey = "app.onym.ios.intro_requests.declined"
 
     private let defaults: UserDefaults
 
@@ -50,6 +64,29 @@ public struct UserDefaultsHandledIntroRequestLog: HandledIntroRequestLog, @unche
             rows.removeFirst(rows.count - Self.maxEntries)
         }
         save(rows)
+    }
+
+    public func reconcile(livePublicKeys: Set<Data>) {
+        let rows = load()
+        // `introPub.isEmpty` is the unattributed marker — no link to
+        // check it against, so it is never reconciled away.
+        let kept = rows.filter { $0.introPub.isEmpty || livePublicKeys.contains($0.introPub) }
+        if kept.count != rows.count { save(kept) }
+    }
+
+    public func declinedCollapseKeys() -> Set<String> {
+        Set(defaults.stringArray(forKey: Self.declinedKey) ?? [])
+    }
+
+    public func recordDeclined(collapseKey: String) {
+        var keys = defaults.stringArray(forKey: Self.declinedKey) ?? []
+        guard !keys.contains(collapseKey) else { return }
+        keys.append(collapseKey)
+        // Same oldest-first backstop as the handled ids.
+        if keys.count > Self.maxEntries {
+            keys.removeFirst(keys.count - Self.maxEntries)
+        }
+        defaults.set(keys, forKey: Self.declinedKey)
     }
 
     public func prune(retiring retiredPublicKeys: Set<Data>) {
@@ -82,6 +119,7 @@ public struct UserDefaultsHandledIntroRequestLog: HandledIntroRequestLog, @unche
 public final class InMemoryHandledIntroRequestLog: HandledIntroRequestLog, @unchecked Sendable {
     private let lock = NSLock()
     private var rows: [String: Data] = [:]
+    private var declined: Set<String> = []
 
     public init() {}
 
@@ -95,5 +133,19 @@ public final class InMemoryHandledIntroRequestLog: HandledIntroRequestLog, @unch
 
     public func prune(retiring retiredPublicKeys: Set<Data>) {
         lock.withLock { rows = rows.filter { !retiredPublicKeys.contains($0.value) } }
+    }
+
+    public func reconcile(livePublicKeys: Set<Data>) {
+        lock.withLock {
+            rows = rows.filter { $0.value.isEmpty || livePublicKeys.contains($0.value) }
+        }
+    }
+
+    public func declinedCollapseKeys() -> Set<String> {
+        lock.withLock { declined }
+    }
+
+    public func recordDeclined(collapseKey: String) {
+        lock.withLock { declined.insert(collapseKey) }
     }
 }
