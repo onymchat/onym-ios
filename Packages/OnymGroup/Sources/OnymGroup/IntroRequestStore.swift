@@ -22,9 +22,34 @@ public protocol IntroRequestStore: Sendable {
     @discardableResult
     func record(_ request: IntroRequest) async -> Bool
 
-    /// Drop a request after the user has acted on it (Approve or
-    /// Decline) so it stops cluttering the surface.
+    /// Drop a handled request and tombstone its id. Conformers MUST
+    /// tombstone durably: cold starts replay the inbox too.
     func consume(id: String) async
+
+    /// Drop tombstones for links that no longer exist, so the durable
+    /// set stays bounded by the live invites.
+    func pruneTombstones(retiring retiredPublicKeys: Set<Data>) async
+
+    /// Drop every tombstone whose link is not in `livePublicKeys`.
+    ///
+    /// Unlike `pruneTombstones(retiring:)` this IS a keep-set, and is
+    /// safe only because the caller passes every owner's live keys —
+    /// see `IntroKeyStore.allLivePublicKeys`. Run once at startup: the
+    /// diff-based prune only observes retirements that happen while
+    /// this identity is subscribed, so links retired with the app
+    /// closed, or under another identity, would otherwise linger until
+    /// `maxEntries` evicted them oldest-first — which can drop a LIVE
+    /// link's tombstone and resurface a handled request.
+    func reconcileTombstones(livePublicKeys: Set<Data>) async
+
+    /// Joiners declined for a group, so a decline means something
+    /// durable. Keyed by collapse key, not event id: a retry arrives as
+    /// a fresh Nostr event and would sail past an id tombstone.
+    func recordDeclined(collapseKey: String) async
+
+    /// Collapse keys the host has declined; `refresh` filters on these.
+    func declinedCollapseKeys() async -> Set<String>
+
 
     /// Snapshot read used by tests + bootstrap reads. UI prefers
     /// the stream.
@@ -37,13 +62,23 @@ public protocol IntroRequestStore: Sendable {
 /// launch outright.
 public actor InMemoryIntroRequestStore: IntroRequestStore {
 
-    public init() {}
-
     private var pending: [IntroRequest] = []
+    /// Event ids already acted on, mirrored from `handledLog` so the
+    /// hot `record` path doesn't hit storage per inbound.
+    private var consumed: Set<String>
+    /// Durable half of the tombstone. Process-lifetime alone would let
+    /// every handled request re-decode on the next cold start.
+    private let handledLog: any HandledIntroRequestLog
     private var continuations: [UUID: AsyncStream<[IntroRequest]>.Continuation] = [:]
+
+    public init(handledLog: any HandledIntroRequestLog = InMemoryHandledIntroRequestLog()) {
+        self.handledLog = handledLog
+        self.consumed = handledLog.handledIDs()
+    }
 
     @discardableResult
     public func record(_ request: IntroRequest) async -> Bool {
+        if consumed.contains(request.id) { return false }
         if pending.contains(where: { $0.id == request.id }) { return false }
         pending.append(request)
         publish()
@@ -51,9 +86,48 @@ public actor InMemoryIntroRequestStore: IntroRequestStore {
     }
 
     public func consume(id: String) async {
+        // Unconditional, so a tombstone can be laid ahead of a replay
+        // that hasn't landed yet.
+        consumed.insert(id)
+        // Attribute to the link it arrived on so `pruneTombstones` can
+        // drop it when that link is retired.
+        // Durable even when the row is absent (a tombstone laid ahead
+        // of a replay, or a stale sibling id). Without the row there is
+        // no link to attribute it to, so it goes in unattributed: it can
+        // never be pruned by a retired link, and is bounded only by the
+        // log's own cap — the right trade, since losing it means the
+        // handled request comes back as pending on the next cold start.
+        handledLog.record(
+            id: id,
+            introPublicKey: pending.first(where: { $0.id == id })?.targetIntroPublicKey
+                ?? Self.unattributedLink
+        )
         let before = pending.count
         pending.removeAll { $0.id == id }
         if pending.count != before { publish() }
+    }
+
+    /// Stands in for "no link known". Never 32 bytes, so it can never
+    /// collide with a real intro pubkey in a retired set.
+    static let unattributedLink = Data()
+
+    public func pruneTombstones(retiring retiredPublicKeys: Set<Data>) async {
+        handledLog.prune(retiring: retiredPublicKeys)
+        consumed = handledLog.handledIDs()
+    }
+
+
+    public func reconcileTombstones(livePublicKeys: Set<Data>) async {
+        handledLog.reconcile(livePublicKeys: livePublicKeys)
+        consumed = handledLog.handledIDs()
+    }
+
+    public func recordDeclined(collapseKey: String) async {
+        handledLog.recordDeclined(collapseKey: collapseKey)
+    }
+
+    public func declinedCollapseKeys() async -> Set<String> {
+        handledLog.declinedCollapseKeys()
     }
 
     public func current() async -> [IntroRequest] {

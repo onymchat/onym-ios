@@ -29,11 +29,8 @@ public protocol JoinRequestApproving: Sendable {
 ///     Approve?" prompts.
 ///  3. On Approve → seals the existing `GroupInvitationPayload`
 ///     (built from the local `ChatGroup`) to the joiner's identity
-///     inbox key, ships via `inboxTransport.send`, revokes the
-///     intro key. The pump from PR-3 stops listening on that intro
-///     tag within one emission window.
-///  4. On Decline → drop the request, revoke the intro key. No
-///     NACK to the joiner; their JoinScreen times out gracefully.
+///     inbox key and ships it. The intro key is NOT retired.
+///  4. On Decline → drop that one request; the link stays live.
 public actor JoinRequestApprover: JoinRequestApproving {
 
     /// UI-renderable view of one decrypted, awaiting-action request.
@@ -152,8 +149,14 @@ public actor JoinRequestApprover: JoinRequestApproving {
     private let systemEvents: any GroupSystemEventRecording
 
     private var pendingValue: [PendingRequest] = []
+    /// Surviving row id → every raw id that collapsed into it.
+    /// Rebuilt by `refresh`, read by `consumeRequestAndSiblings`.
+    private var collapsedRequestIDs: [String: [String]] = [:]
     private var pendingContinuations: [UUID: AsyncStream<[PendingRequest]>.Continuation] = [:]
     private var decryptFailures: Int = 0
+    /// Request ids already counted in `decryptFailures`, so a re-decode
+    /// of the same undecodable row doesn't inflate the signal.
+    private var countedDecodeFailures: Set<String> = []
     private var collectorTask: Task<Void, Never>?
     /// Serializes `approve` calls. Each approval reads `group.epoch`,
     /// proves an `update_commitment` from it, submits, then persists
@@ -214,6 +217,11 @@ public actor JoinRequestApprover: JoinRequestApproving {
     /// Wired to a Settings → Diagnostics view in a follow-up.
     func decryptFailureCount() -> Int { decryptFailures }
 
+    private func countDecodeFailureOnce(_ requestID: String) {
+        guard countedDecodeFailures.insert(requestID).inserted else { return }
+        decryptFailures += 1
+    }
+
     /// Subscribe to `IntroRequestStore.requests` and keep `pending`
     /// in sync. Idempotent — a second call replaces the prior
     /// collector. The collector runs until `stop` or actor deinit.
@@ -269,7 +277,8 @@ public actor JoinRequestApprover: JoinRequestApproving {
     ///      (members, commitment, epoch, salt), seal + ship the
     ///      `GroupInvitationPayload` (with new state) to the joiner,
     ///      fanout `MemberAnnouncementPayload` (also with new state)
-    ///      to existing members, revoke intro key + consume request.
+    ///      to existing members, consume the request. The key survives.
+    ///   8. A joiner already in `members` skips 2-6; snapshot only.
     ///
     /// Failures at the proof / anchor steps return without mutating
     /// any local state or consuming the request, so the admin can
@@ -294,10 +303,16 @@ public actor JoinRequestApprover: JoinRequestApproving {
             return .unknownGroup
         }
 
+        // Already in the roster (reinstall, replay, retry) — re-anchoring
+        // would duplicate a leaf. `members`, not `memberProfiles`.
+        let alreadyInRoster = req.joinerBlsPublicKey.map { blsPub in
+            group.members.contains { $0.publicKeyCompressed == blsPub }
+        } ?? false
+
         // PR-13a admin-anchor path is Tyranny-only. Other types fall
         // through to the pre-PR-13 ship-only flow at the bottom.
         var anchored = group
-        if group.groupType == .tyranny {
+        if group.groupType == .tyranny, !alreadyInRoster {
             switch await anchorTyrannyJoin(
                 req: req,
                 group: group,
@@ -372,6 +387,8 @@ public actor JoinRequestApprover: JoinRequestApproving {
         // already updated by the anchor step. Both side-effects only
         // run when the joiner shipped a BLS pubkey.
         if let blsPub = req.joinerBlsPublicKey {
+            // Idempotent, and the point of the re-join path: a
+            // reinstalled joiner has a new inbox pubkey.
             await recordJoiner(
                 in: anchored,
                 blsPub: blsPub,
@@ -379,6 +396,18 @@ public actor JoinRequestApprover: JoinRequestApproving {
                 sendingPub: req.joinerSendingPublicKey,
                 alias: req.joinerDisplayLabel
             )
+            // Deliberately NOT gated on `alreadyInRoster`. That flag
+            // reads `members` (the crypto roster, advanced by the
+            // anchor), while receivers dedupe on `memberProfiles` —
+            // and those two diverge in exactly the case retry exists
+            // to repair: the anchor persisted, then seal/send failed,
+            // so the joiner is in `members` while no other member has
+            // heard of them. Skipping here would leave their messages
+            // parked forever. Both calls are idempotent at the
+            // receiver — `applyAnnouncement` bails on a known BLS hex,
+            // and the notice's id derives from `member-joined:<hex>`
+            // over an idempotent insert — so a genuine re-join costs
+            // some wasted seals, never a duplicate.
             await broadcastJoin(
                 in: anchored,
                 joinerBlsPub: blsPub,
@@ -387,8 +416,8 @@ public actor JoinRequestApprover: JoinRequestApproving {
                 joinerAlias: req.joinerDisplayLabel
             )
             // The admin's own "X joined" row. Everyone else derives
-            // theirs from the announcement fanned out just above, which
-            // the admin — as its sender — never receives.
+            // theirs from the announcement fanned out just above,
+            // which the admin — as its sender — never receives.
             await systemEvents.recordMemberJoined(
                 groupID: anchored.id,
                 ownerIdentityID: anchored.ownerIdentityID,
@@ -398,11 +427,17 @@ public actor JoinRequestApprover: JoinRequestApproving {
                 at: Date()
             )
         }
-        // Best-effort cleanup.
-        if let introPub = await findIntroPub(forRequestID: requestId) {
-            await introKeyStore.revoke(introPublicKey: introPub)
-        }
-        await introRequestStore.consume(id: requestId)
+        // A create-time offer key is 1:1 with one named invitee and is
+        // spent the moment that invitee is in. Leaving it live would
+        // hold a relay subscription for good and leave a private link
+        // redeemable by anyone it leaked to — retire it here rather
+        // than hoping the host finds the invite list. The shared link
+        // is untouched: that one is meant to be multi-use.
+        await revokeSpentOfferKey(forRequestID: requestId, in: anchored)
+
+        // Drop the request and its siblings. The shared key stays
+        // alive, or every other joiner's row would silently vanish.
+        await consumeRequestAndSiblings(requestId)
         return .sent
     }
 
@@ -681,13 +716,21 @@ public actor JoinRequestApprover: JoinRequestApproving {
         }
     }
 
-    /// Decline a pending request: drop it + revoke the intro slot.
-    /// No NACK to the joiner — their JoinScreen times out.
+    /// Drop that one request and its siblings, and remember the
+    /// joiner. A decline judges one requester, not the link — the link
+    /// stays live for everyone else — but it has to mean something:
+    /// the joiner's screen offers a retry, and each retry is a fresh
+    /// Nostr event, so an id-keyed tombstone would let a declined
+    /// stranger refill the queue indefinitely. Keyed on the collapse
+    /// key (joiner identity ⊕ group), which survives that.
+    /// No NACK to the joiner.
     public func decline(requestId: String) async {
-        if let introPub = await findIntroPub(forRequestID: requestId) {
-            await introKeyStore.revoke(introPublicKey: introPub)
+        if let target = pendingValue.first(where: { $0.id == requestId }) {
+            await introRequestStore.recordDeclined(
+                collapseKey: Self.collapseKey(for: target)
+            )
         }
-        await introRequestStore.consume(id: requestId)
+        await consumeRequestAndSiblings(requestId)
     }
 
     // MARK: - Private
@@ -718,12 +761,19 @@ public actor JoinRequestApprover: JoinRequestApproving {
         // rows and approving/declining one leaves the siblings behind —
         // which reads as "the buttons don't work". Keep the most recently
         // received copy, positioned at the first-seen index.
+        // Re-decodes each emission, so a row lives only while its key
+        // does — stable now that approve no longer revokes.
+        let declined = await introRequestStore.declinedCollapseKeys()
         var collapsed: [String: (request: PendingRequest, receivedAt: Date)] = [:]
+        var siblings: [String: [String]] = [:]
         var order: [String] = []
         for r in raw {
             guard let p = await decode(r) else { continue }
-            let identity = p.joinerBlsPublicKey ?? p.joinerInboxPublicKey
-            let key = Self.hex(identity) + ":" + Self.hex(p.groupId)
+            let key = Self.collapseKey(for: p)
+            // Declined joiners stay declined across retries and
+            // relaunches; the link itself is unaffected.
+            if declined.contains(key) { continue }
+            siblings[key, default: []].append(r.id)
             if let existing = collapsed[key] {
                 if r.receivedAt > existing.receivedAt {
                     collapsed[key] = (p, r.receivedAt)
@@ -734,7 +784,65 @@ public actor JoinRequestApprover: JoinRequestApproving {
             }
         }
         pendingValue = order.compactMap { collapsed[$0]?.request }
+        // Approve/Decline consume the whole set; dropping only the
+        // winner lets a sibling resurface on the next emission.
+        collapsedRequestIDs = order.reduce(into: [:]) { acc, key in
+            guard let winner = collapsed[key]?.request else { return }
+            acc[winner.id] = siblings[key] ?? [winner.id]
+        }
         publishPending()
+    }
+
+    /// Drop `requestId` plus every sibling that collapsed into its row.
+    /// The intro key is left alive — see the type doc.
+    /// Revoke the per-invitee offer key this joiner came in on, if
+    /// any. Matched on the label, which `CreateGroupInteractor` stamps
+    /// with the invitee's inbox fingerprint.
+    ///
+    /// Matched on the link the request actually arrived on, NOT the
+    /// joiner's fingerprint. A fingerprint match broke twice: a
+    /// reinstalled joiner presents a fresh inbox key, so their offer
+    /// key would never be retired and would hold a private link and its
+    /// subscription open for good; and two invitees can collide on four
+    /// bytes, so it would revoke a bystander's link alongside the spent
+    /// one. The intro pubkey is unambiguous.
+    ///
+    /// `label != nil` is what separates a create-time offer from the
+    /// group's shared link, which is meant to be multi-use and is never
+    /// retired here.
+    private func revokeSpentOfferKey(forRequestID requestID: String, in group: ChatGroup) async {
+        let raw = await introRequestStore.current()
+        guard let introPub = raw.first(where: { $0.id == requestID })?.targetIntroPublicKey,
+              let entry = await introKeyStore.find(introPublicKey: introPub),
+              entry.label != nil,
+              entry.groupId == group.groupIDData
+        else { return }
+        await introKeyStore.revoke(introPublicKey: introPub)
+    }
+
+    private func consumeRequestAndSiblings(_ requestId: String) async {
+        var ids = Set(collapsedRequestIDs[requestId] ?? [requestId])
+        // The cached map is only as fresh as the last `refresh`, so
+        // re-derive against the live store before consuming.
+        if let target = pendingValue.first(where: { $0.id == requestId }) {
+            let key = Self.collapseKey(for: target)
+            for raw in await introRequestStore.current() {
+                guard let decoded = await decode(raw),
+                      Self.collapseKey(for: decoded) == key
+                else { continue }
+                ids.insert(raw.id)
+            }
+        }
+        for id in ids {
+            await introRequestStore.consume(id: id)
+        }
+    }
+
+    /// Same joiner, same group — the identity two copies of one logical
+    /// join share.
+    private static func collapseKey(for request: PendingRequest) -> String {
+        let identity = request.joinerBlsPublicKey ?? request.joinerInboxPublicKey
+        return hex(identity) + ":" + hex(request.groupId)
     }
 
     private static func hex(_ data: Data) -> String {
@@ -743,8 +851,19 @@ public actor JoinRequestApprover: JoinRequestApproving {
 
     private func decode(_ raw: IntroRequest) async -> PendingRequest? {
         guard let entry = await introKeyStore.find(introPublicKey: raw.targetIntroPublicKey) else {
-            // Entry was already revoked, or the request landed on a
-            // pubkey we never minted (forged). Drop silently.
+            // Entry was revoked or rotated away, or the request landed
+            // on a pubkey we never minted (forged). Counted like every
+            // other decode failure: now that links are retired only
+            // deliberately, this is what a request against a retired
+            // link looks like, and it was the one drop with no signal
+            // at all.
+            //
+            // Counted once per request id. `refresh` re-decodes the
+            // whole raw set on every store publish and a request
+            // against a retired link is never consumed, so a running
+            // total would climb without bound off one dead link and
+            // couldn't be told apart from a thousand real replays.
+            countDecodeFailureOnce(raw.id)
             return nil
         }
         let privKey: Curve25519.KeyAgreement.PrivateKey
@@ -791,12 +910,5 @@ public actor JoinRequestApprover: JoinRequestApproving {
             groupId: payload.groupId,
             groupName: groupName
         )
-    }
-
-    /// `PendingRequest` doesn't carry the introPub (intentional —
-    /// UI never needs it). Resolve via the raw store on demand.
-    private func findIntroPub(forRequestID id: String) async -> Data? {
-        let raw = await introRequestStore.current()
-        return raw.first { $0.id == id }?.targetIntroPublicKey
     }
 }

@@ -84,7 +84,7 @@ final class ShareInviteFlowTests: XCTestCase {
         XCTAssertEqual(listed.count, 0)
     }
 
-    func test_mintFor_calledTwice_mintsTwoIndependentKeypairs() async throws {
+    func test_mintFor_fromASecondFlowOverTheSameStore_reusesTheLiveLink() async throws {
         let identity = IdentityRepository(keychain: keychain, selectionStore: .inMemory())
         _ = try await identity.bootstrap()
         let resolved = await identity.currentSelectedID()
@@ -96,35 +96,36 @@ final class ShareInviteFlowTests: XCTestCase {
         let groupRepo = GroupRepository(store: store, currentIdentityID: owner)
         let introKeyStore = InMemoryIntroKeyStore()
         let introducer = InviteIntroducer(store: introKeyStore)
-        let flow = ShareInviteFlow(
+
+        // Two flows over one store: the real path (a fresh flow per
+        // tap) and deterministic, since the second starts `.idle`.
+        let first = ShareInviteFlow(
             identity: identity,
             introducer: introducer,
             groupRepository: groupRepo
         )
-
-        flow.mintFor(groupID: group.id)
-        try await waitFor { flow.state.isReady }
-        guard case .ready(let firstLink, _) = flow.state else {
+        first.mintFor(groupID: group.id)
+        try await waitFor { first.state.isReady }
+        guard case .ready(let firstLink, _) = first.state else {
             return XCTFail("expected first .ready")
         }
 
-        flow.mintFor(groupID: group.id)
-        // Wait for the link to actually change (the second mint emits
-        // `.minting` then `.ready` again).
-        try await waitFor {
-            if case .ready(let link, _) = flow.state, link != firstLink { return true }
-            return false
-        }
-        guard case .ready(let secondLink, _) = flow.state else {
+        let second = ShareInviteFlow(
+            identity: identity,
+            introducer: introducer,
+            groupRepository: groupRepo
+        )
+        second.mintFor(groupID: group.id)
+        try await waitFor { second.state.isReady }
+        guard case .ready(let secondLink, _) = second.state else {
             return XCTFail("expected second .ready")
         }
 
-        // Per-link revocation depends on this — re-shares cannot
-        // collapse to the same intro slot or revoking one would kill
-        // the other.
-        XCTAssertNotEqual(firstLink, secondLink, "two shares should produce different links")
+        // The share screen is a view onto the group's link, not a link
+        // factory; re-entry must not leave a trail of slots.
+        XCTAssertEqual(firstLink, secondLink, "re-entry should surface the same link")
         let listed = await introKeyStore.listForOwner(owner)
-        XCTAssertEqual(listed.count, 2)
+        XCTAssertEqual(listed.count, 1, "reuse must not persist a second intro slot")
     }
 
     func test_state_transitionsThroughMinting() async throws {
@@ -147,6 +148,76 @@ final class ShareInviteFlowTests: XCTestCase {
         flow.mintFor(groupID: group.id)
         try await waitFor { flow.state.isReady }
         XCTAssertTrue(flow.state.isReady)
+    }
+
+    func test_rotate_doubleTap_onlyRotatesOnce() async throws {
+        let identity = IdentityRepository(keychain: keychain, selectionStore: .inMemory())
+        _ = try await identity.bootstrap()
+        let resolved = await identity.currentSelectedID()
+        let owner = try XCTUnwrap(resolved)
+        let store = TestableInMemoryGroupStore()
+        let group = makeGroup(id: String(repeating: "ab", count: 32), name: "G", owner: owner)
+        await store.preload([group])
+        let introKeyStore = InMemoryIntroKeyStore()
+        let flow = ShareInviteFlow(
+            identity: identity,
+            introducer: InviteIntroducer(store: introKeyStore),
+            groupRepository: GroupRepository(store: store, currentIdentityID: owner)
+        )
+        flow.mintFor(groupID: group.id)
+        try await waitFor { flow.state.isReady }
+
+        // The guard has to bite before the first await, or the second
+        // tap slips through while `isRotating` is still false.
+        flow.rotateLink(groupID: group.id)
+        flow.rotateLink(groupID: group.id)
+        try await waitFor { flow.state.isReady && !flow.isRotating }
+
+        let shared = await introKeyStore.listForOwner(owner).filter { $0.label == nil }
+        XCTAssertEqual(shared.count, 1, "a second rotate would strand a live key")
+    }
+
+    func test_supersededSharedKey_isListedSoItCanBeRevoked() async throws {
+        let identity = IdentityRepository(keychain: keychain, selectionStore: .inMemory())
+        _ = try await identity.bootstrap()
+        let resolved = await identity.currentSelectedID()
+        let owner = try XCTUnwrap(resolved)
+        let store = TestableInMemoryGroupStore()
+        let group = makeGroup(id: String(repeating: "ab", count: 32), name: "G", owner: owner)
+        await store.preload([group])
+        let introKeyStore = InMemoryIntroKeyStore()
+        let t0 = Date(timeIntervalSince1970: 1_700_000_000)
+
+        // Two unlabelled keys is what a crash mid-rotate leaves. The
+        // older one used to be on no list: no revoke, live subscription.
+        let stranded = try await InviteIntroducer(store: introKeyStore, now: { t0 })
+            .mint(ownerIdentityID: owner, groupId: group.groupIDData)
+        let introducer = InviteIntroducer(
+            store: introKeyStore,
+            now: { t0.addingTimeInterval(60) }
+        )
+        let current = try await introducer.mint(
+            ownerIdentityID: owner, groupId: group.groupIDData
+        )
+        let flow = ShareInviteFlow(
+            identity: identity,
+            introducer: introducer,
+            groupRepository: GroupRepository(store: store, currentIdentityID: owner)
+        )
+        flow.mintFor(groupID: group.id)
+        try await waitFor { flow.state.isReady }
+        try await waitFor { !flow.otherInvites.isEmpty }
+
+        let row = try XCTUnwrap(flow.otherInvites.first)
+        XCTAssertEqual(flow.otherInvites.count, 1, "the rendered link is not a row")
+        XCTAssertEqual(row.introPublicKey, stranded.introPublicKey)
+        XCTAssertNotEqual(row.introPublicKey, current.introPublicKey)
+        XCTAssertNil(row.label, "a superseded key has no invitee name; the view names it")
+
+        flow.revoke(row, groupID: group.id)
+        try await waitFor { flow.otherInvites.isEmpty }
+        let gone = await introKeyStore.find(introPublicKey: stranded.introPublicKey)
+        XCTAssertNil(gone)
     }
 
     // MARK: - Helpers

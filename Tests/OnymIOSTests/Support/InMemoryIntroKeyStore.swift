@@ -36,6 +36,10 @@ actor InMemoryIntroKeyStore: IntroKeyStore {
         for owner in owners { publish(forOwner: owner) }
     }
 
+    func allLivePublicKeys() async -> Set<Data> {
+        Set(entries.map(\.introPublicKey))
+    }
+
     @discardableResult
     func deleteForOwner(_ ownerIdentityID: IdentityID) async -> Int {
         let before = entries.count

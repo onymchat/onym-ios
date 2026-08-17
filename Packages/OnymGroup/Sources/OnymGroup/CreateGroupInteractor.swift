@@ -724,9 +724,8 @@ public struct CreateGroupInteractor: Sendable {
     /// Mint a per-invitee intro key and ship a durable
     /// `GroupInviteOfferPayload` to each invitee's inbox. Reuses the
     /// inbox seal+send path, but the payload grants nothing: it carries
-    /// only the reply channel + display context, so it never expires
-    /// and never anchors anyone. The invitee turns it into a join
-    /// request on accept; the admin anchors only on explicit approve.
+    /// only the reply channel + display context, and never anchors
+    /// anyone. Labelled per invitee so the invite list can revoke it.
     private func sendOffers(
         to invitees: [Data],
         ownerIdentityID: IdentityID,
@@ -736,15 +735,15 @@ public struct CreateGroupInteractor: Sendable {
         inviterAlias: String
     ) async throws {
         for (index, inboxKey) in invitees.enumerated() {
-            // One fresh intro key per invitee → granular revoke and a
-            // clean 1:1 mapping from an inbound join request back to
-            // the person the admin meant to invite.
+            // One key per invitee keeps the 1:1 map from request back
+            // to person; `currentOrMint` would collapse it.
             let capability: IntroCapability
             do {
                 capability = try await introducer.mint(
                     ownerIdentityID: ownerIdentityID,
                     groupId: groupID,
-                    groupName: groupName
+                    groupName: groupName,
+                    label: IntroKeyEntry.fingerprint(of: inboxKey)
                 )
             } catch {
                 throw CreateGroupError.invitationSendFailed(

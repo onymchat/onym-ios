@@ -92,7 +92,7 @@ final class JoinRequestApproverTests: XCTestCase {
 
     // MARK: - approve happy path
 
-    func test_approve_sendsSealedInviteAndConsumesRequest() async throws {
+    func test_approve_sendsSealedInvite_consumesRequest_keepsIntroKeyLive() async throws {
         let env = try await seedEnvironment()
 
         // Pump once: collector reads the seeded request, decodes,
@@ -108,12 +108,15 @@ final class JoinRequestApproverTests: XCTestCase {
         XCTAssertNotNil(toJoiner,
                         "approve must send to the joiner's inbox tag")
 
-        // Request consumed + intro key revoked.
+        // Request consumed, but the link stays usable.
         let remaining = await introRequestStore.current()
         XCTAssertTrue(remaining.isEmpty,
                       "approved request must be consumed from the store")
         let intro = await introKeyStore.find(introPublicKey: env.introPub)
-        XCTAssertNil(intro, "intro key must be revoked after approve")
+        XCTAssertNotNil(
+            intro,
+            "intro key must survive approve — one link is redeemable by many joiners"
+        )
     }
 
     // MARK: - duplicate collapse
@@ -172,9 +175,11 @@ final class JoinRequestApproverTests: XCTestCase {
         } else {
             XCTFail("expected .transportFailed, got \(outcome)")
         }
-        let intro = await introKeyStore.find(introPublicKey: env.introPub)
-        XCTAssertNotNil(intro,
-                        "intro key must NOT be revoked when transport rejects — caller may retry")
+        // Key survival is vacuous now. What this path still owes is
+        // that the request stays available for a retry.
+        let remaining = await introRequestStore.current()
+        XCTAssertEqual(remaining.count, 1,
+                       "a transport-rejected request must stay in the store for retry")
     }
 
     // MARK: - PR 4: recordJoiner side effect
@@ -364,7 +369,7 @@ final class JoinRequestApproverTests: XCTestCase {
 
     // MARK: - decline
 
-    func test_decline_dropsRequestAndRevokesKey() async throws {
+    func test_decline_dropsOnlyThatRequest_leavesLinkLive() async throws {
         let env = try await seedEnvironment()
         await env.approver.pumpOnce()
 
@@ -374,13 +379,257 @@ final class JoinRequestApproverTests: XCTestCase {
         XCTAssertTrue(remaining.isEmpty,
                       "declined request must be consumed")
         let intro = await introKeyStore.find(introPublicKey: env.introPub)
-        XCTAssertNil(intro, "intro key revoked even on decline")
+        XCTAssertNotNil(
+            intro,
+            "declining one joiner must not kill the link for everyone else holding it"
+        )
         let sends = await transport.sends
         XCTAssertTrue(sends.isEmpty,
                       "decline ships no envelopes")
     }
 
     // MARK: - Test fixture builder
+
+    // MARK: - multi-use links
+
+    func test_approve_joinerA_thenJoinerBOnTheSameIntroKey_bothJoin() async throws {
+        let env = try await seedEnvironment()
+        let second = try await seedSecondJoiner(on: env)
+        await env.approver.pumpOnce()
+
+        var pending = await pendingRows(env.approver)
+        XCTAssertEqual(pending.count, 2, "two joiners on one link are two rows")
+
+        let firstOutcome = await env.approver.approve(requestId: env.requestID)
+        XCTAssertEqual(firstOutcome, .sent)
+
+        // The whole feature. Before, revoking here made B's request
+        // undecodable and B's row silently vanished.
+        let intro = await introKeyStore.find(introPublicKey: env.introPub)
+        XCTAssertNotNil(intro, "approving A must not burn the link B is holding")
+
+        await env.approver.pumpOnce()
+        pending = await pendingRows(env.approver)
+        XCTAssertEqual(pending.count, 1, "A consumed, B still standing")
+        XCTAssertEqual(pending.first?.joinerBlsPublicKey, second.blsPub)
+
+        let secondOutcome = await env.approver.approve(requestId: second.requestID)
+        XCTAssertEqual(secondOutcome, .sent)
+
+        let snapshotGroup = await groups.currentGroups()
+        let group = try XCTUnwrap(
+            snapshotGroup.first { $0.groupIDData == env.groupID }
+        )
+        XCTAssertEqual(group.members.count, 3, "admin + both joiners")
+        XCTAssertEqual(group.epoch, 2, "each joiner is its own anchor")
+        XCTAssertEqual(contractTransport.calls.count, 2, "two real anchors, not one")
+
+        let sends = await transport.sends
+        XCTAssertNotNil(sends.first { $0.inbox == env.expectedJoinerTag })
+        XCTAssertNotNil(sends.first { $0.inbox == second.expectedTag })
+    }
+
+    func test_decline_joinerA_leavesJoinerBApprovable() async throws {
+        let env = try await seedEnvironment()
+        let second = try await seedSecondJoiner(on: env)
+        await env.approver.pumpOnce()
+
+        await env.approver.decline(requestId: env.requestID)
+        await env.approver.pumpOnce()
+
+        let pending = await pendingRows(env.approver)
+        XCTAssertEqual(pending.count, 1, "declining A must not drop B")
+        XCTAssertEqual(pending.first?.joinerBlsPublicKey, second.blsPub)
+
+        let outcome = await env.approver.approve(requestId: second.requestID)
+        XCTAssertEqual(outcome, .sent)
+        XCTAssertEqual(contractTransport.calls.count, 1)
+    }
+
+    func test_pumpOnce_twoDifferentJoinersOnOneIntroKey_yieldTwoPendingRows() async throws {
+        let env = try await seedEnvironment()
+        let second = try await seedSecondJoiner(on: env)
+        await env.approver.pumpOnce()
+
+        // Collapse is per joiner, not per key; over-merging would
+        // silently drop invitees.
+        let pending = await pendingRows(env.approver)
+        XCTAssertEqual(pending.count, 2)
+        XCTAssertEqual(
+            Set(pending.compactMap(\.joinerBlsPublicKey)),
+            Set([env.joinerBlsPub, second.blsPub])
+        )
+    }
+
+    func test_approve_consumesEveryCollapsedSibling() async throws {
+        let env = try await seedEnvironment()
+        // Two more copies of the SAME joiner's request, as a retry or a
+        // relay replay under fresh ephemeral keys would produce.
+        for _ in 0..<2 {
+            await introRequestStore.record(IntroRequest(
+                id: "req-\(UUID().uuidString)",
+                targetIntroPublicKey: env.introPub,
+                payload: env.sealedPayload,
+                receivedAt: Date().addingTimeInterval(30)
+            ))
+        }
+        await env.approver.pumpOnce()
+
+        let pending = await pendingRows(env.approver)
+        XCTAssertEqual(pending.count, 1, "one joiner is one row")
+        let winner = try XCTUnwrap(pending.first?.id)
+
+        let outcome = await env.approver.approve(requestId: winner)
+        XCTAssertEqual(outcome, .sent)
+
+        // Consuming only the winner would leave the siblings behind to
+        // resurface on the next emission.
+        let leftover = await introRequestStore.current()
+        XCTAssertTrue(leftover.isEmpty, "every collapsed sibling must be consumed")
+        await env.approver.pumpOnce()
+        let after = await pendingRows(env.approver)
+        XCTAssertTrue(after.isEmpty)
+    }
+
+    func test_decline_consumesEveryCollapsedSibling() async throws {
+        let env = try await seedEnvironment()
+        await introRequestStore.record(IntroRequest(
+            id: "req-\(UUID().uuidString)",
+            targetIntroPublicKey: env.introPub,
+            payload: env.sealedPayload,
+            receivedAt: Date().addingTimeInterval(30)
+        ))
+        await env.approver.pumpOnce()
+        let rows = await pendingRows(env.approver)
+        let winner = try XCTUnwrap(rows.first?.id)
+
+        await env.approver.decline(requestId: winner)
+
+        let leftover = await introRequestStore.current()
+        XCTAssertTrue(leftover.isEmpty)
+        await env.approver.pumpOnce()
+        let after = await pendingRows(env.approver)
+        XCTAssertTrue(after.isEmpty)
+    }
+
+    func test_approvedRequest_replayedByRelay_doesNotReappearAsPending() async throws {
+        let env = try await seedEnvironment()
+        await env.approver.pumpOnce()
+        let outcome = await env.approver.approve(requestId: env.requestID)
+        XCTAssertEqual(outcome, .sent)
+
+        // Reconnects replay the inbox in full, and the key is still
+        // live — without the tombstone this decodes again.
+        let reRecorded = await introRequestStore.record(IntroRequest(
+            id: env.requestID,
+            targetIntroPublicKey: env.introPub,
+            payload: env.sealedPayload,
+            receivedAt: Date().addingTimeInterval(120)
+        ))
+        XCTAssertFalse(reRecorded, "a consumed event id must not be re-recorded")
+
+        await env.approver.pumpOnce()
+        let after = await pendingRows(env.approver)
+        XCTAssertTrue(after.isEmpty)
+    }
+
+    // MARK: - re-join recovery
+
+    func test_approve_joinerAlreadyInRoster_skipsAnchor_reshipsInvitation() async throws {
+        let env = try await seedEnvironment()
+        await env.approver.pumpOnce()
+        let firstOutcome = await env.approver.approve(requestId: env.requestID)
+        XCTAssertEqual(firstOutcome, .sent)
+        XCTAssertEqual(contractTransport.calls.count, 1)
+        let snapshotAfterfirst = await groups.currentGroups()
+        let afterFirst = try XCTUnwrap(
+            snapshotAfterfirst.first { $0.groupIDData == env.groupID }
+        )
+
+        // Same joiner, fresh event id: a reinstall, or a replay landing
+        // on the still-live link.
+        let replayID = "req-\(UUID().uuidString)"
+        await introRequestStore.record(IntroRequest(
+            id: replayID,
+            targetIntroPublicKey: env.introPub,
+            payload: env.sealedPayload,
+            receivedAt: Date().addingTimeInterval(60)
+        ))
+        await env.approver.pumpOnce()
+
+        let replayOutcome = await env.approver.approve(requestId: replayID)
+        XCTAssertEqual(replayOutcome, .sent)
+
+        // No second anchor: re-adding an existing member would push a
+        // duplicate leaf into the tree and burn an epoch.
+        XCTAssertEqual(contractTransport.calls.count, 1, "re-join must not re-anchor")
+        let proveCalls = await proofGenerator.proveUpdateCalls
+        XCTAssertEqual(proveCalls, 1,
+                       "the guard must sit before the proof, not after it")
+
+        let snapshotAftersecond = await groups.currentGroups()
+        let afterSecond = try XCTUnwrap(
+            snapshotAftersecond.first { $0.groupIDData == env.groupID }
+        )
+        XCTAssertEqual(afterSecond.epoch, afterFirst.epoch)
+        XCTAssertEqual(afterSecond.members.count, afterFirst.members.count)
+        XCTAssertEqual(afterSecond.commitment, afterFirst.commitment)
+
+        // But the joiner did get the snapshot again — that's the point.
+        let sends = await transport.sends
+        XCTAssertEqual(
+            sends.filter { $0.inbox == env.expectedJoinerTag }.count, 2,
+            "the re-join path must re-ship the current invitation"
+        )
+    }
+
+    // MARK: - Helpers
+
+    /// Point-in-time read: `pending` yields its snapshot to each new
+    /// subscriber, so one `next()` is enough.
+    private func pendingRows(
+        _ approver: JoinRequestApprover
+    ) async -> [JoinRequestApprover.PendingRequest] {
+        var iterator = approver.pending.makeAsyncIterator()
+        return await iterator.next() ?? []
+    }
+
+    private struct SecondJoiner {
+        let requestID: String
+        let blsPub: Data
+        let expectedTag: TransportInboxID
+    }
+
+    /// A second joiner sealed to the *same* intro pubkey — two people
+    /// redeeming one shared link.
+    private func seedSecondJoiner(on env: Env) async throws -> SecondJoiner {
+        let blsPub = Data(repeating: 0x1A, count: 48)
+        let inboxPub = Data(repeating: 0x1C, count: 32)
+        let payload = try JoinRequestPayload(
+            joinerInboxPublicKey: inboxPub,
+            joinerBlsPublicKey: blsPub,
+            joinerLeafHash: Data(repeating: 0x1B, count: 32),
+            joinerSendingPublicKey: Data(repeating: 0x1D, count: 32),
+            joinerDisplayLabel: "Joiner Carol",
+            groupId: env.groupID
+        )
+        let sealed = try await identity.sealInvitation(
+            payload: try JSONEncoder().encode(payload),
+            to: env.introPub
+        )
+        let requestID = "req-\(UUID().uuidString)"
+        await introRequestStore.record(IntroRequest(
+            id: requestID,
+            targetIntroPublicKey: env.introPub,
+            payload: sealed,
+            receivedAt: Date().addingTimeInterval(10)
+        ))
+        return SecondJoiner(
+            requestID: requestID,
+            blsPub: blsPub,
+            expectedTag: TransportInboxID(rawValue: ApproverInboxTag.from(inboxPub))
+        )
+    }
 
     private struct Env {
         let approver: JoinRequestApprover

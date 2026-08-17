@@ -3,15 +3,11 @@ import Observation
 import OnymIdentity
 
 /// Drives the post-create "Share invite" surface. Owns one piece of
-/// state — the share link for the just-minted invite — and exposes
-/// one intent (`mintFor`) to refresh / re-mint.
+/// state — the group's share link — and exposes one intent
+/// (`mintFor`) to load or refresh it.
 ///
-/// Why minting is decoupled from the view's first appearance:
-/// minting is a side effect (writes to `IntroKeyStore`); doing it
-/// in `.onAppear` ties it to view lifecycle (re-entries would mint
-/// twice). This flow holds the side effect off the view tree where
-/// it belongs. The view calls `mintFor` exactly once on appear,
-/// re-mint requires an explicit "Generate new link" tap.
+/// Re-entry is idempotent: `currentOrMint` returns the existing key
+/// rather than stacking a new one per visit.
 ///
 /// Mirrors onym-android's `ShareInviteViewModel.kt`.
 @MainActor
@@ -24,6 +20,16 @@ public final class ShareInviteFlow: Identifiable {
         case failed(reason: String)
     }
 
+    /// One revokable invite. `label` is nil for a superseded shared
+    /// key; the view supplies the localized name for that case.
+    public struct InviteRow: Equatable, Identifiable, Sendable {
+        public let introPublicKey: Data
+        public let label: String?
+        public let createdAt: Date
+
+        public var id: Data { introPublicKey }
+    }
+
     /// Drives `.sheet(item:)` from a single source of truth.
     /// `.sheet(isPresented:)` paired with a separate optional-flow
     /// `@State` raced on first present — the content closure read
@@ -31,6 +37,21 @@ public final class ShareInviteFlow: Identifiable {
     public nonisolated var id: ObjectIdentifier { ObjectIdentifier(self) }
 
     public private(set) var state: State = .idle
+
+    /// Other live invites: the per-invitee offer keys, plus any
+    /// superseded shared key, so nothing is left unrevokable.
+    public private(set) var otherInvites: [InviteRow] = []
+
+    /// Set while a rotate is in flight so the UI can disable the
+    /// button — rotating twice in a row would strand a live key.
+    public private(set) var isRotating = false
+
+    /// The intro pubkey behind the link currently on screen, remembered
+    /// rather than re-parsed. Deriving it from `state` meant any
+    /// non-`.ready` state (a failed revoke, say) resolved to nil and the
+    /// live link showed up in the revokable list — one tap from killing
+    /// the link the user is in the middle of sharing.
+    private var currentIntroPub: Data?
 
     private let identity: IdentityRepository
     private let introducer: InviteIntroducer
@@ -46,10 +67,8 @@ public final class ShareInviteFlow: Identifiable {
         self.groupRepository = groupRepository
     }
 
-    /// Mint a fresh capability for the group with hex id `groupID` and
-    /// surface the share link. Idempotent for repeated taps from the
-    /// same screen — re-mints a fresh keypair so each share goes
-    /// through a distinct intro slot (per-link revocation friendly).
+    /// Resolve and surface the group's share link. Idempotent: re-entry
+    /// returns the same link. One link, many joiners.
     ///
     /// If `groupID` does not resolve to a local group (race between
     /// persistence + navigation, or a stale deeplink back into share)
@@ -71,14 +90,95 @@ public final class ShareInviteFlow: Identifiable {
         }
         state = .minting
         do {
-            let cap = try await introducer.mint(
+            let cap = try await introducer.currentOrMint(
                 ownerIdentityID: activeID,
                 groupId: group.groupIDData,
                 groupName: group.name
             )
+            currentIntroPub = cap.introPublicKey
             state = .ready(link: cap.toAppLink(), groupName: group.name)
+            await refreshOtherInvites(ownerIdentityID: activeID, groupId: group.groupIDData)
         } catch {
             state = .failed(reason: "\(error)")
         }
+    }
+
+    /// Replace the shared link. Nobody holding the old one is told, so
+    /// this is the "my link leaked" escape hatch.
+    public func rotateLink(groupID: String) {
+        Task { await rotateLinkAsync(groupID: groupID) }
+    }
+
+    private func rotateLinkAsync(groupID: String) async {
+        // Set before the first await, or a double-tap clears both this
+        // guard and `.disabled(flow.isRotating)` inside the window.
+        guard !isRotating else { return }
+        isRotating = true
+        defer { isRotating = false }
+        let groups = await groupRepository.currentGroups()
+        guard let group = groups.first(where: { $0.id == groupID }) else {
+            state = .failed(reason: "Group not found on this device")
+            return
+        }
+        guard let activeID = await identity.currentSelectedID() else {
+            state = .failed(reason: "No identity selected")
+            return
+        }
+        do {
+            let cap = try await introducer.rotate(
+                ownerIdentityID: activeID,
+                groupId: group.groupIDData,
+                groupName: group.name
+            )
+            currentIntroPub = cap.introPublicKey
+            state = .ready(link: cap.toAppLink(), groupName: group.name)
+            // Same refresh mint and revoke do. Without it a key
+            // stranded by a crash mid-rotate stays invisible until the
+            // sheet is dismissed and reopened — the exact "listed
+            // nowhere" state the mint-then-revoke order exists to avoid.
+            await refreshOtherInvites(ownerIdentityID: activeID, groupId: group.groupIDData)
+        } catch {
+            state = .failed(reason: "\(error)")
+        }
+    }
+
+    /// Retire one per-invitee offer key.
+    public func revoke(_ row: InviteRow, groupID: String) {
+        Task { await revokeAsync(row, groupID: groupID) }
+    }
+
+    private func revokeAsync(_ row: InviteRow, groupID: String) async {
+        await introducer.revoke(introPublicKey: row.introPublicKey)
+        let groups = await groupRepository.currentGroups()
+        guard let group = groups.first(where: { $0.id == groupID }),
+              let activeID = await identity.currentSelectedID()
+        else { return }
+        await refreshOtherInvites(ownerIdentityID: activeID, groupId: group.groupIDData)
+    }
+
+    private func refreshOtherInvites(ownerIdentityID: IdentityID, groupId: Data) async {
+        let current = currentIntroPublicKey()
+        // Everything but the link on screen. A shared key stranded by a
+        // crash mid-rotate would otherwise be listed nowhere.
+        otherInvites = await introducer
+            .liveInvites(ownerIdentityID: ownerIdentityID, groupId: groupId)
+            .filter { $0.introPublicKey != current }
+            .map { entry in
+                InviteRow(
+                    introPublicKey: entry.introPublicKey,
+                    label: entry.label,
+                    createdAt: entry.createdAt
+                )
+            }
+    }
+
+    /// Intro pubkey behind the rendered link, so the list excludes it.
+    private func currentIntroPublicKey() -> Data? {
+        if let currentIntroPub { return currentIntroPub }
+        // Only reached before the first mint resolves.
+        guard case .ready(let link, _) = state,
+              let cap = IntroCapability.fromLink(link)
+        else { return nil }
+        return cap.introPublicKey
     }
 }

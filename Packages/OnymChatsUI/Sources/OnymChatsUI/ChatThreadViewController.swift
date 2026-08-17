@@ -134,6 +134,20 @@ final class ChatThreadViewController: UIViewController {
     /// user is already near the bottom.
     private var hasAppliedFirstSnapshot = false
 
+    /// Real, measured height per row id, filled in as rows are
+    /// displayed and served back through
+    /// `tableView(_:estimatedHeightForRowAt:)`.
+    ///
+    /// Without this the table answers every height question about a
+    /// row it hasn't displayed with the flat `estimatedRowHeight`, and
+    /// corrects it to the real height the moment the row is measured.
+    /// Each correction resizes the content and shifts the offset under
+    /// the user's thumb — which is the jump a fresh message produced:
+    /// inserting a row makes the table re-measure, so the whole thread
+    /// lurched every time one landed. Cached heights make the estimate
+    /// exact, so nothing moves but the intended scroll.
+    private var measuredRowHeights: [UUID: CGFloat] = [:]
+
     /// The message the composer is currently replying to, if any. Set
     /// by a swipe-to-reply on a bubble, cleared on cancel or after a
     /// send. Threaded into `onSendTapped` so the sent message carries
@@ -300,9 +314,23 @@ final class ChatThreadViewController: UIViewController {
         if !changedIDs.isEmpty {
             snapshot.reconfigureItems(changedIDs)
         }
+        // A reconfigured row may render at a different height (body
+        // edit, attachment resolving), so its cached measurement is
+        // stale until it's displayed again.
+        for id in changedIDs { measuredRowHeights[id] = nil }
+        pruneMeasuredHeights(keeping: snapshot.itemIdentifiers)
+
+        // A new row at the bottom that we're going to follow is applied
+        // without animation: the insert fade and the follow-scroll are
+        // two separate motions — the second only starting when `apply`'s
+        // completion fires, a third of a second after the row landed —
+        // and the pair read as a lurch. Committing the row instantly and
+        // animating the offset gives one continuous scroll instead.
+        let followsBottom = !isFirstApply && wasNearBottom && sorted.count > previousCount
+        let animates = !isFirstApply && !followsBottom
         // First apply is non-animated to avoid an initial-load
         // "fly-in" of every existing message.
-        dataSource.apply(snapshot, animatingDifferences: !isFirstApply) { [weak self] in
+        dataSource.apply(snapshot, animatingDifferences: animates) { [weak self] in
             guard let self else { return }
             if isFirstApply {
                 // Cold open: land at the bottom with no visible scroll.
@@ -313,10 +341,18 @@ final class ChatThreadViewController: UIViewController {
                 guard !sorted.isEmpty else { return }
                 self.jumpToBottomForColdOpen()
                 self.hasAppliedFirstSnapshot = true
-            } else if wasNearBottom && sorted.count > previousCount {
+            } else if followsBottom {
                 self.scrollToBottom(animated: true)
             }
         }
+    }
+
+    /// Forget measurements for rows no longer in the thread, so the
+    /// cache can't outgrow the list over a long session.
+    private func pruneMeasuredHeights(keeping ids: [UUID]) {
+        guard measuredRowHeights.count > ids.count else { return }
+        let live = Set(ids)
+        measuredRowHeights = measuredRowHeights.filter { live.contains($0.key) }
     }
 
     /// Push the founder's pending join requests for *this* group into
@@ -396,6 +432,8 @@ final class ChatThreadViewController: UIViewController {
         if !changed.isEmpty {
             snapshot.reconfigureItems(changed)
         }
+        for id in changed { measuredRowHeights[id] = nil }
+        pruneMeasuredHeights(keeping: snapshot.itemIdentifiers)
         dataSource.apply(snapshot, animatingDifferences: hasAppliedFirstSnapshot) { [weak self] in
             guard let self else { return }
             // The table sits at alpha 0 until the cold open reveals it,
@@ -651,13 +689,37 @@ final class ChatThreadViewController: UIViewController {
     }
 
     /// Scroll the table so the last row is visible.
+    ///
+    /// Targets the content offset directly rather than going through
+    /// `scrollToRow(at: .bottom)`. `scrollToRow` resolves its
+    /// destination from the row heights the table knows *at the time of
+    /// the call* — with self-sizing bubbles that includes estimates —
+    /// so it would animate to a position that stops being the bottom as
+    /// soon as the rows underneath it were measured, and the table
+    /// snapped the rest of the way. Laying out first and then animating
+    /// to the computed end of the content lands in one motion.
     func scrollToBottom(animated: Bool) {
-        let snapshot = dataSource.snapshot()
-        guard let lastSection = snapshot.sectionIdentifiers.last else { return }
-        let itemCount = snapshot.numberOfItems(inSection: lastSection)
-        guard itemCount > 0 else { return }
-        let lastIndex = IndexPath(row: itemCount - 1, section: 0)
-        tableView.scrollToRow(at: lastIndex, at: .bottom, animated: animated)
+        guard dataSource.snapshot().numberOfItems > 0 else { return }
+        // Resolve pending inserts/heights so `contentSize` below is the
+        // post-update one, not the size from before this row landed.
+        tableView.layoutIfNeeded()
+        let inset = tableView.adjustedContentInset
+        let target = max(
+            -inset.top,
+            tableView.contentSize.height + inset.bottom - tableView.bounds.height
+        )
+        guard abs(target - tableView.contentOffset.y) > 0.5 else { return }
+        guard animated else {
+            tableView.contentOffset.y = target
+            return
+        }
+        UIView.animate(
+            withDuration: 0.25,
+            delay: 0,
+            options: [.curveEaseOut, .beginFromCurrentState]
+        ) {
+            self.tableView.contentOffset.y = target
+        }
     }
 
     // MARK: - Table view (message list)
@@ -962,6 +1024,30 @@ extension ChatThreadViewController: UIGestureRecognizerDelegate {
 }
 
 extension ChatThreadViewController: UITableViewDelegate {
+    /// Serve the row's real height once we've seen it, so the table's
+    /// content size stops changing under the user as rows are measured.
+    /// Falls back to the flat estimate for a row never yet displayed.
+    func tableView(
+        _ tableView: UITableView,
+        estimatedHeightForRowAt indexPath: IndexPath
+    ) -> CGFloat {
+        guard let id = dataSource.itemIdentifier(for: indexPath),
+              let height = measuredRowHeights[id] else { return tableView.estimatedRowHeight }
+        return height
+    }
+
+    /// Record what the row actually measured. `willDisplay` runs after
+    /// the cell has been sized by the table, so `frame.height` here is
+    /// the resolved self-sizing height.
+    func tableView(
+        _ tableView: UITableView,
+        willDisplay cell: UITableViewCell,
+        forRowAt indexPath: IndexPath
+    ) {
+        guard let id = dataSource.itemIdentifier(for: indexPath) else { return }
+        measuredRowHeights[id] = cell.frame.height
+    }
+
     func tableView(
         _ tableView: UITableView,
         contextMenuConfigurationForRowAt indexPath: IndexPath,

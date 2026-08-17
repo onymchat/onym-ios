@@ -16,21 +16,36 @@ import OnymIdentity
 /// - `groupId` is the on-chain `group_id` the invite is for —
 ///   needed when the inviter's app surfaces "Bob wants to join
 ///   <group>?" so it can render the group's name.
-/// - `createdAt` drives optional expiration UI (later PRs may
-///   prune invites older than N days).
+/// - `createdAt` is display-only; links live until revoked.
+/// - `label` is nil for the shared link, else the invitee's fingerprint.
 public struct IntroKeyEntry: Equatable, Sendable {
     public let introPublicKey: Data
     public let introPrivateKey: Data
     public let ownerIdentityID: IdentityID
     public let groupId: Data
     public let createdAt: Date
+    /// nil == the group's shared link. Non-nil == a create-time offer
+    /// aimed at one invitee.
+    public let label: String?
+
+    /// True for entries persisted before labels existed. Those decode
+    /// with `label == nil`, which is indistinguishable from a shared
+    /// link — and on a create-with-invitees group the newest of them is
+    /// the LAST INVITEE'S PRIVATE OFFER KEY. Without this flag
+    /// `currentOrMint` would adopt it as the group's public link, and
+    /// the first rotate would revoke every outstanding legacy invite.
+    /// Never adopted, never mass-revoked; listed and individually
+    /// revokable like any other superseded key.
+    public let isLegacy: Bool
 
     public init(
         introPublicKey: Data,
         introPrivateKey: Data,
         ownerIdentityID: IdentityID,
         groupId: Data,
-        createdAt: Date
+        createdAt: Date,
+        label: String? = nil,
+        isLegacy: Bool = false
     ) {
         precondition(introPublicKey.count == 32,
                      "introPublicKey: expected 32 bytes, got \(introPublicKey.count)")
@@ -43,5 +58,13 @@ public struct IntroKeyEntry: Equatable, Sendable {
         self.ownerIdentityID = ownerIdentityID
         self.groupId = groupId
         self.createdAt = createdAt
+        self.label = label
+        self.isLegacy = isLegacy
+    }
+
+    /// First 4 bytes of the inbox key — same fingerprint shape the
+    /// approval screen shows.
+    static func fingerprint(of inboxPublicKey: Data) -> String {
+        inboxPublicKey.prefix(4).map { String(format: "%02x", $0) }.joined()
     }
 }

@@ -22,26 +22,18 @@ public actor KeychainIntroKeyStore: IntroKeyStore {
     public static let serviceDefault = "app.onym.ios.intro_keys"
     public static let account = "blob"
 
-    /// How long an invite link is honored after minting. 24 hours per
-    /// issue onymchat/onym-ios#111 (shrink the leak window of a
-    /// forwarded or screenshotted link) — matches onym-android's
-    /// `IntroKeyEntry.LIFETIME_MILLIS`. Expired entries are invisible
-    /// to `find`/`listForOwner`/streams (so the intro pump stops
-    /// subscribing their inboxes, which each cost a relay REQ slot)
-    /// and are compacted out of the blob by the load that first sees
-    /// them expired.
-    public static let entryTTL: TimeInterval = 24 * 60 * 60
+    // No entry TTL. Links are retired by `revoke` alone — from the
+    // share screen's per-row Revoke or "Generate new link" — so a QR
+    // shared yesterday still works today. This deliberately reverses
+    // the 24h expiry of issue onymchat/onym-ios#111, and diverges from
+    // onym-android's `IntroKeyEntry.LIFETIME_MILLIS`, which still
+    // expires after 24h.
 
     private let service: String
     /// Per-owner subscriber continuations. Mutations re-emit the
     /// filtered+sorted snapshot to every subscriber whose owner
     /// matches.
     private var continuations: [IdentityID: [UUID: AsyncStream<[IntroKeyEntry]>.Continuation]] = [:]
-    /// Reentrancy latch: `loadAll()` publishes when it compacts, and
-    /// `publish` itself calls `loadAll()` — the latch stops that inner
-    /// load from re-entering the compaction path.
-    private var compacting = false
-
     public init(testNamespace: String? = nil) {
         if let testNamespace, !testNamespace.isEmpty {
             self.service = "\(Self.serviceDefault).\(testNamespace)"
@@ -86,6 +78,10 @@ public actor KeychainIntroKeyStore: IntroKeyStore {
     }
 
     @discardableResult
+    public func allLivePublicKeys() async -> Set<Data> {
+        Set(loadAll().compactMap { $0.toEntry()?.introPublicKey })
+    }
+
     public func deleteForOwner(_ ownerIdentityID: IdentityID) async -> Int {
         var current = loadAll()
         let before = current.count
@@ -171,34 +167,9 @@ public actor KeychainIntroKeyStore: IntroKeyStore {
         var result: AnyObject?
         let status = SecItemCopyMatching(q as CFDictionary, &result)
         guard status == errSecSuccess, let data = result as? Data else { return [] }
-        // Corrupted blob → discard rather than crash. Acceptable
-        // because this store holds ephemeral per-invite keys; if we
-        // lose them, the worst that happens is in-flight invites
-        // fail to deliver and the inviter re-shares.
-        let entries = (try? JSONDecoder().decode(StoredIntroKeysBlob.self, from: data))?.entries ?? []
-        // TTL filter at the single load point so expired entries are
-        // invisible to every reader.
-        let cutoff = Int64((Date().timeIntervalSince1970 - Self.entryTTL) * 1000)
-        let live = entries.filter { $0.createdAtMillis > cutoff }
-        // Compact immediately: expired rows carry intro PRIVATE keys,
-        // and a read-only workload would otherwise leave them at rest
-        // indefinitely waiting for a mutation to rewrite the blob.
-        // Publish for the expired entries' owners so a live session's
-        // intro pump drops their relay REQ slots too — but note this
-        // still only runs when *something* touches the store; a fully
-        // quiet session keeps its slots until the next access or
-        // launch.
-        if live.count != entries.count, !compacting {
-            compacting = true
-            writeAll(live)
-            let expiredOwners = Set(
-                entries.filter { $0.createdAtMillis <= cutoff }
-                    .compactMap { IdentityID($0.ownerIdentityID) }
-            )
-            for owner in expiredOwners { publish(forOwner: owner) }
-            compacting = false
-        }
-        return live
+        // Corrupted blob → discard; the inviter re-shares. No
+        // time-based filter: entries live until revoked.
+        return (try? JSONDecoder().decode(StoredIntroKeysBlob.self, from: data))?.entries ?? []
     }
 
     private func writeAll(_ entries: [StoredIntroKey]) {
@@ -237,6 +208,17 @@ private struct StoredIntroKey: Codable {
     let ownerIdentityID: String
     let groupId: Data
     let createdAtMillis: Int64
+    /// MUST stay optional: the decode is `(try? …) ?? []`, so a
+    /// required field would wipe every existing invite on upgrade.
+    let label: String?
+    /// Absent on rows written before labels existed. Optional so the
+    /// `(try? …) ?? []` decode can't wipe every stored invite on
+    /// upgrade, and so its absence is exactly the legacy signal.
+    let labelVersion: Int?
+
+    /// Bumped only if the meaning of `label` changes; its presence is
+    /// what marks a row as written by a label-aware build.
+    static let currentLabelVersion = 1
 
     enum CodingKeys: String, CodingKey {
         case introPub = "intro_pub"
@@ -244,6 +226,8 @@ private struct StoredIntroKey: Codable {
         case ownerIdentityID = "owner_identity_id"
         case groupId = "group_id"
         case createdAtMillis = "created_at_millis"
+        case label
+        case labelVersion = "label_version"
     }
 
     init(from entry: IntroKeyEntry) {
@@ -252,6 +236,10 @@ private struct StoredIntroKey: Codable {
         self.ownerIdentityID = entry.ownerIdentityID.rawValue.uuidString
         self.groupId = entry.groupId
         self.createdAtMillis = Int64(entry.createdAt.timeIntervalSince1970 * 1000)
+        self.label = entry.label
+        // Stamped on every write, so a row without it is one this
+        // build never wrote — i.e. from before labels existed.
+        self.labelVersion = StoredIntroKey.currentLabelVersion
     }
 
     func toEntry() -> IntroKeyEntry? {
@@ -263,7 +251,9 @@ private struct StoredIntroKey: Codable {
             introPrivateKey: introPriv,
             ownerIdentityID: owner,
             groupId: groupId,
-            createdAt: Date(timeIntervalSince1970: TimeInterval(createdAtMillis) / 1000)
+            createdAt: Date(timeIntervalSince1970: TimeInterval(createdAtMillis) / 1000),
+            label: label,
+            isLegacy: labelVersion == nil
         )
     }
 }

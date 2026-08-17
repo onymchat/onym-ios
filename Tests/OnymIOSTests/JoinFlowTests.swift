@@ -104,7 +104,10 @@ final class JoinFlowTests: XCTestCase {
 
     private func harness(
         outcome: JoinRequestSender.Outcome,
-        seedGroups: [ChatGroup] = []
+        seedGroups: [ChatGroup] = [],
+        // Nil by default so the suite keeps observing
+        // `.awaitingApproval`; the timer has its own tests.
+        unansweredAfter: Duration? = nil
     ) async throws -> Env {
         let store = JoinTestableInMemoryGroupStore()
         await store.preload(seedGroups)
@@ -118,9 +121,23 @@ final class JoinFlowTests: XCTestCase {
                 counter.bump()
                 return outcome
             },
-            groupRepository: repo
+            groupRepository: repo,
+            unansweredAfter: unansweredAfter
         )
         return Env(flow: flow, repo: repo, counter: counter)
+    }
+
+    func test_unanswered_allowsResend_soItIsNotADeadEnd() async throws {
+        let env = try await harness(outcome: .sent, unansweredAfter: .milliseconds(50))
+        env.flow.send(displayLabel: "alice")
+        try await waitFor { env.flow.state.isUnanswered }
+
+        // Without this, the copy's "ask for a new link" is the only
+        // exit and the Try again button does nothing.
+        env.flow.send(displayLabel: "alice")
+
+        try await waitFor { env.flow.state.isAwaitingApproval }
+        XCTAssertEqual(env.counter.value, 2, "the retry must actually re-submit")
     }
 
     // MARK: - Helpers
@@ -161,6 +178,43 @@ final class JoinFlowTests: XCTestCase {
         XCTFail("waitFor predicate never became true within \(timeout)s",
                 file: file, line: line)
     }
+
+    // MARK: - unanswered
+
+    func test_awaitingApproval_afterTheTimeout_flipsToUnanswered() async throws {
+        let env = try await harness(outcome: .sent, unansweredAfter: .milliseconds(50))
+
+        env.flow.send(displayLabel: "alice")
+
+        // A revoked link is indistinguishable from a slow host here, so
+        // the joiner gets told rather than left on an endless spinner.
+        try await waitFor { env.flow.state.isUnanswered }
+    }
+
+    func test_approvalArrivingAfterTheTimeout_stillWins() async throws {
+        let env = try await harness(outcome: .sent, unansweredAfter: .milliseconds(50))
+        env.flow.send(displayLabel: "alice")
+        try await waitFor { env.flow.state.isUnanswered }
+
+        // The watcher stays live past the timeout — `.unanswered` is a
+        // hint, not a terminal state.
+        _ = await env.repo.insert(makeGroup(groupID: groupIdRaw, owner: alice))
+
+        try await waitFor {
+            if case .approved = env.flow.state { return true }
+            return false
+        }
+    }
+
+    func test_unansweredAfterNil_neverLeavesAwaitingApproval() async throws {
+        let env = try await harness(outcome: .sent, unansweredAfter: nil)
+
+        env.flow.send(displayLabel: "alice")
+        try await waitFor { env.flow.state.isAwaitingApproval }
+        try? await Task.sleep(for: .milliseconds(150))
+
+        XCTAssertTrue(env.flow.state.isAwaitingApproval)
+    }
 }
 
 // MARK: - State helpers
@@ -173,6 +227,9 @@ private extension JoinFlow.State {
     }
     var isApproved: Bool { if case .approved = self { return true } else { return false } }
     var isFailed: Bool { if case .failed = self { return true } else { return false } }
+    var isUnanswered: Bool {
+        if case .unanswered = self { return true } else { return false }
+    }
 }
 
 // MARK: - Test doubles

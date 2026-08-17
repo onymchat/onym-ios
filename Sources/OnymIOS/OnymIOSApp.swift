@@ -678,8 +678,15 @@ struct OnymIOSApp: App {
         // approve…". Falls back to the in-memory store if the on-disk
         // container can't be opened, so a storage failure degrades to
         // the old behaviour instead of blocking launch.
+        //
+        // Both stores tombstone handled ids in the same durable log: a
+        // multi-use link keeps its relay subscription for good, and the
+        // REQ carries no `since`, so every reconnect replays requests
+        // that were already acted on. The fallback needs it too — its
+        // rows are gone after a restart, so the tombstones are all that
+        // stop the replay refilling the queue.
         self.introRequestStore = (try? SwiftDataIntroRequestStore())
-            ?? InMemoryIntroRequestStore()
+            ?? InMemoryIntroRequestStore(handledLog: UserDefaultsHandledIntroRequestLog())
 
         // Single shared IdentitiesFlow so the toolbar picker on Chats
         // and the Settings → Identities screen observe the same state.
@@ -1565,7 +1572,52 @@ struct OnymIOSApp: App {
                             continue
                         }
                         let entries = introKeyStore.entriesStream(forOwner: activeID)
-                        currentTask = Task { await pump.run(entries: entries) }
+                        let store = introRequestStore
+                        // Tee the same snapshots the pump reconciles on,
+                        // so a retired link's tombstones go with it.
+                        let (forPump, pumpFeed) = AsyncStream.makeStream(of: [IntroKeyEntry].self)
+                        // One owner-agnostic reconcile per subscribe.
+                        // The diff below only sees retirements that
+                        // happen while this identity is subscribed —
+                        // links retired with the app closed, or under
+                        // another identity, would otherwise linger until
+                        // `maxEntries` evicted them oldest-first, which
+                        // can drop a LIVE link's tombstone and bring a
+                        // handled request back as pending.
+                        let keyStore = introKeyStore
+                        Task {
+                            await store.reconcileTombstones(
+                                livePublicKeys: await keyStore.allLivePublicKeys()
+                            )
+                        }
+                        let tee = Task {
+                            // The diff is taken over EVERY owner's keys,
+                            // never the per-identity snapshot this stream
+                            // carries. "Absent from an owner-scoped
+                            // snapshot" is not "retired": it is also what
+                            // an identity switch, or a keychain read that
+                            // fails closed, looks like — and treating it
+                            // as retirement deletes the other identity's
+                            // tombstones, replaying their handled joiners
+                            // as pending. That is precisely the wipe
+                            // `retiring:` was phrased to make
+                            // inexpressible, so the phrasing has to be
+                            // fed the right set.
+                            var live: Set<Data> = []
+                            for await snapshot in entries {
+                                let current = await keyStore.allLivePublicKeys()
+                                await store.pruneTombstones(
+                                    retiring: live.subtracting(current)
+                                )
+                                live = current
+                                pumpFeed.yield(snapshot)
+                            }
+                            pumpFeed.finish()
+                        }
+                        currentTask = Task {
+                            defer { tee.cancel() }
+                            await pump.run(entries: forPump)
+                        }
                     }
                     currentTask?.cancel()
                 }
