@@ -49,6 +49,13 @@ public enum BackupError: Error, Equatable, Sendable {
     /// Held once; no longer held.
     case retentionExpired
     /// Erasure acknowledged, completion pending. Not destruction.
+    ///
+    /// Never an operator response: erase always returns a receipt, and a
+    /// receipt is always an acknowledgment. This is *derived* locally by
+    /// comparing the receipt's `completionCommittedBy` against the clock,
+    /// so an operator that misses its own committed deadline is caught
+    /// from the receipt we already hold rather than from a status code it
+    /// would have to volunteer against its own interest.
     case erasureUnconfirmed(receipt: ErasureReceipt?)
     /// The operator withheld export. **Non-conforming** — see the note above.
     case exportWithheld
