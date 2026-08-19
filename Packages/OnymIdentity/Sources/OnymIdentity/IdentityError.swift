@@ -10,6 +10,17 @@ public enum IdentityError: Error, Equatable {
     /// No stored identity's Stellar public key matches the requested
     /// hex — it was removed, or quarantined by a fresh-install verdict.
     case noIdentityForKey(String)
+    /// This identity was imported from raw key material, so it has no
+    /// BIP39 seed and nothing can be derived from one for it. Callers
+    /// that need a seed-scoped key must refuse rather than substitute:
+    /// a key derived from something else could not be recovered from the
+    /// recovery phrase, which is the only reason the key exists.
+    case noRecoveryPhrase
+    /// A seed-scoped derivation was asked for under an `info` outside the
+    /// permitted prefixes. The salt is shared with the identity keys, so
+    /// an unrestricted `info` would return those keys verbatim — this is
+    /// the guard that stops the accessor being a seed oracle.
+    case seedScopeNotPermitted(info: String)
     case sdkFailure(String)
 }
 
@@ -30,6 +41,10 @@ extension IdentityError: LocalizedError {
             return "No identity is loaded — bootstrap or restore first"
         case let .noIdentityForKey(hex):
             return "No stored identity has the public key \(hex)"
+        case .noRecoveryPhrase:
+            return "This identity has no recovery phrase, so no seed-derived key exists for it"
+        case let .seedScopeNotPermitted(info):
+            return "Seed-scoped derivation refused for \"\(info)\""
         case let .sdkFailure(message):
             return "OnymSDK call failed: \(message)"
         }
