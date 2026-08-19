@@ -77,10 +77,10 @@ public enum BackupOpener {
 
         let key = BackupKeys.snapshotKey(archiveRoot: archiveRoot, snapshotSalt: Data(salt))
 
-        FileManager.default.createFile(atPath: plaintextURL.path, contents: nil)
-        try (plaintextURL as NSURL).setResourceValue(
-            URLFileProtection.complete,
-            forKey: .fileProtectionKey
+        FileManager.default.createFile(
+            atPath: plaintextURL.path,
+            contents: nil,
+            attributes: [.protectionKey: FileProtectionType.complete]
         )
         let output = try FileHandle(forWritingTo: plaintextURL)
         defer { try? output.close() }

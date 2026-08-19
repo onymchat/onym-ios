@@ -72,10 +72,10 @@ public final class BackupArchiveWriter {
 
     public init(scratchURL: URL) throws {
         self.scratchURL = scratchURL
-        FileManager.default.createFile(atPath: scratchURL.path, contents: nil)
-        try (scratchURL as NSURL).setResourceValue(
-            URLFileProtection.complete,
-            forKey: .fileProtectionKey
+        FileManager.default.createFile(
+            atPath: scratchURL.path,
+            contents: nil,
+            attributes: [.protectionKey: FileProtectionType.complete]
         )
         self.handle = try FileHandle(forWritingTo: scratchURL)
     }
@@ -130,8 +130,11 @@ public final class BackupArchiveWriter {
         encoder.dateEncodingStrategy = .iso8601
         let headerJSON = try encoder.encode(header)
 
-        FileManager.default.createFile(atPath: url.path, contents: nil)
-        try (url as NSURL).setResourceValue(URLFileProtection.complete, forKey: .fileProtectionKey)
+        FileManager.default.createFile(
+            atPath: url.path,
+            contents: nil,
+            attributes: [.protectionKey: FileProtectionType.complete]
+        )
         let output = try FileHandle(forWritingTo: url)
         defer { try? output.close() }
 
