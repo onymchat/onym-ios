@@ -36,13 +36,23 @@ public enum BackupError: Error, Equatable, Sendable {
     /// The operator requires a valid entitlement for this operation.
     case paymentRequired(componentId: String, offerIds: [String], entitlementIssuers: [String])
     /// An entitlement was presented and refused. Refresh without leaking
-    /// another credential to this operator.
-    case invalidEntitlement
+    /// another credential to this operator — the issuers it names are the
+    /// ones *this* operator accepts, and they go nowhere else.
+    case invalidEntitlement(entitlementIssuers: [String])
     /// Exceeds the operator's declared maximum sealed snapshot size.
     case snapshotTooLarge(maximumSealedSnapshotBytes: Int?)
     /// Retained count or byte limit reached. The operator reports it and
     /// must not silently drop an older snapshot to make room.
-    case quotaExceeded(retainedSnapshots: Int?, maximumRetainedSnapshots: Int?)
+    ///
+    /// All four figures are the operator's own claims about its own state,
+    /// carried so a person can be shown what is full rather than only that
+    /// something is.
+    case quotaExceeded(
+        retainedSnapshots: Int?,
+        maximumRetainedSnapshots: Int?,
+        retainedBytes: Int?,
+        limitBytes: Int?
+    )
     /// Bytes received do not compose the reference claimed. Never merged,
     /// never partially restored.
     case incompleteSnapshot
