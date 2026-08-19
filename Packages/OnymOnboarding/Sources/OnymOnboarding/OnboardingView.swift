@@ -54,8 +54,8 @@ public struct OnboardingView: View {
     private func scaffold(for step: OnboardingStep) -> some View {
         OnboardingStepScaffold(
             step: step,
-            title: Self.title(for: step),
-            subtitle: Self.subtitle(for: step),
+            title: Self.title(for: step, restoring: flow.identityOrigin == .restored),
+            subtitle: Self.subtitle(for: step, restoring: flow.identityOrigin == .restored),
             primaryTitle: Self.primaryTitle(for: step),
             // Outcome-gated steps render their primary disabled until
             // the step content records one (moderation's consent, the
@@ -113,10 +113,13 @@ public struct OnboardingView: View {
 
     // MARK: - Copy
 
-    static func title(for step: OnboardingStep) -> String {
+    static func title(for step: OnboardingStep, restoring: Bool = false) -> String {
         switch step {
         case .welcome: return String(localized: "Onym")
-        case .identity: return String(localized: "Making your keys")
+        case .identity:
+            return restoring
+                ? String(localized: "Restoring your identity")
+                : String(localized: "Making your keys")
         case .services: return String(localized: "Your services")
         case .moderation: return String(localized: "Reports & safety")
         case .recoveryPhrase: return String(localized: "Save your recovery phrase")
@@ -124,20 +127,26 @@ public struct OnboardingView: View {
         }
     }
 
-    static func subtitle(for step: OnboardingStep) -> String? {
+    static func subtitle(for step: OnboardingStep, restoring: Bool = false) -> String? {
         switch step {
         case .welcome:
             return String(localized: "Messaging that answers to you — not to a company.")
         case .identity:
-            return String(localized: "This takes a second. Everything happens on your iPhone — nothing has been sent anywhere yet.")
+            return String(localized: "This takes a second, and it happens only on this iPhone. Nothing is sent anywhere — there's nowhere to send it to yet.")
         case .services:
-            return String(localized: "Onym runs on independent services for delivery, files and timestamps. Start with a set that works, or pick your own.")
+            return String(localized: "No homeserver to pick. Just independent services for delivery, files and timestamps — split up on purpose, so no single one holds the whole picture.")
         case .moderation:
             return String(localized: "If someone reports illegal content, an authority you choose reviews the report. Pick one to continue — you'll see exactly what it can do before you agree.")
         case .recoveryPhrase:
-            return String(localized: "These 12 words are the only way back into your account if you lose this iPhone. Onym cannot reset them for you.")
+            // Word count varies (12 or 24) for a restored phrase, and a
+            // restored phrase is the one the user just typed in — not
+            // new information the step is revealing to them for the
+            // first time.
+            return restoring
+                ? String(localized: "This is the phrase you just entered. Lose this iPhone without a copy of it, and even Onym can't get you back in.")
+                : String(localized: "These 12 words ARE your identity. Lose this iPhone without them, and even Onym can't get you back in.")
         case .done:
-            return String(localized: "Your identity is on this device and your services are connected.")
+            return String(localized: "Your identity lives on this device. No account, no admin, no company holds it but you.")
         }
     }
 

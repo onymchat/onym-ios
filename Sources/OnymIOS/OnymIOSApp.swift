@@ -1009,6 +1009,22 @@ struct OnymIOSApp: App {
                 identityReady: { @MainActor in
                     (try? await repository.bootstrap()) != nil
                 },
+                // The welcome step's "I have a recovery phrase" path —
+                // same `restore(mnemonic:)` the recovery-phrase backup
+                // flow's semantics rest on, replacing whatever identity
+                // the WindowGroup task already minted.
+                identityRestore: { @MainActor mnemonic in
+                    try await repository.restore(mnemonic: mnemonic)
+                },
+                // `restore(mnemonic:)` wipes every existing identity —
+                // correct on a genuine fresh install (nothing else is
+                // there to lose), destructive on a Settings → Restart
+                // Onboarding walk, which keeps identity/chats/messages
+                // by design (`OnboardingRestartController`). Reuse the
+                // SAME existing-user read the cold-boot gate answers
+                // with, so the affordance can only ever appear where
+                // that promise actually holds.
+                identityRestoreAllowed: !OnboardingLaunch.isExistingUser(),
                 loadSummary: { @MainActor in
                     // The Done step's summary is read from the
                     // repositories, not the walk's outcomes — what the
