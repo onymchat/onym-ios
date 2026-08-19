@@ -1,4 +1,5 @@
 import Foundation
+import OnymFoundation
 
 /// The declared policy this seat exists to make legible: how long a
 /// snapshot is kept, where, under whose law, erased how, exported how, and
@@ -86,9 +87,21 @@ public struct BackupTerms: Sendable, Equatable {
         public let afterGrace: String
     }
 
+    /// What the operator declares it keeps, and for how long.
+    ///
+    /// Six fields for five record classes: `accessLogs` declares an
+    /// *absence* under this profile — its only conforming value is
+    /// `none` — and the other five name the records the profile's own
+    /// operations require an operator to hold. A declaration that omits
+    /// one is understating, which is the failure the field exists to
+    /// prevent.
     public struct MetadataRetention: Sendable, Equatable {
         public let accessLogs: String
         public let sizeAndTiming: String
+        public let holderIdentifiers: String
+        public let operationOutcomes: String
+        public let erasureReceipts: String
+        public let entitlementRecords: String
     }
 }
 
@@ -131,10 +144,15 @@ extension BackupTerms {
         let jurisdictions = (object["jurisdictions"] as? [String]) ?? []
         guard !jurisdictions.isEmpty else { throw BackupError.termsUnavailable }
 
-        let subProcessors = ((object["subProcessors"] as? [[String: Any]]) ?? []).map {
+        // Fail closed like every other field: a sub-processor whose role
+        // or jurisdiction is missing or not a string is a malformed
+        // disclosure, and coercing it to "" would pin a snapshot against
+        // terms naming a processor in the empty jurisdiction — a
+        // comparison that then passes forever.
+        let subProcessors = try ((object["subProcessors"] as? [[String: Any]]) ?? []).map {
             SubProcessor(
-                role: ($0["role"] as? String) ?? "",
-                jurisdiction: ($0["jurisdiction"] as? String) ?? ""
+                role: try string($0, "role"),
+                jurisdiction: try string($0, "jurisdiction")
             )
         }
 
@@ -177,7 +195,11 @@ extension BackupTerms {
             ),
             metadataRetention: MetadataRetention(
                 accessLogs: try string(metadataObject, "accessLogs"),
-                sizeAndTiming: try string(metadataObject, "sizeAndTiming")
+                sizeAndTiming: try string(metadataObject, "sizeAndTiming"),
+                holderIdentifiers: try string(metadataObject, "holderIdentifiers"),
+                operationOutcomes: try string(metadataObject, "operationOutcomes"),
+                erasureReceipts: try string(metadataObject, "erasureReceipts"),
+                entitlementRecords: try string(metadataObject, "entitlementRecords")
             ),
             rawBytes: raw,
             signature: signature
@@ -186,17 +208,26 @@ extension BackupTerms {
     }
 
     /// `sha256:<hex>` over the document with `termsId` and `signature`
-    /// removed **structurally** — never by string editing, which would
-    /// depend on the operator's whitespace.
+    /// removed, in the canonical form the profile pins.
+    ///
+    /// This must be the *same* canonicalization the operator used, or an
+    /// honest operator's `declaredTermsDigest` will not match what we
+    /// compute and enrolment fails for no reason either side can see. So
+    /// it goes through `ServiceManifestCanonical`, the one serializer in
+    /// this codebase that implements the pinned rules: keys sorted by
+    /// **UTF-8 byte order** (not Foundation's `.sortedKeys`, which is a
+    /// different order and the exact trap the profile's §6.3 warns
+    /// about), floats refused rather than rendered, and one fixed
+    /// escaping set.
+    ///
+    /// Re-serializing with `JSONSerialization` instead would be
+    /// plausible and wrong: a round trip normalizes number formatting
+    /// and escaping in ways that are stable for us and need not match a
+    /// conforming operator computing the digest properly.
     static func canonicalTermsId(raw: Data) throws -> String {
-        guard var object = try? JSONSerialization.jsonObject(with: raw) as? [String: Any] else {
-            throw BackupError.termsUnavailable
-        }
-        object.removeValue(forKey: "termsId")
-        object.removeValue(forKey: "signature")
-        guard let canonical = try? JSONSerialization.data(
-            withJSONObject: object,
-            options: [.sortedKeys, .withoutEscapingSlashes]
+        guard let canonical = try? ServiceManifestCanonical.signingBytes(
+            of: raw,
+            omitting: ["termsId", "signature"]
         ) else {
             throw BackupError.termsUnavailable
         }
@@ -225,6 +256,19 @@ extension BackupTerms {
         if retention.expiryBehavior != pinned.retention.expiryBehavior {
             return "retention.expiryBehavior"
         }
+        // `measurable` -> `best-effort` is a downgrade of what the
+        // operator claims it can be held to, and the class values are a
+        // small vocabulary this layer should not rank: any change is a
+        // regression, same as the free-text fields below.
+        if retention.retentionClass != pinned.retention.retentionClass {
+            return "retention.retentionClass"
+        }
+        // A cut in how many snapshots are kept destroys history the
+        // person is already relying on. Free text ("3", "latest only",
+        // "all"), so any change requires fresh consent.
+        if retention.snapshotsRetained != pinned.retention.snapshotsRetained {
+            return "retention.snapshotsRetained"
+        }
         // Erasure may not become slower or narrower.
         if longer(erasure.acknowledgementDeadline, than: pinned.erasure.acknowledgementDeadline) {
             return "erasure.acknowledgementDeadline"
@@ -248,6 +292,12 @@ extension BackupTerms {
         if pinned.lawfulAccess.notifyHolderWhenPermitted && !lawfulAccess.notifyHolderWhenPermitted {
             return "lawfulAccess.notifyHolderWhenPermitted"
         }
+        // Dropping a declared transparency cadence, or changing it at
+        // all, removes a commitment the person weighed at enrolment.
+        // Optional, so nil-to-nil is fine and anything else is not.
+        if lawfulAccess.transparencyReporting != pinned.lawfulAccess.transparencyReporting {
+            return "lawfulAccess.transparencyReporting"
+        }
         if longer(breachHolderNotice, than: pinned.breachHolderNotice) {
             return "breachDisclosure.holderNotice"
         }
@@ -270,12 +320,18 @@ extension BackupTerms {
         if endOfPayment.afterGrace != pinned.endOfPayment.afterGrace {
             return "endOfPayment.afterGrace"
         }
-        // Metadata may not be kept longer.
-        if longer(metadataRetention.accessLogs, than: pinned.metadataRetention.accessLogs) {
-            return "metadataRetention.accessLogs"
-        }
-        if longer(metadataRetention.sizeAndTiming, than: pinned.metadataRetention.sizeAndTiming) {
-            return "metadataRetention.sizeAndTiming"
+        // Metadata may not be kept longer — every declared class, or the
+        // check only covers the two the schema happened to start with.
+        let metadataAxes: [(String, String, String)] = [
+            ("accessLogs", metadataRetention.accessLogs, pinned.metadataRetention.accessLogs),
+            ("sizeAndTiming", metadataRetention.sizeAndTiming, pinned.metadataRetention.sizeAndTiming),
+            ("holderIdentifiers", metadataRetention.holderIdentifiers, pinned.metadataRetention.holderIdentifiers),
+            ("operationOutcomes", metadataRetention.operationOutcomes, pinned.metadataRetention.operationOutcomes),
+            ("erasureReceipts", metadataRetention.erasureReceipts, pinned.metadataRetention.erasureReceipts),
+            ("entitlementRecords", metadataRetention.entitlementRecords, pinned.metadataRetention.entitlementRecords),
+        ]
+        for (name, candidate, pinnedValue) in metadataAxes where longer(candidate, than: pinnedValue) {
+            return "metadataRetention.\(name)"
         }
         return nil
     }
@@ -313,8 +369,15 @@ extension BackupTerms {
 /// refusing to compare `P1M` against `P30D` at all.
 enum BackupDuration {
     static let untilErased = "until-erased"
+    /// Declared absence. The object-HTTP profile requires `accessLogs:
+    /// "none"`, and a declaration of nothing is a real, comparable
+    /// window of length zero — without this, moving from a 30-day log to
+    /// no log at all would read as an unparseable value and be refused
+    /// as a regression, which is backwards.
+    static let none = "none"
 
     static func seconds(_ value: String) -> TimeInterval? {
+        if value == none { return 0 }
         guard value.hasPrefix("P") else { return nil }
         var total: TimeInterval = 0
         var number = ""

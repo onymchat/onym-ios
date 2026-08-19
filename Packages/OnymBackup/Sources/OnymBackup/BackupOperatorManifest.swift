@@ -16,8 +16,12 @@ public struct BackupOperatorManifest: Sendable, Equatable {
     public let backupProfileId: String
     public let implementationProfileId: String
     /// Read-write HTTPS origin. Exactly one is supported today; a manifest
-    /// offering several is not an error, but we bind to the first
-    /// read-write entry and stay bound to it for the whole operation.
+    /// offering several is not an error. We bind to the first read-write
+    /// entry that is *usable* — https, with a host — skipping malformed
+    /// ones rather than failing the manifest, and stay bound to it for
+    /// the whole operation. A manifest whose read-write entries are all
+    /// malformed is `invalidEndpoint`; we never rewrite one into
+    /// something that works.
     public let endpoint: URL
     public let capabilities: Set<String>
     public let maximumSealedSnapshotBytes: Int?
@@ -96,11 +100,17 @@ public struct BackupOperatorManifest: Sendable, Equatable {
     public var requiresEntitlement: Bool { !entitlementIssuers.isEmpty }
 
     /// Where this operator's content-addressed terms live.
+    ///
+    /// Requires a full `sha256:<64 hex>` digest rather than any hex
+    /// string: this builds a URL we then fetch, and a short or
+    /// over-long component would send a request for something that is
+    /// not a terms document at all.
     public func termsURL(digest: String) -> URL? {
-        let hex = digest.hasPrefix(BackupFormat.digestPrefix)
-            ? String(digest.dropFirst(BackupFormat.digestPrefix.count))
-            : digest
-        guard BackupFormat.isLowercaseHex(hex) else { return nil }
+        let prefixed = digest.hasPrefix(BackupFormat.digestPrefix)
+            ? digest
+            : BackupFormat.digestPrefix + digest
+        guard BackupFormat.isDigest(prefixed) else { return nil }
+        let hex = String(prefixed.dropFirst(BackupFormat.digestPrefix.count))
         return endpoint.appending(path: "terms").appending(path: "\(hex).json")
     }
 

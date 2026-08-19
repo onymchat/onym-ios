@@ -161,6 +161,24 @@ public struct SignedServiceManifest: Sendable, Equatable {
 public enum ServiceManifestCanonical {
     /// The bytes a manifest's embedded Ed25519 signature is made over.
     public static func signingBytes(of raw: Data) throws -> Data {
+        try signingBytes(of: raw, omitting: ["signature"])
+    }
+
+    /// The same canonical form over a document that carries more than
+    /// one self-referential field.
+    ///
+    /// A service manifest omits only `signature`. Other signed documents
+    /// in this system also carry their own content address — a backup
+    /// terms document has both `termsId` and `signature` — and neither
+    /// can be inside the bytes it addresses. The canonical form is
+    /// otherwise identical, and it has to be: two documents signed under
+    /// two different serializers cannot be checked against each other,
+    /// which is the entire property this type exists to provide.
+    ///
+    /// Fields are removed **structurally**, after parsing — never by
+    /// editing the raw text, which would depend on the publisher's
+    /// whitespace.
+    public static func signingBytes(of raw: Data, omitting fields: Set<String>) throws -> Data {
         let parsed: Any
         do {
             parsed = try JSONSerialization.jsonObject(with: raw)
@@ -170,7 +188,9 @@ public enum ServiceManifestCanonical {
         guard var object = parsed as? [String: Any] else {
             throw ServiceManifestError.manifestInvalid(reason: "top level is not a JSON object")
         }
-        object.removeValue(forKey: "signature")
+        for field in fields {
+            object.removeValue(forKey: field)
+        }
         var out = ""
         try serialize(object, at: "", into: &out)
         return Data(out.utf8)

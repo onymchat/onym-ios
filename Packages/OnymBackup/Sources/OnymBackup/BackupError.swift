@@ -126,9 +126,18 @@ extension BackupError {
     /// same operation id (`UI-Backup-Object-HTTP.md` §10.2). `termsChanged`
     /// is not, because a retry would upload under terms nobody consented
     /// to.
+    ///
+    /// `accessRefused` is deliberately absent. A refused proof is usually
+    /// a wrong key or a wrong signed byte string, and those fail
+    /// identically forever — an automatic retry would loop against an
+    /// operator that has already said no. The recoverable slice is
+    /// narrow (a clock far enough out that every timestamp reads as
+    /// stale) and does not belong behind a blanket property: it needs a
+    /// bounded, deliberate re-attempt with a freshly minted proof, which
+    /// is a decision for the repository driving the queue.
     public var isRetriable: Bool {
         switch self {
-        case .operatorUnavailable, .paymentRequired, .accessRefused:
+        case .operatorUnavailable, .paymentRequired:
             true
         default:
             false

@@ -13,8 +13,14 @@ import Foundation
 enum BackupFormat {
     static let digestPrefix = "sha256:"
 
+    /// ASCII `0-9a-f` only.
+    ///
+    /// `Character.isNumber` is true for Arabic-Indic digits, fullwidth
+    /// digits, and vulgar fractions, so the obvious spelling of this
+    /// accepts a 64-character "digest" made of `٣` — precisely the value
+    /// that merely looks plausible and must never reach a comparison.
     static func isLowercaseHex(_ value: String) -> Bool {
-        !value.isEmpty && value.allSatisfy { $0.isNumber || ("a"..."f").contains($0) }
+        !value.isEmpty && value.allSatisfy { $0.isASCII && $0.isHexDigit && !$0.isUppercase }
     }
 
     /// `sha256:<64 lowercase hex>` over `data`, matching
