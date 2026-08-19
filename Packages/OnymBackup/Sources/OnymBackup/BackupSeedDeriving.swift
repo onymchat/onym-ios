@@ -40,14 +40,19 @@ extension BackupKeys {
         let agreement = try await derivator.deriveSeedScopedKey(
             info: agreementInfo(componentId: componentId, rotation: rotation)
         )
+        // The 32-byte contract is documentation, and a conformer is
+        // code we do not own. Force-unwrapping here would turn someone
+        // else's bug into our crash, so it is checked.
+        guard archive.count == 32, signing.count == 32, agreement.count == 32,
+              let signingKey = try? Curve25519.Signing.PrivateKey(rawRepresentation: signing),
+              let agreementKey = try? Curve25519.KeyAgreement.PrivateKey(rawRepresentation: agreement)
+        else {
+            throw BackupError.localFailure(reason: .keyMaterialInvalid)
+        }
         return BackupKeyMaterial(
             archiveRoot: SymmetricKey(data: archive),
-            // Both initializers can only fail on a wrong byte count, and
-            // the contract above is 32 bytes.
-            // swiftlint:disable:next force_try
-            accessSigningKey: try! Curve25519.Signing.PrivateKey(rawRepresentation: signing),
-            // swiftlint:disable:next force_try
-            accessAgreementKey: try! Curve25519.KeyAgreement.PrivateKey(rawRepresentation: agreement),
+            accessSigningKey: signingKey,
+            accessAgreementKey: agreementKey,
             rotation: rotation
         )
     }

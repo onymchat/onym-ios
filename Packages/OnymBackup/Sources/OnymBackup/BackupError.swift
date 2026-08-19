@@ -90,6 +90,14 @@ public enum BackupError: Error, Equatable, Sendable {
         /// forbids. Should be unreachable by construction; if it ever
         /// fires, it is a bug worth failing loudly for.
         case ineligibleContent
+        /// A `BackupSeedDeriving` conformer returned something other
+        /// than the 32 bytes its contract promises. Someone else's bug,
+        /// surfaced as an error rather than as our crash.
+        case keyMaterialInvalid
+        /// An archive writer was finished twice, or written to after
+        /// finishing. A programming error, named so it does not
+        /// masquerade as a corrupt archive.
+        case archiveWriterFinished
     }
 }
 

@@ -54,13 +54,28 @@ public enum BackupAccessProof {
     }
 
     /// Sign a request. Returns the header set to send with it.
+    ///
+    /// The nonce is not injectable from outside the package for the same
+    /// reason the snapshot salt is not: a reused nonce turns a
+    /// single-use proof into a replayable one. Fixtures that need a
+    /// fixed value use the internal overload.
     public static func headers(
         method: String,
         path: String,
         body: Data,
         material: BackupKeyMaterial,
+        now: Date = Date()
+    ) throws -> [String: String] {
+        try headers(method: method, path: path, body: body, material: material, now: now, nonce: nil)
+    }
+
+    static func headers(
+        method: String,
+        path: String,
+        body: Data,
+        material: BackupKeyMaterial,
         now: Date = Date(),
-        nonce: Data? = nil
+        nonce: Data?
     ) throws -> [String: String] {
         // Every CSPRNG call in this codebase goes through SecureRandom,
         // which throws rather than handing back a zero buffer. A

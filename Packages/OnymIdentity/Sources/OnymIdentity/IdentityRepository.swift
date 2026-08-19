@@ -252,6 +252,15 @@ public actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelop
         return snapshot.blsSecretKey
     }
 
+    /// The `info` prefixes `deriveSeedScopedKey` will serve.
+    ///
+    /// An allowlist rather than a denylist: the identity keys are the
+    /// ones that must never be reachable, and enumerating what *is*
+    /// permitted keeps a future `Bip39` derivation from becoming
+    /// reachable the moment it is added. Adding a prefix here is a
+    /// deliberate act with a reviewer attached.
+    static let allowedSeedScopedInfoPrefixes = ["backup-"]
+
     /// Derive 32 bytes from the currently-selected identity's BIP39 seed
     /// under a caller-supplied `info`, in the same salt namespace every
     /// other seed-derived key in this app already uses.
@@ -266,8 +275,16 @@ public actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelop
     ///
     /// Same posture as `blsSecretKey()`: the seed is reconstructed here,
     /// used, and zeroed. Neither it nor the entropy behind it leaves
-    /// this actor — a caller gets derived bytes for the one `info` it
-    /// asked for and has no path back to anything else.
+    /// this actor.
+    ///
+    /// **`info` is restricted, and must be.** The salt here is the one
+    /// `Bip39.deriveNostrKey` and `Bip39.deriveBlsKey` already use, so an
+    /// unrestricted `info` would make this a seed oracle: pass
+    /// `"nostr-secp256k1-v1"` or `"bls12-381-v1"` and it returns those
+    /// secret keys byte for byte. Only prefixes in
+    /// `allowedSeedScopedInfoPrefixes` are accepted, and a new one is a
+    /// deliberate addition here rather than a caller's choice — the point
+    /// of the seam is that a caller cannot name a key it was not given.
     ///
     /// Throws `noRecoveryPhrase` for an identity imported from raw key
     /// material. Substituting some other source would produce a key that
@@ -275,6 +292,9 @@ public actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelop
     /// can never be opened — a failure that would surface only when
     /// someone tried to restore it.
     public func deriveSeedScopedKey(info: String) throws -> Data {
+        guard Self.allowedSeedScopedInfoPrefixes.contains(where: info.hasPrefix) else {
+            throw IdentityError.seedScopeNotPermitted(info: info)
+        }
         guard let currentID else {
             throw IdentityError.identityNotLoaded
         }

@@ -102,9 +102,17 @@ public final class BackupArchiveWriter {
 
     /// Write the finished archive to `url` and return its plaintext
     /// length. The scratch file is removed either way.
+    /// The scratch file holds *plaintext* archive records, so it must
+    /// not outlive the writer. `finish` removes it on the happy path;
+    /// this catches the abandoned one — a composer that threw partway,
+    /// or a cancelled snapshot.
+    deinit {
+        try? FileManager.default.removeItem(at: scratchURL)
+    }
+
     @discardableResult
     public func finish(writingTo url: URL, createdAt: Date = Date()) throws -> Int {
-        guard !finished else { throw BackupError.localFailure(reason: .archiveUnreadable) }
+        guard !finished else { throw BackupError.localFailure(reason: .archiveWriterFinished) }
         finished = true
         try handle.close()
         defer { try? FileManager.default.removeItem(at: scratchURL) }
@@ -197,7 +205,14 @@ public struct BackupArchiveReader {
         for entry in header.entries {
             guard
                 let framing = try handle.read(upToCount: 5), framing.count == 5,
-                let kind = BackupArchiveEntryKind(rawValue: framing[framing.startIndex])
+                let kind = BackupArchiveEntryKind(rawValue: framing[framing.startIndex]),
+                // The header is what a restore reports from, so it is
+                // authoritative. Neither the per-entry digest nor the
+                // AEAD covers the framing byte, so header and framing
+                // can disagree about what a record *is* while both
+                // verify — and a record decoded as the wrong kind is a
+                // worse outcome than a refusal.
+                framing[framing.startIndex] == entry.kind
             else {
                 throw BackupError.incompleteSnapshot
             }

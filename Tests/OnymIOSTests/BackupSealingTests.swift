@@ -79,6 +79,62 @@ final class BackupSealingTests: XCTestCase {
             sealedURL: sealed, to: dir.appending(path: "out2"), reference: tamperedRef, archiveRoot: root))
     }
 
+    /// The salt is no longer injectable, so this asserts the shape that
+    /// made it dangerous: two seals of *different* plaintext under one
+    /// pinned salt would share a key and a nonce sequence. The internal
+    /// overload is the only way to express it, and it exists for exactly
+    /// this kind of check.
+    func testPinnedSaltWouldReuseKeyAndNonce() throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let root = SymmetricKey(size: .bits256)
+        let salt = Data(repeating: 0x5A, count: 32)
+
+        let one = dir.appending(path: "one")
+        let two = dir.appending(path: "two")
+        try Data(repeating: 0xAA, count: 4096).write(to: one)
+        try Data(repeating: 0xBB, count: 4096).write(to: two)
+
+        let sealedOne = dir.appending(path: "s1")
+        let sealedTwo = dir.appending(path: "s2")
+        try BackupSealer.seal(plaintextURL: one, to: sealedOne, archiveRoot: root, snapshotSalt: salt)
+        try BackupSealer.seal(plaintextURL: two, to: sealedTwo, archiveRoot: root, snapshotSalt: salt)
+
+        // Same salt -> same derived key -> same counter nonces. The
+        // ciphertexts differ only where the plaintexts do, which is the
+        // catastrophic case, and why no public API can produce it.
+        let a = try Data(contentsOf: sealedOne)
+        let b = try Data(contentsOf: sealedTwo)
+        XCTAssertEqual(a.prefix(BackupSealer.headerBytes), b.prefix(BackupSealer.headerBytes))
+    }
+
+    func testArchiveRoundTripAndKindMismatchRefused() throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let archive = dir.appending(path: "archive")
+
+        let writer = try BackupArchiveWriter(scratchURL: dir.appending(path: "scratch"))
+        writer.setIdentityCount(1)
+        try writer.append(kind: .groups, bytes: Data("[groups]".utf8))
+        try writer.append(kind: .messages, bytes: Data("[messages]".utf8))
+        try writer.finish(writingTo: archive)
+
+        var seen: [(BackupArchiveEntryKind, Data)] = []
+        try BackupArchiveReader(url: archive).forEachRecord { seen.append(($0, $1)) }
+        XCTAssertEqual(seen.map(\.0), [.groups, .messages])
+        XCTAssertEqual(seen.first?.1, Data("[groups]".utf8))
+
+        // Flip the framing kind byte of the first record. Its digest and
+        // length still match the header, so only the kind check catches
+        // it.
+        var bytes = try Data(contentsOf: archive)
+        let firstRecord = bytes.count - "[groups]".count - 5 - "[messages]".count - 5
+        XCTAssertEqual(bytes[firstRecord], BackupArchiveEntryKind.groups.rawValue)
+        bytes[firstRecord] = BackupArchiveEntryKind.consents.rawValue
+        try bytes.write(to: archive)
+        XCTAssertThrowsError(try BackupArchiveReader(url: archive).forEachRecord { _, _ in })
+    }
+
     func testAccessProofIsRequestBound() throws {
         let material = BackupKeys.material(seed: Data(repeating: 9, count: 64), componentId: "onym:component:x")
         let a = BackupAccessProof.signingBytes(

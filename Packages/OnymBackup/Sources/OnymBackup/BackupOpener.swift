@@ -67,7 +67,11 @@ public enum BackupOpener {
         let chunkPlainBytes = Int(readUInt32(header, at: cursor)); cursor += 4
         let chunkCount = Int(readUInt32(header, at: cursor)); cursor += 4
         let salt = header.suffix(BackupSealer.saltBytes)
-        guard chunkPlainBytes > 0, chunkCount >= 0 else {
+        // The header is inside the seal and the digest was verified
+        // before we got here, so a hostile value is self-inflicted — but
+        // a corrupted-then-resealed file, or a bug in a future writer,
+        // should not turn a u32 into a 4 GiB allocation.
+        guard chunkPlainBytes > 0, chunkPlainBytes <= BackupSealer.chunkPlainBytes, chunkCount >= 0 else {
             throw BackupError.localFailure(reason: .archiveUnreadable)
         }
 

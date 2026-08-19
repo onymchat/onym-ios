@@ -25,16 +25,34 @@ public enum BackupSealer {
     /// Seal `plaintextURL` to `sealedURL`, returning the reference over
     /// the exact bytes written.
     ///
-    /// `snapshotSalt` is fresh per snapshot and public. It is what makes
-    /// keying non-convergent: two holders sealing identical archives get
-    /// unrelated ciphertext and unrelated digests, so an operator cannot
-    /// confirm that someone possesses a known file (§5.3).
+    /// The snapshot salt is drawn fresh from the CSPRNG. It is what
+    /// makes keying non-convergent: two holders sealing identical
+    /// archives get unrelated ciphertext and unrelated digests, so an
+    /// operator cannot confirm that someone possesses a known file
+    /// (§5.3).
+    ///
+    /// There is deliberately no way to supply one. Reusing a salt under
+    /// the same archive root reproduces the same snapshot key, and the
+    /// nonces are counters — so two different plaintexts would be sealed
+    /// under an identical (key, nonce) pair, which collapses AES-GCM's
+    /// confidentiality *and* its integrity. The only caller that ever
+    /// wanted to pin a salt was a fixture, and a fixture can reach the
+    /// internal overload.
     @discardableResult
     public static func seal(
         plaintextURL: URL,
         to sealedURL: URL,
+        archiveRoot: SymmetricKey
+    ) throws -> SnapshotReference {
+        try seal(plaintextURL: plaintextURL, to: sealedURL, archiveRoot: archiveRoot, snapshotSalt: nil)
+    }
+
+    @discardableResult
+    static func seal(
+        plaintextURL: URL,
+        to sealedURL: URL,
         archiveRoot: SymmetricKey,
-        snapshotSalt: Data? = nil
+        snapshotSalt: Data?
     ) throws -> SnapshotReference {
         let salt = try snapshotSalt ?? SecureRandom.data(saltBytes)
         guard salt.count == saltBytes else { throw BackupError.localFailure(reason: .archiveUnreadable) }
