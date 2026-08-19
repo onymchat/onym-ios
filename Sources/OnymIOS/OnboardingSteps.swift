@@ -51,6 +51,12 @@ struct OnboardingStepContentBuilder {
     /// `IdentityRepository.restore(mnemonic:)` the recovery-phrase
     /// backup flow's semantics rest on. Throws on an invalid phrase.
     let identityRestore: @MainActor (String) async throws -> Void
+    /// `restore(mnemonic:)` wipes every existing identity — safe only
+    /// on a genuine fresh install. False on a Settings → Restart
+    /// Onboarding walk (which keeps identity/chats/messages by
+    /// design), hiding the affordance entirely rather than risking a
+    /// silent wipe of live data.
+    let identityRestoreAllowed: Bool
     let loadSummary: @MainActor () async -> [OnboardingSummaryRow]
 
     func content(for step: OnboardingStep, flow: OnboardingFlow) -> AnyView? {
@@ -58,7 +64,8 @@ struct OnboardingStepContentBuilder {
         case .welcome:
             return AnyView(OnboardingWelcomeContent(
                 onboarding: flow,
-                identityRestore: identityRestore
+                identityRestore: identityRestore,
+                identityRestoreAllowed: identityRestoreAllowed
             ))
         case .identity:
             return AnyView(OnboardingIdentityContent(
@@ -232,6 +239,7 @@ private struct OnboardingSectionLabel: View {
 struct OnboardingWelcomeContent: View {
     let onboarding: OnboardingFlow
     let identityRestore: @MainActor (String) async throws -> Void
+    let identityRestoreAllowed: Bool
     @State private var showRestore = false
 
     var body: some View {
@@ -258,15 +266,21 @@ struct OnboardingWelcomeContent: View {
             .background(OnymTokens.surface2,
                         in: RoundedRectangle(cornerRadius: 14, style: .continuous))
 
-            Button {
-                showRestore = true
-            } label: {
-                Text("I have a recovery phrase")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(OnymAccent.blue.color)
+            // Hidden on a Settings → Restart Onboarding walk: that
+            // path keeps identity/chats/messages by design, and
+            // `restore(mnemonic:)` wipes all of it — this affordance
+            // must only ever be reachable where nothing is at stake.
+            if identityRestoreAllowed {
+                Button {
+                    showRestore = true
+                } label: {
+                    Text("I have a recovery phrase")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(OnymAccent.blue.color)
+                }
+                .padding(.top, 18)
+                .accessibilityIdentifier("onboarding.welcome.restore")
             }
-            .padding(.top, 18)
-            .accessibilityIdentifier("onboarding.welcome.restore")
         }
         .sheet(isPresented: $showRestore) {
             OnboardingRestoreSheet(identityRestore: identityRestore) {
@@ -625,7 +639,7 @@ struct OnboardingServicesContent: View {
                 // seeded defaults plus the published lists installed
                 // on completion) — they are a promise, not live state;
                 // the Done step's summary is the live, checkable view.
-                summaryLine(label: "Delivery", value: "2 relays", note: "primary + backup")
+                summaryLine(label: "Delivery", value: "Onym Official relay")
                 summaryLine(label: "Media delivery", value: "Onym Official")
                 summaryLine(label: "Group integrity", value: "Published defaults")
                 summaryLine(label: "Directory", value: "Onym Discovery")
@@ -683,11 +697,7 @@ struct OnboardingServicesContent: View {
         .accessibilityIdentifier("onboarding.services.custom")
     }
 
-    private func summaryLine(
-        label: LocalizedStringKey,
-        value: LocalizedStringKey,
-        note: LocalizedStringKey? = nil
-    ) -> some View {
+    private func summaryLine(label: LocalizedStringKey, value: LocalizedStringKey) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Text(label)
                 .font(.system(size: 13.5))
@@ -696,11 +706,6 @@ struct OnboardingServicesContent: View {
             Text(value)
                 .font(.system(size: 13.5, weight: .medium))
                 .foregroundStyle(OnymTokens.text)
-            if let note {
-                Text(note)
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(OnymTokens.text3)
-            }
             Spacer(minLength: 0)
         }
         .padding(.vertical, 2)

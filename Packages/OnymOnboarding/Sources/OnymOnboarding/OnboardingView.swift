@@ -55,7 +55,7 @@ public struct OnboardingView: View {
         OnboardingStepScaffold(
             step: step,
             title: Self.title(for: step, restoring: flow.identityOrigin == .restored),
-            subtitle: Self.subtitle(for: step),
+            subtitle: Self.subtitle(for: step, restoring: flow.identityOrigin == .restored),
             primaryTitle: Self.primaryTitle(for: step),
             // Outcome-gated steps render their primary disabled until
             // the step content records one (moderation's consent, the
@@ -127,7 +127,7 @@ public struct OnboardingView: View {
         }
     }
 
-    static func subtitle(for step: OnboardingStep) -> String? {
+    static func subtitle(for step: OnboardingStep, restoring: Bool = false) -> String? {
         switch step {
         case .welcome:
             return String(localized: "Messaging that answers to you — not to a company.")
@@ -138,7 +138,13 @@ public struct OnboardingView: View {
         case .moderation:
             return String(localized: "If someone reports illegal content, an authority you choose reviews the report. Pick one to continue — you'll see exactly what it can do before you agree.")
         case .recoveryPhrase:
-            return String(localized: "These 12 words ARE your identity. Lose this iPhone without them, and even Onym can't get you back in.")
+            // Word count varies (12 or 24) for a restored phrase, and a
+            // restored phrase is the one the user just typed in — not
+            // new information the step is revealing to them for the
+            // first time.
+            return restoring
+                ? String(localized: "This is the phrase you just entered. Lose this iPhone without a copy of it, and even Onym can't get you back in.")
+                : String(localized: "These 12 words ARE your identity. Lose this iPhone without them, and even Onym can't get you back in.")
         case .done:
             return String(localized: "Your identity lives on this device. No account, no admin, no company holds it but you.")
         }
@@ -157,7 +163,7 @@ public struct OnboardingView: View {
     /// and it reads as a deferral, not a skip.
     static func skipTitle(for step: OnboardingStep) -> String {
         switch step {
-        case .recoveryPhrase: return String(localized: "Remind me tonight")
+        case .recoveryPhrase: return String(localized: "Remind me later")
         default: return String(localized: "Skip")
         }
     }
