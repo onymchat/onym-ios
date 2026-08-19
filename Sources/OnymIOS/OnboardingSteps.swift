@@ -224,15 +224,21 @@ struct OnboardingWelcomeContent: View {
         VStack(spacing: 0) {
             OnymMark(size: 88, color: OnymAccent.blue.color, strokeRatio: 0.14)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 28)
+                .padding(.top, 28)
+                .padding(.bottom, 8)
                 .accessibilityHidden(true)
+            Text("No account to take away.")
+                .font(.system(size: 19, weight: .semibold))
+                .foregroundStyle(OnymTokens.text)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.bottom, 20)
             VStack(alignment: .leading, spacing: 14) {
                 row(symbol: "lock.fill",
-                    text: "Your identity key is made on this device and stays here. No account, no phone number.")
+                    text: "Your identity is a key made on this device — not an account on ours.")
                 row(symbol: "antenna.radiowaves.left.and.right",
-                    text: "You pick who carries your messages — and can swap them any time in Settings.")
+                    text: "You pick who carries your messages, and can swap them any time — nobody's locked in.")
                 row(symbol: "shield.fill",
-                    text: "You pick who handles reports, and see exactly what they can do before you agree.")
+                    text: "You pick who handles reports, and see exactly what they're allowed to do — before you agree.")
             }
             .padding(16)
             .background(OnymTokens.surface2,
@@ -282,7 +288,7 @@ struct OnboardingIdentityContent: View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(spacing: 0) {
                 row(title: "Identity key created",
-                    subtitle: "Held in this device's secure enclave")
+                    subtitle: "Held in this device's secure enclave — nowhere else, ever")
                 Divider()
                     .background(OnymTokens.hairline)
                     .padding(.leading, 46)
@@ -322,7 +328,7 @@ struct OnboardingIdentityContent: View {
                 .accessibilityIdentifier("onboarding.identity.failed")
             }
 
-            Text("Your key is the only thing that proves this account is yours. No server holds a copy of it.")
+            Text("This key is the only proof of who you are. No server holds a copy of it — not even ours.")
                 .font(.system(size: 12.5))
                 .foregroundStyle(OnymTokens.text2)
                 .lineSpacing(2)
@@ -409,7 +415,7 @@ struct OnboardingServicesContent: View {
         VStack(alignment: .leading, spacing: 12) {
             recommendedCard
             customCard
-            Text("Whichever you choose, every service can be added, replaced or removed later in Settings.")
+            Text("Swap any of this later in Settings → Services. None of them can lock you out — you hold the key, not them.")
                 .font(.system(size: 12.5))
                 .foregroundStyle(OnymTokens.text2)
                 .lineSpacing(2)
@@ -482,7 +488,7 @@ struct OnboardingServicesContent: View {
                     }
                     Spacer(minLength: 0)
                 }
-                Text("Services published by Onym, verified on this device. Ready in a second.")
+                Text("Published by Onym, verified on this device. None of it is a login — swap any piece later.")
                     .font(.system(size: 13.5))
                     .foregroundStyle(OnymTokens.text2)
                     .lineSpacing(2)
@@ -491,7 +497,7 @@ struct OnboardingServicesContent: View {
                 // seeded defaults plus the published lists installed
                 // on completion) — they are a promise, not live state;
                 // the Done step's summary is the live, checkable view.
-                summaryLine(label: "Delivery", value: "Onym Official relays")
+                summaryLine(label: "Delivery", value: "2 relays", note: "primary + backup")
                 summaryLine(label: "Media delivery", value: "Onym Official")
                 summaryLine(label: "Group integrity", value: "Published defaults")
                 summaryLine(label: "Directory", value: "Onym Discovery")
@@ -549,7 +555,11 @@ struct OnboardingServicesContent: View {
         .accessibilityIdentifier("onboarding.services.custom")
     }
 
-    private func summaryLine(label: LocalizedStringKey, value: LocalizedStringKey) -> some View {
+    private func summaryLine(
+        label: LocalizedStringKey,
+        value: LocalizedStringKey,
+        note: LocalizedStringKey? = nil
+    ) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Text(label)
                 .font(.system(size: 13.5))
@@ -558,6 +568,11 @@ struct OnboardingServicesContent: View {
             Text(value)
                 .font(.system(size: 13.5, weight: .medium))
                 .foregroundStyle(OnymTokens.text)
+            if let note {
+                Text(note)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(OnymTokens.text3)
+            }
             Spacer(minLength: 0)
         }
         .padding(.vertical, 2)
@@ -1527,6 +1542,19 @@ struct OnboardingModerationContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            // Only true while an authority is still being chosen — once
+            // terms are on screen the referee is already picked.
+            if case .pickingAuthority = flow.state.step {
+                Text("You choose the referee — not a homeserver admin, not us.")
+                    .font(.system(size: 13.5, weight: .semibold))
+                    .foregroundStyle(OnymTokens.text)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(OnymAccent.blue.color.opacity(0.14),
+                                in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .padding(.bottom, 8)
+            }
+
             ModerationConsentContent(flow: flow)
                 // The content carries the Settings pages' own
                 // horizontal insets; pull them back to the scaffold's.
@@ -1824,7 +1852,7 @@ struct OnboardingDoneContent: View {
                 .accessibilityIdentifier("onboarding.done.backup_nudge")
             }
 
-            Text("Tap into Settings → Services to change any of this. Nothing here is permanent except your recovery phrase.")
+            Text("Tap any line to change it. Nothing here is permanent except your recovery phrase.")
                 .font(.system(size: 12.5))
                 .foregroundStyle(OnymTokens.text2)
                 .lineSpacing(2)

@@ -129,15 +129,15 @@ public struct OnboardingView: View {
         case .welcome:
             return String(localized: "Messaging that answers to you — not to a company.")
         case .identity:
-            return String(localized: "This takes a second. Everything happens on your iPhone — nothing has been sent anywhere yet.")
+            return String(localized: "This takes a second, and it happens only on this iPhone. Nothing is sent anywhere — there's nowhere to send it to yet.")
         case .services:
-            return String(localized: "Onym runs on independent services for delivery, files and timestamps. Start with a set that works, or pick your own.")
+            return String(localized: "No homeserver to pick. Just independent services for delivery, files and timestamps — split up on purpose, so no single one holds the whole picture.")
         case .moderation:
             return String(localized: "If someone reports illegal content, an authority you choose reviews the report. Pick one to continue — you'll see exactly what it can do before you agree.")
         case .recoveryPhrase:
-            return String(localized: "These 12 words are the only way back into your account if you lose this iPhone. Onym cannot reset them for you.")
+            return String(localized: "These 12 words ARE your identity. Lose this iPhone without them, and even Onym can't get you back in.")
         case .done:
-            return String(localized: "Your identity is on this device and your services are connected.")
+            return String(localized: "Your identity lives on this device. No account, no admin, no company holds it but you.")
         }
     }
 
@@ -154,7 +154,7 @@ public struct OnboardingView: View {
     /// and it reads as a deferral, not a skip.
     static func skipTitle(for step: OnboardingStep) -> String {
         switch step {
-        case .recoveryPhrase: return String(localized: "Remind me later")
+        case .recoveryPhrase: return String(localized: "Remind me tonight")
         default: return String(localized: "Skip")
         }
     }
