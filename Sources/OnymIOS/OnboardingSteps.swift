@@ -3,6 +3,7 @@ import OnymChain
 import OnymDesign
 import OnymDiscovery
 import OnymFoundation
+import OnymIdentity
 import OnymModerationUI
 import OnymOnboarding
 import OnymRecovery
@@ -44,12 +45,21 @@ struct OnboardingStepContentBuilder {
     /// exists — the identity step's checklist binds to this instead of
     /// asserting success it can't know about.
     let identityReady: @MainActor () async -> Bool
+    /// The welcome step's "I have a recovery phrase" path. Replaces
+    /// whatever identity the WindowGroup task already minted with the
+    /// one the entered mnemonic describes — same
+    /// `IdentityRepository.restore(mnemonic:)` the recovery-phrase
+    /// backup flow's semantics rest on. Throws on an invalid phrase.
+    let identityRestore: @MainActor (String) async throws -> Void
     let loadSummary: @MainActor () async -> [OnboardingSummaryRow]
 
     func content(for step: OnboardingStep, flow: OnboardingFlow) -> AnyView? {
         switch step {
         case .welcome:
-            return AnyView(OnboardingWelcomeContent())
+            return AnyView(OnboardingWelcomeContent(
+                onboarding: flow,
+                identityRestore: identityRestore
+            ))
         case .identity:
             return AnyView(OnboardingIdentityContent(
                 onboarding: flow,
@@ -220,6 +230,10 @@ private struct OnboardingSectionLabel: View {
 /// subtitle. The identity bootstrap stays silent — it already runs in
 /// the WindowGroup task; nothing here mentions or blocks on it.
 struct OnboardingWelcomeContent: View {
+    let onboarding: OnboardingFlow
+    let identityRestore: @MainActor (String) async throws -> Void
+    @State private var showRestore = false
+
     var body: some View {
         VStack(spacing: 0) {
             OnymMark(size: 88, color: OnymAccent.blue.color, strokeRatio: 0.14)
@@ -243,6 +257,23 @@ struct OnboardingWelcomeContent: View {
             .padding(16)
             .background(OnymTokens.surface2,
                         in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+            Button {
+                showRestore = true
+            } label: {
+                Text("I have a recovery phrase")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(OnymAccent.blue.color)
+            }
+            .padding(.top, 18)
+            .accessibilityIdentifier("onboarding.welcome.restore")
+        }
+        .sheet(isPresented: $showRestore) {
+            OnboardingRestoreSheet(identityRestore: identityRestore) {
+                showRestore = false
+                onboarding.identityOrigin = .restored
+                onboarding.advance()
+            }
         }
     }
 
@@ -256,6 +287,97 @@ struct OnboardingWelcomeContent: View {
                 .font(.system(size: 14))
                 .foregroundStyle(OnymTokens.text2)
                 .lineSpacing(2)
+        }
+    }
+}
+
+/// The welcome step's "I have a recovery phrase" sheet — an existing
+/// mnemonic replaces whatever identity the WindowGroup task already
+/// minted (`IdentityRepository.restore(mnemonic:)`; the additive
+/// `add(mnemonic:)` used by Settings' second-identity flow is the
+/// wrong call here, since there is nothing else on this fresh install
+/// worth keeping alongside it). `onRestored` fires only after the
+/// repository call actually succeeds.
+private struct OnboardingRestoreSheet: View {
+    let identityRestore: @MainActor (String) async throws -> Void
+    let onRestored: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var phrase = ""
+    @State private var error: String?
+    @State private var isRestoring = false
+
+    private var wordCount: Int {
+        phrase.split(whereSeparator: { $0.isWhitespace }).count
+    }
+    private var canRestore: Bool { wordCount == 12 || wordCount == 24 }
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Enter the 12 or 24-word recovery phrase for the identity you're bringing to this device.")
+                    .font(.system(size: 14))
+                    .foregroundStyle(OnymTokens.text2)
+                    .lineSpacing(2)
+
+                SettingsCard {
+                    TextField("word word word …", text: $phrase, axis: .vertical)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .font(.system(size: 15, design: .monospaced))
+                        .lineLimit(3...6)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .accessibilityIdentifier("onboarding.welcome.restore.phrase_field")
+                }
+
+                if let error {
+                    Text(verbatim: error)
+                        .font(.system(size: 13))
+                        .foregroundStyle(OnymTokens.red)
+                        .accessibilityIdentifier("onboarding.welcome.restore.error")
+                }
+
+                Text("This replaces the identity Onym just created on this device with the one these words describe. Nothing else here is touched.")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(OnymTokens.text2)
+                    .lineSpacing(2)
+
+                Spacer(minLength: 0)
+
+                SettingsPrimaryButton(isRestoring ? "Restoring…" : "Restore identity") {
+                    Task { await submit() }
+                }
+                .disabled(!canRestore || isRestoring)
+                .opacity(canRestore ? 1 : 0.5)
+                .accessibilityIdentifier("onboarding.welcome.restore.submit")
+            }
+            .padding(20)
+            .background(OnymTokens.surface.ignoresSafeArea())
+            .navigationTitle("Recovery phrase")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                        .disabled(isRestoring)
+                }
+            }
+        }
+        .interactiveDismissDisabled(isRestoring)
+    }
+
+    private func submit() async {
+        guard canRestore else { return }
+        error = nil
+        isRestoring = true
+        defer { isRestoring = false }
+        do {
+            try await identityRestore(phrase.trimmingCharacters(in: .whitespacesAndNewlines))
+            onRestored()
+        } catch IdentityError.invalidMnemonic {
+            error = String(localized: "That doesn't look like a valid 12 or 24-word phrase.")
+        } catch {
+            self.error = String(localized: "Couldn't restore that identity. Check the phrase and try again.")
         }
     }
 }
@@ -287,13 +409,19 @@ struct OnboardingIdentityContent: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(spacing: 0) {
-                row(title: "Identity key created",
+                row(title: onboarding.identityOrigin == .restored
+                        ? "Identity key restored"
+                        : "Identity key created",
                     subtitle: "Held in this device's secure enclave — nowhere else, ever")
                 Divider()
                     .background(OnymTokens.hairline)
                     .padding(.leading, 46)
-                row(title: "Recovery phrase generated",
-                    subtitle: "12 words — you'll back these up in a moment")
+                row(title: onboarding.identityOrigin == .restored
+                        ? "Recovery phrase confirmed"
+                        : "Recovery phrase generated",
+                    subtitle: onboarding.identityOrigin == .restored
+                        ? "The words you entered are now this device's identity"
+                        : "12 words — you'll back these up in a moment")
             }
             .background(OnymTokens.surface2,
                         in: RoundedRectangle(cornerRadius: 14, style: .continuous))

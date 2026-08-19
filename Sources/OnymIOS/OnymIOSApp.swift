@@ -1009,6 +1009,13 @@ struct OnymIOSApp: App {
                 identityReady: { @MainActor in
                     (try? await repository.bootstrap()) != nil
                 },
+                // The welcome step's "I have a recovery phrase" path —
+                // same `restore(mnemonic:)` the recovery-phrase backup
+                // flow's semantics rest on, replacing whatever identity
+                // the WindowGroup task already minted.
+                identityRestore: { @MainActor mnemonic in
+                    try await repository.restore(mnemonic: mnemonic)
+                },
                 loadSummary: { @MainActor in
                     // The Done step's summary is read from the
                     // repositories, not the walk's outcomes — what the

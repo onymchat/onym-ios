@@ -78,6 +78,20 @@ public enum ServicesSetupChoice: Equatable, Sendable {
     case custom
 }
 
+/// How the current identity came to exist. Lives on the flow (not the
+/// step view) for the same reason as `ServicesSetupChoice`: the
+/// `identity` step's content is rebuilt on every navigation, and its
+/// checklist copy must not fall back to "created" over an identity
+/// that was actually restored from a phrase the user typed in.
+public enum IdentityOrigin: Equatable, Sendable {
+    /// The default: a fresh key generated on this device.
+    case minted
+    /// The welcome step's "I have a recovery phrase" path replaced the
+    /// freshly-minted identity with one derived from an entered
+    /// mnemonic.
+    case restored
+}
+
 /// State machine for the first-launch onboarding sequence. Modeled on
 /// `ModuleConsentFlow` / `ModerationConsentFlow`: `@MainActor
 /// @Observable`, every collaborator injected as a closure so the
@@ -120,6 +134,11 @@ public final class OnboardingFlow {
     /// content as the backup sheet progresses. Never downgrades:
     /// `verified` stays `verified` across navigation and re-reveals.
     public var recoveryBackupState: RecoveryBackupState = .none
+    /// Written by the welcome step's restore sheet the moment a
+    /// mnemonic restore succeeds — read by the identity step's content
+    /// so its checklist doesn't claim a fresh key was "created" over
+    /// one the user just typed in.
+    public var identityOrigin: IdentityOrigin = .minted
     /// Flips exactly once, inside `complete()` — the observable signal
     /// the presenter dismisses its cover on. `onCompleted` alone can't
     /// carry the dismissal: it is bound at the composition root, which

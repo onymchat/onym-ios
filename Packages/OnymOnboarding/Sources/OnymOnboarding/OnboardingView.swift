@@ -54,7 +54,7 @@ public struct OnboardingView: View {
     private func scaffold(for step: OnboardingStep) -> some View {
         OnboardingStepScaffold(
             step: step,
-            title: Self.title(for: step),
+            title: Self.title(for: step, restoring: flow.identityOrigin == .restored),
             subtitle: Self.subtitle(for: step),
             primaryTitle: Self.primaryTitle(for: step),
             // Outcome-gated steps render their primary disabled until
@@ -113,10 +113,13 @@ public struct OnboardingView: View {
 
     // MARK: - Copy
 
-    static func title(for step: OnboardingStep) -> String {
+    static func title(for step: OnboardingStep, restoring: Bool = false) -> String {
         switch step {
         case .welcome: return String(localized: "Onym")
-        case .identity: return String(localized: "Making your keys")
+        case .identity:
+            return restoring
+                ? String(localized: "Restoring your identity")
+                : String(localized: "Making your keys")
         case .services: return String(localized: "Your services")
         case .moderation: return String(localized: "Reports & safety")
         case .recoveryPhrase: return String(localized: "Save your recovery phrase")
