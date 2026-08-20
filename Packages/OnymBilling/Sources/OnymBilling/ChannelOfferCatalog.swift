@@ -55,6 +55,16 @@ public struct ChannelOfferCatalog: Sendable {
         return ChannelOfferCatalog(offers: offers)
     }
 
+    /// Product identifiers listed more than once. Empty in a
+    /// well-formed catalog; surfaced so a build can fail on it rather
+    /// than discovering it during a replay.
+    public var duplicateProductIds: [String] {
+        Dictionary(grouping: offers, by: \.productId)
+            .filter { $0.value.count > 1 }
+            .keys
+            .sorted()
+    }
+
     public func offer(forOfferId offerId: String, componentId: String) -> ChannelOffer? {
         offers.first { $0.offerId == offerId && $0.componentId == componentId }
     }
@@ -62,8 +72,22 @@ public struct ChannelOfferCatalog: Sendable {
     /// The reverse lookup a `Transaction.updates` replay needs: StoreKit
     /// hands back a product identifier, and only the catalog knows which
     /// seat and offer it was bought for.
+    ///
+    /// **A `productId` must appear at most once.** The reverse lookup has
+    /// no other way to choose, so two components sharing a product would
+    /// redeem a replayed transaction for whichever sorted first —
+    /// crediting one operator for a purchase made from another. Checked
+    /// at load rather than left as a convention.
     public func offer(forProductId productId: String) -> ChannelOffer? {
-        offers.first { $0.productId == productId }
+        let matches = offers.filter { $0.productId == productId }
+        guard matches.count == 1 else {
+            // Ambiguous or absent. Refusing is right for both: a replay
+            // we cannot attribute is left unfinished and retried, which
+            // is recoverable, where crediting the wrong operator is not.
+            assert(matches.count < 2, "channel offers share productId \(productId)")
+            return nil
+        }
+        return matches[0]
     }
 
     public var productIds: Set<String> { Set(offers.map(\.productId)) }

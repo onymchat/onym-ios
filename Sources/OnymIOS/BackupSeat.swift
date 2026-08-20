@@ -7,6 +7,7 @@ import OnymChatsCore
 import OnymFoundation
 import OnymGroup
 import OnymIdentity
+import OnymModeration
 import OnymPersistence
 import OnymTransportBlossom
 
@@ -18,7 +19,16 @@ import OnymTransportBlossom
 /// and the keys come from the identity vault. If no backup operator has
 /// been consented to, this resolves to `nil` and Settings shows no
 /// backup section — which is correct, not a degraded state.
-@MainActor
+/// Not `@MainActor`.
+///
+/// It was, and the annotation was not honoured: `entitlementIssuers` is
+/// called synchronously from nonisolated `@Sendable` closures that run
+/// inside the purchase-flow actor and the entitlement provider, off the
+/// main actor. That is a warning in Swift 5 and a hard error in Swift 6,
+/// and in the meantime it meant main-actor-annotated code running
+/// elsewhere. Everything here is a pure read of a `Sendable` store, so
+/// dropping the isolation is the honest fix rather than adding hops that
+/// would only make the annotation true.
 enum BackupSeat {
     /// The seat value a backup operator declares.
     static let seat = "storage.backup"
@@ -72,26 +82,13 @@ enum BackupSeat {
         componentId: String,
         consentStore: any PinnedConsentStore
     ) -> Curve25519.Signing.PublicKey? {
+        // `AuthorityKey` is the one `onym:key:` parser in this codebase.
+        // A second hand-rolled one is a second place for the hex rules
+        // to drift.
         for reference in entitlementIssuers(componentId: componentId, consentStore: consentStore) {
-            let prefix = "onym:key:"
-            guard reference.hasPrefix(prefix) else { continue }
-            let hex = String(reference.dropFirst(prefix.count))
-            guard hex.count == 64 else { continue }
-            var bytes = [UInt8]()
-            var index = hex.startIndex
-            var valid = true
-            while index < hex.endIndex {
-                let next = hex.index(index, offsetBy: 2)
-                guard let byte = UInt8(hex[index..<next], radix: 16) else { valid = false; break }
-                bytes.append(byte)
-                index = next
+            if let key = try? AuthorityKey.publicKey(fromReference: reference) {
+                return key
             }
-            guard valid, let key = try? Curve25519.Signing.PublicKey(
-                rawRepresentation: Data(bytes))
-            else {
-                continue
-            }
-            return key
         }
         return nil
     }

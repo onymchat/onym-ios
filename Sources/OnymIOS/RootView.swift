@@ -63,6 +63,13 @@ struct RootView: View {
     /// consent record and derives a seat key, and the later of two
     /// in-flight resolutions could otherwise land first.
     @State private var resolvingDeviceBackup = false
+    /// Which operator the current backup view was built for.
+    ///
+    /// Re-resolving unconditionally on every visit to Settings rebuilt
+    /// the flow underneath a running backup, discarding its state
+    /// mid-upload. The view is only replaced when the consented operator
+    /// actually changed.
+    @State private var deviceBackupComponentId: String?
 
     /// `fullScreenCover(item:)` needs identity, and the two consent
     /// gates the root can host are exactly "no mandate yet" and "the
@@ -229,9 +236,17 @@ struct RootView: View {
         guard let makeDeviceBackupView = dependencies.makeDeviceBackupView,
               !resolvingDeviceBackup
         else { return }
+
+        // Nothing to do when the operator has not changed. Rebuilding
+        // here would hand Settings a fresh flow and throw away a backup
+        // that is running.
+        let componentId = dependencies.consentedBackupComponentId?()
+        if deviceBackupView != nil, componentId == deviceBackupComponentId { return }
+
         resolvingDeviceBackup = true
         defer { resolvingDeviceBackup = false }
         deviceBackupView = await makeDeviceBackupView()
+        deviceBackupComponentId = componentId
     }
 
     private func presentationUnlessOnboarding(

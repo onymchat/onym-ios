@@ -87,6 +87,7 @@ struct BackupSeatComposer {
                 flow: BackupEnrolmentFlow(
                     port: client,
                     stateStore: stateStore,
+                    workingDirectory: workingDirectory,
                     mediaPolicy: mediaPolicy)
             ) {
                 flow.refresh()

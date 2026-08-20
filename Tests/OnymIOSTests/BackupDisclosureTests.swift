@@ -3,6 +3,7 @@ import OnymFoundation
 import XCTest
 @testable import OnymBackup
 @testable import OnymBackupUI
+@testable import OnymBilling
 
 /// The consent surface, checked by fixture rather than by review.
 ///
@@ -201,6 +202,97 @@ final class BackupDisclosureTests: XCTestCase {
         XCTAssertEqual(BackupDisclosure.cadence(24 * 3600), "once a day")
         XCTAssertEqual(BackupDisclosure.cadence(72 * 3600), "once every 3 days")
         XCTAssertEqual(BackupDisclosure.cadence(6 * 3600), "once every 6 hours")
+    }
+
+    /// Switching operators must not hand the new one the old one's
+    /// operational state.
+    ///
+    /// The dangerous member is `awaitingPayment`: a snapshot sealed
+    /// under operator A's terms and pinned to A's digest, retried
+    /// against B, is a person paying B to store something that pins
+    /// terms B never published.
+    func testRebindDiscardsThePreviousOperatorsWork() throws {
+        var state = BackupState()
+        state.componentId = "onym:component:a"
+        state.acceptedTermsId = "sha256:" + String(repeating: "a", count: 64)
+        state.lastSuccessAt = Date()
+        state.lastAttemptAt = Date()
+        state.record(
+            reference: try SnapshotReference(
+                digest: "sha256:" + String(repeating: "1", count: 64), sealedByteSize: 1024),
+            acceptedTermsId: state.acceptedTermsId!, at: Date(), status: .retained)
+        state.pendingOperations = [
+            BackupState.PendingOperation(
+                operationId: "a-op", digest: "sha256:" + String(repeating: "2", count: 64),
+                sealedByteSize: 2048, startedAt: Date(), acceptedTermsId: state.acceptedTermsId)
+        ]
+        state.awaitingPayment = BackupState.PendingPayment(
+            operationId: "a-pay", digest: "sha256:" + String(repeating: "3", count: 64),
+            sealedByteSize: 4096, sealedBytesFilename: "pending-a",
+            acceptedTermsId: state.acceptedTermsId!, supersedesDigest: nil,
+            supersedesByteSize: nil, sealedAt: Date(), refusedAt: Date())
+        state.receipts = [Data("receipt from a".utf8)]
+
+        let orphan = state.rebind(to: "onym:component:b")
+
+        XCTAssertEqual(orphan, "pending-a", "the sealed bytes were left to rot in the directory")
+        XCTAssertEqual(state.componentId, "onym:component:b")
+        XCTAssertTrue(state.snapshots.isEmpty)
+        XCTAssertTrue(state.pendingOperations.isEmpty)
+        XCTAssertNil(state.awaitingPayment, "a snapshot sealed under A's terms could be sent to B")
+        XCTAssertNil(state.lastSuccessAt)
+        XCTAssertNil(state.lastAttemptAt)
+
+        // Receipts survive: evidence of something that happened, never
+        // acted on, and the only durable record of what an erasure did
+        // not reach.
+        XCTAssertEqual(state.receipts.count, 1)
+    }
+
+    /// Re-enrolling with the *same* operator is not a switch and must
+    /// not throw away a backup chain.
+    func testRebindToTheSameOperatorKeepsEverything() throws {
+        var state = BackupState()
+        state.componentId = "onym:component:a"
+        state.record(
+            reference: try SnapshotReference(
+                digest: "sha256:" + String(repeating: "1", count: 64), sealedByteSize: 1024),
+            acceptedTermsId: "t", at: Date(), status: .retained)
+
+        XCTAssertNil(state.rebind(to: "onym:component:a"))
+        XCTAssertEqual(state.snapshots.count, 1)
+    }
+
+    /// A first enrolment has no previous operator to discard, but does
+    /// have to record which one it is now.
+    func testRebindFromNoOperatorRecordsIt() {
+        var state = BackupState()
+        XCTAssertNil(state.rebind(to: "onym:component:a"))
+        XCTAssertEqual(state.componentId, "onym:component:a")
+    }
+
+    /// The reverse lookup a replay depends on has no way to choose
+    /// between two components sharing a product, so it refuses — a
+    /// replay we cannot attribute is retried, where crediting the wrong
+    /// operator is not recoverable.
+    func testAmbiguousProductIdIsRefused() {
+        let shared = ChannelOffer(
+            channelOfferId: "sha256:x", componentId: "onym:component:a",
+            offerId: "o1", productId: "app.onym.backup.monthly",
+            productType: "auto-renewable-subscription",
+            operatorShareBps: 7000, frontendCommissionBps: 3000)
+        let clash = ChannelOffer(
+            channelOfferId: "sha256:y", componentId: "onym:component:b",
+            offerId: "o2", productId: "app.onym.backup.monthly",
+            productType: "auto-renewable-subscription",
+            operatorShareBps: 7000, frontendCommissionBps: 3000)
+
+        let catalog = ChannelOfferCatalog(offers: [shared, clash])
+        XCTAssertEqual(catalog.duplicateProductIds, ["app.onym.backup.monthly"])
+
+        let clean = ChannelOfferCatalog(offers: [shared])
+        XCTAssertEqual(clean.offer(forProductId: "app.onym.backup.monthly")?.offerId, "o1")
+        XCTAssertTrue(clean.duplicateProductIds.isEmpty)
     }
 
     // MARK: - Fixtures

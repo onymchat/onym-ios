@@ -1362,6 +1362,9 @@ struct OnymIOSApp: App {
                 )
             },
             makeDiscoverySettingsFlow: makeDiscoverySettingsFlow,
+            consentedBackupComponentId: {
+                BackupSeat.consentedManifest(consentStore: pinnedConsentStore)?.componentId
+            },
             makeDeviceBackupView: {
                 await BackupSeatComposer(
                     identities: identities,

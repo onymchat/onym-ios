@@ -27,16 +27,19 @@ public final class BackupEnrolmentFlow {
     private let stateStore: any BackupStateStoring
     private let schedule: BackupSchedule
     private let mediaPolicy: BackupMediaPolicy
+    private let workingDirectory: URL
     private var connection: BackupConnection?
 
     public init(
         port: any BackupPort,
         stateStore: any BackupStateStoring,
+        workingDirectory: URL,
         schedule: BackupSchedule = .default,
         mediaPolicy: BackupMediaPolicy = .descriptorsOnly
     ) {
         self.port = port
         self.stateStore = stateStore
+        self.workingDirectory = workingDirectory
         self.schedule = schedule
         self.mediaPolicy = mediaPolicy
     }
@@ -70,11 +73,24 @@ public final class BackupEnrolmentFlow {
         }
         do {
             var stored = try stateStore.load()
-            stored.componentId = connection.manifest.componentId
+            // Enrolling with a *different* operator discards the
+            // previous one's operational state. Keeping it would let
+            // reconciliation ask the new operator about the old one's
+            // operations, and would let a snapshot awaiting payment —
+            // sealed under terms the new operator never published — be
+            // retried against it.
+            let orphaned = stored.rebind(to: connection.manifest.componentId)
             stored.acceptedTermsId = connection.acceptedTermsId
             stored.acceptedTermsRaw = connection.terms.rawBytes
             stored.mediaPolicy = mediaPolicy
             try stateStore.save(stored)
+            if let orphaned {
+                // Sealed bytes nobody will claim now. Ciphertext, so not
+                // a disclosure — but a file the person never sees and
+                // would otherwise keep paying for in storage.
+                try? FileManager.default.removeItem(
+                    at: workingDirectory.appending(path: orphaned))
+            }
             state = .enrolled
         } catch {
             // Not enrolled. Reporting success over a failed write would
