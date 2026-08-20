@@ -62,7 +62,10 @@ public final class DeviceBackupVendorsFlow {
         /// separate because "nothing to restore" and "already set up"
         /// are different answers, and only one of them means something
         /// went wrong.
-        case finished(restored: Int, held: Int, failures: [String])
+        /// `checked` is how many operators were actually asked about.
+        /// Zero means nothing was, which is not a fact about the App
+        /// Store.
+        case finished(restored: Int, held: Int, checked: Int, failures: [String])
     }
 
     private let fanOut: BackupFanOut
@@ -72,88 +75,38 @@ public final class DeviceBackupVendorsFlow {
     /// operator. `nil` when this build cannot sell anything — a free
     /// operator, or a build with no store products — in which case the
     /// row does not appear.
+    /// Recovers a credential for one operator. `nil` from the closure
+    /// means this operator was not checked at all — no pinned issuer, or
+    /// nothing this build can sell for it — which is not the same answer
+    /// as "the store has nothing".
     private let restorePurchasesForOperator:
-        (@Sendable (String, Bool) async -> SeatPurchaseFlow.RestoreResult?)?
+        (@Sendable (String) async -> SeatPurchaseFlow.RestoreResult?)?
+    /// Asks StoreKit to sync. Account-wide, and prompts for an App Store
+    /// password, so it happens once per tap and never per operator.
+    private let syncPurchasesWithStore: (@Sendable () async -> Void)?
+    /// Guards the sweep itself, rather than what the screen is showing.
+    /// The quiet sweep displays nothing, so a status-based guard did not
+    /// hold it — and a tap during one started a second concurrent sweep,
+    /// with its own `AppStore.sync()`.
+    private var isSweepingPurchases = false
 
     public init(
         vendors: [Vendor],
         fanOut: BackupFanOut,
         schedule: BackupSchedule = .default,
         restorePurchasesForOperator:
-            (@Sendable (String, Bool) async -> SeatPurchaseFlow.RestoreResult?)? = nil
+            (@Sendable (String) async -> SeatPurchaseFlow.RestoreResult?)? = nil,
+        syncPurchasesWithStore: (@Sendable () async -> Void)? = nil
     ) {
         self.vendors = vendors
         self.fanOut = fanOut
         self.schedule = schedule
         self.sessionJitter = schedule.drawJitter()
         self.restorePurchasesForOperator = restorePurchasesForOperator
+        self.syncPurchasesWithStore = syncPurchasesWithStore
     }
 
     public var canRestorePurchases: Bool { restorePurchasesForOperator != nil }
-
-    /// Recover what was already paid for, for every operator.
-    ///
-    /// The new-phone path. Someone who restored their identity from the
-    /// recovery phrase has the keys to prove who they are to the broker
-    /// and to open a snapshot, but no credential — the purchase was
-    /// finished on a phone they no longer have. Without this the only
-    /// route past a paid operator's refusal is to buy the same thing
-    /// again.
-    ///
-    /// `syncWithStore` asks StoreKit to sync first, which prompts for an
-    /// App Store password. Passed as false for the sweep that runs on
-    /// its own, true for the button someone taps.
-    public func restorePurchases(syncWithStore: Bool = true) async {
-        await restorePurchases(syncWithStore: syncWithStore, announcingNothingFound: true)
-    }
-
-    /// The quiet sweep, once per screen.
-    ///
-    /// Costs nothing when there is nothing to do: `currentEntitlement`
-    /// is answered from what the device already holds, and the broker is
-    /// contacted only for a purchase the store knows about and this
-    /// device has no credential for. After the first success it
-    /// short-circuits on the credential it just stored.
-    ///
-    /// It runs without being asked because the person it exists for does
-    /// not know to ask: on a new phone nothing has been uploaded, so no
-    /// operator has refused anything yet, and the refusal that would
-    /// have mentioned a purchase has not happened.
-    public func restorePurchasesIfNeeded() async {
-        guard !hasSweptPurchases else { return }
-        hasSweptPurchases = true
-        await restorePurchases(syncWithStore: false, announcingNothingFound: false)
-    }
-
-    private func restorePurchases(syncWithStore: Bool, announcingNothingFound: Bool) async {
-        guard let restore = restorePurchasesForOperator, purchaseRestore != .running else { return }
-        if announcingNothingFound { purchaseRestore = .running }
-        var restored = 0
-        var held = 0
-        var failures: [String] = []
-        for vendor in vendors {
-            guard let result = await restore(vendor.id, syncWithStore) else { continue }
-            restored += result.restored.count
-            held += result.alreadyHeld.count
-            // Named by operator: with several set up, "something went
-            // wrong" without saying where is not something a person can
-            // act on.
-            failures += result.failures.values.map { "\(vendor.displayName): \($0)" }
-        }
-        if announcingNothingFound || restored > 0 || !failures.isEmpty {
-            // A sweep nobody asked for stays quiet unless it has news.
-            // Announcing "the App Store has no purchase to restore" on a
-            // screen someone opened to check their backups would be an
-            // answer to a question they did not ask.
-            purchaseRestore = .finished(restored: restored, held: held, failures: failures)
-        } else {
-            purchaseRestore = .idle
-        }
-        // A recovered credential changes what the next upload can do, so
-        // an operator sitting on "Payment needed" should stop saying so
-        // once it no longer is.
-        refresh()
-    }
 
     public var summary: Summary {
         if isRunning { return .running }
@@ -256,6 +209,116 @@ public final class DeviceBackupVendorsFlow {
     public func backUpIfDue(conditions: BackupSchedule.Conditions) async {
         guard schedule.permitsOpportunisticRun(conditions, jitter: sessionJitter) else { return }
         await backUpAllNow()
+    }
+
+    /// Recover what was already paid for, for every operator.
+    ///
+    /// The new-phone path. Someone who restored their identity from the
+    /// recovery phrase has the keys to prove who they are to the broker
+    /// and to open a snapshot, but no credential — the purchase was
+    /// finished on a phone they no longer have. Without this the only
+    /// route past a paid operator's refusal is to buy the same thing
+    /// again.
+    ///
+    /// `syncWithStore` asks StoreKit to sync first, which prompts for an
+    /// App Store password. Passed as false for the sweep that runs on
+    /// its own, true for the button someone taps.
+    public func restorePurchases(syncWithStore: Bool = true) async {
+        await restorePurchases(syncWithStore: syncWithStore, announcingNothingFound: true)
+    }
+
+    /// The quiet sweep, once per screen.
+    ///
+    /// Costs nothing when there is nothing to do: `currentEntitlement`
+    /// is answered from what the device already holds, and the broker is
+    /// contacted only for a purchase the store knows about and this
+    /// device has no credential for. After the first success it
+    /// short-circuits on the credential it just stored.
+    ///
+    /// It runs without being asked because the person it exists for does
+    /// not know to ask: on a new phone nothing has been uploaded, so no
+    /// operator has refused anything yet, and the refusal that would
+    /// have mentioned a purchase has not happened.
+    public func restorePurchasesIfNeeded() async {
+        guard !hasSweptPurchases else { return }
+        await restorePurchases(syncWithStore: false, announcingNothingFound: false)
+    }
+
+    private func restorePurchases(syncWithStore: Bool, announcingNothingFound: Bool) async {
+        guard let restore = restorePurchasesForOperator, !isSweepingPurchases else { return }
+        isSweepingPurchases = true
+        defer { isSweepingPurchases = false }
+        if announcingNothingFound { purchaseRestore = .running }
+        // Once, before the loop. `AppStore.sync()` is account-wide and
+        // prompts for a password: doing it per operator asked a person
+        // with two operators to authenticate twice for one tap, the
+        // second time seconds later and out of context.
+        if syncWithStore { await syncPurchasesWithStore?() }
+
+        var restored = 0
+        var held = 0
+        var checked = 0
+        var failures: [String] = []
+        for vendor in vendors {
+            guard let result = await restore(vendor.id) else {
+                // Not checked: no pinned issuer, or nothing this build
+                // sells for it. Counting it as checked would let the row
+                // say the App Store has nothing to restore without
+                // anything having asked the App Store.
+                continue
+            }
+            checked += 1
+            restored += result.restored.count
+            held += result.alreadyHeld.count
+            // Named by operator: with several set up, "something went
+            // wrong" without saying where is not something a person can
+            // act on.
+            failures += result.failures.values
+                .filter { !Self.isCancellation($0) }
+                .map { "\(vendor.displayName): \($0)" }
+        }
+
+        if Task.isCancelled {
+            // The screen was left mid-sweep. Nothing is known, so
+            // nothing is claimed — and the quiet sweep is left un-swept
+            // so the next visit tries again rather than reporting a
+            // cancellation forever.
+            if announcingNothingFound { purchaseRestore = .idle }
+            return
+        }
+        hasSweptPurchases = true
+
+        if announcingNothingFound || restored > 0 || !failures.isEmpty {
+            // A sweep nobody asked for stays quiet unless it has news.
+            // Announcing "the App Store has no purchase to restore" on a
+            // screen someone opened to check their backups would be an
+            // answer to a question they did not ask.
+            purchaseRestore = .finished(
+                restored: restored, held: held, checked: checked, failures: failures)
+        } else {
+            purchaseRestore = .idle
+        }
+        // A recovered credential changes what the next upload can do, so
+        // an operator sitting on "Payment needed" is told what to do
+        // about it. `refresh()` cannot clear that state on its own: it
+        // is derived from a snapshot still awaiting payment, and only a
+        // run that actually places those bytes resolves it.
+        refresh()
+        if restored > 0 {
+            for vendor in vendors where vendor.flow.isPaymentRequired {
+                vendor.flow.noteRestoredPurchase()
+            }
+            // A credential is what lets a paid operator answer at all,
+            // so the list it refused a moment ago is worth asking again.
+            await loadSnapshots()
+        }
+    }
+
+    /// A cancelled request is not a failed one. Leaving the screen
+    /// mid-sweep used to leave a raw `URLError` in the row.
+    private static func isCancellation(_ message: String) -> Bool {
+        message.contains("cancelled") || message.contains("Cancelled")
+            || message.contains("CancellationError")
     }
 
     /// What one operator reported in the last run, if it reported

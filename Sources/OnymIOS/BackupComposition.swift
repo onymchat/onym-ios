@@ -47,6 +47,12 @@ struct BackupSeatComposer {
     /// screen offers no restore-purchases row rather than one that
     /// always reports nothing.
     let makePurchaseFlow: (@Sendable (String) async -> SeatPurchaseFlow?)?
+    /// Whether this build can actually sell anything for an operator.
+    /// A free operator declares no offers, and a build whose bundled
+    /// catalog is missing sells nothing at all — in both cases a Restore
+    /// Purchases row would prompt for an App Store password and then
+    /// always answer "nothing to restore".
+    let sellsOffers: (@Sendable (String) -> Bool)?
 
     /// One operator's assembled stack, before it becomes a screen.
     private struct Stack {
@@ -207,7 +213,10 @@ struct BackupSeatComposer {
                 // is not a choice about which operator is special.
                 archiveRoot: first.material.archiveRoot
             ),
-            restorePurchasesForOperator: Self.purchaseRestorer(makePurchaseFlow)
+            restorePurchasesForOperator: stacks.contains(where: { sellsOffers?($0.componentId) == true })
+                ? Self.purchaseRestorer(makePurchaseFlow)
+                : nil,
+            syncPurchasesWithStore: Self.storeSyncer(makePurchaseFlow, componentId: first.manifest.componentId)
         )
 
         // Restored attachment ciphertext, and the client that will
@@ -366,20 +375,32 @@ struct BackupSeatComposer {
     /// authority.
     private static func purchaseRestorer(
         _ makePurchaseFlow: (@Sendable (String) async -> SeatPurchaseFlow?)?
-    ) -> (@Sendable (String, Bool) async -> SeatPurchaseFlow.RestoreResult?)? {
+    ) -> (@Sendable (String) async -> SeatPurchaseFlow.RestoreResult?)? {
         guard let makePurchaseFlow else { return nil }
-        return { @Sendable componentId, syncWithStore in
+        return { @Sendable componentId in
+            // `nil` means this operator was not checked — no pinned
+            // issuer to verify a broker's answer against — which the
+            // caller must not report as the App Store having nothing.
             guard let flow = await makePurchaseFlow(componentId) else { return nil }
-            if syncWithStore {
-                // A sync failure is not a reason to skip the sweep:
-                // `currentEntitlement` answers from what the device
-                // already knows, and that is usually everything needed.
-                // Someone who just signed in to a different Apple
-                // account is the case sync is for, and they will tap
-                // again.
-                try? await flow.syncWithStore()
-            }
             return await flow.restorePurchases(componentId: componentId)
+        }
+    }
+
+    /// The account-wide sync, done once per tap.
+    ///
+    /// It needs a flow to reach StoreKit through, and any operator's
+    /// will do: `AppStore.sync()` is a property of the Apple account,
+    /// not of a seat. A sync failure is not a reason to skip the sweep
+    /// that follows — `currentEntitlement` answers from what the device
+    /// already knows, and that is usually everything needed.
+    private static func storeSyncer(
+        _ makePurchaseFlow: (@Sendable (String) async -> SeatPurchaseFlow?)?,
+        componentId: String
+    ) -> (@Sendable () async -> Void)? {
+        guard let makePurchaseFlow else { return nil }
+        return { @Sendable in
+            guard let flow = await makePurchaseFlow(componentId) else { return }
+            try? await flow.syncWithStore()
         }
     }
 

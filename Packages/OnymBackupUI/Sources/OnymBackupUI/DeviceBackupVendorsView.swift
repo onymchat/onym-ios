@@ -97,10 +97,17 @@ public struct DeviceBackupVendorsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task {
             flow.refresh()
-            // Before the snapshot list, because a credential recovered
-            // here is what lets a paid operator answer that list at all.
-            await flow.restorePurchasesIfNeeded()
             await flow.loadSnapshots()
+        }
+        // Its own task, so it runs beside the snapshot list rather than
+        // in front of it. On the overwhelmingly common path it recovers
+        // nothing, and making everyone wait for StoreKit and a credential
+        // verification per operator to find that out delays the screen
+        // for no one's benefit. The sweep reloads the list itself if it
+        // actually recovers something — which is the only case where the
+        // list's answer would have changed.
+        .task {
+            await flow.restorePurchasesIfNeeded()
         }
     }
 
@@ -142,7 +149,7 @@ public struct DeviceBackupVendorsView: View {
             return "Bring a subscription bought on another phone to this one"
         case .running:
             return "Checking with the App Store…"
-        case .finished(let restored, let held, let failures):
+        case .finished(let restored, let held, let checked, let failures):
             if let first = failures.first {
                 // The operator's own words, not a count. A failure here
                 // is the difference between someone getting what they
@@ -154,9 +161,14 @@ public struct DeviceBackupVendorsView: View {
                     ? "1 purchase restored"
                     : "\(restored) purchases restored"
             }
-            return held > 0
-                ? "Nothing to restore — this phone is already set up"
-                : "The App Store has no purchase for this identity to restore"
+            if held > 0 { return "Nothing to restore — this phone is already set up" }
+            // Only claimable if something actually asked. An operator
+            // with no pinned issuer is never checked, and reporting that
+            // as the App Store's answer is a positive claim made without
+            // a question.
+            return checked > 0
+                ? "The App Store has no purchase for this identity to restore"
+                : "No operator here sells storage through this app"
         }
     }
 

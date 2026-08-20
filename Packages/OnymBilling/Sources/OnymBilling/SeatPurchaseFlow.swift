@@ -249,32 +249,41 @@ public actor SeatPurchaseFlow {
             subject: subject
         ).verify(entitlement)
 
-        // Not `try?`. A failed load here would be followed by a save
-        // that writes only this credential over every other one — and
-        // this is the `Transaction.updates` replay path, which fires at
-        // launch, where a read can legitimately fail because the file is
-        // under complete protection and the device has not been
-        // unlocked. One replayed transaction would then destroy every
-        // purchase the person had made.
+        // Not `try?`. A failed load inside the mutation propagates
+        // rather than being followed by a save that writes only this
+        // credential over every other one — and this is the
+        // `Transaction.updates` replay path, which fires at launch,
+        // where a read can legitimately fail because the file is under
+        // complete protection and the device has not been unlocked. One
+        // replayed transaction would then destroy every purchase the
+        // person had made.
         //
         // Throwing leaves the transaction unfinished, so the store
         // replays it once the device is readable. A delayed credential
         // is recoverable; deleted credentials are not.
-        var stored = try store.load()
-
-        // One live credential per offer. Keeping the superseded one
-        // would leave a verifier free to pick either.
-        //
-        // Entries this build cannot decode are *kept*. A newer client
-        // may have written a version we do not understand, and an older
-        // build silently deleting it during an unrelated redeem is a
-        // downgrade that eats data. Only positively matched entries go.
-        stored.removeAll { existing in
-            guard let decoded = try? SeatEntitlement.decode(raw: existing) else { return false }
-            return decoded.audience == componentId && decoded.offerId == offerId
+        // One step, under the store's lock. A `load()` here and a
+        // `save()` three lines later is a read-modify-write across a
+        // shared file, and every `SeatPurchaseFlow` is a separate actor
+        // instance — the replay observer and a restore sweep redeeming
+        // at once would drop one of the two credentials, permanently,
+        // because a redeemed transaction is finished and never replayed.
+        try store.mutate { stored in
+            var stored = stored
+            // One live credential per offer. Keeping the superseded one
+            // would leave a verifier free to pick either.
+            //
+            // Entries this build cannot decode are *kept*. A newer
+            // client may have written a version we do not understand,
+            // and an older build silently deleting it during an
+            // unrelated redeem is a downgrade that eats data. Only
+            // positively matched entries go.
+            stored.removeAll { existing in
+                guard let decoded = try? SeatEntitlement.decode(raw: existing) else { return false }
+                return decoded.audience == componentId && decoded.offerId == offerId
+            }
+            stored.append(raw)
+            return stored
         }
-        stored.append(raw)
-        try store.save(stored)
         return entitlement
     }
 }

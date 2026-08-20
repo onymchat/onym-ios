@@ -1403,7 +1403,10 @@ struct OnymIOSApp: App {
                     endpointOverride: backupBaseURLOverride,
                     entitlementStore: seatEntitlementStore,
                     seatKeys: seatAccessKeys,
-                    makePurchaseFlow: makeSeatPurchaseFlow
+                    makePurchaseFlow: makeSeatPurchaseFlow,
+                    sellsOffers: { componentId in
+                        !channelOfferCatalog.offers(forComponentId: componentId).isEmpty
+                    }
                 ).makeDeviceBackupView()
             },
             makeOnboardingFlow: makeOnboardingFlow,
