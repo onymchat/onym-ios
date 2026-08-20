@@ -124,7 +124,9 @@ public struct URLSessionBackupClient: BackupPort {
         let termsBytes = try await get(url: termsURL, signed: false)
         let signature = try? await get(url: termsURL.appendingPathExtension("sig"), signed: false)
 
-        let terms = try BackupTerms.decode(raw: termsBytes, signature: signature.flatMap {
+        let terms = try BackupTerms.decode(raw: termsBytes, detachedSignature: signature.flatMap {
+            // The `.sig` is base64 text; fall back to raw bytes for an
+            // operator that serves them unencoded.
             Data(base64Encoded: $0) ?? $0
         })
         // The manifest is what the person consented to, so it is the

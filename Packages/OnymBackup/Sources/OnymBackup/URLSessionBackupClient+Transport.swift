@@ -294,24 +294,49 @@ extension URLSessionBackupClient {
         }
     }
 
+    /// Check the terms against the operator key the manifest pins.
+    ///
+    /// **Two signatures cover two different messages, and confusing them
+    /// rejects an honest operator.** The document's own `signature`
+    /// covers the canonical bytes with `termsId` and `signature`
+    /// removed; the detached `.sig` served beside it covers the exact
+    /// served bytes. This checked the detached one against the
+    /// canonical message, which cannot verify for any correct operator
+    /// — every enrolment failed with "terms could not be verified"
+    /// while the operator was serving a perfectly valid document.
+    ///
+    /// Both are checked now, each against the bytes it actually signs.
+    /// They are independent guarantees rather than a belt-and-braces
+    /// pair: the embedded one is what a pinned `termsId` is a digest
+    /// of, and the detached one is what proves the bytes on the wire
+    /// were not altered in transit by something that could also
+    /// recanonicalize them.
     func verifyTermsSignature(_ terms: BackupTerms) throws {
         guard
-            let signature = terms.signature,
             let keyHex = manifest.operatorKey.split(separator: ":").last.map(String.init),
             let keyBytes = BackupFormat.data(fromLowercaseHex: keyHex),
-            let key = try? Curve25519.Signing.PublicKey(rawRepresentation: keyBytes)
+            let key = try? Curve25519.Signing.PublicKey(rawRepresentation: keyBytes),
+            let embedded = terms.embeddedSignature
         else {
             // An unsigned or unverifiable terms document is not terms.
             // Enrolment stops here rather than pinning something nobody
             // can be held to.
             throw BackupError.termsUnavailable
         }
-        let signingBytes = try ServiceManifestCanonical.signingBytes(
+        let canonical = try ServiceManifestCanonical.signingBytes(
             of: terms.rawBytes,
             omitting: ["termsId", "signature"]
         )
-        guard key.isValidSignature(signature, for: signingBytes) else {
+        guard key.isValidSignature(embedded, for: canonical) else {
             throw BackupError.termsUnavailable
+        }
+        // The `.sig` sibling is optional on the wire, but a served one
+        // that does not verify is worse than an absent one: it is a
+        // disagreement between two things the same operator published.
+        if let detached = terms.detachedSignature {
+            guard key.isValidSignature(detached, for: terms.rawBytes) else {
+                throw BackupError.termsUnavailable
+            }
         }
     }
 }
