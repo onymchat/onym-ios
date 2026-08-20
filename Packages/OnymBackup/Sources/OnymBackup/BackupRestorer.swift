@@ -86,25 +86,50 @@ public actor BackupRestorer {
         // Gate 3: write. Groups before messages, because a message whose
         // group does not exist yet is an orphan in every surface that
         // renders it.
-        try await sink.restore(groups: groups)
-        try await sink.restore(messages: messages)
-        try await sink.restore(invitations: invitations)
-        try await sink.restore(consents: consents)
+        // Counts come from the sink, not from the archive. A row the
+        // sink could not reconstruct is skipped, and reporting the
+        // archive's totals would claim to have restored things that are
+        // not there — the same overstatement this seat refuses
+        // everywhere else.
+        let wroteGroups = try await sink.restore(groups: groups)
+        let wroteMessages = try await sink.restore(messages: messages)
+        let wroteInvitations = try await sink.restore(invitations: invitations)
+        let wroteConsents = try await sink.restore(consents: consents)
         for blob in blobs {
             try await sink.restore(blob: blob)
         }
 
-        let carried = Set(blobs.map(\.sha256))
-        let referenced = Set(messages.flatMap(Self.contentAddresses(in:)))
+        var skipped: [String: Int] = [:]
+        for (name, held, written) in [
+            ("groups", groups.count, wroteGroups),
+            ("messages", messages.count, wroteMessages),
+            ("invitations", invitations.count, wroteInvitations),
+            ("consents", consents.count, wroteConsents),
+        ] where held > written {
+            skipped[name] = held - written
+        }
+
+        // Only a snapshot that meant to carry blobs can be missing any.
+        // A descriptors-only archive carries none by design and its
+        // attachments still resolve from the blob store, so reporting
+        // every one of them as unresolved would be alarming and false.
+        let unresolved: [String]
+        if reader.header.mediaPolicy == .includeCiphertext {
+            let carried = Set(blobs.map(\.sha256))
+            let referenced = Set(messages.flatMap(Self.contentAddresses(in:)))
+            unresolved = referenced.subtracting(carried).sorted()
+        } else {
+            unresolved = []
+        }
+
         return BackupRestoreSummary(
-            groups: groups.count,
-            messages: messages.count,
-            invitations: invitations.count,
-            consents: consents.count,
+            groups: wroteGroups,
+            messages: wroteMessages,
+            invitations: wroteInvitations,
+            consents: wroteConsents,
             blobs: blobs.count,
-            // What the snapshot pointed at but did not carry. The person
-            // is told rather than left to find the gaps themselves.
-            unresolvedBlobs: referenced.subtracting(carried).sorted()
+            skipped: skipped,
+            unresolvedBlobs: unresolved
         )
     }
 

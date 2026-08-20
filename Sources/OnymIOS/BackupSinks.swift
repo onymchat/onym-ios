@@ -33,7 +33,9 @@ struct AppBackupSink: BackupSinkProviding {
         return decoder
     }()
 
-    func restore(groups: [BackupGroupRecord]) async throws {
+    @discardableResult
+    func restore(groups: [BackupGroupRecord]) async throws -> Int {
+        var written = 0
         for record in groups {
             // A record we cannot reconstruct is skipped rather than
             // fatal, and the reason is asymmetric: the whole archive was
@@ -73,10 +75,14 @@ struct AppBackupSink: BackupSinkProviding {
                     invitationMessage: record.invitationMessage
                 )
             )
+            written += 1
         }
+        return written
     }
 
-    func restore(messages: [BackupMessageRecord]) async throws {
+    @discardableResult
+    func restore(messages: [BackupMessageRecord]) async throws -> Int {
+        var written = 0
         for record in messages {
             guard
                 let id = UUID(uuidString: record.id),
@@ -108,10 +114,14 @@ struct AppBackupSink: BackupSinkProviding {
                     systemEvent: Self.decode(ChatSystemEvent.self, record.systemEventJSON)
                 )
             )
+            written += 1
         }
+        return written
     }
 
-    func restore(invitations: [BackupInvitationRecord]) async throws {
+    @discardableResult
+    func restore(invitations: [BackupInvitationRecord]) async throws -> Int {
+        var written = 0
         for record in invitations {
             guard
                 let ownerID = IdentityID(record.ownerIdentityID),
@@ -128,22 +138,33 @@ struct AppBackupSink: BackupSinkProviding {
                     status: status
                 )
             )
+            written += 1
         }
+        return written
     }
 
-    func restore(consents: [BackupConsentRecord]) async throws {
+    @discardableResult
+    func restore(consents: [BackupConsentRecord]) async throws -> Int {
         let restored = consents.compactMap {
             try? Self.decoder.decode(PinnedConsentRecord.self, from: $0.raw)
         }
-        guard !restored.isEmpty else { return }
+        guard !restored.isEmpty else { return 0 }
         // Merged, not replaced: a device may already have consented to
         // something since the snapshot was taken, and a restore that
         // overwrote it would silently revoke a choice the person made
         // more recently than the backup.
-        let existing = (try? consentStore.load()) ?? []
+        //
+        // A *failed* load must therefore abort rather than read as "no
+        // existing consents". Treating a corrupt or transient read as an
+        // empty store and then saving would replace every live consent
+        // with the restored, inactive ones — the exact revocation this
+        // merge exists to prevent, executed by the code meant to prevent
+        // it. Losing the restored consents is recoverable; the person is
+        // re-asked. Losing the live ones is not.
+        let existing = try consentStore.load()
         let known = Set(existing.map { "\($0.componentId)|\($0.manifestHash)" })
         let additions = restored.filter { !known.contains("\($0.componentId)|\($0.manifestHash)") }
-        guard !additions.isEmpty else { return }
+        guard !additions.isEmpty else { return 0 }
         try consentStore.save(existing + additions.map {
             // Restored consents land inactive. Re-activating one would
             // silently re-select an operator the person has not seen
@@ -152,6 +173,7 @@ struct AppBackupSink: BackupSinkProviding {
             record.isActive = false
             return record
         })
+        return additions.count
     }
 
     func restore(blob: BackupBlobRecord) async throws {

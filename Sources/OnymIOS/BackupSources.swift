@@ -113,12 +113,19 @@ struct AppBackupSource: BackupSourceProviding {
         }
     }
 
-    func blobCiphertext(sha256: String) async throws -> Data? {
-        guard let blobClient else { return nil }
-        // Nil rather than throwing: blob retention is the blob
-        // operator's own contract and shorter than a backup's by
-        // design, so an expired attachment is an expected outcome and
-        // must not abort a snapshot of everything else.
-        return try? await blobClient.download(sha256: sha256)
+    func blobCiphertext(sha256: String) async throws -> BackupBlobAvailability {
+        guard let blobClient else { return .gone }
+        do {
+            return .available(try await blobClient.download(sha256: sha256))
+        } catch BlossomError.badStatus(404), BlossomError.badStatus(410) {
+            // The store answered and does not hold it. Expected: blob
+            // retention is its own contract, shorter than a backup's.
+            return .gone
+        }
+        // Everything else — a dropped connection, a 5xx, a malformed
+        // response — propagates. Folding it into "gone" would turn a
+        // flaky network into a snapshot that is quietly missing half its
+        // media and reports itself complete; failing means the snapshot
+        // is retried, which is cheap and correct.
     }
 }

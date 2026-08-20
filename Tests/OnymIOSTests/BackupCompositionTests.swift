@@ -1,4 +1,5 @@
 import CryptoKit
+import OnymFoundation
 import XCTest
 @testable import OnymBackup
 
@@ -17,7 +18,12 @@ final class BackupCompositionTests: XCTestCase {
     /// and the failure would be invisible from the outside.
     func testArchiveContainsNoSeedMaterial() async throws {
         let dir = try makeDirectory()
+        // The seed is derived from *this* mnemonic, so the word
+        // assertions below are actually reachable. Previously the seed
+        // was unrelated constant bytes, which made the whole word loop
+        // vacuous — it could not have failed.
         let mnemonic = "legal winner thank year wave sausage worth useful legal winner thank yellow"
+        let seed = Bip39.seedFromMnemonic(mnemonic)
         let source = StubSource(
             groups: [Self.group(name: "Weekend plans")],
             messages: [Self.message(body: "see you at six")]
@@ -25,7 +31,6 @@ final class BackupCompositionTests: XCTestCase {
         let composer = BackupComposer(
             source: source, mediaPolicy: .descriptorsOnly, workingDirectory: dir)
 
-        let seed = Data(repeating: 0x11, count: 64)
         let material = BackupKeys.material(seed: seed, componentId: "onym:component:op")
         let snapshot = try await composer.compose(
             keyMaterial: material, acceptedTermsId: "sha256:" + String(repeating: "a", count: 64))
@@ -37,10 +42,13 @@ final class BackupCompositionTests: XCTestCase {
             reference: snapshot.snapshotReference, archiveRoot: material.archiveRoot)
         let bytes = try Data(contentsOf: plain)
 
-        XCTAssertFalse(bytes.contains(seed), "raw seed bytes are in the archive")
-        for word in mnemonic.split(separator: " ") {
-            XCTAssertFalse(
-                bytes.range(of: Data(word.utf8)) != nil && word.count > 5,
+        XCTAssertNil(bytes.range(of: seed), "raw seed bytes are in the archive")
+        // Every word, unconditionally. The earlier form ANDed on
+        // `word.count > 5`, which let six of the twelve pass no matter
+        // what the archive contained.
+        for word in Set(mnemonic.split(separator: " ")) {
+            XCTAssertNil(
+                bytes.range(of: Data(word.utf8)),
                 "mnemonic word \"\(word)\" appears in the archive")
         }
         XCTAssertNil(
@@ -123,6 +131,51 @@ final class BackupCompositionTests: XCTestCase {
         XCTAssertEqual(summary.unresolvedBlobs, [address], "the gap was not reported")
     }
 
+    /// A descriptors-only snapshot carries no blobs *by design*, and its
+    /// attachments still resolve from the blob store. Reporting them all
+    /// as unresolved would tell someone their media is gone when it is
+    /// not.
+    func testDescriptorsOnlySnapshotReportsNoUnresolvedBlobs() async throws {
+        let dir = try makeDirectory()
+        let attachment = Data(#"{"sha256":"\#(String(repeating: "f", count: 64))","encKey":"k"}"#.utf8)
+        let composer = BackupComposer(
+            source: StubSource(
+                groups: [Self.group(name: "g")],
+                messages: [Self.message(body: "with media", imageJSON: attachment)]),
+            mediaPolicy: .descriptorsOnly, workingDirectory: dir)
+        let material = BackupKeys.material(
+            seed: Data(repeating: 0x55, count: 64), componentId: "onym:component:op")
+        let snapshot = try await composer.compose(
+            keyMaterial: material, acceptedTermsId: "sha256:" + String(repeating: "e", count: 64))
+
+        let summary = try await BackupRestorer(sink: StubSink()).restore(
+            sealedURL: snapshot.sealedBytesURL, reference: snapshot.snapshotReference,
+            keyMaterial: material, workingDirectory: dir)
+        XCTAssertTrue(summary.unresolvedBlobs.isEmpty)
+    }
+
+    /// A summary must count what the sink wrote, not what the archive
+    /// held — "5 groups restored" when three landed is the same
+    /// overstatement this seat refuses everywhere else.
+    func testSummaryCountsWhatTheSinkWrote() async throws {
+        let dir = try makeDirectory()
+        let composer = BackupComposer(
+            source: StubSource(
+                groups: [Self.group(name: "a"), Self.group(name: "b")], messages: []),
+            mediaPolicy: .descriptorsOnly, workingDirectory: dir)
+        let material = BackupKeys.material(
+            seed: Data(repeating: 0x66, count: 64), componentId: "onym:component:op")
+        let snapshot = try await composer.compose(
+            keyMaterial: material, acceptedTermsId: "sha256:" + String(repeating: "f", count: 64))
+
+        let sink = RefusingSink()
+        let summary = try await BackupRestorer(sink: sink).restore(
+            sealedURL: snapshot.sealedBytesURL, reference: snapshot.snapshotReference,
+            keyMaterial: material, workingDirectory: dir)
+        XCTAssertEqual(summary.groups, 1, "reported more groups than the sink wrote")
+        XCTAssertEqual(summary.skipped["groups"], 1)
+    }
+
     // MARK: - Fixtures
 
     private static func group(name: String) -> BackupGroupRecord {
@@ -166,7 +219,9 @@ private struct StubSource: BackupSourceProviding {
     }
     func invitations() async throws -> [BackupInvitationRecord] { [] }
     func consents() async throws -> [BackupConsentRecord] { [] }
-    func blobCiphertext(sha256: String) async throws -> Data? { blobs[sha256] }
+    func blobCiphertext(sha256: String) async throws -> BackupBlobAvailability {
+        blobs[sha256].map { .available($0) } ?? .gone
+    }
 }
 
 private actor StubSink: BackupSinkProviding {
@@ -174,9 +229,26 @@ private actor StubSink: BackupSinkProviding {
     var messages: [BackupMessageRecord] = []
     var blobs: [BackupBlobRecord] = []
 
-    func restore(groups: [BackupGroupRecord]) async throws { self.groups = groups }
-    func restore(messages: [BackupMessageRecord]) async throws { self.messages = messages }
-    func restore(invitations: [BackupInvitationRecord]) async throws {}
-    func restore(consents: [BackupConsentRecord]) async throws {}
+    func restore(groups: [BackupGroupRecord]) async throws -> Int {
+        self.groups = groups
+        return groups.count
+    }
+    func restore(messages: [BackupMessageRecord]) async throws -> Int {
+        self.messages = messages
+        return messages.count
+    }
+    func restore(invitations: [BackupInvitationRecord]) async throws -> Int { 0 }
+    func restore(consents: [BackupConsentRecord]) async throws -> Int { 0 }
     func restore(blob: BackupBlobRecord) async throws { blobs.append(blob) }
+}
+
+
+/// Writes only the first group it is handed, standing in for a sink that
+/// meets a row from a schema it does not understand.
+private actor RefusingSink: BackupSinkProviding {
+    func restore(groups: [BackupGroupRecord]) async throws -> Int { min(groups.count, 1) }
+    func restore(messages: [BackupMessageRecord]) async throws -> Int { messages.count }
+    func restore(invitations: [BackupInvitationRecord]) async throws -> Int { 0 }
+    func restore(consents: [BackupConsentRecord]) async throws -> Int { 0 }
+    func restore(blob: BackupBlobRecord) async throws {}
 }

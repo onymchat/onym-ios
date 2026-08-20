@@ -60,6 +60,7 @@ public actor BackupComposer {
 
         let writer = try BackupArchiveWriter(scratchURL: scratchURL)
         writer.setIdentityCount(await source.identityCount())
+        writer.setMediaPolicy(mediaPolicy)
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
@@ -90,11 +91,21 @@ public actor BackupComposer {
         try writer.finish(writingTo: plaintextURL, createdAt: now)
 
         let sealedURL = workingDirectory.appending(path: "pending-\(operationId)")
-        let reference = try BackupSealer.seal(
-            plaintextURL: plaintextURL,
-            to: sealedURL,
-            archiveRoot: keyMaterial.archiveRoot
-        )
+        let reference: SnapshotReference
+        do {
+            reference = try BackupSealer.seal(
+                plaintextURL: plaintextURL,
+                to: sealedURL,
+                archiveRoot: keyMaterial.archiveRoot
+            )
+        } catch {
+            // A half-written seal is ciphertext, so it is not a
+            // disclosure — but it is a file nobody will ever claim, and
+            // repeated failures would accumulate them under a directory
+            // the person never sees.
+            try? FileManager.default.removeItem(at: sealedURL)
+            throw error
+        }
         return SealedSnapshot(
             operationId: operationId,
             snapshotReference: reference,
@@ -131,11 +142,15 @@ public actor BackupComposer {
 
         var blobs: [BackupBlobRecord] = []
         for address in addresses.sorted() {
-            // A blob the store no longer serves is not a failure: blob
-            // retention is its own contract, shorter than a backup's by
-            // design. The descriptor still travels, and the restore says
-            // what it could not resolve.
-            guard let ciphertext = try await source.blobCiphertext(sha256: address) else { continue }
+            // `.gone` is expected and skipped: blob retention is its
+            // own contract, shorter than a backup's by design. A
+            // transport failure is *not* folded in here — the source
+            // throws for that, so a flaky network fails the snapshot and
+            // it is retried, rather than silently producing one with
+            // half the media in it.
+            guard case .available(let ciphertext) = try await source.blobCiphertext(sha256: address) else {
+                continue
+            }
             let actual = SHA256.hash(data: ciphertext).map { String(format: "%02x", $0) }.joined()
             guard actual == address else { continue }
             blobs.append(BackupBlobRecord(sha256: address, ciphertext: ciphertext))

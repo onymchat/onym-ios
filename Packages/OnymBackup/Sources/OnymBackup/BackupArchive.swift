@@ -40,6 +40,14 @@ public struct BackupArchiveHeader: Sendable, Equatable, Codable {
     /// The archive's true length before padding. The padding is inside
     /// the seal, so this is the only place the real size is recorded.
     public let contentByteSize: Int
+    /// What this snapshot set out to carry for media.
+    ///
+    /// Recorded because a restore cannot otherwise tell "this archive
+    /// deliberately carries descriptors only" from "this archive should
+    /// have carried blobs and some are missing" — and reporting every
+    /// attachment of a descriptors-only snapshot as unresolved would be
+    /// alarming and wrong.
+    public let mediaPolicy: BackupMediaPolicy
     public let entries: [BackupArchiveEntry]
 }
 
@@ -68,6 +76,7 @@ public final class BackupArchiveWriter {
     private let handle: FileHandle
     private var entries: [BackupArchiveEntry] = []
     private var identityCount = 0
+    private var mediaPolicy: BackupMediaPolicy = .descriptorsOnly
     private var finished = false
 
     public init(scratchURL: URL) throws {
@@ -82,6 +91,10 @@ public final class BackupArchiveWriter {
 
     public func setIdentityCount(_ count: Int) {
         identityCount = count
+    }
+
+    public func setMediaPolicy(_ policy: BackupMediaPolicy) {
+        mediaPolicy = policy
     }
 
     /// Append one record. `bytes` is whatever the composer serialized
@@ -123,6 +136,7 @@ public final class BackupArchiveWriter {
             createdAt: createdAt,
             identityCount: identityCount,
             contentByteSize: recordBytes,
+            mediaPolicy: mediaPolicy,
             entries: entries
         )
         let encoder = JSONEncoder()
@@ -205,7 +219,16 @@ public struct BackupArchiveReader {
         defer { try? handle.close() }
         try handle.seek(toOffset: UInt64(recordsOffset))
 
+        var seenKinds: Set<UInt8> = []
         for entry in header.entries {
+            // Two records of one kind would be decoded in order and the
+            // later would win silently, so an archive that names groups
+            // twice could quietly discard half of them. Nothing writes
+            // that shape, which is exactly why it should be refused
+            // rather than tolerated.
+            guard seenKinds.insert(entry.kind).inserted else {
+                throw BackupError.incompleteSnapshot
+            }
             guard
                 let framing = try handle.read(upToCount: 5), framing.count == 5,
                 let kind = BackupArchiveEntryKind(rawValue: framing[framing.startIndex]),

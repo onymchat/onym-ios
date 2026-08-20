@@ -41,27 +41,41 @@ public protocol BackupSourceProviding: Sendable {
 
     func consents() async throws -> [BackupConsentRecord]
 
-    /// The blob store's bytes for one content address, or `nil` if it no
-    /// longer serves them.
+    /// The blob store's answer for one content address.
     ///
-    /// A missing blob is not a failure: retention at the blob operator
-    /// is its own contract and shorter than a backup's by design. The
-    /// snapshot records what it could get and the restore reports what
-    /// it could not.
-    func blobCiphertext(sha256: String) async throws -> Data?
+    /// The two failure modes must be told apart. A blob the store no
+    /// longer holds is `.gone`: blob retention is its own contract,
+    /// shorter than a backup's by design, and a snapshot should record
+    /// what it could get rather than abort. A blob the store could not
+    /// be *asked* about — a dropped connection, a 5xx — is an error, and
+    /// folding it into `.gone` would quietly produce a media-thin
+    /// snapshot on a flaky network and call it complete.
+    func blobCiphertext(sha256: String) async throws -> BackupBlobAvailability
 }
 
-/// Where a restored snapshot's contents go.
-///
 /// Writes go through the app's stores rather than into the database
 /// files, so the restoring device re-encrypts everything under *its*
 /// at-rest key. That is the whole reason a snapshot is a logical export:
 /// the bytes that arrive are not the bytes that get stored.
+/// What a blob store had to say.
+public enum BackupBlobAvailability: Sendable, Equatable {
+    case available(Data)
+    /// The store answered, and does not hold it.
+    case gone
+}
+
+/// Where a restored snapshot's contents go.
+///
+/// Every method returns **how many rows it actually wrote**, not how
+/// many it was handed. An implementation that cannot reconstruct a row —
+/// an enum case from a newer schema, an unparseable id — skips it, and a
+/// summary built from the archive's counts would then report restoring
+/// things that are not there. The count has to come from the writer.
 public protocol BackupSinkProviding: Sendable {
-    func restore(groups: [BackupGroupRecord]) async throws
-    func restore(messages: [BackupMessageRecord]) async throws
-    func restore(invitations: [BackupInvitationRecord]) async throws
-    func restore(consents: [BackupConsentRecord]) async throws
+    @discardableResult func restore(groups: [BackupGroupRecord]) async throws -> Int
+    @discardableResult func restore(messages: [BackupMessageRecord]) async throws -> Int
+    @discardableResult func restore(invitations: [BackupInvitationRecord]) async throws -> Int
+    @discardableResult func restore(consents: [BackupConsentRecord]) async throws -> Int
     /// Hand back one attachment blob. The implementation is responsible
     /// for putting it somewhere the media loaders will find it.
     func restore(blob: BackupBlobRecord) async throws
@@ -74,10 +88,15 @@ public struct BackupRestoreSummary: Sendable, Equatable {
     public let invitations: Int
     public let consents: Int
     public let blobs: Int
-    /// Content addresses the snapshot referenced but did not carry, and
-    /// which the blob store no longer serves. Surfaced rather than
-    /// swallowed: the person's media is partly gone, and a restore that
-    /// reported plain success would be lying about it.
+    /// Rows the archive held that the sink could not reconstruct, by
+    /// kind. Non-empty means this build does not understand part of the
+    /// snapshot — worth telling someone about rather than absorbing.
+    public let skipped: [String: Int]
+    /// Content addresses this snapshot *meant* to carry and did not.
+    ///
+    /// Empty for a descriptors-only snapshot, which carries no blobs by
+    /// design and whose attachments still resolve from the blob store —
+    /// reporting all of them as unresolved would be alarming and wrong.
     public let unresolvedBlobs: [String]
 
     public init(
@@ -86,8 +105,10 @@ public struct BackupRestoreSummary: Sendable, Equatable {
         invitations: Int,
         consents: Int,
         blobs: Int,
+        skipped: [String: Int] = [:],
         unresolvedBlobs: [String]
     ) {
+        self.skipped = skipped
         self.groups = groups
         self.messages = messages
         self.invitations = invitations
