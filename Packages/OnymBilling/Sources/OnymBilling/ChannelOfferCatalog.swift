@@ -59,5 +59,12 @@ public struct ChannelOfferCatalog: Sendable {
         offers.first { $0.offerId == offerId && $0.componentId == componentId }
     }
 
+    /// The reverse lookup a `Transaction.updates` replay needs: StoreKit
+    /// hands back a product identifier, and only the catalog knows which
+    /// seat and offer it was bought for.
+    public func offer(forProductId productId: String) -> ChannelOffer? {
+        offers.first { $0.productId == productId }
+    }
+
     public var productIds: Set<String> { Set(offers.map(\.productId)) }
 }

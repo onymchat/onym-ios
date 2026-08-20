@@ -1,6 +1,7 @@
 import SwiftUI
 import OnymSearch
 import OnymChatsUI
+import OnymBackupUI
 import OnymSettings
 import OnymModerationUI
 import OnymDiscovery
@@ -53,6 +54,11 @@ struct RootView: View {
     /// onboarding, `needsReconsent` presents the same surface with the
     /// reason attached, and anything else dismisses it.
     @State private var consentPresentation: ConsentPresentation?
+    /// Resolved once at appear, because building it reads a pinned
+    /// consent record and derives a seat key — neither of which belongs
+    /// in a view body that re-runs on every redraw. `nil` means no
+    /// backup operator is consented to, and the Settings section hides.
+    @State private var deviceBackupView: DeviceBackupSettingsView?
 
     /// `fullScreenCover(item:)` needs identity, and the two consent
     /// gates the root can host are exactly "no mandate yet" and "the
@@ -112,6 +118,9 @@ struct RootView: View {
             consentPresentation = presentationUnlessOnboarding(
                 for: dependencies.moderationGateFlow.gate
             )
+            if let makeDeviceBackupView = dependencies.makeDeviceBackupView {
+                deviceBackupView = await makeDeviceBackupView()
+            }
         }
         .onChange(of: dependencies.moderationGateFlow.gate) { _, gate in
             consentPresentation = presentationUnlessOnboarding(for: gate)
@@ -267,7 +276,8 @@ struct RootView: View {
                         makeDiscoverySettingsFlow: dependencies.makeDiscoverySettingsFlow,
                         onRestartOnboarding: dependencies.onboardingRestart.map { restart in
                             { restart.requestRestart() }
-                        }
+                        },
+                        makeDeviceBackupView: deviceBackupView.map { view in { view } }
                     )
                 }
                 .safeAreaInset(edge: .bottom, spacing: 0) {
