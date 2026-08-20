@@ -65,7 +65,11 @@ public final class DeviceBackupVendorsFlow {
         /// `checked` is how many operators were actually asked about.
         /// Zero means nothing was, which is not a fact about the App
         /// Store.
-        case finished(restored: Int, held: Int, checked: Int, failures: [String])
+        /// `heldUnknown` means this phone could not check what it
+        /// already holds — different from finding nothing, and not
+        /// something to report as an answer about the App Store.
+        case finished(
+            restored: Int, held: Int, checked: Int, heldUnknown: Bool, failures: [String])
     }
 
     private let fanOut: BackupFanOut
@@ -258,6 +262,7 @@ public final class DeviceBackupVendorsFlow {
         var restored = 0
         var held = 0
         var checked = 0
+        var heldUnknown = false
         var failures: [String] = []
         for vendor in vendors {
             guard let result = await restore(vendor.id) else {
@@ -273,9 +278,15 @@ public final class DeviceBackupVendorsFlow {
             // Named by operator: with several set up, "something went
             // wrong" without saying where is not something a person can
             // act on.
-            failures += result.failures.values
+            // Sorted by offer id, so two failing offers do not produce
+            // a different subtitle on every run — `Dictionary.values`
+            // has no order, and the row shows the first one.
+            failures += result.failures
+                .sorted { $0.key < $1.key }
+                .map(\.value)
                 .filter { !Self.isCancellation($0) }
                 .map { "\(vendor.displayName): \($0)" }
+            if result.heldUnknown { heldUnknown = true }
         }
 
         if Task.isCancelled {
@@ -294,7 +305,11 @@ public final class DeviceBackupVendorsFlow {
             // screen someone opened to check their backups would be an
             // answer to a question they did not ask.
             purchaseRestore = .finished(
-                restored: restored, held: held, checked: checked, failures: failures)
+                restored: restored,
+                held: held,
+                checked: checked,
+                heldUnknown: heldUnknown,
+                failures: failures)
         } else {
             purchaseRestore = .idle
         }

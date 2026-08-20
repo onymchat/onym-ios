@@ -149,7 +149,7 @@ public struct DeviceBackupVendorsView: View {
             return "Bring a subscription bought on another phone to this one"
         case .running:
             return "Checking with the App Store…"
-        case .finished(let restored, let held, let checked, let failures):
+        case .finished(let restored, let held, let checked, let heldUnknown, let failures):
             if let first = failures.first {
                 // The operator's own words, not a count. A failure here
                 // is the difference between someone getting what they
@@ -160,6 +160,12 @@ public struct DeviceBackupVendorsView: View {
                 return restored == 1
                     ? "1 purchase restored"
                     : "\(restored) purchases restored"
+            }
+            if heldUnknown {
+                // Neither "already set up" nor "nothing there": this
+                // phone could not read what it holds, and both of the
+                // other answers would be claims it cannot make.
+                return "Could not check what this phone already has — try again"
             }
             if held > 0 { return "Nothing to restore — this phone is already set up" }
             // Only claimable if something actually asked. An operator

@@ -63,15 +63,38 @@ public actor SeatPurchaseFlow {
         public let restored: [String]
         /// Offers already covered before the sweep ran.
         public let alreadyHeld: [String]
-        /// Offers the store has no entitlement for. The ordinary answer
-        /// for something never bought, or a subscription that lapsed —
-        /// not an error, and not phrased as one.
-        public let notPurchased: [String]
+        /// Whether the check for what is already held could not be
+        /// made — an unreadable credential store, or a subject that
+        /// could not be derived.
+        ///
+        /// The sweep still runs, re-redeeming everything, which is the
+        /// safe direction. It is reported because "this phone is
+        /// already set up" and "this phone could not tell" are
+        /// different answers and only one of them is a reason to stop
+        /// looking.
+        public let heldUnknown: Bool
         /// Offers the store *did* have an entitlement for and this
         /// device could not turn into a credential, by offer id.
+        ///
+        /// Sentences, not enum dumps: one of these is rendered straight
+        /// onto the Device Backup screen, and the difference between
+        /// getting what you paid for and buying it twice is what that
+        /// row is for.
         public let failures: [String: String]
 
         public var isEmpty: Bool { restored.isEmpty && alreadyHeld.isEmpty }
+
+        public init(
+            restored: [String],
+            alreadyHeld: [String],
+            heldUnknown: Bool,
+            failures: [String: String]
+        ) {
+            self.restored = restored
+            self.alreadyHeld = alreadyHeld
+            self.heldUnknown = heldUnknown
+            self.failures = failures
+        }
     }
 
     /// Ask the store to sync before a sweep.
@@ -106,10 +129,19 @@ public actor SeatPurchaseFlow {
     public func restorePurchases(componentId: String) async -> RestoreResult {
         var restored: [String] = []
         var alreadyHeld: [String] = []
-        var notPurchased: [String] = []
         var failures: [String: String] = [:]
 
-        let held = (try? await heldOfferIds(componentId: componentId)) ?? []
+        var held: Set<String> = []
+        var heldUnknown = false
+        do {
+            held = try await heldOfferIds(componentId: componentId)
+        } catch {
+            // Could not tell. Everything is re-checked, which is the
+            // safe direction — but it is not the same as knowing
+            // nothing is held, and the caller is told which one this
+            // was.
+            heldUnknown = true
+        }
         for channelOffer in catalog.offers(forComponentId: componentId) {
             if held.contains(channelOffer.offerId) {
                 // A credential that still verifies needs no broker round
@@ -123,7 +155,9 @@ public actor SeatPurchaseFlow {
                 let (jws, transaction) = await coordinator.currentTransaction(
                     for: channelOffer.productId)
             else {
-                notPurchased.append(channelOffer.offerId)
+                // The ordinary answer for something never bought, or a
+                // subscription that lapsed. Not an error, and not
+                // counted as one.
                 continue
             }
             do {
@@ -140,15 +174,31 @@ public actor SeatPurchaseFlow {
                 // completed, which is delivered now.
                 await coordinator.finish(transaction)
             } catch {
-                failures[channelOffer.offerId] = String(describing: error)
+                failures[channelOffer.offerId] = Self.describe(error)
             }
         }
         return RestoreResult(
             restored: restored,
             alreadyHeld: alreadyHeld,
-            notPurchased: notPurchased,
+            heldUnknown: heldUnknown,
             failures: failures
         )
+    }
+
+    /// A sentence somebody can act on.
+    ///
+    /// `String(describing:)` on a `BillingError` produces
+    /// `brokerRejected(code: "invalid_transaction", message: Optional("…"))`
+    /// — a debugger's output, rendered at a person trying to find out
+    /// whether the subscription they paid for came across. Every error
+    /// this can see already knows how to say itself; anything that does
+    /// not gets a sentence rather than its type name.
+    static func describe(_ error: Error) -> String {
+        if let described = (error as? LocalizedError)?.errorDescription { return described }
+        if let urlError = error as? URLError, urlError.code == .notConnectedToInternet {
+            return "This phone is not online, so the App Store could not be checked."
+        }
+        return "The purchase could not be restored on this device."
     }
 
     /// Offers this device already holds a credential for that verifies
