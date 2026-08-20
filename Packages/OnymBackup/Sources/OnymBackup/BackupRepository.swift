@@ -520,6 +520,15 @@ public actor BackupRepository {
         try await port.listSnapshots()
     }
 
+    /// Fetch a snapshot's sealed bytes.
+    ///
+    /// The caller verifies the reference before treating any byte as
+    /// restorable; the client refuses a short or over-long body, so what
+    /// arrives is either the whole thing or an error.
+    public func download(_ reference: SnapshotReference, to destination: URL) async throws {
+        try await port.downloadSnapshot(reference, to: destination)
+    }
+
     /// Erase, and record the receipt.
     ///
     /// The receipt is kept because its `excludedScope` outlives the

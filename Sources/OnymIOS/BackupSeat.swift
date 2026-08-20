@@ -93,6 +93,15 @@ enum BackupSeat {
         return nil
     }
 
+    /// Where a restore puts attachment ciphertext it recovered.
+    ///
+    /// Read by `RestoredBlobClient`, which the media loaders go through
+    /// — that wrapping is what makes a restored attachment visible
+    /// rather than merely present on disk.
+    static func restoredBlobDirectory() throws -> URL {
+        try workingDirectory().appending(path: "blobs")
+    }
+
     /// Where sealed snapshots and local backup state live.
     static func workingDirectory() throws -> URL {
         let base = try PersistentStoreOpener.storeDirectory()

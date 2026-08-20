@@ -9,12 +9,14 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../OnymFoundation"),
+        .package(path: "../OnymTransportBlossom"),
     ],
     targets: [
         .target(
             name: "OnymBackup",
             dependencies: [
                 "OnymFoundation",
+                "OnymTransportBlossom",
             ]
         ),
     ]

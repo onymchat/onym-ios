@@ -91,12 +91,24 @@ public actor BackupRestorer {
         // archive's totals would claim to have restored things that are
         // not there — the same overstatement this seat refuses
         // everywhere else.
-        let wroteGroups = try await sink.restore(groups: groups)
-        let wroteMessages = try await sink.restore(messages: messages)
-        let wroteInvitations = try await sink.restore(invitations: invitations)
-        let wroteConsents = try await sink.restore(consents: consents)
-        for blob in blobs {
-            try await sink.restore(blob: blob)
+        // From here on a failure is *not* "nothing happened": the
+        // earlier writes have landed. Reported as `restoreInterrupted`
+        // so the screen can say so, rather than inheriting the
+        // pre-write promise.
+        let wroteGroups: Int
+        let wroteMessages: Int
+        let wroteInvitations: Int
+        let wroteConsents: Int
+        do {
+            wroteGroups = try await sink.restore(groups: groups)
+            wroteMessages = try await sink.restore(messages: messages)
+            wroteInvitations = try await sink.restore(invitations: invitations)
+            wroteConsents = try await sink.restore(consents: consents)
+            for blob in blobs {
+                try await sink.restore(blob: blob)
+            }
+        } catch {
+            throw BackupError.localFailure(reason: .restoreInterrupted)
         }
 
         var skipped: [String: Int] = [:]

@@ -578,6 +578,16 @@ struct OnymIOSApp: App {
         #else
         blossomClient = makeLiveBlossomClient()
         #endif
+        // Every media loader goes through this, so a restored
+        // attachment is served from disk before the network is asked.
+        // Without it, a restore writes ciphertext somewhere no loader
+        // reads and the summary counts attachments nobody can see.
+        // Content-addressed and re-verified on read, so a local file
+        // can only ever stand in for the bytes it actually is.
+        let mediaClient: any BlossomClient = (try? BackupSeat.restoredBlobDirectory())
+            .map { RestoredBlobClient(restoredDirectory: $0, upstream: blossomClient) }
+            ?? blossomClient
+
         // The loaders may honor an attachment's `server` stamp only
         // within this set — the user's own configured servers — never
         // a peer-chosen host (see BlossomServerStampPolicy).
@@ -585,17 +595,17 @@ struct OnymIOSApp: App {
             await blossomServersRepository.currentEndpoints().map(\.url)
         }
         let imageLoader = ChatImageLoader(
-            blossomClient: blossomClient,
+            blossomClient: mediaClient,
             allowedStampServers: allowedStampServers
         )
         self.imageLoader = imageLoader
         let videoLoader = ChatVideoLoader(
-            blossomClient: blossomClient,
+            blossomClient: mediaClient,
             allowedStampServers: allowedStampServers
         )
         self.videoLoader = videoLoader
         let voiceLoader = ChatVoiceLoader(
-            blossomClient: blossomClient,
+            blossomClient: mediaClient,
             allowedStampServers: allowedStampServers
         )
         self.voiceLoader = voiceLoader
