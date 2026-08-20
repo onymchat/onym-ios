@@ -86,14 +86,16 @@ public actor SwiftDataInvitationStore: InvitationStore {
     }
 
     @discardableResult
-    public func save(_ record: IncomingInvitationRecord) -> Bool {
+    public func save(_ record: IncomingInvitationRecord) -> InvitationSaveOutcome {
         let id = record.id
         let dup = FetchDescriptor<PersistedInvitation>(
             predicate: #Predicate { $0.id == id }
         )
-        if let count = try? context.fetchCount(dup), count > 0 { return false }
+        // Row already here, left exactly as it was — not a write that
+        // failed, and no longer spelled like one.
+        if let count = try? context.fetchCount(dup), count > 0 { return .duplicate }
 
-        guard let encrypted = try? StorageEncryption.encrypt(record.payload) else { return false }
+        guard let encrypted = try? StorageEncryption.encrypt(record.payload) else { return .failed }
         context.insert(PersistedInvitation(
             id: record.id,
             ownerIdentityIDString: record.ownerIdentityID.rawValue.uuidString,
@@ -102,7 +104,7 @@ public actor SwiftDataInvitationStore: InvitationStore {
             statusRaw: record.status.rawValue
         ))
         try? context.save()
-        return true
+        return .saved
     }
 
     public func updateStatus(id: String, status: IncomingInvitationStatus) {

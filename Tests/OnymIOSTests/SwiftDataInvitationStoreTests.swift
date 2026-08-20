@@ -28,8 +28,8 @@ final class SwiftDataInvitationStoreTests: XCTestCase {
 
     func test_save_andList_returnsRecord() async {
         let record = Self.makeRecord(id: "evt-1", payload: Data("hello".utf8))
-        let inserted = await store.save(record)
-        XCTAssertTrue(inserted)
+        let outcome = await store.save(record)
+        XCTAssertEqual(outcome, .saved)
 
         let listed = await store.list()
         XCTAssertEqual(listed.count, 1)
@@ -38,12 +38,14 @@ final class SwiftDataInvitationStoreTests: XCTestCase {
         XCTAssertEqual(listed[0].status, .pending)
     }
 
-    func test_save_dedupesById_returnsFalseOnSecondSave() async {
+    func test_save_dedupesById_reportsDuplicateOnSecondSave() async {
         let record = Self.makeRecord(id: "evt-1")
         let first = await store.save(record)
         let second = await store.save(record)
-        XCTAssertTrue(first)
-        XCTAssertFalse(second)
+        XCTAssertEqual(first, .saved)
+        XCTAssertEqual(
+            second, .duplicate,
+            "a row already here is a duplicate, not a write that failed")
 
         let listed = await store.list()
         XCTAssertEqual(listed.count, 1, "duplicate save must not insert a second row")

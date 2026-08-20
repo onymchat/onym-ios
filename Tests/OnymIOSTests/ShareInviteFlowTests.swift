@@ -286,10 +286,10 @@ private actor TestableInMemoryGroupStore: GroupStore {
     }
 
     @discardableResult
-    func insertOrUpdate(_ group: ChatGroup) -> Bool {
+    func insertOrUpdate(_ group: ChatGroup) -> GroupInsertOutcome {
         let isNew = rows[group.id] == nil
         rows[group.id] = group
-        return isNew
+        return isNew ? .inserted : .updated
     }
 
     func markPublished(id: String, ownerIDString: String, commitment: Data?) {

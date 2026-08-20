@@ -33,8 +33,8 @@ final class SwiftDataGroupStoreTests: XCTestCase {
             name: "Family",
             adminPubkeyHex: "ee".repeated(48)
         )
-        let inserted = await store.insertOrUpdate(group)
-        XCTAssertTrue(inserted)
+        let outcome = await store.insertOrUpdate(group)
+        XCTAssertEqual(outcome, .inserted)
 
         let listed = await store.list()
         XCTAssertEqual(listed.count, 1)
@@ -134,8 +134,9 @@ final class SwiftDataGroupStoreTests: XCTestCase {
         var updated = original
         updated.epoch = 7
         updated.commitment = Data(repeating: 0x99, count: 32)
-        let inserted = await store.insertOrUpdate(updated)
-        XCTAssertFalse(inserted, "second insertOrUpdate on the same id is an update")
+        let outcome = await store.insertOrUpdate(updated)
+        XCTAssertEqual(
+            outcome, .updated, "second insertOrUpdate on the same id is an update")
 
         let listed = await store.list()
         XCTAssertEqual(listed.count, 1)
@@ -198,10 +199,12 @@ final class SwiftDataGroupStoreTests: XCTestCase {
         let groupA = makeGroup(id: sharedID, name: "A's copy", ownerIdentityID: ownerA)
         let groupB = makeGroup(id: sharedID, name: "B's copy", ownerIdentityID: ownerB)
 
-        let insertedA = await store.insertOrUpdate(groupA)
-        let insertedB = await store.insertOrUpdate(groupB)
-        XCTAssertTrue(insertedA)
-        XCTAssertTrue(insertedB, "second owner must be a fresh insert, not an in-place overwrite")
+        let outcomeA = await store.insertOrUpdate(groupA)
+        let outcomeB = await store.insertOrUpdate(groupB)
+        XCTAssertEqual(outcomeA, .inserted)
+        XCTAssertEqual(
+            outcomeB, .inserted,
+            "second owner must be a fresh insert, not an in-place overwrite")
 
         let listed = await store.list()
         XCTAssertEqual(listed.count, 2, "both identities keep their own row")

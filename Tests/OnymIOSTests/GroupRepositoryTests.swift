@@ -33,8 +33,8 @@ final class GroupRepositoryTests: XCTestCase {
         _ = await iterator.next()  // initial empty snapshot
 
         let group = makeGroup(id: "bb".repeated(32), name: "Friends", owner: ownerA)
-        let inserted = await repo.insert(group)
-        XCTAssertTrue(inserted)
+        let outcome = await repo.insert(group)
+        XCTAssertEqual(outcome, .inserted)
 
         let next = await iterator.next()
         XCTAssertEqual(next?.count, 1)
@@ -197,10 +197,10 @@ private actor InMemoryGroupStore: GroupStore {
     }
 
     @discardableResult
-    func insertOrUpdate(_ group: ChatGroup) -> Bool {
+    func insertOrUpdate(_ group: ChatGroup) -> GroupInsertOutcome {
         let isNew = rows[group.id] == nil
         rows[group.id] = group
-        return isNew
+        return isNew ? .inserted : .updated
     }
 
     func markPublished(id: String, ownerIDString: String, commitment: Data?) {
