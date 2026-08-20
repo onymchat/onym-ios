@@ -68,8 +68,16 @@ public final class DeviceBackupVendorsFlow {
         /// `heldUnknown` means this phone could not check what it
         /// already holds — different from finding nothing, and not
         /// something to report as an answer about the App Store.
+        /// `syncFailed` means the account-wide sync did not happen or
+        /// did not work, so nothing here is an answer about what the
+        /// App Store holds.
         case finished(
-            restored: Int, held: Int, checked: Int, heldUnknown: Bool, failures: [String])
+            restored: Int,
+            held: Int,
+            checked: Int,
+            heldUnknown: Bool,
+            syncFailed: Bool,
+            failures: [String])
     }
 
     private let fanOut: BackupFanOut
@@ -85,9 +93,12 @@ public final class DeviceBackupVendorsFlow {
     /// as "the store has nothing".
     private let restorePurchasesForOperator:
         (@Sendable (String) async -> SeatPurchaseFlow.RestoreResult?)?
-    /// Asks StoreKit to sync. Account-wide, and prompts for an App Store
-    /// password, so it happens once per tap and never per operator.
-    private let syncPurchasesWithStore: (@Sendable () async -> Void)?
+    /// Asks StoreKit to sync. Account-wide, and prompts for an App
+    /// Store password, so it happens once per tap and never per
+    /// operator — and it reports whether it worked, because a sweep
+    /// that follows a failed sync must not go on to say the App Store
+    /// has nothing.
+    private let syncPurchasesWithStore: (@Sendable () async -> Bool)?
     /// Guards the sweep itself, rather than what the screen is showing.
     /// The quiet sweep displays nothing, so a status-based guard did not
     /// hold it — and a tap during one started a second concurrent sweep,
@@ -100,7 +111,7 @@ public final class DeviceBackupVendorsFlow {
         schedule: BackupSchedule = .default,
         restorePurchasesForOperator:
             (@Sendable (String) async -> SeatPurchaseFlow.RestoreResult?)? = nil,
-        syncPurchasesWithStore: (@Sendable () async -> Void)? = nil
+        syncPurchasesWithStore: (@Sendable () async -> Bool)? = nil
     ) {
         self.vendors = vendors
         self.fanOut = fanOut
@@ -257,13 +268,27 @@ public final class DeviceBackupVendorsFlow {
         // prompts for a password: doing it per operator asked a person
         // with two operators to authenticate twice for one tap, the
         // second time seconds later and out of context.
-        if syncWithStore { await syncPurchasesWithStore?() }
+        // A sync that did not happen is not a sync that found nothing.
+        // Skipping it silently — or swallowing its failure — and then
+        // reporting "the App Store has no purchase for this identity"
+        // is a definitive answer to a question nobody managed to ask,
+        // told to the one person who most needs it to be right: someone
+        // on a replacement phone.
+        var syncFailed = false
+        if syncWithStore {
+            syncFailed = await syncPurchasesWithStore?() == false
+        }
 
         var restored = 0
         var held = 0
         var checked = 0
         var heldUnknown = false
         var failures: [String] = []
+        /// The operators a credential was actually recovered for. A
+        /// total is not enough: with two paid operators, one restore and
+        /// one failure, a total would tell the operator that got nothing
+        /// that its purchase had been restored.
+        var restoredFor: Set<String> = []
         for vendor in vendors {
             guard let result = await restore(vendor.id) else {
                 // Not checked: no pinned issuer, or nothing this build
@@ -274,6 +299,7 @@ public final class DeviceBackupVendorsFlow {
             }
             checked += 1
             restored += result.restored.count
+            if !result.restored.isEmpty { restoredFor.insert(vendor.id) }
             held += result.alreadyHeld.count
             // Named by operator: with several set up, "something went
             // wrong" without saying where is not something a person can
@@ -309,6 +335,7 @@ public final class DeviceBackupVendorsFlow {
                 held: held,
                 checked: checked,
                 heldUnknown: heldUnknown,
+                syncFailed: syncFailed,
                 failures: failures)
         } else {
             purchaseRestore = .idle
@@ -319,8 +346,9 @@ public final class DeviceBackupVendorsFlow {
         // is derived from a snapshot still awaiting payment, and only a
         // run that actually places those bytes resolves it.
         refresh()
-        if restored > 0 {
-            for vendor in vendors where vendor.flow.isPaymentRequired {
+        if !restoredFor.isEmpty {
+            for vendor in vendors
+            where restoredFor.contains(vendor.id) && vendor.flow.isPaymentRequired {
                 vendor.flow.noteRestoredPurchase()
             }
             // A credential is what lets a paid operator answer at all,

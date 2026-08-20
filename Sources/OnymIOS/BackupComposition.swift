@@ -216,7 +216,7 @@ struct BackupSeatComposer {
             restorePurchasesForOperator: stacks.contains(where: { sellsOffers?($0.componentId) == true })
                 ? Self.purchaseRestorer(makePurchaseFlow)
                 : nil,
-            syncPurchasesWithStore: Self.storeSyncer(makePurchaseFlow, componentId: first.manifest.componentId)
+            syncPurchasesWithStore: Self.storeSyncer()
         )
 
         // Restored attachment ciphertext, and the client that will
@@ -386,21 +386,32 @@ struct BackupSeatComposer {
         }
     }
 
-    /// The account-wide sync, done once per tap.
+    /// The account-wide sync, done once per tap and belonging to no
+    /// operator.
     ///
-    /// It needs a flow to reach StoreKit through, and any operator's
-    /// will do: `AppStore.sync()` is a property of the Apple account,
-    /// not of a seat. A sync failure is not a reason to skip the sweep
-    /// that follows — `currentEntitlement` answers from what the device
-    /// already knows, and that is usually everything needed.
-    private static func storeSyncer(
-        _ makePurchaseFlow: (@Sendable (String) async -> SeatPurchaseFlow?)?,
-        componentId: String
-    ) -> (@Sendable () async -> Void)? {
-        guard let makePurchaseFlow else { return nil }
+    /// It used to be routed through the first operator's
+    /// `SeatPurchaseFlow`, which was wrong twice over. That flow exists
+    /// only when the operator pins an entitlement issuer, so a free
+    /// operator sorting first made the sync a silent no-op — and the
+    /// sweep then went on to report that the App Store had no purchase
+    /// for this identity, which nothing had asked it. `AppStore.sync()`
+    /// is a property of the Apple account: no seat, no broker, no
+    /// issuer, so it is built from a bare coordinator and cannot be
+    /// skipped by whichever operator happens to sort first.
+    ///
+    /// Returns whether it actually synced. A failure is not a reason to
+    /// skip the sweep — `currentEntitlement` answers from what the
+    /// device already knows — but it is a reason for the sweep to stop
+    /// short of concluding anything about what the store holds.
+    private static func storeSyncer() -> (@Sendable () async -> Bool)? {
+        let coordinator = StoreKitPurchaseCoordinator()
         return { @Sendable in
-            guard let flow = await makePurchaseFlow(componentId) else { return }
-            try? await flow.syncWithStore()
+            do {
+                try await coordinator.sync()
+                return true
+            } catch {
+                return false
+            }
         }
     }
 

@@ -149,7 +149,8 @@ public struct DeviceBackupVendorsView: View {
             return "Bring a subscription bought on another phone to this one"
         case .running:
             return "Checking with the App Store…"
-        case .finished(let restored, let held, let checked, let heldUnknown, let failures):
+        case .finished(
+            let restored, let held, let checked, let heldUnknown, let syncFailed, let failures):
             if let first = failures.first {
                 // The operator's own words, not a count. A failure here
                 // is the difference between someone getting what they
@@ -160,6 +161,12 @@ public struct DeviceBackupVendorsView: View {
                 return restored == 1
                     ? "1 purchase restored"
                     : "\(restored) purchases restored"
+            }
+            if syncFailed, restored == 0 {
+                // Nothing was asked, so nothing may be concluded. The
+                // person on a replacement phone is exactly who would
+                // act on a wrong answer here.
+                return "Could not reach the App Store — try again"
             }
             if heldUnknown {
                 // Neither "already set up" nor "nothing there": this
