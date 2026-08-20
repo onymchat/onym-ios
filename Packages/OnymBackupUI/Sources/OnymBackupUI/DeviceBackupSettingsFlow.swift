@@ -65,6 +65,14 @@ public final class DeviceBackupSettingsFlow {
 
     public private(set) var state = State()
 
+    /// A sentence about the last run that state alone cannot say.
+    ///
+    /// Cleared by `refresh()`, so it cannot outlive the run it
+    /// describes: a fan-out failure used to sit in the vendors list
+    /// beside a later, successful per-operator backup, reading
+    /// "backed up today · last run: <last week's error>".
+    public private(set) var lastRunNote: String?
+
     /// The operator this screen is about.
     ///
     /// One flow per operator: a person may keep the same history with
@@ -87,9 +95,17 @@ public final class DeviceBackupSettingsFlow {
     /// not do.
     public let attachmentsWithheld: Bool
 
+    /// What happened the last time someone asked to leave this
+    /// operator, if it did not simply work.
+    public private(set) var stopFailure: String?
+
     private let repository: BackupRepository
     private let stateStore: any BackupStateStoring
     private let schedule: BackupSchedule
+    /// Withdraws consent and forgets this operator. Supplied by the
+    /// composition root, which owns the consent store; `nil` in a build
+    /// that does not offer leaving.
+    private let onStopBackingUp: (@MainActor @Sendable () -> Void)?
     /// Drawn once for this flow's lifetime. Re-drawing per check would
     /// let frequent polling sample until it found a small value, which
     /// is the same as no jitter.
@@ -101,11 +117,13 @@ public final class DeviceBackupSettingsFlow {
         repository: BackupRepository,
         stateStore: any BackupStateStoring,
         schedule: BackupSchedule = .default,
-        attachmentsWithheld: Bool = false
+        attachmentsWithheld: Bool = false,
+        onStopBackingUp: (@MainActor @Sendable () -> Void)? = nil
     ) {
         self.componentId = componentId
         self.displayName = displayName
         self.attachmentsWithheld = attachmentsWithheld
+        self.onStopBackingUp = onStopBackingUp
         self.repository = repository
         self.stateStore = stateStore
         self.schedule = schedule
@@ -113,6 +131,7 @@ public final class DeviceBackupSettingsFlow {
     }
 
     public func refresh() {
+        lastRunNote = nil
         guard let stored = try? stateStore.load() else {
             // An unreadable state file is not "no backup configured".
             // Saying so would invite someone to enrol again on top of
@@ -176,8 +195,20 @@ public final class DeviceBackupSettingsFlow {
     /// An explicit request bypasses the schedule entirely — someone who
     /// taps the button has already decided the upload is worth it, and
     /// second-guessing them about battery would be presumptuous.
+    /// Show this operator as busy while somebody else's run covers it.
+    ///
+    /// A fan-out drives the repositories directly, so without this the
+    /// per-operator screen reads `.idle` for minutes while its snapshot
+    /// is being sealed — and its Back Up Now, whose only guard is that
+    /// status, is tappable.
+    public func markRunning() {
+        state.status = .running
+        lastRunNote = nil
+    }
+
     public func backUpNow() async {
         state.status = .running
+        lastRunNote = nil
         do {
             // A snapshot refused for payment is retried byte for byte
             // before anything new is composed. Composing instead would
@@ -227,10 +258,14 @@ public final class DeviceBackupSettingsFlow {
     /// So the run tells the flow what it learned. Only downwards:
     /// `retained` re-reads state rather than asserting success from a
     /// return value.
-    public func apply(_ result: BackupRepository.RunResult) {
+    public func apply(_ result: BackupRepository.RunResult, resumedPayment: Bool = false) {
         switch result {
         case .retained, .alreadyRetained:
             refresh()
+            if resumedPayment {
+                // It backed up, and not the same thing the others got.
+                lastRunNote = "The backup you paid for went up; the newest changes go next time."
+            }
         case .paymentRequired(_, let offerIds, _):
             state.status = .paymentRequired(offerIds: offerIds)
         case .termsChanged:
@@ -241,8 +276,21 @@ public final class DeviceBackupSettingsFlow {
             state.status = .checkingEarlierBackup
         case .unknown:
             // Never rendered as success. The bytes may be held; only the
-            // operator can say, and it has not.
-            state.status = .failed(message: "The result of the last backup is still unknown.")
+            // operator can say, and it has not — but *how* that is
+            // rendered comes from the state file, which recorded a
+            // pending operation before the upload and therefore reads as
+            // "checking an earlier backup". Overwriting that with
+            // "something went wrong" gave one unchanged state two
+            // different words and two different icons depending on which
+            // screen you were looking at, with the alarming one on the
+            // summary.
+            refresh()
+            if case .idle = state.status {
+                state.status = .failed(message: "The result of the last backup is still unknown.")
+            }
+            if case .stale = state.status {
+                state.status = .failed(message: "The result of the last backup is still unknown.")
+            }
         case .alreadyRunning:
             break
         }
@@ -251,6 +299,7 @@ public final class DeviceBackupSettingsFlow {
     /// Report that a run threw before it could reach a result.
     public func applyFailure(message: String) {
         state.status = .failed(message: message)
+        lastRunNote = message
     }
 
     /// Run only if the schedule permits it — the opportunistic path.
@@ -261,6 +310,60 @@ public final class DeviceBackupSettingsFlow {
 
     public func loadSnapshots() async {
         state.snapshots = (try? await repository.listSnapshots()) ?? []
+    }
+
+    public var canStopBackingUp: Bool { onStopBackingUp != nil }
+
+    /// Stop backing up to this operator.
+    ///
+    /// The route out that did not exist. Consenting to a second operator
+    /// adds one rather than replacing the first — that is the whole
+    /// point of the seat — so without this, every operator a person ever
+    /// chose keeps receiving their history and keeps charging for it,
+    /// and the only way to stop is to delete the app.
+    ///
+    /// `erasingFirst` asks the operator to destroy what it holds and
+    /// keeps the receipt. It is offered rather than assumed: erasure is
+    /// a request to a counterparty that can fail or be refused, and
+    /// someone who wants to stop paying today should not be blocked by
+    /// an operator that will not answer. What is *not* offered is
+    /// pretending: a failed erasure says so and leaves the choice of
+    /// stopping anyway to the person.
+    ///
+    /// Local state goes either way. It describes a relationship that has
+    /// ended — except the receipts, which are evidence of something that
+    /// happened and are the one thing kept.
+    public func stopBackingUp(erasingFirst: Bool) async {
+        stopFailure = nil
+        if erasingFirst {
+            do {
+                state.lastReceipt = try await repository.erase(scope: .all)
+            } catch {
+                // Not stopped, and not erased. Saying so beats reporting
+                // either one as done.
+                stopFailure = """
+                    \(displayName) did not confirm that it erased your backup, so nothing was \
+                    changed. You can try again, or stop without erasing — what it already holds \
+                    stays until its own retention period ends.
+                    """
+                return
+            }
+        }
+        do {
+            var cleared = BackupState()
+            // Receipts survive. They record what an erasure did and did
+            // not reach, they are never acted on, and destroying them
+            // because a relationship ended would discard the only
+            // durable evidence of it.
+            cleared.receipts = ((try? stateStore.load())?.receipts ?? [])
+            try stateStore.save(cleared)
+        } catch {
+            stopFailure = "This device could not update its backup settings, so nothing was changed."
+            return
+        }
+        state.status = .off
+        lastRunNote = nil
+        onStopBackingUp?()
     }
 
     /// Erase, and keep the receipt.

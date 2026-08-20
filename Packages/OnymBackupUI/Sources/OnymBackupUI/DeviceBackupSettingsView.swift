@@ -10,14 +10,16 @@ import SwiftUI
 /// nobody else. Restore is not here — it reads across every operator at
 /// once, so it belongs one level up.
 public struct DeviceBackupSettingsView: View {
-    @State private var flow: DeviceBackupSettingsFlow
+    private let flow: DeviceBackupSettingsFlow
     private let makeEnrolment: () -> BackupEnrolmentView?
+
+    @State private var confirmingStop = false
 
     public init(
         flow: DeviceBackupSettingsFlow,
         makeEnrolment: @escaping () -> BackupEnrolmentView?
     ) {
-        _flow = State(wrappedValue: flow)
+        self.flow = flow
         self.makeEnrolment = makeEnrolment
     }
 
@@ -85,6 +87,7 @@ public struct DeviceBackupSettingsView: View {
                         "Each backup uploads everything, not just what changed — there is no incremental upload yet.")
 
                     snapshotsSection
+                    stopSection
                 }
             }
             .padding(.horizontal, 16)
@@ -93,6 +96,26 @@ public struct DeviceBackupSettingsView: View {
         // The operator's own name: with several set up, "Device Backup"
         // on every one of them is a screen you cannot tell from the last.
         .navigationTitle(Text(verbatim: flow.displayName))
+        .confirmationDialog(
+            "Stop backing up to this operator?",
+            isPresented: $confirmingStop,
+            titleVisibility: .visible
+        ) {
+            Button("Erase My Backup and Stop", role: .destructive) {
+                Task { await flow.stopBackingUp(erasingFirst: true) }
+            }
+            // Offered as its own choice rather than a fallback: erasure
+            // is a request to a counterparty that can fail or be
+            // refused, and somebody who wants to stop paying today
+            // should not be held there by an operator that will not
+            // answer.
+            Button("Stop Without Erasing") {
+                Task { await flow.stopBackingUp(erasingFirst: false) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Your history stays on this phone, and your other operators are not affected. Erasing cannot reach copies other people in your chats already have.")
+        }
         .navigationBarTitleDisplayMode(.inline)
         .task {
             flow.refresh()
@@ -108,6 +131,41 @@ public struct DeviceBackupSettingsView: View {
         case .termsChanged: "Review New Terms"
         case .operatorChanged: "Set Up With New Operator"
         default: "Set Up Backup"
+        }
+    }
+
+    /// Leaving.
+    ///
+    /// Below the snapshots, because it is the last thing anyone should
+    /// do by accident, and offered at all because consenting to another
+    /// operator adds one rather than replacing this one — without a way
+    /// out, every operator a person ever chose keeps billing them for a
+    /// copy of a history they thought they had moved.
+    @ViewBuilder
+    private var stopSection: some View {
+        if flow.canStopBackingUp {
+            SettingsCard {
+                Button(role: .destructive) {
+                    confirmingStop = true
+                } label: {
+                    SettingsRow(
+                        title: "Stop Backing Up Here",
+                        subtitle: "Ends this operator's copy and stops paying for it",
+                        last: true
+                    ) {
+                        SettingsIconTile(symbol: "xmark.bin", bg: SettingsTile.red)
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("backup.stop_row")
+            }
+            if let failure = flow.stopFailure {
+                SettingsFootnote(verbatim: failure)
+                    .accessibilityIdentifier("backup.stop_failed")
+            } else {
+                SettingsFootnote(
+                    "Your other operators are not affected. Erasing asks this operator to destroy what it holds and keeps its signed receipt; stopping without erasing leaves what it has until its own retention period ends.")
+            }
         }
     }
 

@@ -32,7 +32,9 @@ public final class DeviceBackupVendorsFlow {
         /// Operators are consented to, but none has been set up.
         case off(consented: Int)
         /// Every enrolled operator is holding a current backup.
-        case on(operators: Int, lastSuccessAt: Date?)
+        /// `notSetUp` is still reported, because a consented operator
+        /// holding nothing is not covered by the ones that are.
+        case on(operators: Int, notSetUp: Int, lastSuccessAt: Date?)
         case running
         /// Some operators are fine and some are not. `attention` is
         /// never folded into `on`, however small it is.
@@ -67,6 +69,7 @@ public final class DeviceBackupVendorsFlow {
         var healthy = 0
         var attention = 0
         var notSetUp = 0
+        var running = 0
         var lastSuccess: Date?
         for vendor in vendors {
             switch vendor.flow.state.status {
@@ -74,9 +77,16 @@ public final class DeviceBackupVendorsFlow {
                 notSetUp += 1
             case .idle(let at):
                 healthy += 1
-                lastSuccess = [lastSuccess, at].compactMap { $0 }.max()
+                // The *oldest* success, not the newest. Two operators,
+                // one an hour old and one six days old, are not both an
+                // hour old — and the number a person reads as "how far
+                // back am I exposed" is the older one.
+                lastSuccess = [lastSuccess, at].compactMap { $0 }.min()
             case .running:
-                healthy += 1
+                // Somebody else's run, or this operator's own. In
+                // flight is not up to date: it may never have retained
+                // anything.
+                running += 1
             case .stale, .paymentRequired, .termsChanged, .operatorChanged,
                  .checkingEarlierBackup, .failed:
                 // Every one of these means this operator is not
@@ -88,8 +98,11 @@ public final class DeviceBackupVendorsFlow {
                 attention += 1
             }
         }
+        if running > 0 { return .running }
         if attention > 0 { return .needsAttention(attention: attention, healthy: healthy) }
-        if healthy > 0 { return .on(operators: healthy, lastSuccessAt: lastSuccess) }
+        if healthy > 0 {
+            return .on(operators: healthy, notSetUp: notSetUp, lastSuccessAt: lastSuccess)
+        }
         return .off(consented: notSetUp)
     }
 
@@ -116,6 +129,13 @@ public final class DeviceBackupVendorsFlow {
     public func backUpAllNow() async {
         guard !isRunning else { return }
         isRunning = true
+        // Every operator that could be part of this run shows as busy
+        // for its duration, so its own screen cannot offer a second
+        // Back Up Now over the top of it.
+        for vendor in vendors where !DeviceBackupSettingsFlow.needsEnrolment(
+            for: vendor.flow.state.status) {
+            vendor.flow.markRunning()
+        }
         let outcomes = await fanOut.backUpAll()
         lastRun = outcomes
         isRunning = false
@@ -129,7 +149,8 @@ public final class DeviceBackupVendorsFlow {
         for outcome in outcomes {
             guard let vendor = vendors.first(where: { $0.id == outcome.componentId }) else { continue }
             switch outcome.result {
-            case .ran(let result): vendor.flow.apply(result)
+            case .ran(let result):
+                vendor.flow.apply(result, resumedPayment: outcome.resumedPayment)
             case .failed(let message): vendor.flow.applyFailure(message: message)
             }
         }

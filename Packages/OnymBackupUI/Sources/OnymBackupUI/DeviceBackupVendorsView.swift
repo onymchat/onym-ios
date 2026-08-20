@@ -4,8 +4,17 @@ import SwiftUI
 
 /// Settings → Device Backup, listing every operator this identity keeps
 /// its history with.
+/// The flow is held as a plain `let`, not `@State`.
+///
+/// `@State(wrappedValue:)` keeps the *first* value for the lifetime of
+/// the view's identity, so once this screen was on the navigation stack
+/// a newly consented operator never reached it: the root view rebuilds
+/// the whole stack when the consented set changes, and the pushed screen
+/// went on listing the operators it was born with. `@Observable` needs
+/// no `@State` to be observed — only to be owned, and this one is owned
+/// by the composition root.
 public struct DeviceBackupVendorsView: View {
-    @State private var flow: DeviceBackupVendorsFlow
+    private let flow: DeviceBackupVendorsFlow
     private let makeEnrolment: (String) -> BackupEnrolmentView?
     private let makeRestore: () -> BackupRestoreView
 
@@ -14,7 +23,7 @@ public struct DeviceBackupVendorsView: View {
         makeEnrolment: @escaping (String) -> BackupEnrolmentView?,
         makeRestore: @escaping () -> BackupRestoreView
     ) {
-        _flow = State(wrappedValue: flow)
+        self.flow = flow
         self.makeEnrolment = makeEnrolment
         self.makeRestore = makeRestore
     }
@@ -51,19 +60,28 @@ public struct DeviceBackupVendorsView: View {
                     SettingsFootnote(
                         "Each backup uploads everything, not just what changed — there is no incremental upload yet.")
 
-                    SettingsCard {
-                        NavigationLink { makeRestore() } label: {
-                            SettingsRow(
-                                title: "Restore From Backup",
-                                subtitle: "Adds messages and chats — nothing is deleted",
-                                last: true
-                            ) {
-                                SettingsIconTile(symbol: "arrow.down.circle", bg: SettingsTile.green)
-                            }
+                }
+
+                // Outside the enrolled gate on purpose. Reading a backup
+                // needs the recovery phrase and the operator's name, not
+                // a terms pin — `listSnapshots` and `download` consult no
+                // local state at all. Inside the gate it disappeared
+                // exactly when it was most wanted: a new phone with
+                // nothing set up yet, or every operator republishing its
+                // terms at once, which now counts as not-enrolled and
+                // took the restore route down with it.
+                SettingsCard {
+                    NavigationLink { makeRestore() } label: {
+                        SettingsRow(
+                            title: "Restore From Backup",
+                            subtitle: "Adds messages and chats — nothing is deleted",
+                            last: true
+                        ) {
+                            SettingsIconTile(symbol: "arrow.down.circle", bg: SettingsTile.green)
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("backup.restore_row")
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("backup.restore_row")
                 }
 
                 operators
@@ -99,7 +117,7 @@ public struct DeviceBackupVendorsView: View {
                     } label: {
                         SettingsRow(
                             title: "Operator",
-                            subtitle: Self.subtitle(for: vendor, run: flow.lastRun(for: vendor.id)),
+                            subtitle: Self.subtitle(for: vendor),
                             // Two lines, because the thing worth reading
                             // here is a failure message, and one line
                             // middle-truncates it exactly when it
@@ -109,9 +127,7 @@ public struct DeviceBackupVendorsView: View {
                         ) {
                             SettingsIconTile(
                                 symbol: Self.symbol(for: vendor.flow.state.status),
-                                bg: DeviceBackupSettingsFlow.needsEnrolment(for: vendor.flow.state.status)
-                                    ? SettingsTile.gray
-                                    : SettingsTile.green)
+                                bg: Self.tint(for: vendor.flow.state.status))
                         }
                     }
                     .buttonStyle(.plain)
@@ -127,16 +143,13 @@ public struct DeviceBackupVendorsView: View {
     /// runtime data, so it lives in the subtitle: `SettingsRow` takes a
     /// localization key for its title, and looking up user-facing data
     /// as one would be a bug waiting for a translator.
-    private static func subtitle(
-        for vendor: DeviceBackupVendorsFlow.Vendor,
-        run: BackupFanOut.Outcome?
-    ) -> String {
+    /// The note comes from the operator's own flow rather than from the
+    /// last fan-out, so it cannot outlive the run it describes — a
+    /// per-operator backup refreshes that flow and clears it.
+    private static func subtitle(for vendor: DeviceBackupVendorsFlow.Vendor) -> String {
         var line = vendor.displayName + " · " + describe(vendor.flow.state.status)
-        if case .failed(let message) = run?.result {
-            line += " · last run: " + message
-        } else if run?.resumedPayment == true {
-            // It backed up, and not the same thing everyone else got.
-            line += " · the backup you paid for went up; the newest changes go next time"
+        if let note = vendor.flow.lastRunNote {
+            line += " · " + note
         }
         return line
     }
@@ -154,6 +167,27 @@ public struct DeviceBackupVendorsView: View {
         case .operatorChanged: "needs setting up again"
         case .checkingEarlierBackup: "checking an earlier backup"
         case .failed: "something went wrong"
+        }
+    }
+
+    /// Green is reserved for an operator that is actually holding what
+    /// it is supposed to hold.
+    ///
+    /// It used to be keyed on `needsEnrolment` alone, which painted
+    /// every failing, stale, unpaid and unresolved operator the same
+    /// green as a healthy one — on the list whose whole purpose is
+    /// finding out which operator is the problem — and gave the two
+    /// stopped-accepting-uploads states the same gray as one that was
+    /// never turned on.
+    private static func tint(for status: DeviceBackupSettingsFlow.Status) -> Color {
+        switch status {
+        case .idle, .running: SettingsTile.green
+        case .off: SettingsTile.gray
+        case .failed: SettingsTile.red
+        case .stale, .paymentRequired, .checkingEarlierBackup: SettingsTile.amber
+        // Set up, and no longer accepting uploads until somebody reads
+        // something. Not a failure, and not "off" either.
+        case .termsChanged, .operatorChanged: SettingsTile.orange
         }
     }
 
@@ -193,11 +227,23 @@ public struct DeviceBackupVendorsView: View {
             return consented == 0
                 ? "Your history stays on this phone only"
                 : "Your history stays on this phone until you set an operator up"
-        case .on(let operators, let lastSuccessAt):
+        case .on(let operators, let notSetUp, let lastSuccessAt):
+            // The oldest of the operators' last successes, so the
+            // sentence describes the copy a person is actually relying
+            // on rather than the freshest one.
             let when = lastSuccessAt.map {
-                "last backup \($0.formatted(date: .abbreviated, time: .shortened))"
+                "oldest copy \($0.formatted(date: .abbreviated, time: .shortened))"
             } ?? "no backup has completed yet"
-            return operators == 1 ? "1 operator · \(when)" : "\(operators) operators · \(when)"
+            var line = operators == 1 ? "1 operator · \(when)" : "\(operators) operators · \(when)"
+            if notSetUp > 0 {
+                // A consented operator holding nothing is not covered by
+                // the ones that are, and it is the row someone would
+                // otherwise never notice.
+                line += notSetUp == 1
+                    ? " · 1 more not set up"
+                    : " · \(notSetUp) more not set up"
+            }
+            return line
         case .running:
             return "Uploading"
         case .needsAttention(let attention, let healthy):

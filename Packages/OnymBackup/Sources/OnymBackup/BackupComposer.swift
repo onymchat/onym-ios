@@ -46,13 +46,19 @@ public actor BackupComposer {
         supersedes: SnapshotReference? = nil,
         now: Date = Date()
     ) async throws -> SealedSnapshot {
+        // Minted before a byte is written, not between the seal and the
+        // return. The refactor had it second, where a failure would
+        // throw *after* `seal` had produced a full-size file — one that
+        // no state record mentions, so nothing claims it and nothing
+        // ever deletes it.
+        let operationId = try Self.newIdentifier()
         let archive = try await composeArchive(now: now)
         // Before the upload, not after: the plaintext is the one
         // artefact here that is readable without the recovery phrase.
         defer { archive.destroy() }
         let prepared = try seal(archive, archiveRoot: keyMaterial.archiveRoot)
         return prepared.addressed(
-            operationId: try Self.newIdentifier(),
+            operationId: operationId,
             acceptedTermsId: acceptedTermsId,
             supersedes: supersedes
         )
@@ -173,12 +179,30 @@ public actor BackupComposer {
     /// Age-guarded because a manual per-operator run can be sealing into
     /// this directory right now, and a sweep is not worth a race with
     /// it.
+    /// Two ages, because two kinds of file are at stake.
+    ///
+    /// `plaintextAge` covers everything readable without the recovery
+    /// phrase: the archive a compose writes, the scratch it builds it
+    /// in, and `restore-<digest>`, which is the *whole history in the
+    /// clear* and is cleaned today only by an in-process `defer` — a
+    /// force-quit or a jetsam during a several-hundred-megabyte restore
+    /// skips it. Keeping that for a day to avoid racing a concurrent
+    /// compose is the wrong trade; an hour is long enough that no live
+    /// run is touching it.
+    ///
+    /// `ciphertextAge` covers sealed bytes, where the cost of being
+    /// early is a re-upload and the cost of being wrong is deleting
+    /// something a purchase is waiting on.
     public func sweepWorkingDirectory(
         claiming claimed: Set<String>,
-        olderThan age: TimeInterval = 24 * 60 * 60,
+        plaintextAge: TimeInterval = 60 * 60,
+        ciphertextAge: TimeInterval = 24 * 60 * 60,
         now: Date = Date()
     ) {
-        let prefixes = ["pending-", "archive-", "scratch-"]
+        // `sealed-` is the restore path's download: ciphertext, so space
+        // only, and it leaks by the same route as `restore-`.
+        let plaintextPrefixes = ["archive-", "scratch-", "restore-"]
+        let ciphertextPrefixes = ["pending-", "sealed-"]
         guard
             let entries = try? FileManager.default.contentsOfDirectory(
                 at: workingDirectory,
@@ -189,7 +213,15 @@ public actor BackupComposer {
         }
         for url in entries {
             let name = url.lastPathComponent
-            guard prefixes.contains(where: name.hasPrefix), !claimed.contains(name) else { continue }
+            guard !claimed.contains(name) else { continue }
+            let age: TimeInterval
+            if plaintextPrefixes.contains(where: name.hasPrefix) {
+                age = plaintextAge
+            } else if ciphertextPrefixes.contains(where: name.hasPrefix) {
+                age = ciphertextAge
+            } else {
+                continue
+            }
             let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
                 .contentModificationDate
             guard let modified, now.timeIntervalSince(modified) > age else { continue }

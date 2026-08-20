@@ -140,7 +140,9 @@ public actor BackupFanOut {
         // bytes from a run that ended `unknown` are never re-read, and
         // without this they accumulate at full snapshot size, once per
         // operator, for the life of the install.
-        await composer.sweepWorkingDirectory(claiming: claimedSealedBytes())
+        if let claimed = claimedSealedBytes() {
+            await composer.sweepWorkingDirectory(claiming: claimed)
+        }
 
         for vendor in vendors {
             // An operator that has been consented to but never set up is
@@ -166,13 +168,15 @@ public actor BackupFanOut {
 
             if let settled = await retryPendingPayment(at: vendor, now: now) {
                 outcomes[vendor.componentId] = settled
-                // Resumed, so this operator is out of this run's fresh
-                // compose: it has just been paid for and stored the
-                // older snapshot, and sending the new one on top would
-                // charge for storing the same history twice in one run.
-                // The row says so rather than letting a fresh success
-                // time imply otherwise.
-                resumedPayments.insert(vendor.componentId)
+                if case .ran(let result) = settled, Self.isRetention(result) {
+                    // Only a retention earns the row that says the paid
+                    // backup went up.
+                    resumedPayments.insert(vendor.componentId)
+                }
+                // Either way this operator is out of this run's fresh
+                // compose: a resumed snapshot has just been paid for and
+                // stored, and sending the new one on top would charge
+                // for storing the same history twice in one run.
                 continue
             }
             do {
@@ -196,6 +200,7 @@ public actor BackupFanOut {
             let message = String(describing: error)
             for vendor in candidates {
                 outcomes[vendor.componentId] = .failed(message: message)
+                await vendor.repository.cancelReservation()
             }
             return collate(outcomes)
         }
@@ -210,6 +215,10 @@ public actor BackupFanOut {
                 sealed.append((vendor, try await composer.seal(archive, archiveRoot: archiveRoot)))
             } catch {
                 outcomes[vendor.componentId] = .failed(message: String(describing: error))
+                // Reserved by `prepare` and never placed. Left set, it
+                // would refuse this operator's every later run as
+                // `alreadyRunning` — a lock held by nobody.
+                await vendor.repository.cancelReservation()
             }
         }
         archive.destroy()
@@ -251,14 +260,39 @@ public actor BackupFanOut {
         return collate(outcomes)
     }
 
+    /// Whether a result means the operator is holding the bytes.
+    ///
+    /// `paymentRequired`, `unknown` and `alreadyRunning` are all
+    /// non-nil answers from the retry path and none of them uploaded
+    /// anything — a row reading "payment needed · the backup you paid
+    /// for went up" says two contradictory things at once, and the
+    /// reassuring half is the false one.
+    private static func isRetention(_ result: BackupRepository.RunResult) -> Bool {
+        switch result {
+        case .retained, .alreadyRetained: true
+        default: false
+        }
+    }
+
     /// Filenames the sweep must not touch: sealed bytes an operator is
     /// waiting on a purchase for, which are resumed byte for byte.
-    private func claimedSealedBytes() -> Set<String> {
-        Set(
-            vendors.compactMap {
-                (try? $0.stateStore.load())?.awaitingPayment?.sealedBytesFilename
+    ///
+    /// Returns `nil` when any operator's state could not be read, which
+    /// cancels the sweep. A `try?` here would read an unreadable state
+    /// as "claims nothing" and hand the sweep permission to delete the
+    /// one file a purchase already made is waiting for — deleting data
+    /// on the strength of a failed read is exactly what the store
+    /// throwing, rather than returning an empty state, exists to
+    /// prevent.
+    private func claimedSealedBytes() -> Set<String>? {
+        var claimed: Set<String> = []
+        for vendor in vendors {
+            guard let state = try? vendor.stateStore.load() else { return nil }
+            if let filename = state.awaitingPayment?.sealedBytesFilename {
+                claimed.insert(filename)
             }
-        )
+        }
+        return claimed
     }
 
     /// Retry a snapshot one operator refused for payment.

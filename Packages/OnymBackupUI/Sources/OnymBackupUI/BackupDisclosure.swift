@@ -205,11 +205,19 @@ public struct BackupDisclosure: Sendable, Equatable {
     ) -> String? {
         guard !otherOperators.isEmpty else { return nil }
         let names = otherOperators.map(\.name).joined(separator: ", ")
+        // Counted, not assumed to be two. With two operators already
+        // enrolled, "a second complete copy" understates the number of
+        // places this history now lives, on the one screen §14.11 exists
+        // to make exact.
+        let existing = otherOperators.count == 1
+            ? "You already back up to \(names)."
+            : "You already back up to \(otherOperators.count) operators: \(names)."
+        let ordinal = otherOperators.count == 1 ? "a second" : "another"
         var sentence = """
-            You already back up to \(names). Setting this one up does not replace it — it adds \
-            a second complete copy of your history, kept under this operator's own terms and \
-            paid for separately. Everyone in your chats has their messages kept in one more \
-            place. Setting this one up does not turn the other one off.
+            \(existing) Setting this one up does not replace them — it adds \(ordinal) complete \
+            copy of your history, kept under this operator's own terms and paid for separately. \
+            Everyone in your chats has their messages kept in one more place. Setting this one \
+            up does not turn the others off.
             """
         if let jurisdiction = Self.jurisdictionSentence(otherOperators, jurisdictions: jurisdictions) {
             sentence += " " + jurisdiction
@@ -217,7 +225,7 @@ public struct BackupDisclosure: Sendable, Equatable {
         return sentence
     }
 
-    /// Where the two copies actually sit, when both sides said so.
+    /// Where the copies actually sit, when both sides said so.
     ///
     /// Silent when either side's terms did not reach us. An unstated
     /// jurisdiction is not evidence of a different one.
@@ -227,22 +235,39 @@ public struct BackupDisclosure: Sendable, Equatable {
     ) -> String? {
         let known = otherOperators.filter { !$0.jurisdictions.isEmpty }
         guard !jurisdictions.isEmpty, !known.isEmpty else { return nil }
-        let mine = Set(jurisdictions)
-        let shared = known.filter { !mine.isDisjoint(with: Set($0.jurisdictions)) }
-        if shared.isEmpty {
+        let mine = Set(jurisdictions.map(Self.normalizedJurisdiction))
+        let shared = known.filter {
+            !mine.isDisjoint(with: Set($0.jurisdictions.map(Self.normalizedJurisdiction)))
+        }
+        guard !shared.isEmpty else {
+            // Stated as two lists, and nothing more. "Stores your backup
+            // somewhere else" would be a reassurance drawn from two
+            // free-text fields that no two operators write the same way
+            // — "Estonia" and "EE" are the same country and different
+            // strings, and the reassuring reading is the one that would
+            // be wrong.
+            let theirs = known
+                .map { "\($0.name) declares \($0.jurisdictions.joined(separator: ", "))" }
+                .joined(separator: "; ")
             return """
-                This one stores in \(jurisdictions.joined(separator: ", ")); \
-                \(known.map(\.name).joined(separator: ", ")) stores your backup somewhere else.
+                This operator declares \(jurisdictions.joined(separator: ", ")); \(theirs). \
+                Whether those are the same place is not something this app can check.
                 """
         }
         let overlap = shared
             .flatMap { $0.jurisdictions }
-            .filter { mine.contains($0) }
+            .filter { mine.contains(Self.normalizedJurisdiction($0)) }
         return """
             Both this operator and \(shared.map(\.name).joined(separator: ", ")) store in \
             \(Array(Set(overlap)).sorted().joined(separator: ", ")), so one authority can reach \
-            both copies.
+            those copies.
             """
+    }
+
+    /// Case- and whitespace-insensitive, which is as far as comparing
+    /// two operators' free text can honestly go.
+    static func normalizedJurisdiction(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     /// Describes the configured interval rather than asserting a day.

@@ -81,10 +81,18 @@ public enum BackupVendorStorage {
         }
         let destination = stateURL(componentId: componentId, in: directory)
         guard !FileManager.default.fileExists(atPath: destination.path) else {
-            // Already migrated, and the per-operator file is the live
-            // one. The legacy file is a stale copy; removing it keeps a
-            // second, older answer from ever being read.
-            try? FileManager.default.removeItem(at: legacy)
+            // Both files exist, and nothing here can say which is newer.
+            // It used to delete the legacy one as "a stale copy", which
+            // is a guess — and the wrong one to be confident about,
+            // because that file may hold erasure receipts, an
+            // outstanding operation, or a snapshot awaiting a purchase
+            // already made. Ten lines above, this same function declines
+            // to delete an unattributable legacy file for exactly that
+            // reason.
+            //
+            // So it stays. Nothing reads it once the per-operator file
+            // exists, so it costs a few kilobytes; deleting it can cost
+            // the only record of what an erasure did and did not reach.
             return componentId
         }
         do {

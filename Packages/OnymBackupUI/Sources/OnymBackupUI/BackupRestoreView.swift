@@ -4,11 +4,11 @@ import SwiftUI
 
 /// Settings → Device Backup → Restore.
 public struct BackupRestoreView: View {
-    @State private var flow: BackupRestoreFlow
+    private let flow: BackupRestoreFlow
     @State private var confirming: RestorableSnapshot?
 
     public init(flow: BackupRestoreFlow) {
-        _flow = State(wrappedValue: flow)
+        self.flow = flow
     }
 
     public var body: some View {
@@ -92,7 +92,7 @@ public struct BackupRestoreView: View {
                 .font(.headline)
             Text(flow.unreachableOperators.isEmpty
                 ? "No operator you have set up holds anything for this identity. If you backed up under a different identity, or with an operator this device has not been set up with, that is where it will be."
-                : "The operators that answered hold nothing for this identity. That is not the whole picture — one of them could not be reached, and what it holds is unknown.")
+                : "The operators that answered hold nothing for this identity. That is not the whole picture — what the ones below hold is unknown.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -123,7 +123,18 @@ public struct BackupRestoreView: View {
                         confirming = row
                     } label: {
                         SettingsRow(
-                            title: index == 0 ? "Most recent" : "Earlier backup",
+                            // Per operator, not per list. These rows come
+                            // from independent operators now: the newest
+                            // row overall might be one operator's copy
+                            // taken 35 seconds after another's, and — the
+                            // case that matters — an operator's only copy
+                            // reads "Earlier backup" merely because
+                            // somebody else ran later. That is the row a
+                            // person reaches for when the other one will
+                            // not open.
+                            title: Self.isNewestForItsOperator(row, in: snapshots)
+                                ? "Most recent"
+                                : "Earlier backup",
                             subtitle: Self.subtitle(for: row),
                             last: index == snapshots.count - 1
                         ) {
@@ -204,6 +215,18 @@ public struct BackupRestoreView: View {
         if summary.invitations > 0 { parts.append("\(summary.invitations) invitations") }
         if summary.blobs > 0 { parts.append("\(summary.blobs) attachments") }
         return parts.isEmpty ? "Nothing to add — it was all already here." : parts.joined(separator: ", ")
+    }
+
+    /// Whether this row is the newest snapshot *its own operator*
+    /// holds.
+    static func isNewestForItsOperator(
+        _ row: RestorableSnapshot,
+        in rows: [RestorableSnapshot]
+    ) -> Bool {
+        let newest = rows
+            .filter { $0.componentId == row.componentId }
+            .max { $0.snapshot.retainedAt < $1.snapshot.retainedAt }
+        return newest?.id == row.id
     }
 
     /// The operator's name leads, because with more than one set up it

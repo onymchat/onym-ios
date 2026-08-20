@@ -113,11 +113,20 @@ public final class BackupRestoreFlow {
                         operatorName: source.displayName)
                 }
             } catch {
-                // One operator being unreachable is not a failed
-                // restore screen — the others may be holding exactly
-                // what this person needs. It is also not nothing, so it
-                // is named.
-                unreachable.append(source.displayName)
+                // Only silence counts as unknown. An operator that
+                // answered — refusing this holder's key, or asking for
+                // payment — has told us it is holding nothing *for us*,
+                // and reporting that as "could not reach" points someone
+                // at an operator that has provably never held a byte of
+                // their history. The restore surface exists to stop that
+                // misreport, not to make it.
+                //
+                // This is the ordinary state of an operator someone
+                // consented to and never set up, which is also every
+                // operator on a phone where restore matters most.
+                if Self.isSilence(error) {
+                    unreachable.append(source.displayName)
+                }
             }
         }
         unreachableOperators = unreachable
@@ -182,6 +191,26 @@ public final class BackupRestoreFlow {
                 partial = false
             }
             state = .failed(message: Self.describe(error), partial: partial)
+        }
+    }
+
+    /// Whether an operator failed to answer, as opposed to answering
+    /// with something we do not like.
+    nonisolated static func isSilence(_ error: Error) -> Bool {
+        guard let error = error as? BackupError else {
+            // Transport failures, timeouts, anything the adapter did not
+            // normalise. The honest word is "unknown".
+            return true
+        }
+        switch error {
+        case .accessRefused, .retentionExpired, .paymentRequired, .rejected:
+            // All of these are answers. Nothing is held for this holder
+            // here, or nothing this device may read — which is the
+            // ordinary state of an operator someone consented to and
+            // never set up.
+            return false
+        default:
+            return true
         }
     }
 

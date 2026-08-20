@@ -20,6 +20,19 @@ public actor BackupRepository {
     /// rather than merged.
     private var isRunning = false
 
+    /// Set between `prepare()` saying yes and the `place(prepared:)`
+    /// that answers it.
+    ///
+    /// `isRunning` alone was not enough once a run had two calls. A
+    /// fan-out asks every operator first and only then reads the
+    /// history and seals — minutes, on a large one — and `prepare`'s
+    /// `defer` released the lock immediately, so the whole expensive
+    /// window was unguarded. A person tapping this operator's own Back
+    /// Up Now during it composed a second archive through the same
+    /// composer and uploaded a second snapshot: one action, two
+    /// snapshots, two charges, twice the peak disk.
+    private var isReserved = false
+
     public init(
         port: any BackupPort,
         composer: BackupComposer,
@@ -65,7 +78,7 @@ public actor BackupRepository {
 
     /// Compose a fresh snapshot and try to place it.
     public func backUp(now: Date = Date()) async throws -> RunResult {
-        guard !isRunning else { return .alreadyRunning }
+        guard !isRunning, !isReserved else { return .alreadyRunning }
         isRunning = true
         defer { isRunning = false }
 
@@ -113,7 +126,12 @@ public actor BackupRepository {
     public func place(prepared: PreparedSnapshot, now: Date = Date()) async throws -> RunResult {
         guard !isRunning else { return .alreadyRunning }
         isRunning = true
-        defer { isRunning = false }
+        // The reservation this call answers, released whichever way it
+        // goes.
+        defer {
+            isRunning = false
+            isReserved = false
+        }
 
         var state: BackupState
         let acceptedTermsId: String
@@ -144,7 +162,7 @@ public actor BackupRepository {
     /// somebody can take it. Reconciliation of earlier work happens
     /// here, which is why this is not a pure read.
     public func prepare(now: Date = Date()) async throws -> Readiness {
-        guard !isRunning else { return .blocked(.alreadyRunning) }
+        guard !isRunning, !isReserved else { return .blocked(.alreadyRunning) }
         isRunning = true
         defer { isRunning = false }
 
@@ -159,8 +177,23 @@ public actor BackupRepository {
             // screen would keep reporting a terms change that has
             // already been resolved.
             try commit(state, expecting: state.componentId)
+            // Held until `place(prepared:)` or `cancelReservation()`.
+            // Anything else that would upload is turned away in the
+            // meantime, because the snapshot for this run is already
+            // being made.
+            isReserved = true
             return .ready
         }
+    }
+
+    /// Release a reservation whose snapshot never arrived.
+    ///
+    /// Called for an operator the caller promised to place at and then
+    /// could not — a seal that failed, a run abandoned. Without it the
+    /// operator stays reserved and refuses every later run as
+    /// `alreadyRunning`, which is a lock nobody holds.
+    public func cancelReservation() {
+        isReserved = false
     }
 
     private enum Preconditions {
@@ -215,6 +248,20 @@ public actor BackupRepository {
             return .blocked(mismatch)
         }
 
+        // The refusal is disproved the moment the operator and the terms
+        // check out, so it is cleared *here* — before the
+        // reconciliation return below, which used to skip the clear
+        // entirely, and committed immediately rather than left for a
+        // caller. `backUp` does not commit until after composing, so a
+        // compose that throws would otherwise leave a refusal on file
+        // that this call had just shown to be false: the screen reports
+        // "Terms changed" for good, Back Up Now is hidden, and Restore
+        // goes with it.
+        if state.lastBlockedReason != nil {
+            state.lastBlockedReason = nil
+            try commit(state, expecting: enrolled)
+        }
+
         // Only now: an operation whose result we never learned may well
         // have succeeded, and composing a second snapshot on top of an
         // unresolved first is how a person ends up paying to store the
@@ -234,12 +281,8 @@ public actor BackupRepository {
             return .blocked(.awaitingReconciliation(
                 operationIds: state.pendingOperations.map(\.operationId)))
         }
-        // Cleared by getting past the check that set it: the operator
-        // is the one this state was enrolled with, publishing the terms
-        // it pinned. Every caller commits the state it is handed — see
-        // `prepare`, which commits precisely so a later failure cannot
-        // resurrect a refusal that no longer holds.
-        state.lastBlockedReason = nil
+        // Cleared by getting past the check that set it, and never
+        // carried further than that.
         return .ready(state, acceptedTermsId: acceptedTermsId)
     }
 
@@ -321,7 +364,7 @@ public actor BackupRepository {
     /// and would charge the person for a second copy of the same
     /// history.
     public func retry(_ snapshot: SealedSnapshot, now: Date = Date()) async throws -> RunResult {
-        guard !isRunning else { return .alreadyRunning }
+        guard !isRunning, !isReserved else { return .alreadyRunning }
         isRunning = true
         defer { isRunning = false }
 
@@ -338,6 +381,8 @@ public actor BackupRepository {
         // under. A snapshot left over from earlier terms is not one to
         // send now.
         guard snapshot.acceptedTermsId == state.acceptedTermsId else {
+            state.lastBlockedReason = .termsChanged
+            try commit(state, expecting: state.componentId)
             return .termsChanged(currentTermsId: state.acceptedTermsId)
         }
         return try await place(snapshot, state: &state, now: now)
@@ -432,6 +477,14 @@ public actor BackupRepository {
                 return .paymentRequired(
                     componentId: componentId, offerIds: offerIds, pending: snapshot)
             case .termsChanged(let currentTermsId):
+                // The operator republished between `connect` and here.
+                // Recorded, not merely returned: a refusal that lives
+                // only in a return value is one the next launch cannot
+                // see, and the screen would report a device that last
+                // backed up successfully as On while uploads have
+                // stopped.
+                state.lastBlockedReason = .termsChanged
+                try commit(state, expecting: enrolled)
                 return .termsChanged(currentTermsId: currentTermsId)
             default:
                 throw error

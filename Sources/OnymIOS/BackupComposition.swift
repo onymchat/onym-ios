@@ -3,6 +3,7 @@ import OnymBackup
 import OnymBackupUI
 import OnymBilling
 import OnymChatsCore
+import OnymDiscovery
 import OnymFoundation
 import OnymGroup
 import OnymIdentity
@@ -85,7 +86,24 @@ struct BackupSeatComposer {
             }
             let stateStore = BackupVendorStorage.stateStore(
                 componentId: manifest.componentId, in: workingDirectory)
-            let stored = try? stateStore.load()
+            // `try?` would be wrong here in the one direction that
+            // matters. An unreadable state file — a corrupt one, or one
+            // read while the device is locked and the container is under
+            // complete protection — would drop this operator's policy
+            // from the vote, and the vote is unanimity: with its
+            // descriptors-only vote missing, a single includeCiphertext
+            // operator carries it, and attachments go to an operator the
+            // person never agreed to give them to. So an unreadable
+            // state votes for the strictest policy, which is what
+            // `FileBackupStateStore` throwing rather than returning an
+            // empty state is for.
+            let stored: BackupState?
+            do {
+                stored = try stateStore.load()
+            } catch {
+                stored = nil
+                policies.append(.descriptorsOnly)
+            }
             let consented = stored?.acceptedTermsId == nil ? nil : stored?.mediaPolicy
             if let consented { policies.append(consented) }
             enrolments.append((manifest, stateStore, material, consented))
@@ -115,6 +133,17 @@ struct BackupSeatComposer {
             workingDirectory: workingDirectory
         )
 
+        // An operator's name is a string it wrote in its own manifest,
+        // and nothing stops two of them writing the same one. That
+        // string is the only thing telling operators apart on every
+        // surface here — the rows, the restore list, the unreachable
+        // note, and the "you already back up to X" sentence someone
+        // reads while consenting to a *different* X. Pinning stops an
+        // operator relabelling itself after consent; it does not stop it
+        // colliding at consent time.
+        let displayNames = Self.distinctDisplayNames(
+            for: enrolments.map(\.manifest.componentId), consentStore: consentStore)
+
         let stacks: [Stack] = enrolments.map { enrolment in
             let client = URLSessionBackupClient(
                 manifest: enrolment.manifest,
@@ -125,8 +154,8 @@ struct BackupSeatComposer {
             )
             return Stack(
                 componentId: enrolment.manifest.componentId,
-                displayName: BackupSeat.displayName(
-                    componentId: enrolment.manifest.componentId, consentStore: consentStore),
+                displayName: displayNames[enrolment.manifest.componentId]
+                    ?? enrolment.manifest.componentId,
                 consentedMediaPolicy: enrolment.consentedMediaPolicy,
                 client: client,
                 stateStore: enrolment.stateStore,
@@ -151,7 +180,9 @@ struct BackupSeatComposer {
                         // Consented to with media, and not getting it,
                         // because somebody else was not.
                         attachmentsWithheld: $0.consentedMediaPolicy == .includeCiphertext
-                            && mediaPolicy == .descriptorsOnly
+                            && mediaPolicy == .descriptorsOnly,
+                        onStopBackingUp: Self.stopBackingUp(
+                            componentId: $0.componentId, consentStore: consentStore)
                     )
                 )
             },
@@ -202,9 +233,17 @@ struct BackupSeatComposer {
                         // Named so the surface can say what adding a
                         // second operator does rather than let it read
                         // as switching.
-                        otherOperators: stacks
-                            .filter { $0.componentId != componentId }
-                            .compactMap(Self.otherOperator(from:))
+                        // Only when this operator is not already one of
+                        // the copies. Re-reading an operator's new terms
+                        // routes through this same screen, and it used
+                        // to greet someone with "This adds a second copy
+                        // — it does not move the first" for an operator
+                        // that has been holding a copy for months.
+                        otherOperators: Self.isEnrolled(stack)
+                            ? []
+                            : stacks
+                                .filter { $0.componentId != componentId }
+                                .compactMap(Self.otherOperator(from:))
                     )
                 ) {
                     flow.refresh()
@@ -231,6 +270,59 @@ struct BackupSeatComposer {
         )
     }
 
+    /// Names that tell the operators apart, whatever they call
+    /// themselves.
+    ///
+    /// A collision falls back to the component id for *both* sides, not
+    /// just the newcomer: disambiguating only one leaves the other
+    /// wearing the plain name, which reads as the authentic one.
+    @MainActor
+    private static func distinctDisplayNames(
+        for componentIds: [String],
+        consentStore: any PinnedConsentStore
+    ) -> [String: String] {
+        var claimed: [String: [String]] = [:]
+        for componentId in componentIds {
+            let name = BackupSeat.displayName(componentId: componentId, consentStore: consentStore)
+            claimed[name, default: []].append(componentId)
+        }
+        var resolved: [String: String] = [:]
+        for (name, componentIds) in claimed {
+            for componentId in componentIds {
+                resolved[componentId] = componentIds.count == 1
+                    ? name
+                    : "\(name) (\(ModuleConsentFlow.shortComponentId(componentId)))"
+            }
+        }
+        return resolved
+    }
+
+    /// Withdraw consent so this operator stops being part of the seat.
+    ///
+    /// The local state is already cleared by the flow; this is the other
+    /// half, and without it the operator reappears in the list on the
+    /// next visit to Settings — consented, unenrolled, and offering to
+    /// be set up again.
+    private static func stopBackingUp(
+        componentId: String,
+        consentStore: any PinnedConsentStore
+    ) -> @MainActor @Sendable () -> Void {
+        { @MainActor @Sendable in
+            // A failed withdrawal is not reported here: the flow has
+            // already cleared this device's state, so nothing is being
+            // uploaded to this operator either way. The row returning
+            // as "not set up" is the visible consequence, and setting
+            // it up again is a screen.
+            try? consentStore.withdraw(componentId: componentId)
+        }
+    }
+
+    /// Whether this operator already holds a copy — that is, whether
+    /// this enrolment is a first one or a re-reading of new terms.
+    private static func isEnrolled(_ stack: Stack) -> Bool {
+        (try? stack.stateStore.load())?.acceptedTermsId != nil
+    }
+
     /// One already-enrolled operator, described only by what it signed.
     ///
     /// Its jurisdictions come from the terms bytes this device pinned
@@ -241,13 +333,18 @@ struct BackupSeatComposer {
     /// jurisdictions rather than guessing when the pinned bytes will not
     /// decode.
     private static func otherOperator(from stack: Stack) -> BackupDisclosure.OtherOperator? {
-        guard
-            let stored = try? stack.stateStore.load(),
-            stored.acceptedTermsId != nil
-        else {
-            return nil
-        }
-        let jurisdictions = stored.acceptedTermsRaw
+        let stored = try? stack.stateStore.load()
+        // Only a state that loaded *and* says so is "not enrolled". An
+        // unreadable one is named anyway, without jurisdictions: the
+        // consequence of over-naming is a person told they may already
+        // have a copy somewhere they do not, and the consequence of
+        // under-naming is the whole "this adds a second copy" headline
+        // silently disappearing from the consent screen — someone agrees
+        // to a second copy of everyone's messages in a second
+        // jurisdiction believing they are switching. This disclosure
+        // fails loud.
+        if let stored, stored.acceptedTermsId == nil { return nil }
+        let jurisdictions = stored?.acceptedTermsRaw
             .flatMap { try? BackupTerms.decode(raw: $0) }?
             .jurisdictions ?? []
         return BackupDisclosure.OtherOperator(

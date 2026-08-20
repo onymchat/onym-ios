@@ -16,14 +16,14 @@ import SwiftUI
 /// operator that keeps access logs or excludes a great deal from
 /// erasure has published that, and this screen repeats it.
 public struct BackupEnrolmentView: View {
-    @State private var flow: BackupEnrolmentFlow
+    private let flow: BackupEnrolmentFlow
     private let onEnrolled: () -> Void
     @Environment(\.dismiss) private var dismiss
 
     @State private var scrolledToEnd = false
 
     public init(flow: BackupEnrolmentFlow, onEnrolled: @escaping () -> Void = {}) {
-        _flow = State(wrappedValue: flow)
+        self.flow = flow
         self.onEnrolled = onEnrolled
     }
 
