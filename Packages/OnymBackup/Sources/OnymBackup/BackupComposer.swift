@@ -46,22 +46,41 @@ public actor BackupComposer {
         supersedes: SnapshotReference? = nil,
         now: Date = Date()
     ) async throws -> SealedSnapshot {
+        // Minted before a byte is written, not between the seal and the
+        // return. The refactor had it second, where a failure would
+        // throw *after* `seal` had produced a full-size file — one that
+        // no state record mentions, so nothing claims it and nothing
+        // ever deletes it.
+        let operationId = try Self.newIdentifier()
+        let archive = try await composeArchive(now: now)
+        // Before the upload, not after: the plaintext is the one
+        // artefact here that is readable without the recovery phrase.
+        defer { archive.destroy() }
+        let prepared = try seal(archive, archiveRoot: keyMaterial.archiveRoot)
+        return prepared.addressed(
+            operationId: operationId,
+            acceptedTermsId: acceptedTermsId,
+            supersedes: supersedes
+        )
+    }
+
+    /// Read the whole history into one plaintext archive.
+    ///
+    /// The expensive half, and the half that is the same for every
+    /// operator: someone keeping their history with two operators reads
+    /// it once and seals it twice. The caller owns the result and must
+    /// `destroy()` it — including on the failure path, and before the
+    /// first upload rather than after the last.
+    public func composeArchive(now: Date = Date()) async throws -> BackupPlaintextArchive {
         try FileManager.default.createDirectory(
             at: workingDirectory,
             withIntermediateDirectories: true,
             attributes: [.protectionKey: FileProtectionType.complete]
         )
-        let operationId = try SecureRandom.data(16).map { String(format: "%02x", $0) }.joined()
-        let plaintextURL = workingDirectory.appending(path: "archive-\(operationId)")
-        let scratchURL = workingDirectory.appending(path: "scratch-\(operationId)")
-
-        // The plaintext archive is the one artefact on disk that is
-        // readable without the seed, so it is removed the moment the
-        // seal exists — including on the throwing path.
-        defer {
-            try? FileManager.default.removeItem(at: plaintextURL)
-            try? FileManager.default.removeItem(at: scratchURL)
-        }
+        let runId = try Self.newIdentifier()
+        let plaintextURL = workingDirectory.appending(path: "archive-\(runId)")
+        let scratchURL = workingDirectory.appending(path: "scratch-\(runId)")
+        defer { try? FileManager.default.removeItem(at: scratchURL) }
 
         let writer = try BackupArchiveWriter(scratchURL: scratchURL)
         writer.setIdentityCount(await source.identityCount())
@@ -71,37 +90,61 @@ public actor BackupComposer {
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         encoder.dateEncodingStrategy = .iso8601
 
-        let groups = try await source.groups()
-        try writer.append(kind: .groups, bytes: try encoder.encode(groups))
+        do {
+            let groups = try await source.groups()
+            try writer.append(kind: .groups, bytes: try encoder.encode(groups))
 
-        var messages: [BackupMessageRecord] = []
-        for group in groups {
-            messages += try await source.messages(
-                groupID: group.id,
-                ownerIdentityID: group.ownerIdentityID
-            )
-        }
-        try writer.append(kind: .messages, bytes: try encoder.encode(messages))
-
-        try writer.append(kind: .invitations, bytes: try encoder.encode(try await source.invitations()))
-        try writer.append(kind: .consents, bytes: try encoder.encode(try await source.consents()))
-
-        if mediaPolicy == .includeCiphertext {
-            let blobs = try await collectBlobs(from: messages)
-            if !blobs.isEmpty {
-                try writer.append(kind: .blobCiphertext, bytes: try encoder.encode(blobs))
+            var messages: [BackupMessageRecord] = []
+            for group in groups {
+                messages += try await source.messages(
+                    groupID: group.id,
+                    ownerIdentityID: group.ownerIdentityID
+                )
             }
+            try writer.append(kind: .messages, bytes: try encoder.encode(messages))
+
+            try writer.append(kind: .invitations, bytes: try encoder.encode(try await source.invitations()))
+            try writer.append(kind: .consents, bytes: try encoder.encode(try await source.consents()))
+
+            if mediaPolicy == .includeCiphertext {
+                let blobs = try await collectBlobs(from: messages)
+                if !blobs.isEmpty {
+                    try writer.append(kind: .blobCiphertext, bytes: try encoder.encode(blobs))
+                }
+            }
+
+            try writer.finish(writingTo: plaintextURL, createdAt: now)
+        } catch {
+            // A half-written plaintext archive is readable without the
+            // seed. It does not survive the throw.
+            try? FileManager.default.removeItem(at: plaintextURL)
+            throw error
         }
+        return BackupPlaintextArchive(url: plaintextURL, createdAt: now)
+    }
 
-        try writer.finish(writingTo: plaintextURL, createdAt: now)
-
-        let sealedURL = workingDirectory.appending(path: "pending-\(operationId)")
+    /// Seal one archive for one operator.
+    ///
+    /// Called once per operator, and each call mints a fresh snapshot
+    /// salt — so the same history sealed for two operators produces two
+    /// unrelated ciphertexts under two unrelated references. Handing both
+    /// operators the same bytes would be cheaper and would hand a pair of
+    /// colluding operators the link between their two holders.
+    ///
+    /// `archiveRoot` is derived from the seed alone and is therefore the
+    /// same at every operator: the snapshot must be openable by whoever
+    /// holds the recovery phrase, not by whoever stored it.
+    public func seal(
+        _ archive: BackupPlaintextArchive,
+        archiveRoot: SymmetricKey
+    ) throws -> PreparedSnapshot {
+        let sealedURL = workingDirectory.appending(path: "pending-\(try Self.newIdentifier())")
         let reference: SnapshotReference
         do {
             reference = try BackupSealer.seal(
-                plaintextURL: plaintextURL,
+                plaintextURL: archive.url,
                 to: sealedURL,
-                archiveRoot: keyMaterial.archiveRoot
+                archiveRoot: archiveRoot
             )
         } catch {
             // A half-written seal is ciphertext, so it is not a
@@ -111,14 +154,83 @@ public actor BackupComposer {
             try? FileManager.default.removeItem(at: sealedURL)
             throw error
         }
-        return SealedSnapshot(
-            operationId: operationId,
+        return PreparedSnapshot(
             snapshotReference: reference,
             sealedBytesURL: sealedURL,
-            sealedAt: now,
-            acceptedTermsId: acceptedTermsId,
-            supersedes: supersedes
+            sealedAt: archive.createdAt
         )
+    }
+
+    /// Delete working files nobody will claim.
+    ///
+    /// Written because a comment in `BackupRepository` claimed the
+    /// working directory "is swept on the next run" and nothing ever
+    /// swept it. The claim mattered: a run that ends `unknown` keeps its
+    /// sealed bytes deliberately — the upload may have landed — but
+    /// reconciliation resolves that by asking the operator, never by
+    /// re-reading the file, so nothing ever deleted it. Every unresolved
+    /// run left a full-size snapshot on the device, permanently, once
+    /// per operator.
+    ///
+    /// `claimed` is the filenames that must survive: the sealed bytes of
+    /// snapshots awaiting a purchase, which are the one case where the
+    /// file itself is still needed. Everything else here is scratch.
+    ///
+    /// Age-guarded because a manual per-operator run can be sealing into
+    /// this directory right now, and a sweep is not worth a race with
+    /// it.
+    /// Two ages, because two kinds of file are at stake.
+    ///
+    /// `plaintextAge` covers everything readable without the recovery
+    /// phrase: the archive a compose writes, the scratch it builds it
+    /// in, and `restore-<digest>`, which is the *whole history in the
+    /// clear* and is cleaned today only by an in-process `defer` — a
+    /// force-quit or a jetsam during a several-hundred-megabyte restore
+    /// skips it. Keeping that for a day to avoid racing a concurrent
+    /// compose is the wrong trade; an hour is long enough that no live
+    /// run is touching it.
+    ///
+    /// `ciphertextAge` covers sealed bytes, where the cost of being
+    /// early is a re-upload and the cost of being wrong is deleting
+    /// something a purchase is waiting on.
+    public func sweepWorkingDirectory(
+        claiming claimed: Set<String>,
+        plaintextAge: TimeInterval = 60 * 60,
+        ciphertextAge: TimeInterval = 24 * 60 * 60,
+        now: Date = Date()
+    ) {
+        // `sealed-` is the restore path's download: ciphertext, so space
+        // only, and it leaks by the same route as `restore-`.
+        let plaintextPrefixes = ["archive-", "scratch-", "restore-"]
+        let ciphertextPrefixes = ["pending-", "sealed-"]
+        guard
+            let entries = try? FileManager.default.contentsOfDirectory(
+                at: workingDirectory,
+                includingPropertiesForKeys: [.contentModificationDateKey],
+                options: [.skipsHiddenFiles])
+        else {
+            return
+        }
+        for url in entries {
+            let name = url.lastPathComponent
+            guard !claimed.contains(name) else { continue }
+            let age: TimeInterval
+            if plaintextPrefixes.contains(where: name.hasPrefix) {
+                age = plaintextAge
+            } else if ciphertextPrefixes.contains(where: name.hasPrefix) {
+                age = ciphertextAge
+            } else {
+                continue
+            }
+            let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate
+            guard let modified, now.timeIntervalSince(modified) > age else { continue }
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    static func newIdentifier() throws -> String {
+        try SecureRandom.data(16).map { String(format: "%02x", $0) }.joined()
     }
 
     /// Fetch the ciphertext behind every attachment the messages

@@ -36,11 +36,16 @@ final class BackupRestoreTests: XCTestCase {
 
         let sink = RecordingSink()
         let flow = await BackupRestoreFlow(
-            repository: BackupRepository(
-                port: HoldingPort(snapshot: snapshot),
-                composer: composer,
-                stateStore: EmptyStateStore(),
-                keyMaterial: material),
+            sources: [
+                BackupRestoreSource(
+                    componentId: "onym:component:test-operator",
+                    displayName: "Test Operator",
+                    repository: BackupRepository(
+                        port: HoldingPort(snapshot: snapshot),
+                        composer: composer,
+                        stateStore: EmptyStateStore(),
+                        keyMaterial: material))
+            ],
             restorer: BackupRestorer(sink: sink),
             keyMaterial: material,
             workingDirectory: dir)
@@ -80,11 +85,16 @@ final class BackupRestoreTests: XCTestCase {
 
         let sink = RecordingSink()
         let flow = await BackupRestoreFlow(
-            repository: BackupRepository(
-                port: HoldingPort(snapshot: snapshot),
-                composer: composer,
-                stateStore: EmptyStateStore(),
-                keyMaterial: material),
+            sources: [
+                BackupRestoreSource(
+                    componentId: "onym:component:test-operator",
+                    displayName: "Test Operator",
+                    repository: BackupRepository(
+                        port: HoldingPort(snapshot: snapshot),
+                        composer: composer,
+                        stateStore: EmptyStateStore(),
+                        keyMaterial: material))
+            ],
             restorer: BackupRestorer(sink: sink),
             keyMaterial: material,
             workingDirectory: dir)
@@ -108,12 +118,17 @@ final class BackupRestoreTests: XCTestCase {
         let dir = try directory()
         let material = material()
         let flow = await BackupRestoreFlow(
-            repository: BackupRepository(
-                port: HoldingPort(snapshot: nil),
-                composer: BackupComposer(
-                    source: SeededSource(), mediaPolicy: .descriptorsOnly, workingDirectory: dir),
-                stateStore: EmptyStateStore(),
-                keyMaterial: material),
+            sources: [
+                BackupRestoreSource(
+                    componentId: "onym:component:test-operator",
+                    displayName: "Test Operator",
+                    repository: BackupRepository(
+                        port: HoldingPort(snapshot: nil),
+                        composer: BackupComposer(
+                            source: SeededSource(), mediaPolicy: .descriptorsOnly, workingDirectory: dir),
+                        stateStore: EmptyStateStore(),
+                        keyMaterial: material))
+            ],
             restorer: BackupRestorer(sink: RecordingSink()),
             keyMaterial: material,
             workingDirectory: dir)
@@ -177,11 +192,16 @@ final class BackupRestoreTests: XCTestCase {
             acceptedTermsId: "sha256:" + String(repeating: "d", count: 64))
 
         let flow = await BackupRestoreFlow(
-            repository: BackupRepository(
-                port: HoldingPort(snapshot: snapshot),
-                composer: composer,
-                stateStore: EmptyStateStore(),
-                keyMaterial: material),
+            sources: [
+                BackupRestoreSource(
+                    componentId: "onym:component:test-operator",
+                    displayName: "Test Operator",
+                    repository: BackupRepository(
+                        port: HoldingPort(snapshot: snapshot),
+                        composer: composer,
+                        stateStore: EmptyStateStore(),
+                        keyMaterial: material))
+            ],
             // Groups land, then invitations throw — the shape the
             // reviewer identified in the real sink.
             restorer: BackupRestorer(sink: FailsMidWriteSink()),

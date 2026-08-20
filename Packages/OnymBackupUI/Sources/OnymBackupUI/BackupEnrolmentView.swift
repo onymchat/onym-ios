@@ -16,14 +16,14 @@ import SwiftUI
 /// operator that keeps access logs or excludes a great deal from
 /// erasure has published that, and this screen repeats it.
 public struct BackupEnrolmentView: View {
-    @State private var flow: BackupEnrolmentFlow
+    private let flow: BackupEnrolmentFlow
     private let onEnrolled: () -> Void
     @Environment(\.dismiss) private var dismiss
 
     @State private var scrolledToEnd = false
 
     public init(flow: BackupEnrolmentFlow, onEnrolled: @escaping () -> Void = {}) {
-        _flow = State(wrappedValue: flow)
+        self.flow = flow
         self.onEnrolled = onEnrolled
     }
 
@@ -84,6 +84,16 @@ public struct BackupEnrolmentView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityIdentifier("backup.enrolment.operator")
+
+                if let additionalCopies = disclosure.additionalCopies {
+                    // Above the rest, because it changes what the whole
+                    // screen is: not "choose an operator" but "add one".
+                    headline(
+                        "This adds a second copy — it does not move the first",
+                        additionalCopies,
+                        symbol: "square.on.square",
+                        identifier: "backup.enrolment.additional_copies")
+                }
 
                 headline(
                     "This copies other people's messages too",

@@ -3,6 +3,7 @@ import OnymBackup
 import OnymBackupUI
 import OnymBilling
 import OnymChatsCore
+import OnymDiscovery
 import OnymFoundation
 import OnymGroup
 import OnymIdentity
@@ -16,6 +17,16 @@ import OnymTransportBlossom
 /// or an identity imported from raw key material and therefore without a
 /// recovery phrase to derive a key from. Both mean the Settings section
 /// hides rather than offering something that cannot work.
+///
+/// A person may keep the same history with more than one operator, so
+/// this assembles one stack per consented operator and one fan-out over
+/// all of them. What is shared is the part that is a property of the
+/// identity: the source of truth being read, and the archive key ladder,
+/// which comes from the recovery seed alone so that a snapshot is
+/// openable by whoever holds the phrase rather than by whoever stored
+/// it. Everything else — the access keys, the terms pin, the chain, the
+/// entitlement, the local state file — is per operator, because
+/// `UI-Backup.md` §14.12 says one operator never receives another's.
 @MainActor
 struct BackupSeatComposer {
     let identities: IdentityRepository
@@ -32,32 +43,84 @@ struct BackupSeatComposer {
     let entitlementStore: (any SeatEntitlementStoring)?
     let seatKeys: any SeatAccessKeyProviding
 
-    func makeDeviceBackupView() async -> DeviceBackupSettingsView? {
-        guard let manifest = BackupSeat.consentedManifest(consentStore: consentStore) else {
+    /// One operator's assembled stack, before it becomes a screen.
+    private struct Stack {
+        let componentId: String
+        let displayName: String
+        /// What *this* operator was consented under, which is not
+        /// necessarily what the shared archive ends up carrying.
+        let consentedMediaPolicy: BackupMediaPolicy?
+        let client: URLSessionBackupClient
+        let stateStore: FileBackupStateStore
+        let material: BackupKeyMaterial
+        let repository: BackupRepository
+    }
+
+    func makeDeviceBackupView() async -> DeviceBackupVendorsView? {
+        let manifests = BackupSeat.consentedManifests(consentStore: consentStore)
+        guard !manifests.isEmpty, let workingDirectory = try? BackupSeat.workingDirectory() else {
             return nil
         }
-        guard
-            let material = try? await BackupKeys.material(
-                deriving: identities, componentId: manifest.componentId),
-            let workingDirectory = try? BackupSeat.workingDirectory()
-        else {
-            // No recovery phrase, or nowhere to write. Either way a
-            // snapshot sealed now could not be opened later, and
-            // offering the screen would be offering something false.
-            return nil
+        // A single-operator install kept its state in `state.json`.
+        // Without moving it onto the per-operator path, this launch
+        // would read no state for the operator the person is already
+        // enrolled with: backup would show as off, and the next snapshot
+        // would supersede nothing and be paid for twice.
+        BackupVendorStorage.migrateLegacyState(in: workingDirectory)
+
+        // Two passes, because the archive is composed once for every
+        // operator and its media policy therefore has to be decided
+        // before the composer exists.
+        var enrolments: [(manifest: BackupOperatorManifest, stateStore: FileBackupStateStore,
+                          material: BackupKeyMaterial, consentedMediaPolicy: BackupMediaPolicy?)] = []
+        var policies: [BackupMediaPolicy] = []
+        for manifest in manifests {
+            guard
+                let material = try? await BackupKeys.material(
+                    deriving: identities, componentId: manifest.componentId)
+            else {
+                // No recovery phrase. A snapshot sealed now could not be
+                // opened later, and that is true at every operator, so
+                // there is nothing to build at all.
+                return nil
+            }
+            let stateStore = BackupVendorStorage.stateStore(
+                componentId: manifest.componentId, in: workingDirectory)
+            // `try?` would be wrong here in the one direction that
+            // matters. An unreadable state file — a corrupt one, or one
+            // read while the device is locked and the container is under
+            // complete protection — would drop this operator's policy
+            // from the vote, and the vote is unanimity: with its
+            // descriptors-only vote missing, a single includeCiphertext
+            // operator carries it, and attachments go to an operator the
+            // person never agreed to give them to. So an unreadable
+            // state votes for the strictest policy, which is what
+            // `FileBackupStateStore` throwing rather than returning an
+            // empty state is for.
+            let stored: BackupState?
+            do {
+                stored = try stateStore.load()
+            } catch {
+                stored = nil
+                policies.append(.descriptorsOnly)
+            }
+            let consented = stored?.acceptedTermsId == nil ? nil : stored?.mediaPolicy
+            if let consented { policies.append(consented) }
+            enrolments.append((manifest, stateStore, material, consented))
         }
+        guard let first = enrolments.first else { return nil }
 
-        let stateStore = FileBackupStateStore(
-            url: workingDirectory.appending(path: "state.json"))
-        let mediaPolicy = (try? stateStore.load())?.mediaPolicy ?? .descriptorsOnly
+        // The strictest policy any enrolled operator was consented under
+        // wins, because one archive is composed for all of them. The
+        // other direction would send an operator attachments the person
+        // agreed to give somebody else — a widening of the eligible set
+        // by composition order, and §14.10 says the eligible set never
+        // widens without an explicit choice.
+        let mediaPolicy: BackupMediaPolicy =
+            !policies.isEmpty && policies.allSatisfy { $0 == .includeCiphertext }
+                ? .includeCiphertext
+                : .descriptorsOnly
 
-        let client = URLSessionBackupClient(
-            manifest: manifest,
-            material: material,
-            endpointOverride: endpointOverride,
-            entitlement: Self.entitlementProvider(
-                manifest: manifest, store: entitlementStore, keys: seatKeys)
-        )
         let composer = BackupComposer(
             source: AppBackupSource(
                 groupStore: groupStore,
@@ -69,21 +132,78 @@ struct BackupSeatComposer {
             mediaPolicy: mediaPolicy,
             workingDirectory: workingDirectory
         )
-        let repository = BackupRepository(
-            port: client,
-            composer: composer,
-            stateStore: stateStore,
-            keyMaterial: material
+
+        // An operator's name is a string it wrote in its own manifest,
+        // and nothing stops two of them writing the same one. That
+        // string is the only thing telling operators apart on every
+        // surface here — the rows, the restore list, the unreachable
+        // note, and the "you already back up to X" sentence someone
+        // reads while consenting to a *different* X. Pinning stops an
+        // operator relabelling itself after consent; it does not stop it
+        // colliding at consent time.
+        let displayNames = Self.distinctDisplayNames(
+            for: enrolments.map(\.manifest.componentId), consentStore: consentStore)
+
+        let stacks: [Stack] = enrolments.map { enrolment in
+            let client = URLSessionBackupClient(
+                manifest: enrolment.manifest,
+                material: enrolment.material,
+                endpointOverride: endpointOverride,
+                entitlement: Self.entitlementProvider(
+                    manifest: enrolment.manifest, store: entitlementStore, keys: seatKeys)
+            )
+            return Stack(
+                componentId: enrolment.manifest.componentId,
+                displayName: displayNames[enrolment.manifest.componentId]
+                    ?? enrolment.manifest.componentId,
+                consentedMediaPolicy: enrolment.consentedMediaPolicy,
+                client: client,
+                stateStore: enrolment.stateStore,
+                material: enrolment.material,
+                repository: BackupRepository(
+                    port: client,
+                    composer: composer,
+                    stateStore: enrolment.stateStore,
+                    keyMaterial: enrolment.material
+                )
+            )
+        }
+
+        let flow = DeviceBackupVendorsFlow(
+            vendors: stacks.map {
+                DeviceBackupVendorsFlow.Vendor(
+                    flow: DeviceBackupSettingsFlow(
+                        componentId: $0.componentId,
+                        displayName: $0.displayName,
+                        repository: $0.repository,
+                        stateStore: $0.stateStore,
+                        // Consented to with media, and not getting it,
+                        // because somebody else was not.
+                        attachmentsWithheld: $0.consentedMediaPolicy == .includeCiphertext
+                            && mediaPolicy == .descriptorsOnly,
+                        onStopBackingUp: Self.stopBackingUp(
+                            componentId: $0.componentId, consentStore: consentStore)
+                    )
+                )
+            },
+            fanOut: BackupFanOut(
+                vendors: stacks.map {
+                    BackupFanOut.Vendor(
+                        componentId: $0.componentId,
+                        displayName: $0.displayName,
+                        repository: $0.repository,
+                        stateStore: $0.stateStore
+                    )
+                },
+                composer: composer,
+                // Identity-wide by derivation: `BackupKeys.archiveRootKey`
+                // takes the seed and nothing else, so every operator's
+                // material carries the same one. Taking it from the first
+                // is not a choice about which operator is special.
+                archiveRoot: first.material.archiveRoot
+            )
         )
-        let consented = manifest.componentId
-        let flow = DeviceBackupSettingsFlow(
-            repository: repository,
-            stateStore: stateStore,
-            // Lets the flow tell "enrolled" from "enrolled with somebody
-            // else", which is the difference between a working backup
-            // and one that silently never uploads again.
-            currentComponentId: { consented }
-        )
+
         // Restored attachment ciphertext, and the client that will
         // actually serve it. Writing bytes to a directory no loader
         // reads would let the summary report attachments "restored"
@@ -97,31 +217,138 @@ struct BackupSeatComposer {
                 consentStore: consentStore,
                 blobDirectory: restoredBlobs))
 
-        return DeviceBackupSettingsView(flow: flow, canRestore: true) {
-            // The consent surface, reachable. Without this the section
-            // rendered a status card with no way to turn backup on, and
-            // everything behind it was unreachable code.
-            BackupEnrolmentView(
-                flow: BackupEnrolmentFlow(
-                    port: client,
-                    stateStore: stateStore,
-                    workingDirectory: workingDirectory,
-                    mediaPolicy: mediaPolicy)
-            ) {
-                flow.refresh()
+        return DeviceBackupVendorsView(
+            flow: flow,
+            makeEnrolment: { componentId in
+                guard let stack = stacks.first(where: { $0.componentId == componentId })
+                else {
+                    return nil
+                }
+                return BackupEnrolmentView(
+                    flow: BackupEnrolmentFlow(
+                        port: stack.client,
+                        stateStore: stack.stateStore,
+                        workingDirectory: workingDirectory,
+                        mediaPolicy: mediaPolicy,
+                        // Named so the surface can say what adding a
+                        // second operator does rather than let it read
+                        // as switching.
+                        // Only when this operator is not already one of
+                        // the copies. Re-reading an operator's new terms
+                        // routes through this same screen, and it used
+                        // to greet someone with "This adds a second copy
+                        // — it does not move the first" for an operator
+                        // that has been holding a copy for months.
+                        otherOperators: Self.isEnrolled(stack)
+                            ? []
+                            : stacks
+                                .filter { $0.componentId != componentId }
+                                .compactMap(Self.otherOperator(from:))
+                    )
+                ) {
+                    flow.refresh()
+                }
+            },
+            makeRestore: {
+                BackupRestoreView(
+                    flow: BackupRestoreFlow(
+                        sources: stacks.map {
+                            BackupRestoreSource(
+                                componentId: $0.componentId,
+                                displayName: $0.displayName,
+                                repository: $0.repository)
+                        },
+                        restorer: restorer,
+                        // Opening a snapshot uses the archive root,
+                        // which is the same for every operator; the
+                        // per-operator access keys are inside each
+                        // repository and are not used to decrypt
+                        // anything.
+                        keyMaterial: first.material,
+                        workingDirectory: workingDirectory))
             }
-        } makeRestore: {
-            // Reachable from the moment backup is set up. Building it
-            // here rather than leaving a `nil` factory is deliberate:
-            // every unreachable screen in this stack has been a screen
-            // someone believed shipped.
-            BackupRestoreView(
-                flow: BackupRestoreFlow(
-                    repository: repository,
-                    restorer: restorer,
-                    keyMaterial: material,
-                    workingDirectory: workingDirectory))
+        )
+    }
+
+    /// Names that tell the operators apart, whatever they call
+    /// themselves.
+    ///
+    /// A collision falls back to the component id for *both* sides, not
+    /// just the newcomer: disambiguating only one leaves the other
+    /// wearing the plain name, which reads as the authentic one.
+    @MainActor
+    private static func distinctDisplayNames(
+        for componentIds: [String],
+        consentStore: any PinnedConsentStore
+    ) -> [String: String] {
+        var claimed: [String: [String]] = [:]
+        for componentId in componentIds {
+            let name = BackupSeat.displayName(componentId: componentId, consentStore: consentStore)
+            claimed[name, default: []].append(componentId)
         }
+        var resolved: [String: String] = [:]
+        for (name, componentIds) in claimed {
+            for componentId in componentIds {
+                resolved[componentId] = componentIds.count == 1
+                    ? name
+                    : "\(name) (\(ModuleConsentFlow.shortComponentId(componentId)))"
+            }
+        }
+        return resolved
+    }
+
+    /// Withdraw consent so this operator stops being part of the seat.
+    ///
+    /// The local state is already cleared by the flow; this is the other
+    /// half, and without it the operator reappears in the list on the
+    /// next visit to Settings — consented, unenrolled, and offering to
+    /// be set up again.
+    private static func stopBackingUp(
+        componentId: String,
+        consentStore: any PinnedConsentStore
+    ) -> @MainActor @Sendable () -> Void {
+        { @MainActor @Sendable in
+            // A failed withdrawal is not reported here: the flow has
+            // already cleared this device's state, so nothing is being
+            // uploaded to this operator either way. The row returning
+            // as "not set up" is the visible consequence, and setting
+            // it up again is a screen.
+            try? consentStore.withdraw(componentId: componentId)
+        }
+    }
+
+    /// Whether this operator already holds a copy — that is, whether
+    /// this enrolment is a first one or a re-reading of new terms.
+    private static func isEnrolled(_ stack: Stack) -> Bool {
+        (try? stack.stateStore.load())?.acceptedTermsId != nil
+    }
+
+    /// One already-enrolled operator, described only by what it signed.
+    ///
+    /// Its jurisdictions come from the terms bytes this device pinned
+    /// when the person consented — `acceptedTermsRaw`, kept for exactly
+    /// this kind of question — rather than from a fetch that could
+    /// answer differently today. Returns `nil` for an operator that is
+    /// not enrolled, which has no copy to speak of, and reports empty
+    /// jurisdictions rather than guessing when the pinned bytes will not
+    /// decode.
+    private static func otherOperator(from stack: Stack) -> BackupDisclosure.OtherOperator? {
+        let stored = try? stack.stateStore.load()
+        // Only a state that loaded *and* says so is "not enrolled". An
+        // unreadable one is named anyway, without jurisdictions: the
+        // consequence of over-naming is a person told they may already
+        // have a copy somewhere they do not, and the consequence of
+        // under-naming is the whole "this adds a second copy" headline
+        // silently disappearing from the consent screen — someone agrees
+        // to a second copy of everyone's messages in a second
+        // jurisdiction believing they are switching. This disclosure
+        // fails loud.
+        if let stored, stored.acceptedTermsId == nil { return nil }
+        let jurisdictions = stored?.acceptedTermsRaw
+            .flatMap { try? BackupTerms.decode(raw: $0) }?
+            .jurisdictions ?? []
+        return BackupDisclosure.OtherOperator(
+            name: stack.displayName, jurisdictions: jurisdictions)
     }
 
     /// The credential to present, chosen at request time.

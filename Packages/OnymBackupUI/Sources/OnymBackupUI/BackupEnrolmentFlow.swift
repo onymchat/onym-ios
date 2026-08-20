@@ -28,6 +28,10 @@ public final class BackupEnrolmentFlow {
     private let schedule: BackupSchedule
     private let mediaPolicy: BackupMediaPolicy
     private let workingDirectory: URL
+    /// Operators this identity is already enrolled with. Only used to
+    /// say what adding another one does — enrolling here changes
+    /// nothing about them.
+    private let otherOperators: [BackupDisclosure.OtherOperator]
     private var connection: BackupConnection?
 
     public init(
@@ -35,13 +39,15 @@ public final class BackupEnrolmentFlow {
         stateStore: any BackupStateStoring,
         workingDirectory: URL,
         schedule: BackupSchedule = .default,
-        mediaPolicy: BackupMediaPolicy = .descriptorsOnly
+        mediaPolicy: BackupMediaPolicy = .descriptorsOnly,
+        otherOperators: [BackupDisclosure.OtherOperator] = []
     ) {
         self.port = port
         self.stateStore = stateStore
         self.workingDirectory = workingDirectory
         self.schedule = schedule
         self.mediaPolicy = mediaPolicy
+        self.otherOperators = otherOperators
     }
 
     public func load() async {
@@ -53,10 +59,11 @@ public final class BackupEnrolmentFlow {
                 BackupDisclosure.from(
                     connection: connection,
                     schedule: schedule,
-                    mediaPolicy: mediaPolicy))
+                    mediaPolicy: mediaPolicy,
+                    otherOperators: otherOperators))
         } catch {
             self.connection = nil
-            state = .unavailable(message: String(describing: error))
+            state = .unavailable(message: BackupCopy.describe(error))
         }
     }
 
@@ -83,6 +90,18 @@ public final class BackupEnrolmentFlow {
             stored.acceptedTermsId = connection.acceptedTermsId
             stored.acceptedTermsRaw = connection.terms.rawBytes
             stored.mediaPolicy = mediaPolicy
+            // The refusal this screen exists to resolve. Leaving it set
+            // locks the person in a loop they cannot leave: the status
+            // still reads "Terms changed", which routes straight back to
+            // this screen, and with a single operator the vendors screen
+            // hides Back Up Now — so the run that would have cleared the
+            // reason is not reachable. Accepting terms would appear to
+            // do nothing, permanently.
+            //
+            // Cleared here rather than only by a successful run because
+            // this *is* the resolution: the reason a run refused was
+            // that nobody had read these terms, and somebody just has.
+            stored.lastBlockedReason = nil
             try stateStore.save(stored)
             if let orphaned {
                 // Sealed bytes nobody will claim now. Ciphertext, so not
@@ -96,7 +115,7 @@ public final class BackupEnrolmentFlow {
             // Not enrolled. Reporting success over a failed write would
             // leave someone believing their history is being backed up
             // when nothing is pinned.
-            state = .unavailable(message: String(describing: error))
+            state = .unavailable(message: BackupCopy.describe(error))
         }
     }
 }

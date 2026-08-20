@@ -2,29 +2,25 @@ import OnymBackup
 import OnymDesign
 import SwiftUI
 
-/// Settings → Device Backup.
+/// Settings → Device Backup → one operator.
+///
+/// One screen per operator, reached from `DeviceBackupVendorsView`.
+/// Everything here is about this operator alone: its terms, its
+/// snapshots, its payment, and a Back Up Now that sends to it and to
+/// nobody else. Restore is not here — it reads across every operator at
+/// once, so it belongs one level up.
 public struct DeviceBackupSettingsView: View {
-    @State private var flow: DeviceBackupSettingsFlow
+    private let flow: DeviceBackupSettingsFlow
     private let makeEnrolment: () -> BackupEnrolmentView?
 
-    /// Whether restore is available at all, and separately how to build
-    /// it. Split because the row's *presence* is evaluated on every body
-    /// pass while the screen itself is needed only when someone taps
-    /// through — asking the factory each time built a whole flow, and a
-    /// repository with it, to answer a yes/no question.
-    private let canRestore: Bool
-    private let makeRestore: () -> BackupRestoreView
+    @State private var confirmingStop = false
 
     public init(
         flow: DeviceBackupSettingsFlow,
-        canRestore: Bool = false,
-        makeEnrolment: @escaping () -> BackupEnrolmentView?,
-        makeRestore: @escaping () -> BackupRestoreView
+        makeEnrolment: @escaping () -> BackupEnrolmentView?
     ) {
-        _flow = State(wrappedValue: flow)
+        self.flow = flow
         self.makeEnrolment = makeEnrolment
-        self.canRestore = canRestore
-        self.makeRestore = makeRestore
     }
 
     public var body: some View {
@@ -32,12 +28,25 @@ public struct DeviceBackupSettingsView: View {
             VStack(alignment: .leading, spacing: 16) {
                 SettingsSectionLabel("STATUS")
                 SettingsCard {
-                    SettingsRow(title: statusTitle, subtitle: statusSubtitle, last: true) {
+                    SettingsRow(
+                        title: statusTitle,
+                        subtitle: statusSubtitle,
+                        // A failure message renders here, and one line
+                        // middle-truncates it exactly when it matters.
+                        subtitleLineLimit: 3,
+                        last: true
+                    ) {
                         SettingsIconTile(symbol: statusSymbol, bg: SettingsTile.blue)
                     }
                     .accessibilityIdentifier("backup.status_row")
                 }
                 SettingsFootnote(verbatim: statusFootnote)
+
+                if flow.attachmentsWithheld {
+                    SettingsFootnote(
+                        "You set this operator up with attachments included, but another operator you back up to was not. One backup is made for all of them, so attachments are currently left out of every one — including this operator's.")
+                        .accessibilityIdentifier("backup.attachments_withheld")
+                }
 
                 if flow.needsEnrolment {
                     if let enrolment = makeEnrolment() {
@@ -64,7 +73,7 @@ public struct DeviceBackupSettingsView: View {
                         } label: {
                             SettingsRow(
                                 title: "Back Up Now",
-                                subtitle: "Uploads your whole history",
+                                subtitle: "Uploads your whole history to this operator",
                                 last: true
                             ) {
                                 SettingsIconTile(symbol: "arrow.up.circle", bg: SettingsTile.blue)
@@ -77,14 +86,36 @@ public struct DeviceBackupSettingsView: View {
                     SettingsFootnote(
                         "Each backup uploads everything, not just what changed — there is no incremental upload yet.")
 
-                    restoreSection
                     snapshotsSection
+                    stopSection
                 }
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 24)
         }
-        .navigationTitle("Device Backup")
+        // The operator's own name: with several set up, "Device Backup"
+        // on every one of them is a screen you cannot tell from the last.
+        .navigationTitle(Text(verbatim: flow.displayName))
+        .confirmationDialog(
+            "Stop backing up to this operator?",
+            isPresented: $confirmingStop,
+            titleVisibility: .visible
+        ) {
+            Button("Erase My Backup and Stop", role: .destructive) {
+                Task { await flow.stopBackingUp(erasingFirst: true) }
+            }
+            // Offered as its own choice rather than a fallback: erasure
+            // is a request to a counterparty that can fail or be
+            // refused, and somebody who wants to stop paying today
+            // should not be held there by an operator that will not
+            // answer.
+            Button("Stop Without Erasing") {
+                Task { await flow.stopBackingUp(erasingFirst: false) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Your history stays on this phone, and your other operators are not affected. Erasing cannot reach copies other people in your chats already have.")
+        }
         .navigationBarTitleDisplayMode(.inline)
         .task {
             flow.refresh()
@@ -103,29 +134,37 @@ public struct DeviceBackupSettingsView: View {
         }
     }
 
-    /// Restore is offered whenever backup is set up, not only on a
-    /// fresh device.
+    /// Leaving.
     ///
-    /// It adds history rather than replacing it, and it does not touch
-    /// the identity — the wiping kind of restore is identity restore,
-    /// which lives in onboarding and is not reachable from here. Someone
-    /// who lost a chat, or who set up a second device, has the same
-    /// reason to want this as someone with a new phone.
+    /// Below the snapshots, because it is the last thing anyone should
+    /// do by accident, and offered at all because consenting to another
+    /// operator adds one rather than replacing this one — without a way
+    /// out, every operator a person ever chose keeps billing them for a
+    /// copy of a history they thought they had moved.
     @ViewBuilder
-    private var restoreSection: some View {
-        if canRestore {
+    private var stopSection: some View {
+        if flow.canStopBackingUp {
             SettingsCard {
-                NavigationLink { makeRestore() } label: {
+                Button(role: .destructive) {
+                    confirmingStop = true
+                } label: {
                     SettingsRow(
-                        title: "Restore From Backup",
-                        subtitle: "Adds messages and chats — nothing is deleted",
+                        title: "Stop Backing Up Here",
+                        subtitle: "Ends this operator's copy and stops paying for it",
                         last: true
                     ) {
-                        SettingsIconTile(symbol: "arrow.down.circle", bg: SettingsTile.green)
+                        SettingsIconTile(symbol: "xmark.bin", bg: SettingsTile.red)
                     }
                 }
                 .buttonStyle(.plain)
-                .accessibilityIdentifier("backup.restore_row")
+                .accessibilityIdentifier("backup.stop_row")
+            }
+            if let failure = flow.stopFailure {
+                SettingsFootnote(verbatim: failure)
+                    .accessibilityIdentifier("backup.stop_failed")
+            } else {
+                SettingsFootnote(
+                    "Your other operators are not affected. Erasing asks this operator to destroy what it holds and keeps its signed receipt; stopping without erasing leaves what it has until its own retention period ends.")
             }
         }
     }
@@ -217,7 +256,7 @@ public struct DeviceBackupSettingsView: View {
     private var statusFootnote: String {
         switch flow.state.status {
         case .stale:
-            "Backups only run while the app is open. If you have not opened Onym in a while, nothing has been backed up."
+            "Backups run only when you tap Back Up Now. Nothing is uploaded on its own, so if you have not backed up in a while, nothing has been backed up."
         case .checkingEarlierBackup:
             "Nothing new is uploaded until the earlier one is resolved, so you are not charged to store the same history twice."
         default:

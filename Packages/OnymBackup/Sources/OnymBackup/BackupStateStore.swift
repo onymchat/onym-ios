@@ -28,6 +28,24 @@ public struct BackupState: Sendable, Equatable, Codable {
     /// survive until the retry resolves.
     public var awaitingPayment: PendingPayment?
     public var receipts: [Data] = []
+    /// Why the last run refused to send, when nothing else here would
+    /// show it.
+    ///
+    /// Terms moving and the operator changing are the two refusals that
+    /// leave no other trace: no pending operation, no sealed bytes, no
+    /// failed upload — the run simply stops. Without a record, the next
+    /// read of this file describes a device that last backed up
+    /// successfully, and a surface built on it says "On" for an operator
+    /// that has not accepted an upload since. It is the same rule as
+    /// `pendingOperations`: an uncertainty that does not survive a
+    /// relaunch is not one the person will ever be told about.
+    public var lastBlockedReason: BlockedReason?
+
+    /// A refusal that has to outlive the run that hit it.
+    public enum BlockedReason: String, Sendable, Equatable, Codable {
+        case termsChanged
+        case operatorChanged
+    }
 
     public struct RecordedSnapshot: Sendable, Equatable, Codable {
         public let digest: String

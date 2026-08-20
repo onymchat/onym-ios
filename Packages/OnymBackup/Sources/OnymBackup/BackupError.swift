@@ -169,3 +169,76 @@ extension BackupError {
         }
     }
 }
+
+/// Sentences, not enum dumps.
+///
+/// Three surfaces render one of these straight at a person: the backup
+/// status row, the consent screen when terms cannot be fetched, and the
+/// restore screen. `String(describing:)` on this enum produces
+/// `rejected(code: "quota_exceeded", message: Optional("…"))`, which is
+/// a debugger's output shown to somebody trying to find out whether
+/// their history is safe.
+///
+/// `rejected` prefers the operator's own message for the same reason
+/// the rest of this type keeps its code and message rather than
+/// flattening them: an unrecognised refusal's own account of itself
+/// beats a local guess at what it meant.
+extension BackupError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .incompleteSnapshot:
+            return "The backup did not arrive complete."
+        case .retentionExpired:
+            return "The operator no longer holds this backup."
+        case .accessRefused:
+            return "The operator did not accept this device's key."
+        case .operatorUnavailable:
+            return "The operator could not be reached."
+        case .termsUnavailable:
+            return "The operator's terms could not be checked."
+        case .termsChanged:
+            return "The operator published new terms, so nothing is uploaded until you have read them."
+        case .paymentRequired:
+            return "The operator needs a subscription before it will keep a backup."
+        case .invalidReference:
+            return "The operator described a backup this device cannot make sense of."
+        case .invalidEndpoint:
+            return "That operator's address is not one this device will connect to."
+        case .termsRegression(let field):
+            // Named rather than smoothed over: the operator's new terms
+            // are worse than the ones consented to, on this axis.
+            return "The operator's new terms changed \(field) in a way this device will not accept automatically."
+        case .invalidEntitlement:
+            return "The operator did not accept this device's proof of purchase."
+        case .snapshotTooLarge:
+            return "This history is larger than the operator will store in one backup."
+        case .quotaExceeded:
+            return "The operator has no room left for this backup."
+        case .unsupportedProfile:
+            return "This version of Onym does not understand how that operator stores backups."
+        case .exportWithheld:
+            // A conformance violation, and worth saying plainly: export
+            // is unconditional, so an operator refusing it has broken
+            // the terms it published.
+            return "The operator refused to export your backup, which its own terms do not allow."
+        case .erasureUnconfirmed:
+            return "The operator acknowledged the erasure but has not confirmed it finished."
+        case .rejected(let code, let message):
+            if let message, !message.isEmpty { return message }
+            return "The operator refused the request (\(code))."
+        case .localFailure(let reason):
+            switch reason {
+            case .stateUnreadable:
+                return "This device's backup settings could not be read."
+            case .archiveUnreadable:
+                return "The backup could not be read on this device."
+            case .restoreInterrupted:
+                return "The restore stopped partway. Restoring again is safe and will finish the job."
+            case .noRecoveryPhrase:
+                return "This identity has no recovery phrase, so it has no backups."
+            default:
+                return "Something went wrong on this device."
+            }
+        }
+    }
+}

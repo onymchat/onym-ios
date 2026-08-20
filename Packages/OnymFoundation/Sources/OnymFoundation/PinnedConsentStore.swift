@@ -113,6 +113,40 @@ public extension PinnedConsentStore {
         return record
     }
 
+    /// Withdraw consent for a component: every record for it becomes
+    /// history, and none is active.
+    ///
+    /// There was no way to do this, and for a single-seat consent it did
+    /// not show: consenting to a replacement deactivated the previous
+    /// record for the *same* componentId, so switching worked and
+    /// leaving was never asked for. A seat a person can hold with
+    /// several operators at once makes the gap expensive — every
+    /// operator ever consented to stays active, keeps receiving a copy
+    /// of the history, and keeps charging for it, with no route out.
+    ///
+    /// The records are kept, deactivated, exactly as a switch keeps
+    /// them. A consent artifact is evidence that something was agreed;
+    /// leaving is a new fact about it, not a reason to erase it.
+    ///
+    /// Returns whether anything changed, so a caller can tell a
+    /// withdrawal from a no-op.
+    @discardableResult
+    func withdraw(componentId: String) throws -> Bool {
+        PinnedConsentStoreSerialization.lock.lock()
+        defer { PinnedConsentStoreSerialization.lock.unlock() }
+
+        var records = try load()
+        var changed = false
+        for index in records.indices
+        where records[index].componentId == componentId && records[index].isActive {
+            records[index].isActive = false
+            changed = true
+        }
+        guard changed else { return false }
+        try save(records)
+        return true
+    }
+
     /// The active consent for a component, if any. Throws
     /// `corruptStore` rather than pretending no consent exists.
     func activeRecord(componentId: String) throws -> PinnedConsentRecord? {

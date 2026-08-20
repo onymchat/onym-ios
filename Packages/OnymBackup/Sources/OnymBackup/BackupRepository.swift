@@ -20,6 +20,19 @@ public actor BackupRepository {
     /// rather than merged.
     private var isRunning = false
 
+    /// Set between `prepare()` saying yes and the `place(prepared:)`
+    /// that answers it.
+    ///
+    /// `isRunning` alone was not enough once a run had two calls. A
+    /// fan-out asks every operator first and only then reads the
+    /// history and seals — minutes, on a large one — and `prepare`'s
+    /// `defer` released the lock immediately, so the whole expensive
+    /// window was unguarded. A person tapping this operator's own Back
+    /// Up Now during it composed a second archive through the same
+    /// composer and uploaded a second snapshot: one action, two
+    /// snapshots, two charges, twice the peak disk.
+    private var isReserved = false
+
     public init(
         port: any BackupPort,
         composer: BackupComposer,
@@ -55,17 +68,152 @@ public actor BackupRepository {
         case alreadyRunning
     }
 
+    /// Whether a run may proceed at this operator right now.
+    public enum Readiness: Sendable, Equatable {
+        case ready
+        /// The reason nothing may be sent, in the same words a run would
+        /// have returned.
+        case blocked(RunResult)
+    }
+
     /// Compose a fresh snapshot and try to place it.
     public func backUp(now: Date = Date()) async throws -> RunResult {
-        guard !isRunning else { return .alreadyRunning }
+        guard !isRunning, !isReserved else { return .alreadyRunning }
         isRunning = true
         defer { isRunning = false }
 
+        var state: BackupState
+        let acceptedTermsId: String
+        switch try await evaluatePreconditions(now: now) {
+        case .blocked(let result):
+            return result
+        case .ready(let ready, let terms):
+            state = ready
+            acceptedTermsId = terms
+        }
+        let enrolled = state.componentId
+
+        let snapshot = try await composer.compose(
+            keyMaterial: keyMaterial,
+            acceptedTermsId: acceptedTermsId,
+            supersedes: try supersededReference(in: state),
+            now: now
+        )
+        state.lastAttemptAt = now
+        try commit(state, expecting: enrolled)
+        return try await place(snapshot, state: &state, now: now)
+    }
+
+    /// Place bytes sealed elsewhere in this run at *this* operator.
+    ///
+    /// The seam that lets one person keep the same history with more
+    /// than one operator at once. The history is read once and sealed
+    /// once per operator (`BackupComposer.seal`); everything an operator
+    /// is told is stamped here, because none of it is a property of the
+    /// bytes:
+    ///
+    /// - the terms digest **this** device pinned with **this** operator,
+    ///   never another's;
+    /// - the position the snapshot takes in **this** operator's chain,
+    ///   which is not the same as another's — one operator may have
+    ///   missed the snapshot the other is superseding; and
+    /// - a fresh operation id, so two operators never reconcile on a
+    ///   shared identifier that would link their two holders.
+    ///
+    /// On a blocked result the sealed bytes are left untouched: the
+    /// caller minted them and is the only one that knows whether another
+    /// operator is still to receive its own copy.
+    public func place(prepared: PreparedSnapshot, now: Date = Date()) async throws -> RunResult {
+        guard !isRunning else { return .alreadyRunning }
+        isRunning = true
+        // The reservation this call answers, released whichever way it
+        // goes.
+        defer {
+            isRunning = false
+            isReserved = false
+        }
+
+        var state: BackupState
+        let acceptedTermsId: String
+        switch try await evaluatePreconditions(now: now) {
+        case .blocked(let result):
+            return result
+        case .ready(let ready, let terms):
+            state = ready
+            acceptedTermsId = terms
+        }
+        let enrolled = state.componentId
+
+        let snapshot = prepared.addressed(
+            operationId: try BackupComposer.newIdentifier(),
+            acceptedTermsId: acceptedTermsId,
+            supersedes: try supersededReference(in: state)
+        )
+        state.lastAttemptAt = now
+        try commit(state, expecting: enrolled)
+        return try await place(snapshot, state: &state, now: now)
+    }
+
+    /// Ask whether a run may proceed, without composing anything.
+    ///
+    /// Reading a whole history and sealing it is expensive, and a
+    /// snapshot no operator will accept is expense for nothing — so a
+    /// fan-out over several operators asks first and composes only if
+    /// somebody can take it. Reconciliation of earlier work happens
+    /// here, which is why this is not a pure read.
+    public func prepare(now: Date = Date()) async throws -> Readiness {
+        guard !isRunning, !isReserved else { return .blocked(.alreadyRunning) }
+        isRunning = true
+        defer { isRunning = false }
+
+        switch try await evaluatePreconditions(now: now) {
+        case .blocked(let result):
+            return .blocked(result)
+        case .ready(let state, _):
+            // Committed here, not left to the caller. A fan-out asks
+            // every operator before it composes anything, and if
+            // composing then fails there is no later write — the
+            // refusal this call just disproved would survive, and the
+            // screen would keep reporting a terms change that has
+            // already been resolved.
+            try commit(state, expecting: state.componentId)
+            // Held until `place(prepared:)` or `cancelReservation()`.
+            // Anything else that would upload is turned away in the
+            // meantime, because the snapshot for this run is already
+            // being made.
+            isReserved = true
+            return .ready
+        }
+    }
+
+    /// Release a reservation whose snapshot never arrived.
+    ///
+    /// Called for an operator the caller promised to place at and then
+    /// could not — a seal that failed, a run abandoned. Without it the
+    /// operator stays reserved and refuses every later run as
+    /// `alreadyRunning`, which is a lock nobody holds.
+    public func cancelReservation() {
+        isReserved = false
+    }
+
+    private enum Preconditions {
+        case ready(BackupState, acceptedTermsId: String)
+        case blocked(RunResult)
+    }
+
+    /// Everything that must hold before a byte is sent, in order.
+    ///
+    /// Extracted rather than duplicated: `backUp`, `place(prepared:)` and
+    /// `prepare` must apply the *same* rules, and a second copy of this
+    /// sequence is a second place for one of them to drift — which on
+    /// this path means a snapshot reaching an operator nobody consented
+    /// to.
+    private func evaluatePreconditions(now: Date) async throws -> Preconditions {
         var state = try stateStore.load()
         // Captured before the first suspension. Every write below is
-        // conditional on the enrolment still being this one — `backUp`
-        // awaits `connect`, `reconcile` and `compose`, and a
-        // re-enrolment can land during any of them.
+        // conditional on the enrolment still being this one — this
+        // awaits `connect` and `reconcile`, and a re-enrolment can land
+        // during either.
         let enrolled = state.componentId
 
         guard let acceptedTermsId = state.acceptedTermsId else {
@@ -87,10 +235,32 @@ public actor BackupRepository {
         // Fresh consent is a screen, not an inference.
         if let mismatch = try await operatorOrTermsMismatch(state: state, now: now) {
             state.lastAttemptAt = now
+            // Written down, not just returned. A caller that forgets to
+            // render the return value is one bug; a device that forgets
+            // it was refused is every subsequent launch reporting a
+            // backup that has not run since.
+            switch mismatch {
+            case .termsChanged: state.lastBlockedReason = .termsChanged
+            case .operatorChanged: state.lastBlockedReason = .operatorChanged
+            default: break
+            }
             try commit(state, expecting: enrolled)
-            return mismatch
+            return .blocked(mismatch)
         }
-        _ = acceptedTermsId
+
+        // The refusal is disproved the moment the operator and the terms
+        // check out, so it is cleared *here* — before the
+        // reconciliation return below, which used to skip the clear
+        // entirely, and committed immediately rather than left for a
+        // caller. `backUp` does not commit until after composing, so a
+        // compose that throws would otherwise leave a refusal on file
+        // that this call had just shown to be false: the screen reports
+        // "Terms changed" for good, Back Up Now is hidden, and Restore
+        // goes with it.
+        if state.lastBlockedReason != nil {
+            state.lastBlockedReason = nil
+            try commit(state, expecting: enrolled)
+        }
 
         // Only now: an operation whose result we never learned may well
         // have succeeded, and composing a second snapshot on top of an
@@ -108,31 +278,34 @@ public actor BackupRepository {
         guard state.pendingOperations.isEmpty else {
             state.lastAttemptAt = now
             try commit(state, expecting: enrolled)
-            return .awaitingReconciliation(
-                operationIds: state.pendingOperations.map(\.operationId))
+            return .blocked(.awaitingReconciliation(
+                operationIds: state.pendingOperations.map(\.operationId)))
         }
+        // Cleared by getting past the check that set it, and never
+        // carried further than that.
+        return .ready(state, acceptedTermsId: acceptedTermsId)
+    }
 
-        let snapshot = try await composer.compose(
-            keyMaterial: keyMaterial,
-            acceptedTermsId: acceptedTermsId,
-            supersedes: try state.newestSnapshot.map {
-                // `try?` here would turn an unreadable ancestor into a
-                // snapshot claiming to supersede nothing, quietly
-                // breaking the chain. The store refuses to *read*
-                // corrupt state for the same reason; it should not be
-                // written past here either.
-                do {
-                    return try SnapshotReference(
-                        digest: $0.digest, sealedByteSize: $0.sealedByteSize)
-                } catch {
-                    throw BackupError.localFailure(reason: .stateUnreadable)
-                }
-            },
-            now: now
-        )
-        state.lastAttemptAt = now
-        try commit(state, expecting: enrolled)
-        return try await place(snapshot, state: &state, now: now)
+    /// The snapshot a new one supersedes *at this operator*.
+    ///
+    /// Read from this operator's own chain, never from another's: two
+    /// operators enrolled at different times, or one that missed a run,
+    /// hold different newest snapshots, and pointing one at the other's
+    /// ancestor would describe a chain it never had.
+    private func supersededReference(in state: BackupState) throws -> SnapshotReference? {
+        try state.newestSnapshot.map {
+            // `try?` here would turn an unreadable ancestor into a
+            // snapshot claiming to supersede nothing, quietly breaking
+            // the chain. The store refuses to *read* corrupt state for
+            // the same reason; it should not be written past here
+            // either.
+            do {
+                return try SnapshotReference(
+                    digest: $0.digest, sealedByteSize: $0.sealedByteSize)
+            } catch {
+                throw BackupError.localFailure(reason: .stateUnreadable)
+            }
+        }
     }
 
     /// The snapshot waiting on a purchase, if one survived a relaunch.
@@ -191,7 +364,7 @@ public actor BackupRepository {
     /// and would charge the person for a second copy of the same
     /// history.
     public func retry(_ snapshot: SealedSnapshot, now: Date = Date()) async throws -> RunResult {
-        guard !isRunning else { return .alreadyRunning }
+        guard !isRunning, !isReserved else { return .alreadyRunning }
         isRunning = true
         defer { isRunning = false }
 
@@ -208,6 +381,8 @@ public actor BackupRepository {
         // under. A snapshot left over from earlier terms is not one to
         // send now.
         guard snapshot.acceptedTermsId == state.acceptedTermsId else {
+            state.lastBlockedReason = .termsChanged
+            try commit(state, expecting: state.componentId)
             return .termsChanged(currentTermsId: state.acceptedTermsId)
         }
         return try await place(snapshot, state: &state, now: now)
@@ -302,6 +477,14 @@ public actor BackupRepository {
                 return .paymentRequired(
                     componentId: componentId, offerIds: offerIds, pending: snapshot)
             case .termsChanged(let currentTermsId):
+                // The operator republished between `connect` and here.
+                // Recorded, not merely returned: a refusal that lives
+                // only in a return value is one the next launch cannot
+                // see, and the screen would report a device that last
+                // backed up successfully as On while uploads have
+                // stopped.
+                state.lastBlockedReason = .termsChanged
+                try commit(state, expecting: enrolled)
                 return .termsChanged(currentTermsId: currentTermsId)
             default:
                 throw error
@@ -584,7 +767,10 @@ public actor BackupRepository {
     /// Remove sealed bytes once they are no longer needed.
     ///
     /// Not throwing: failing to delete is not worth failing a completed
-    /// backup over, and the working directory is swept on the next run.
+    /// backup over. What it leaves behind is collected by
+    /// `BackupComposer.sweepWorkingDirectory`, which a fan-out runs
+    /// before it composes — this used to claim a sweep that did not
+    /// exist.
     private func discard(_ snapshot: SealedSnapshot) {
         try? FileManager.default.removeItem(at: snapshot.sealedBytesURL)
     }

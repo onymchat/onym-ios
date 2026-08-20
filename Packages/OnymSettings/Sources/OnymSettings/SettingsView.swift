@@ -53,7 +53,7 @@ public struct SettingsView: View {
     /// Note the name: `makeBackupFlow` above is the *recovery phrase*
     /// backup, which is a different thing entirely. One protects the
     /// key; this protects the history.
-    let makeDeviceBackupView: (@MainActor () -> DeviceBackupSettingsView)?
+    let makeDeviceBackupView: (@MainActor () -> DeviceBackupVendorsView)?
 
     public init(
         makeBackupFlow: @escaping @MainActor () -> RecoveryPhraseBackupFlow,
@@ -68,7 +68,7 @@ public struct SettingsView: View {
         makeModerationCaseFlow: (@MainActor (CaseNotice) -> ModerationCaseFlow)? = nil,
         makeDiscoverySettingsFlow: (@MainActor () -> DiscoverySettingsFlow)? = nil,
         onRestartOnboarding: (@MainActor () -> Void)? = nil,
-        makeDeviceBackupView: (@MainActor () -> DeviceBackupSettingsView)? = nil
+        makeDeviceBackupView: (@MainActor () -> DeviceBackupVendorsView)? = nil
     ) {
         self.makeBackupFlow = makeBackupFlow
         self.makeRelayerSettingsFlow = makeRelayerSettingsFlow
@@ -232,7 +232,7 @@ public struct SettingsView: View {
                         } label: {
                             SettingsRow(
                                 title: "Device Backup",
-                                subtitle: "A sealed copy of this phone's history",
+                                subtitle: "Sealed copies of this phone's history",
                                 last: true
                             ) {
                                 SettingsIconTile(

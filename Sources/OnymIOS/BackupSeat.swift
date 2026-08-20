@@ -4,6 +4,7 @@ import OnymBackup
 import OnymBackupUI
 import OnymBilling
 import OnymChatsCore
+import OnymDiscovery
 import OnymFoundation
 import OnymGroup
 import OnymIdentity
@@ -33,26 +34,70 @@ enum BackupSeat {
     /// The seat value a backup operator declares.
     static let seat = "storage.backup"
 
-    /// The consented backup operator, if there is one.
+    /// Every backup operator this identity has consented to, in a
+    /// stable order (by componentId — see below; it is deliberately not
+    /// acceptance order, which moves).
     ///
-    /// Reads the *active* pinned record. A person who switched
-    /// operators has a history of records; only the current one may
-    /// receive a snapshot.
-    static func consentedManifest(
+    /// Reads the *active* pinned record per operator. A person who
+    /// switched away from an operator has a history of records for it;
+    /// only a current one may receive a snapshot. A person who added a
+    /// second operator has two active records, and both may — that is
+    /// what keeping a history in two places means.
+    static func consentedManifests(
         consentStore: any PinnedConsentStore
-    ) -> BackupOperatorManifest? {
-        guard let records = try? consentStore.load() else { return nil }
+    ) -> [BackupOperatorManifest] {
+        guard let records = try? consentStore.load() else { return [] }
+        var seen: Set<String> = []
+        var manifests: [BackupOperatorManifest] = []
+        // Newest record first, so the active pin wins for a component
+        // that has been re-consented.
         for record in records.reversed() where record.isActive {
             guard
+                !seen.contains(record.componentId),
                 let manifest = record.consentedManifest(),
                 manifest.seat == seat,
                 let backup = try? BackupOperatorManifest(manifest: manifest)
             else {
                 continue
             }
-            return backup
+            seen.insert(record.componentId)
+            manifests.append(backup)
         }
-        return nil
+        // Sorted by componentId, which is the only key here that does
+        // not move.
+        //
+        // Store position looks like acceptance order and is not one:
+        // `accept` appends, so re-reading an operator's terms moves it
+        // to the tail and reorders the list. `acceptedAt` on the active
+        // record moves for the same reason, and the *earliest* record
+        // for a component is evicted once its history passes the cap. A
+        // list that reshuffles is not cosmetic here — the root view
+        // rebuilds the whole backup stack when this list changes, which
+        // would throw away a running backup because somebody re-read
+        // some terms.
+        return manifests.sorted { $0.componentId < $1.componentId }
+    }
+
+    /// What to call an operator on screen.
+    ///
+    /// The manifest `name` the person consented to, else the component
+    /// id minus its prefix — the same rule as the seat adapters and the
+    /// Blossom catalog, so one operator is not called two different
+    /// things in two places. Read from the *pinned* bytes rather than a
+    /// live fetch: an operator does not get to relabel itself into
+    /// looking like the one beside it in the list.
+    @MainActor
+    static func displayName(
+        componentId: String,
+        consentStore: any PinnedConsentStore
+    ) -> String {
+        if let record = try? consentStore.activeRecord(componentId: componentId),
+           let manifest = record.consentedManifest(),
+           let name = SeatManifestFields(rawBytes: manifest.rawBytes).name,
+           !name.isEmpty {
+            return name
+        }
+        return ModuleConsentFlow.shortComponentId(componentId)
     }
 
     /// Issuer keys an operator declares. Pinned from the signed

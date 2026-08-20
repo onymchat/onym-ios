@@ -58,18 +58,19 @@ struct RootView: View {
     /// consent record and derives a seat key — neither of which belongs
     /// in a view body that re-runs on every redraw. `nil` means no
     /// backup operator is consented to, and the Settings section hides.
-    @State private var deviceBackupView: DeviceBackupSettingsView?
+    @State private var deviceBackupView: DeviceBackupVendorsView?
     /// Guards against two resolutions overlapping — building one reads a
     /// consent record and derives a seat key, and the later of two
     /// in-flight resolutions could otherwise land first.
     @State private var resolvingDeviceBackup = false
-    /// Which operator the current backup view was built for.
+    /// Which operators the current backup view was built for.
     ///
     /// Re-resolving unconditionally on every visit to Settings rebuilt
-    /// the flow underneath a running backup, discarding its state
-    /// mid-upload. The view is only replaced when the consented operator
-    /// actually changed.
-    @State private var deviceBackupComponentId: String?
+    /// the flows underneath a running backup, discarding their state
+    /// mid-upload. The view is only replaced when the set of consented
+    /// operators actually changed — adding a second operator is such a
+    /// change, and re-reading one's terms is not.
+    @State private var deviceBackupComponentIds: [String]?
     /// A resolution asked for while one was in flight.
     @State private var deviceBackupResolutionPending = false
 
@@ -257,13 +258,13 @@ struct RootView: View {
 
         repeat {
             deviceBackupResolutionPending = false
-            // Nothing to do when the operator has not changed. Rebuilding
-            // here would hand Settings a fresh flow and throw away a
-            // backup that is running.
-            let componentId = dependencies.consentedBackupComponentId?()
-            if deviceBackupView == nil || componentId != deviceBackupComponentId {
+            // Nothing to do when the operators have not changed.
+            // Rebuilding here would hand Settings fresh flows and throw
+            // away a backup that is running.
+            let componentIds = dependencies.consentedBackupComponentIds?()
+            if deviceBackupView == nil || componentIds != deviceBackupComponentIds {
                 deviceBackupView = await makeDeviceBackupView()
-                deviceBackupComponentId = componentId
+                deviceBackupComponentIds = componentIds
             }
         } while deviceBackupResolutionPending
     }
