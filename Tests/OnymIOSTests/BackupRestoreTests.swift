@@ -127,19 +127,54 @@ final class BackupRestoreTests: XCTestCase {
 
     /// The download and the decrypt must not share a path.
     ///
-    /// They did: both were `restore-<digest>` in the same directory, so
-    /// `BackupOpener` held a read handle on the sealed file while
-    /// creating the plaintext over it. Whether that works at all depends
-    /// on Foundation replacing the inode rather than truncating in
-    /// place.
-    func testDownloadAndPlaintextDoNotShareAPath() async throws {
+    /// Pinned at the hazard itself rather than by observing that a
+    /// restore completed — completion also happens with a shared path
+    /// wherever Foundation replaces the inode, which is exactly the
+    /// platform the tests run on. So: open a sealed file onto itself and
+    /// require it to fail, and require it to succeed with the sealed
+    /// bytes intact when the paths differ.
+    func testOpeningASnapshotOntoItselfIsRefused() async throws {
+        let dir = try directory()
+        let material = material()
+        let plain = dir.appending(path: "plain")
+        try Data(repeating: 0xAB, count: 64 * 1024).write(to: plain)
+
+        let sealed = dir.appending(path: "sealed")
+        let reference = try BackupSealer.seal(
+            plaintextURL: plain, to: sealed, archiveRoot: material.archiveRoot)
+        let sealedBytes = try Data(contentsOf: sealed)
+
+        // Same path in and out. Asserting a *throw* here would have
+        // been wrong: on this platform Foundation replaces the inode and
+        // the open succeeds — which is precisely why the collision
+        // survived review and testing. The hazard is what it does to the
+        // input, so that is what gets pinned: the snapshot we were
+        // handed is destroyed by reading it.
+        _ = try? BackupOpener.open(
+            sealedURL: sealed, to: sealed,
+            reference: reference, archiveRoot: material.archiveRoot)
+        XCTAssertNotEqual(
+            try? Data(contentsOf: sealed), sealedBytes,
+            "expected the shared path to clobber the sealed file; if this now holds, the hazard changed shape")
+
+        // Distinct paths: succeeds, and the sealed file is untouched.
+        try Data(sealedBytes).write(to: sealed)
+        let out = dir.appending(path: "out")
+        try BackupOpener.open(
+            sealedURL: sealed, to: out,
+            reference: reference, archiveRoot: material.archiveRoot)
+        XCTAssertEqual(try Data(contentsOf: sealed), sealedBytes, "the sealed file was clobbered")
+    }
+
+    /// A failure during the write phase must not claim nothing changed.
+    func testWritePhaseFailureIsReportedAsPartial() async throws {
         let dir = try directory()
         let material = material()
         let composer = BackupComposer(
             source: SeededSource(), mediaPolicy: .descriptorsOnly, workingDirectory: dir)
         let snapshot = try await composer.compose(
             keyMaterial: material,
-            acceptedTermsId: "sha256:" + String(repeating: "c", count: 64))
+            acceptedTermsId: "sha256:" + String(repeating: "d", count: 64))
 
         let flow = await BackupRestoreFlow(
             repository: BackupRepository(
@@ -147,7 +182,9 @@ final class BackupRestoreTests: XCTestCase {
                 composer: composer,
                 stateStore: EmptyStateStore(),
                 keyMaterial: material),
-            restorer: BackupRestorer(sink: RecordingSink()),
+            // Groups land, then invitations throw — the shape the
+            // reviewer identified in the real sink.
+            restorer: BackupRestorer(sink: FailsMidWriteSink()),
             keyMaterial: material,
             workingDirectory: dir)
 
@@ -156,15 +193,12 @@ final class BackupRestoreTests: XCTestCase {
             return XCTFail("not listed")
         }
         await flow.restore(first)
-        guard case .restored = await flow.state else {
-            return XCTFail("restore failed: \(await flow.state)")
+
+        guard case .failed(let message, let partial) = await flow.state else {
+            return XCTFail("expected a failure")
         }
-        // Both temporaries are cleaned up, so the check that matters is
-        // that the restore completed at all — with a shared path and
-        // truncate semantics it cannot.
-        let leftovers = try FileManager.default.contentsOfDirectory(atPath: dir.path)
-            .filter { $0.hasPrefix("sealed-") || $0.hasPrefix("restore-") }
-        XCTAssertTrue(leftovers.isEmpty, "temporaries left behind: \(leftovers)")
+        XCTAssertTrue(partial, "a mid-write failure claimed nothing had changed")
+        XCTAssertTrue(message.contains("restoring again is safe"))
     }
 
     /// A person mid-restore should get a sentence, not a debug dump.
@@ -307,4 +341,17 @@ private actor RecordingSink: BackupSinkProviding {
 private struct EmptyStateStore: BackupStateStoring {
     func load() throws -> BackupState { BackupState() }
     func save(_ state: BackupState) throws {}
+}
+
+
+/// Writes groups, then fails — the shape of a consent or blob write
+/// throwing after earlier rows have already landed.
+private actor FailsMidWriteSink: BackupSinkProviding {
+    func restore(groups: [BackupGroupRecord]) async throws -> Int { groups.count }
+    func restore(messages: [BackupMessageRecord]) async throws -> Int { messages.count }
+    func restore(invitations: [BackupInvitationRecord]) async throws -> Int {
+        throw BackupError.localFailure(reason: .archiveUnreadable)
+    }
+    func restore(consents: [BackupConsentRecord]) async throws -> Int { 0 }
+    func restore(blob: BackupBlobRecord) async throws {}
 }

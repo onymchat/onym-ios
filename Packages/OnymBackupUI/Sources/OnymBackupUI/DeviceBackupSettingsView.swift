@@ -7,15 +7,23 @@ public struct DeviceBackupSettingsView: View {
     @State private var flow: DeviceBackupSettingsFlow
     private let makeEnrolment: () -> BackupEnrolmentView?
 
-    private let makeRestore: () -> BackupRestoreView?
+    /// Whether restore is available at all, and separately how to build
+    /// it. Split because the row's *presence* is evaluated on every body
+    /// pass while the screen itself is needed only when someone taps
+    /// through — asking the factory each time built a whole flow, and a
+    /// repository with it, to answer a yes/no question.
+    private let canRestore: Bool
+    private let makeRestore: () -> BackupRestoreView
 
     public init(
         flow: DeviceBackupSettingsFlow,
+        canRestore: Bool = false,
         makeEnrolment: @escaping () -> BackupEnrolmentView?,
-        makeRestore: @escaping () -> BackupRestoreView? = { nil }
+        makeRestore: @escaping () -> BackupRestoreView
     ) {
         _flow = State(wrappedValue: flow)
         self.makeEnrolment = makeEnrolment
+        self.canRestore = canRestore
         self.makeRestore = makeRestore
     }
 
@@ -105,9 +113,9 @@ public struct DeviceBackupSettingsView: View {
     /// reason to want this as someone with a new phone.
     @ViewBuilder
     private var restoreSection: some View {
-        if let restore = makeRestore() {
+        if canRestore {
             SettingsCard {
-                NavigationLink { restore } label: {
+                NavigationLink { makeRestore() } label: {
                     SettingsRow(
                         title: "Restore From Backup",
                         subtitle: "Adds messages and chats — nothing is deleted",

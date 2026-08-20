@@ -41,8 +41,8 @@ public struct BackupRestoreView: View {
                 case .restored(let summary):
                     restored(summary)
 
-                case .failed(let message):
-                    failed(message)
+                case .failed(let message, let partial):
+                    failed(message, partial: partial)
                 }
             }
             .padding(.horizontal, 16)
@@ -150,13 +150,19 @@ public struct BackupRestoreView: View {
         .accessibilityIdentifier("backup.restore.summary")
     }
 
-    private func failed(_ message: String) -> some View {
+    private func failed(_ message: String, partial: Bool) -> some View {
         VStack(spacing: 10) {
             Image(systemName: "exclamationmark.triangle").font(.largeTitle)
             Text("Restore did not complete")
                 .font(.headline)
-            Text("Nothing on this phone was changed.")
-                .font(.callout)
+            // Only claimed when it is true. A failure during the write
+            // phase leaves earlier rows in place, and telling someone
+            // nothing changed would be the sort of comfortable lie this
+            // seat refuses everywhere else.
+            if !partial {
+                Text("Nothing on this phone was changed.")
+                    .font(.callout)
+            }
             Text(verbatim: message)
                 .font(.footnote)
                 .foregroundStyle(.secondary)

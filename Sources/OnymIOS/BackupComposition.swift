@@ -97,7 +97,7 @@ struct BackupSeatComposer {
                 consentStore: consentStore,
                 blobDirectory: restoredBlobs))
 
-        return DeviceBackupSettingsView(flow: flow) {
+        return DeviceBackupSettingsView(flow: flow, canRestore: true) {
             // The consent surface, reachable. Without this the section
             // rendered a status card with no way to turn backup on, and
             // everything behind it was unreachable code.

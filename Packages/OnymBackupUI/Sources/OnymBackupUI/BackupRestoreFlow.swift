@@ -29,7 +29,9 @@ public final class BackupRestoreFlow {
         case ready(snapshots: [RetainedSnapshot])
         case restoring(SnapshotReference)
         case restored(BackupRestoreSummary)
-        case failed(message: String)
+        /// `partial` is true when writing had already begun, so the
+        /// screen must not promise that nothing changed.
+        case failed(message: String, partial: Bool)
     }
 
     public private(set) var state: State = .loading
@@ -60,7 +62,9 @@ public final class BackupRestoreFlow {
             // work the screen can do.
             state = .ready(snapshots: snapshots.sorted { $0.retainedAt > $1.retainedAt })
         } catch {
-            state = .failed(message: Self.describe(error))
+            // Listing failed; nothing was written because nothing was
+            // attempted.
+            state = .failed(message: Self.describe(error), partial: false)
         }
     }
 
@@ -92,7 +96,17 @@ public final class BackupRestoreFlow {
             // whole reference and decodes the entire archive before it
             // touches a store. A failure here means the device is exactly
             // as it was.
-            state = .failed(message: Self.describe(error))
+            // Everything up to the write phase leaves the device
+            // untouched — the reference is verified and the whole
+            // archive decoded before a store is opened. Past that
+            // point the restorer says so, and so do we.
+            let partial: Bool
+            if case BackupError.localFailure(.restoreInterrupted) = error {
+                partial = true
+            } else {
+                partial = false
+            }
+            state = .failed(message: Self.describe(error), partial: partial)
         }
     }
 
@@ -116,6 +130,8 @@ public final class BackupRestoreFlow {
         case BackupError.localFailure(.stateUnreadable),
              BackupError.localFailure(.archiveUnreadable):
             return "The backup could not be read on this device."
+        case BackupError.localFailure(.restoreInterrupted):
+            return "The restore stopped partway. Some items may already have been added — restoring again is safe and will finish the job."
         case BackupError.localFailure(.noRecoveryPhrase):
             return "This identity has no recovery phrase, so it has no backups to restore."
         case BackupError.termsUnavailable:

@@ -14,6 +14,13 @@ import OnymTransportBlossom
 /// Wrapping the client is what makes them real, and it covers every
 /// loader at once — image, voice, and video all take a `BlossomClient`,
 /// so none of them needs to know this exists.
+///
+/// **Nothing prunes this directory yet** (onymchat/onym-ios#283).
+/// Restored ciphertext outlives the chat it belongs to, which is the
+/// wrong default in a product that argues deletion means something. It
+/// is only ever written by an `.includeCiphertext` restore, which is not
+/// selectable yet, and must be fixed before that policy becomes
+/// reachable.
 public struct RestoredBlobClient: BlossomClient {
     private let restored: URL
     private let upstream: any BlossomClient

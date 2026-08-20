@@ -98,6 +98,15 @@ public enum BackupError: Error, Equatable, Sendable {
         /// finishing. A programming error, named so it does not
         /// masquerade as a corrupt archive.
         case archiveWriterFinished
+        /// A restore failed *after* it had begun writing.
+        ///
+        /// Gate 3 is not atomic: groups, messages and invitations may
+        /// already be in the stores when a later write throws. The
+        /// partial state is benign — every write is `insertOrUpdate`, so
+        /// restoring again converges — but a screen that says "nothing
+        /// was changed" would be lying, and this seat does not get to
+        /// claim more than it knows.
+        case restoreInterrupted
         /// The local backup state exists but could not be read or
         /// decoded. Never treated as "no backup configured": the next
         /// save would overwrite the pinned terms and the pending
