@@ -34,6 +34,7 @@ packages:
   OnymSettings: {path: Packages/OnymSettings}
   OnymBackup: {path: Packages/OnymBackup}
   OnymBilling: {path: Packages/OnymBilling}
+  OnymBackupUI: {path: Packages/OnymBackupUI}
   OnymModeration: {path: Packages/OnymModeration}
   OnymModerationUI: {path: Packages/OnymModerationUI}
   OnymDiscovery: {path: Packages/OnymDiscovery}
@@ -66,6 +67,7 @@ targets:
       - package: OnymSettings
       - package: OnymBackup
       - package: OnymBilling
+      - package: OnymBackupUI
       - package: OnymModeration
       - package: OnymModerationUI
       - package: OnymDiscovery
@@ -232,6 +234,7 @@ targets:
       - package: OnymSettings
       - package: OnymBackup
       - package: OnymBilling
+      - package: OnymBackupUI
       - package: OnymModeration
       - package: OnymModerationUI
       - package: OnymDiscovery
