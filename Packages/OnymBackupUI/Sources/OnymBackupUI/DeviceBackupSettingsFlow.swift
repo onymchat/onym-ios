@@ -74,6 +74,18 @@ public final class DeviceBackupSettingsFlow {
     public let componentId: String
     /// What to call this operator on screen.
     public let displayName: String
+    /// This operator was set up with attachments included, and is no
+    /// longer getting them.
+    ///
+    /// One archive is composed for every operator, so its media policy
+    /// is the strictest any of them was consented under. That is the
+    /// right direction to be wrong in — nobody receives more than they
+    /// were agreed to — but it narrows what an already-enrolled operator
+    /// gets, without anything having changed on its own screen. Silently
+    /// dropping attachments from an operator someone chose *for*
+    /// attachments is the kind of quiet downgrade this seat says it does
+    /// not do.
+    public let attachmentsWithheld: Bool
 
     private let repository: BackupRepository
     private let stateStore: any BackupStateStoring
@@ -88,10 +100,12 @@ public final class DeviceBackupSettingsFlow {
         displayName: String,
         repository: BackupRepository,
         stateStore: any BackupStateStoring,
-        schedule: BackupSchedule = .default
+        schedule: BackupSchedule = .default,
+        attachmentsWithheld: Bool = false
     ) {
         self.componentId = componentId
         self.displayName = displayName
+        self.attachmentsWithheld = attachmentsWithheld
         self.repository = repository
         self.stateStore = stateStore
         self.schedule = schedule

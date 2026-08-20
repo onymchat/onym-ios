@@ -90,6 +90,18 @@ public final class BackupEnrolmentFlow {
             stored.acceptedTermsId = connection.acceptedTermsId
             stored.acceptedTermsRaw = connection.terms.rawBytes
             stored.mediaPolicy = mediaPolicy
+            // The refusal this screen exists to resolve. Leaving it set
+            // locks the person in a loop they cannot leave: the status
+            // still reads "Terms changed", which routes straight back to
+            // this screen, and with a single operator the vendors screen
+            // hides Back Up Now — so the run that would have cleared the
+            // reason is not reachable. Accepting terms would appear to
+            // do nothing, permanently.
+            //
+            // Cleared here rather than only by a successful run because
+            // this *is* the resolution: the reason a run refused was
+            // that nobody had read these terms, and somebody just has.
+            stored.lastBlockedReason = nil
             try stateStore.save(stored)
             if let orphaned {
                 // Sealed bytes nobody will claim now. Ciphertext, so not

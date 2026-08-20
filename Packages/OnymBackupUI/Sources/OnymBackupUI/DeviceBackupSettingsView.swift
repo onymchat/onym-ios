@@ -33,6 +33,12 @@ public struct DeviceBackupSettingsView: View {
                 }
                 SettingsFootnote(verbatim: statusFootnote)
 
+                if flow.attachmentsWithheld {
+                    SettingsFootnote(
+                        "You set this operator up with attachments included, but another operator you back up to was not. One backup is made for all of them, so attachments are currently left out of every one — including this operator's.")
+                        .accessibilityIdentifier("backup.attachments_withheld")
+                }
+
                 if flow.needsEnrolment {
                     if let enrolment = makeEnrolment() {
                         SettingsCard {

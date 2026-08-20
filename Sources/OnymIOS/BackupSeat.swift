@@ -34,8 +34,9 @@ enum BackupSeat {
     /// The seat value a backup operator declares.
     static let seat = "storage.backup"
 
-    /// Every backup operator this identity has consented to, in the
-    /// order the consents were accepted.
+    /// Every backup operator this identity has consented to, in a
+    /// stable order (by componentId — see below; it is deliberately not
+    /// acceptance order, which moves).
     ///
     /// Reads the *active* pinned record per operator. A person who
     /// switched away from an operator has a history of records for it;

@@ -149,8 +149,17 @@ public actor BackupRepository {
         defer { isRunning = false }
 
         switch try await evaluatePreconditions(now: now) {
-        case .blocked(let result): return .blocked(result)
-        case .ready: return .ready
+        case .blocked(let result):
+            return .blocked(result)
+        case .ready(let state, _):
+            // Committed here, not left to the caller. A fan-out asks
+            // every operator before it composes anything, and if
+            // composing then fails there is no later write — the
+            // refusal this call just disproved would survive, and the
+            // screen would keep reporting a terms change that has
+            // already been resolved.
+            try commit(state, expecting: state.componentId)
+            return .ready
         }
     }
 
@@ -225,10 +234,11 @@ public actor BackupRepository {
             return .blocked(.awaitingReconciliation(
                 operationIds: state.pendingOperations.map(\.operationId)))
         }
-        // Cleared only by getting past the check that set it: the
-        // operator is the one this state was enrolled with, publishing
-        // the terms it pinned. The caller commits this along with
-        // whatever the run does next.
+        // Cleared by getting past the check that set it: the operator
+        // is the one this state was enrolled with, publishing the terms
+        // it pinned. Every caller commits the state it is handed — see
+        // `prepare`, which commits precisely so a later failure cannot
+        // resurrect a refusal that no longer holds.
         state.lastBlockedReason = nil
         return .ready(state, acceptedTermsId: acceptedTermsId)
     }

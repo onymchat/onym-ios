@@ -20,10 +20,17 @@ public enum BackupVendorStorage {
 
     /// `state-<32 hex>.json`.
     ///
-    /// A digest rather than the componentId itself: a componentId is a
-    /// URN with colons in it, and the set of operators a person keeps
-    /// backups with should not be readable from a directory listing by
-    /// anyone who gets as far as the container.
+    /// A digest rather than the componentId itself, because a
+    /// componentId is a URN with colons in it and a filename should not
+    /// have to escape one.
+    ///
+    /// It is obfuscation and not a privacy property: the digest is
+    /// deterministic and unsalted, so anyone who reaches the container
+    /// can confirm enrolment with an operator they can name by hashing
+    /// its componentId. Salting it would mean storing the salt beside
+    /// the files it hides, which buys nothing against the same reader.
+    /// What actually keeps this directory closed is file protection, not
+    /// the filenames.
     public static func stateFilename(componentId: String) -> String {
         let digest = SHA256.hash(data: Data(("onym-backup-vendor-v1|" + componentId).utf8))
         let hex = digest.map { String(format: "%02x", $0) }.joined()

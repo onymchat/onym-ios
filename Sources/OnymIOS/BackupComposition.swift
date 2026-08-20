@@ -46,6 +46,9 @@ struct BackupSeatComposer {
     private struct Stack {
         let componentId: String
         let displayName: String
+        /// What *this* operator was consented under, which is not
+        /// necessarily what the shared archive ends up carrying.
+        let consentedMediaPolicy: BackupMediaPolicy?
         let client: URLSessionBackupClient
         let stateStore: FileBackupStateStore
         let material: BackupKeyMaterial
@@ -68,7 +71,7 @@ struct BackupSeatComposer {
         // operator and its media policy therefore has to be decided
         // before the composer exists.
         var enrolments: [(manifest: BackupOperatorManifest, stateStore: FileBackupStateStore,
-                          material: BackupKeyMaterial)] = []
+                          material: BackupKeyMaterial, consentedMediaPolicy: BackupMediaPolicy?)] = []
         var policies: [BackupMediaPolicy] = []
         for manifest in manifests {
             guard
@@ -83,10 +86,9 @@ struct BackupSeatComposer {
             let stateStore = BackupVendorStorage.stateStore(
                 componentId: manifest.componentId, in: workingDirectory)
             let stored = try? stateStore.load()
-            if let stored, stored.acceptedTermsId != nil {
-                policies.append(stored.mediaPolicy)
-            }
-            enrolments.append((manifest, stateStore, material))
+            let consented = stored?.acceptedTermsId == nil ? nil : stored?.mediaPolicy
+            if let consented { policies.append(consented) }
+            enrolments.append((manifest, stateStore, material, consented))
         }
         guard let first = enrolments.first else { return nil }
 
@@ -125,6 +127,7 @@ struct BackupSeatComposer {
                 componentId: enrolment.manifest.componentId,
                 displayName: BackupSeat.displayName(
                     componentId: enrolment.manifest.componentId, consentStore: consentStore),
+                consentedMediaPolicy: enrolment.consentedMediaPolicy,
                 client: client,
                 stateStore: enrolment.stateStore,
                 material: enrolment.material,
@@ -144,7 +147,11 @@ struct BackupSeatComposer {
                         componentId: $0.componentId,
                         displayName: $0.displayName,
                         repository: $0.repository,
-                        stateStore: $0.stateStore
+                        stateStore: $0.stateStore,
+                        // Consented to with media, and not getting it,
+                        // because somebody else was not.
+                        attachmentsWithheld: $0.consentedMediaPolicy == .includeCiphertext
+                            && mediaPolicy == .descriptorsOnly
                     )
                 )
             },
