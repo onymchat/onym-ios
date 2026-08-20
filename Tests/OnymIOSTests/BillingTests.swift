@@ -170,18 +170,58 @@ final class BillingTests: XCTestCase {
         }
     }
 
+    /// The decrypt path itself — HKDF salt, sharedInfo, GCM assembly —
+    /// against a matching seal. A wrong constant here would otherwise
+    /// surface only at broker integration.
+    func testSealedEnvelopeRoundTrips() throws {
+        let recipient = Curve25519.KeyAgreement.PrivateKey()
+        let payload = Data("the entitlement".utf8)
+        let sealed = try TestSeatSeal.seal(
+            payload, to: recipient.publicKey, signedBy: issuerKey)
+
+        let opened = try SeatSealedEnvelope.open(
+            envelopeBytes: sealed, recipient: recipient,
+            expectedSenders: [issuerKey.publicKey])
+        XCTAssertEqual(opened, payload)
+    }
+
+    /// An envelope sealed by a broker we do not trust must not open,
+    /// even though the ciphertext is addressed to us.
+    func testEnvelopeFromAnUnexpectedSenderIsRefused() throws {
+        let recipient = Curve25519.KeyAgreement.PrivateKey()
+        let stranger = Curve25519.Signing.PrivateKey()
+        let sealed = try TestSeatSeal.seal(
+            Data("payload".utf8), to: recipient.publicKey, signedBy: stranger)
+
+        XCTAssertThrowsError(
+            try SeatSealedEnvelope.open(
+                envelopeBytes: sealed, recipient: recipient,
+                expectedSenders: [issuerKey.publicKey])
+        ) { error in
+            XCTAssertEqual(error as? BillingError, .envelopeUnreadable)
+        }
+    }
+
     /// `redeem` is the `Transaction.updates` replay path, which fires at
     /// launch — where a read can fail because the file is under complete
     /// protection and the device has not been unlocked. Swallowing that
-    /// and saving would write one credential over every other purchase
-    /// the person had made.
+    /// and saving would write one credential over every other purchase.
+    ///
+    /// The envelope here is a *real* seal, so execution actually reaches
+    /// `store.load()`. An earlier version of this test stubbed the
+    /// broker with empty bytes, which threw in the opener long before
+    /// the load ran — it would have passed with the bug reinstated.
     func testRedeemRefusesToSaveOverAnUnreadableStore() async throws {
+        let keys = StubKeys(subject: subject())
+        let sealed = try TestSeatSeal.seal(
+            try makeEntitlement(), to: keys.agreement.publicKey, signedBy: issuerKey)
+        let store = FailingLoadStore()
         let flow = SeatPurchaseFlow(
             coordinator: StoreKitPurchaseCoordinator(),
-            broker: StubBroker(sealed: Data()),
+            broker: StubBroker(sealed: sealed),
             catalog: ChannelOfferCatalog(offers: []),
-            store: FailingLoadStore(),
-            keys: StubKeys(subject: subject()),
+            store: store,
+            keys: keys,
             trustedIssuers: { _ in [self.issuerReference] })
 
         do {
@@ -189,25 +229,62 @@ final class BillingTests: XCTestCase {
                 signedTransaction: "jws", offerId: "backup-monthly-v1",
                 componentId: componentId)
             XCTFail("saved over a store it could not read")
-        } catch {
-            // The failure arrives before any save. What matters is that
-            // the store was never written.
+        } catch BillingError.malformedEntitlement {
+            // The failure came from the load, which is the point.
         }
-        XCTAssertFalse(FailingLoadStore.didSave, "wrote over credentials it could not read")
+        XCTAssertTrue(store.didAttemptLoad, "never reached the load this test exists to cover")
+        XCTAssertFalse(store.didSave, "wrote over credentials it could not read")
     }
 
     /// An entry a newer build wrote must survive an older build's
-    /// redeem. Deleting what we cannot decode is a downgrade that eats
-    /// data.
-    func testUndecodableStoredEntriesAreKept() throws {
-        var stored: [Data] = [Data("from a future version".utf8)]
-        let componentId = self.componentId
-        let offerId = "backup-monthly-v1"
-        stored.removeAll { existing in
-            guard let decoded = try? SeatEntitlement.decode(raw: existing) else { return false }
-            return decoded.audience == componentId && decoded.offerId == offerId
+    /// redeem. Driven through `redeem` rather than re-implementing its
+    /// predicate, so a regression in the flow is actually caught.
+    func testUndecodableStoredEntriesAreKept() async throws {
+        let keys = StubKeys(subject: subject())
+        let sealed = try TestSeatSeal.seal(
+            try makeEntitlement(), to: keys.agreement.publicKey, signedBy: issuerKey)
+        let future = Data("written by a newer build".utf8)
+        let store = MemoryEntitlementStore(raw: [future])
+
+        let flow = SeatPurchaseFlow(
+            coordinator: StoreKitPurchaseCoordinator(),
+            broker: StubBroker(sealed: sealed),
+            catalog: ChannelOfferCatalog(offers: []),
+            store: store,
+            keys: keys,
+            trustedIssuers: { _ in [self.issuerReference] })
+
+        _ = try await flow.redeem(
+            signedTransaction: "jws", offerId: "backup-monthly-v1",
+            componentId: componentId)
+
+        let stored = try store.load()
+        XCTAssertTrue(stored.contains(future), "an entry this build cannot decode was dropped")
+        XCTAssertEqual(stored.count, 2)
+    }
+
+    /// A trusted-issuer set that parses to nothing must refuse rather
+    /// than opening an unauthenticated envelope.
+    func testUnparseableIssuerSetRefusesRedemption() async throws {
+        let keys = StubKeys(subject: subject())
+        let sealed = try TestSeatSeal.seal(
+            try makeEntitlement(), to: keys.agreement.publicKey, signedBy: issuerKey)
+        let flow = SeatPurchaseFlow(
+            coordinator: StoreKitPurchaseCoordinator(),
+            broker: StubBroker(sealed: sealed),
+            catalog: ChannelOfferCatalog(offers: []),
+            store: MemoryEntitlementStore(),
+            keys: keys,
+            trustedIssuers: { _ in ["not-a-key-reference"] })
+
+        do {
+            _ = try await flow.redeem(
+                signedTransaction: "jws", offerId: "backup-monthly-v1",
+                componentId: componentId)
+            XCTFail("opened an envelope with no sender expectation")
+        } catch BillingError.untrustedIssuer {
+            // Expected.
         }
-        XCTAssertEqual(stored.count, 1, "an entry this build cannot decode was dropped")
     }
 
     /// An envelope signed by nobody must not open when we were told who
@@ -343,6 +420,7 @@ private struct StubKeys: SeatAccessKeyProviding {
     let subject: String
     let agreement = Curve25519.KeyAgreement.PrivateKey()
 
+
     func seatSubject(componentId: String) async throws -> String { subject }
     func seatAgreementKey(componentId: String) async throws -> Curve25519.KeyAgreement.PrivateKey {
         agreement
@@ -370,9 +448,63 @@ private struct StubBroker: BillingBrokerClient {
 
 /// Stands in for a store whose file exists but cannot be read — the
 /// locked-device case.
+///
+/// Instance state, not static: a shared counter would carry results
+/// between tests and poison whichever ran second.
 private final class FailingLoadStore: SeatEntitlementStoring, @unchecked Sendable {
-    nonisolated(unsafe) static var didSave = false
+    private let lock = NSLock()
+    private var loaded = false
+    private var saved = false
 
-    func load() throws -> [Data] { throw BillingError.malformedEntitlement }
-    func save(_ rawEntitlements: [Data]) throws { Self.didSave = true }
+    var didAttemptLoad: Bool { lock.withLock { loaded } }
+    var didSave: Bool { lock.withLock { saved } }
+
+    func load() throws -> [Data] {
+        lock.withLock { loaded = true }
+        throw BillingError.malformedEntitlement
+    }
+
+    func save(_ rawEntitlements: [Data]) throws { lock.withLock { saved = true } }
+}
+
+/// Seals a payload the way a conforming broker does, so tests exercise
+/// the real decrypt path rather than asserting around it.
+///
+/// Mirrors `SeatSealedEnvelope.open`: ephemeral X25519, ECDH, HKDF under
+/// the seat salt, AES-GCM, and an Ed25519 signature over the ephemeral
+/// public key. If any of those constants drift apart, the positive test
+/// below stops passing — which is the point, since a wrong constant
+/// would otherwise surface only at broker integration.
+enum TestSeatSeal {
+    static func seal(
+        _ payload: Data,
+        to recipient: Curve25519.KeyAgreement.PublicKey,
+        signedBy sender: Curve25519.Signing.PrivateKey?,
+        scheme: String = SeatSealedEnvelope.scheme
+    ) throws -> Data {
+        let ephemeral = Curve25519.KeyAgreement.PrivateKey()
+        let shared = try ephemeral.sharedSecretFromKeyAgreement(with: recipient)
+        let key = shared.hkdfDerivedSymmetricKey(
+            using: SHA256.self,
+            salt: Data("onym-seat-entitlement-v1".utf8),
+            sharedInfo: Data("aes-256-gcm".utf8),
+            outputByteCount: 32)
+        let box = try AES.GCM.seal(payload, using: key)
+
+        var wire: [String: Any] = [
+            "version": 1,
+            "scheme": scheme,
+            "ephemeral_public_key": ephemeral.publicKey.rawRepresentation.base64EncodedString(),
+            "nonce": Data(box.nonce).base64EncodedString(),
+            "ciphertext": box.ciphertext.base64EncodedString(),
+            "authentication_tag": box.tag.base64EncodedString(),
+        ]
+        if let sender {
+            let signature = try sender.signature(for: ephemeral.publicKey.rawRepresentation)
+            wire["ephemeral_key_signature"] = signature.base64EncodedString()
+            wire["sender_ed25519_public_key"] = sender.publicKey.rawRepresentation
+                .base64EncodedString()
+        }
+        return try JSONSerialization.data(withJSONObject: wire)
+    }
 }

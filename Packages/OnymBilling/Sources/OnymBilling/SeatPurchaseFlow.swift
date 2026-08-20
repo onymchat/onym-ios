@@ -59,9 +59,8 @@ public actor SeatPurchaseFlow {
 
     /// The Ed25519 keys behind a set of `onym:key:` references.
     ///
-    /// An unparseable reference is dropped rather than failing the set —
-    /// but if that leaves nothing, the envelope opener refuses, because
-    /// an empty expectation is not the same as no expectation.
+    /// An unparseable reference is dropped rather than failing the whole
+    /// set; the caller refuses if that leaves nothing.
     static func senderKeys(from references: [String]) -> [Curve25519.Signing.PublicKey] {
         references.compactMap { reference in
             guard
@@ -103,10 +102,20 @@ public actor SeatPurchaseFlow {
         // without this, an envelope signed by anyone — or by nobody —
         // opens, and the sender-authentication path exists but never
         // runs.
+        //
+        // An empty set is refused rather than passed through as "accept
+        // unauthenticated". It cannot succeed anyway — the verifier
+        // below requires a trusted issuer — but failing here says why,
+        // instead of opening an unauthenticated envelope and reporting a
+        // signature problem two steps later.
+        let senders = Self.senderKeys(from: trustedIssuers(componentId))
+        guard !senders.isEmpty else {
+            throw BillingError.untrustedIssuer(issuer: componentId)
+        }
         let raw = try SeatSealedEnvelope.open(
             envelopeBytes: sealed,
             recipient: agreementKey,
-            expectedSenders: Self.senderKeys(from: trustedIssuers(componentId))
+            expectedSenders: senders
         )
         let entitlement = try SeatEntitlement.decode(raw: raw)
 

@@ -57,6 +57,13 @@ public struct StoreKitEntitlementProvider: EntitlementProviding {
         guard catalog.offer(forOfferId: offerId, componentId: componentId) != nil else {
             return nil
         }
+        // `try?` here is deliberate and is the opposite call from
+        // `SeatPurchaseFlow.redeem`, which propagates. This asks "may
+        // this offer be selected right now"; an unreadable store — a
+        // locked device at launch, say — means we cannot say yes, and
+        // fail-closed is the honest answer. `redeem` propagates because
+        // it goes on to *write*, and answering "no entitlements" there
+        // would overwrite the ones it could not read.
         guard
             let subject = try? await keys.seatSubject(componentId: componentId),
             let stored = try? store.load()
