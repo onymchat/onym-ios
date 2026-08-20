@@ -41,6 +41,11 @@ public actor BackupRepository {
         case paymentRequired(componentId: String, offerIds: [String], pending: SealedSnapshot)
         /// Terms moved. Uploading would pin something nobody agreed to.
         case termsChanged(currentTermsId: String?)
+        /// A different operator is now consented to than the one this
+        /// state was enrolled with. Nothing may be uploaded, reconciled
+        /// or retried until the person has enrolled with the new one —
+        /// none of the recorded work means anything to it.
+        case operatorChanged(previousComponentId: String, currentComponentId: String)
         /// The request went out and we never learned what happened.
         case unknown(operationId: String)
         /// Earlier work is unresolved and could not be reconciled, so
@@ -58,10 +63,41 @@ public actor BackupRepository {
 
         var state = try stateStore.load()
 
-        // Reconcile before adding to the pile. An operation whose result
-        // we never learned may well have succeeded, and composing a
-        // second snapshot on top of an unresolved first is how a person
-        // ends up paying to store the same history twice.
+        guard let acceptedTermsId = state.acceptedTermsId else {
+            // Nothing has been consented to. Enrolment is a decision, and
+            // the repository does not make it on the person's behalf.
+            throw BackupError.termsUnavailable
+        }
+
+        // Terms and operator are checked *before* reconciling, not after.
+        //
+        // Reconciliation talks to whichever operator this repository was
+        // built for, using operation ids recorded against whoever was
+        // consented to when they were written. If those are not the same
+        // operator, reconciling first hands operator B a list of operator
+        // A's operations — the cross-operator leak the rebind on
+        // enrolment exists to prevent, arrived at through a different
+        // door.
+        let connection = try await port.connect()
+        if let previous = state.componentId, previous != connection.manifest.componentId {
+            state.lastAttemptAt = now
+            try stateStore.save(state)
+            return .operatorChanged(
+                previousComponentId: previous,
+                currentComponentId: connection.manifest.componentId)
+        }
+        if connection.acceptedTermsId != acceptedTermsId {
+            // Do not upload, do not re-pin, do not "helpfully" accept.
+            // Fresh consent is a screen, not an inference.
+            state.lastAttemptAt = now
+            try stateStore.save(state)
+            return .termsChanged(currentTermsId: connection.acceptedTermsId)
+        }
+
+        // Only now: an operation whose result we never learned may well
+        // have succeeded, and composing a second snapshot on top of an
+        // unresolved first is how a person ends up paying to store the
+        // same history twice.
         try await reconcile(&state)
 
         // And if it is *still* unresolved, do not compose. Reconciling
@@ -76,21 +112,6 @@ public actor BackupRepository {
             try stateStore.save(state)
             return .awaitingReconciliation(
                 operationIds: state.pendingOperations.map(\.operationId))
-        }
-
-        guard let acceptedTermsId = state.acceptedTermsId else {
-            // Nothing has been consented to. Enrolment is a decision, and
-            // the repository does not make it on the person's behalf.
-            throw BackupError.termsUnavailable
-        }
-
-        let connection = try await port.connect()
-        if connection.acceptedTermsId != acceptedTermsId {
-            // Do not upload, do not re-pin, do not "helpfully" accept.
-            // Fresh consent is a screen, not an inference.
-            state.lastAttemptAt = now
-            try stateStore.save(state)
-            return .termsChanged(currentTermsId: connection.acceptedTermsId)
         }
 
         let snapshot = try await composer.compose(

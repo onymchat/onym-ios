@@ -874,7 +874,7 @@ struct OnymIOSApp: App {
             // credential from whoever answered the URL.
             guard
                 let entitlementStore = seatEntitlementStore,
-                let issuerKey = await BackupSeat.entitlementIssuerKey(
+                let issuerKey = BackupSeat.entitlementIssuerKey(
                     componentId: componentId, consentStore: pinnedConsentStore)
             else {
                 return nil

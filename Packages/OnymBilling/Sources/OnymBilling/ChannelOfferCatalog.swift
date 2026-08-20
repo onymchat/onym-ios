@@ -30,9 +30,27 @@ public struct ChannelOffer: Sendable, Equatable, Codable {
 public struct ChannelOfferCatalog: Sendable {
     private let offers: [ChannelOffer]
 
+    /// Duplicated product identifiers are **dropped at construction**,
+    /// not asserted at lookup.
+    ///
+    /// An assert crashes a debug build in the middle of a replay, which
+    /// is the opposite of the refuse-and-retry the lookup promises, and
+    /// does nothing at all in Release. Dropping both sides of a clash
+    /// means the catalog is well-formed by construction: the affected
+    /// offer becomes unsellable, which is visible and safe, rather than
+    /// crediting a purchase to whichever operator sorted first.
     public init(offers: [ChannelOffer]) {
-        self.offers = offers
+        let duplicated = Set(
+            Dictionary(grouping: offers, by: \.productId)
+                .filter { $0.value.count > 1 }
+                .keys)
+        self.offers = offers.filter { !duplicated.contains($0.productId) }
+        self.rejectedProductIds = duplicated.sorted()
     }
+
+    /// Product identifiers dropped as ambiguous. Empty in a well-formed
+    /// catalog; surfaced so a build or a diagnostic can notice.
+    public let rejectedProductIds: [String]
 
     /// Load from a bundled JSON resource.
     ///
@@ -55,15 +73,7 @@ public struct ChannelOfferCatalog: Sendable {
         return ChannelOfferCatalog(offers: offers)
     }
 
-    /// Product identifiers listed more than once. Empty in a
-    /// well-formed catalog; surfaced so a build can fail on it rather
-    /// than discovering it during a replay.
-    public var duplicateProductIds: [String] {
-        Dictionary(grouping: offers, by: \.productId)
-            .filter { $0.value.count > 1 }
-            .keys
-            .sorted()
-    }
+
 
     public func offer(forOfferId offerId: String, componentId: String) -> ChannelOffer? {
         offers.first { $0.offerId == offerId && $0.componentId == componentId }
@@ -79,15 +89,11 @@ public struct ChannelOfferCatalog: Sendable {
     /// crediting one operator for a purchase made from another. Checked
     /// at load rather than left as a convention.
     public func offer(forProductId productId: String) -> ChannelOffer? {
-        let matches = offers.filter { $0.productId == productId }
-        guard matches.count == 1 else {
-            // Ambiguous or absent. Refusing is right for both: a replay
-            // we cannot attribute is left unfinished and retried, which
-            // is recoverable, where crediting the wrong operator is not.
-            assert(matches.count < 2, "channel offers share productId \(productId)")
-            return nil
-        }
-        return matches[0]
+        // Unambiguous by construction — a clash was dropped at load — so
+        // a miss here means the product is not ours to redeem, and the
+        // replay is left unfinished and retried rather than attributed
+        // to a guess.
+        offers.first { $0.productId == productId }
     }
 
     public var productIds: Set<String> { Set(offers.map(\.productId)) }

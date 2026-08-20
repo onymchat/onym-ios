@@ -287,12 +287,42 @@ final class BackupDisclosureTests: XCTestCase {
             productType: "auto-renewable-subscription",
             operatorShareBps: 7000, frontendCommissionBps: 3000)
 
+        // Both sides of the clash are dropped at construction, so the
+        // lookup cannot attribute a replay to a guess — and no assert
+        // fires mid-replay to crash a debug build.
         let catalog = ChannelOfferCatalog(offers: [shared, clash])
-        XCTAssertEqual(catalog.duplicateProductIds, ["app.onym.backup.monthly"])
+        XCTAssertEqual(catalog.rejectedProductIds, ["app.onym.backup.monthly"])
+        XCTAssertNil(catalog.offer(forProductId: "app.onym.backup.monthly"))
 
         let clean = ChannelOfferCatalog(offers: [shared])
         XCTAssertEqual(clean.offer(forProductId: "app.onym.backup.monthly")?.offerId, "o1")
-        XCTAssertTrue(clean.duplicateProductIds.isEmpty)
+        XCTAssertTrue(clean.rejectedProductIds.isEmpty)
+    }
+
+    /// The gap that made the previous fix unreachable.
+    ///
+    /// `rebind` only runs from enrolment, enrolment was only offered at
+    /// `.off`, and `.off` required no stored terms — so after consenting
+    /// to a new operator the old terms id was still there, the status
+    /// read as enrolled, and every Back Up Now returned `termsChanged`
+    /// with no route back to the consent screen. A protection that only
+    /// runs on first enrolment is not a protection against switching.
+    func testStatesThatNeedEnrolmentOfferIt() {
+        let cases: [(DeviceBackupSettingsFlow.Status, Bool)] = [
+            (.off, true),
+            (.termsChanged, true),
+            (.operatorChanged, true),
+            (.idle(lastSuccessAt: nil), false),
+            (.running, false),
+            (.stale(lastSuccessAt: nil), false),
+            (.checkingEarlierBackup, false),
+            (.paymentRequired(offerIds: []), false),
+        ]
+        for (status, expected) in cases {
+            XCTAssertEqual(
+                DeviceBackupSettingsFlow.needsEnrolment(for: status), expected,
+                "\(status) should\(expected ? "" : " not") offer enrolment")
+        }
     }
 
     // MARK: - Fixtures

@@ -75,9 +75,14 @@ struct BackupSeatComposer {
             stateStore: stateStore,
             keyMaterial: material
         )
+        let consented = manifest.componentId
         let flow = DeviceBackupSettingsFlow(
             repository: repository,
-            stateStore: stateStore
+            stateStore: stateStore,
+            // Lets the flow tell "enrolled" from "enrolled with somebody
+            // else", which is the difference between a working backup
+            // and one that silently never uploads again.
+            currentComponentId: { consented }
         )
         return DeviceBackupSettingsView(flow: flow) {
             // The consent surface, reachable. Without this the section

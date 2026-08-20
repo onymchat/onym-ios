@@ -70,6 +70,8 @@ struct RootView: View {
     /// mid-upload. The view is only replaced when the consented operator
     /// actually changed.
     @State private var deviceBackupComponentId: String?
+    /// A resolution asked for while one was in flight.
+    @State private var deviceBackupResolutionPending = false
 
     /// `fullScreenCover(item:)` needs identity, and the two consent
     /// gates the root can host are exactly "no mandate yet" and "the
@@ -137,6 +139,13 @@ struct RootView: View {
             // the section missing until the next launch, which reads as
             // the consent not having worked.
             guard tab == .settings else { return }
+            Task { await resolveDeviceBackupView() }
+        }
+        .onChange(of: consentPresentation) { _, presentation in
+            // Consent can also be given *while already on* Settings, in
+            // which case the tab never changes. Re-resolve when a consent
+            // sheet closes.
+            guard presentation == nil else { return }
             Task { await resolveDeviceBackupView() }
         }
         .onChange(of: dependencies.moderationGateFlow.gate) { _, gate in
@@ -233,20 +242,30 @@ struct RootView: View {
     /// the Settings section hides rather than offering something that
     /// cannot produce an openable snapshot.
     private func resolveDeviceBackupView() async {
-        guard let makeDeviceBackupView = dependencies.makeDeviceBackupView,
-              !resolvingDeviceBackup
-        else { return }
-
-        // Nothing to do when the operator has not changed. Rebuilding
-        // here would hand Settings a fresh flow and throw away a backup
-        // that is running.
-        let componentId = dependencies.consentedBackupComponentId?()
-        if deviceBackupView != nil, componentId == deviceBackupComponentId { return }
+        guard let makeDeviceBackupView = dependencies.makeDeviceBackupView else { return }
+        guard !resolvingDeviceBackup else {
+            // Queued, not dropped. A request that arrives mid-resolution
+            // is usually the one that matters — the consent that just
+            // landed — and discarding it leaves the section describing
+            // the operator from before.
+            deviceBackupResolutionPending = true
+            return
+        }
 
         resolvingDeviceBackup = true
         defer { resolvingDeviceBackup = false }
-        deviceBackupView = await makeDeviceBackupView()
-        deviceBackupComponentId = componentId
+
+        repeat {
+            deviceBackupResolutionPending = false
+            // Nothing to do when the operator has not changed. Rebuilding
+            // here would hand Settings a fresh flow and throw away a
+            // backup that is running.
+            let componentId = dependencies.consentedBackupComponentId?()
+            if deviceBackupView == nil || componentId != deviceBackupComponentId {
+                deviceBackupView = await makeDeviceBackupView()
+                deviceBackupComponentId = componentId
+            }
+        } while deviceBackupResolutionPending
     }
 
     private func presentationUnlessOnboarding(
