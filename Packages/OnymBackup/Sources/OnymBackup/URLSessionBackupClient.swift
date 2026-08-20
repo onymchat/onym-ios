@@ -44,6 +44,23 @@ public struct URLSessionBackupClient: BackupPort {
     /// chunk is buffered to sign and send it, so this is a memory bound
     /// as much as an arithmetic one.
     static let maxUploadChunkBytes = 64 << 20
+    /// Ceiling on the list-response cap, and on the snapshot count we
+    /// will derive one from. Every other operator-controlled figure gets
+    /// a refusal; this one was getting a trap, because a large enough
+    /// declared limit overflows the multiplication that sizes the cap.
+    static let maxListedSnapshots = 100_000
+    static let maxListResponseBytes = 32 << 20
+
+    /// How many bytes we are willing to read for a snapshot listing.
+    ///
+    /// Derived from the operator's declared limit, then clamped — the
+    /// declaration is its own unsigned figure and bounds nothing on its
+    /// own.
+    var listResponseCap: Int {
+        let declared = min(manifest.maximumRetainedSnapshots ?? 1_000, Self.maxListedSnapshots)
+        let derived = max(declared, 0) * Self.perSnapshotEntryBytes
+        return min(max(derived, 64 << 10), Self.maxListResponseBytes)
+    }
 
     public init(
         manifest: BackupOperatorManifest,
@@ -193,11 +210,10 @@ public struct URLSessionBackupClient: BackupPort {
     }
 
     public func listSnapshots() async throws -> [RetainedSnapshot] {
-        let cap = (manifest.maximumRetainedSnapshots ?? 1_000) * Self.perSnapshotEntryBytes
         let data = try await get(
             path: ["v1", "snapshots"],
             signed: true,
-            maxResponseBytes: max(cap, 64 << 10)
+            maxResponseBytes: listResponseCap
         )
         struct Row: Decodable {
             let snapshotReference: SnapshotReference
@@ -239,11 +255,10 @@ public struct URLSessionBackupClient: BackupPort {
     }
 
     public func exportSnapshots(to directory: URL) async throws -> BackupExport {
-        let cap = (manifest.maximumRetainedSnapshots ?? 1_000) * Self.perSnapshotEntryBytes
         let manifestBytes = try await get(
             path: ["v1", "exports"],
             signed: true,
-            maxResponseBytes: max(cap, 64 << 10)
+            maxResponseBytes: listResponseCap
         )
         struct Entry: Decodable {
             let snapshotReference: SnapshotReference

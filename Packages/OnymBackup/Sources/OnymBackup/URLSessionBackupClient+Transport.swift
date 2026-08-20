@@ -152,9 +152,15 @@ extension URLSessionBackupClient {
         guard let http = response as? HTTPURLResponse else { throw BackupError.operatorUnavailable }
         guard (200..<300).contains(http.statusCode) else {
             // The body of a failed download is small; read it bounded so
-            // the operator's own code and message survive.
+            // the operator's own code and message survive. `break`, not
+            // a `where` clause — the latter stops appending but keeps
+            // draining, so an unbounded error body would still be read
+            // to completion.
             var body = Data()
-            for try await byte in stream where body.count < 8 << 10 { body.append(byte) }
+            for try await byte in stream {
+                if body.count >= 8 << 10 { break }
+                body.append(byte)
+            }
             try Self.check(http, body)
             return
         }

@@ -102,19 +102,20 @@ final class BackupAdapterTests: XCTestCase {
         configuration.protocolClasses = [StubURLProtocol.self]
         let session = URLSession(
             configuration: configuration, delegate: RedirectRefusingDelegate(), delegateQueue: nil)
+        let visited = HostRecorder()
         StubURLProtocol.set { request in
+            visited.record(request.url?.host())
             let response = HTTPURLResponse(
                 url: request.url!, statusCode: 302, httpVersion: nil,
                 headerFields: ["Location": "https://elsewhere.example/v1/snapshots"])!
             return (Data(), response)
         }
-        do {
-            _ = try await makeClient(session: session).listSnapshots()
-            XCTFail("expected the redirect not to be followed")
-        } catch {
-            // Either the 302 surfaces as a rejection or the body fails
-            // to decode — both mean we did not go to the other origin.
-        }
+        _ = try? await makeClient(session: session).listSnapshots()
+        // The assertion that matters is *where the bytes went*, not that
+        // an error came back — the previous version of this test passed
+        // whether or not the redirect was followed, because the second
+        // origin also hits the stub.
+        XCTAssertEqual(visited.hosts, ["backup.example"])
     }
 
     /// An unmodelled operator code is preserved rather than flattened
@@ -402,7 +403,125 @@ final class BackupAdapterTests: XCTestCase {
         XCTAssertEqual(try FileBackupStateStore(url: fresh).load(), BackupState())
     }
 
+    /// An operation the operator says is still `submitted` is in
+    /// flight, not resolved. Dropping it would compose a second snapshot
+    /// on top of one the operator is still working on — and charge for
+    /// both.
+    func testInFlightOperationStaysPending() async throws {
+        let dir = try Self.directory()
+        let digest = "sha256:" + String(repeating: "3", count: 64)
+        var state = BackupState()
+        state.acceptedTermsId = ScriptedPort.termsId
+        state.pendingOperations = [
+            BackupState.PendingOperation(
+                operationId: "inflight", digest: digest, startedAt: Date(),
+                acceptedTermsId: ScriptedPort.termsId)
+        ]
+        let stateStore = MemoryStateStore(state: state)
+        let port = ScriptedPort(acceptedTermsId: ScriptedPort.termsId, paymentSatisfied: true)
+        await port.setQueryOutcome(
+            BackupOutcome(operationId: "inflight", componentId: "onym:component:op",
+                          status: .submitted))
+
+        _ = try await Self.repository(port: port, store: stateStore, dir: dir).backUp()
+        XCTAssertEqual(try stateStore.load().pendingOperations.count, 1)
+    }
+
+    /// A query we could not make resolves nothing — the same rule as a
+    /// list we could not fetch.
+    func testFailedQueryLeavesPendingIntact() async throws {
+        let dir = try Self.directory()
+        var state = BackupState()
+        state.acceptedTermsId = ScriptedPort.termsId
+        state.pendingOperations = [
+            BackupState.PendingOperation(
+                operationId: "lost", digest: "sha256:" + String(repeating: "4", count: 64),
+                startedAt: Date(), acceptedTermsId: ScriptedPort.termsId)
+        ]
+        let stateStore = MemoryStateStore(state: state)
+        let port = ScriptedPort(acceptedTermsId: ScriptedPort.termsId, paymentSatisfied: true)
+        await port.setQueryFails(true)
+
+        _ = try await Self.repository(port: port, store: stateStore, dir: dir).backUp()
+        XCTAssertEqual(try stateStore.load().pendingOperations.count, 1)
+    }
+
+    /// The operator does not get to say which snapshot we asked about.
+    func testMismatchedEchoedReferenceIsRefused() async throws {
+        let dir = try Self.directory()
+        var state = BackupState()
+        state.acceptedTermsId = ScriptedPort.termsId
+        let stateStore = MemoryStateStore(state: state)
+        let port = ScriptedPort(acceptedTermsId: ScriptedPort.termsId, paymentSatisfied: true)
+        await port.setAlreadyRetainedEcho(
+            try SnapshotReference(
+                digest: "sha256:" + String(repeating: "5", count: 64), sealedByteSize: 99))
+
+        do {
+            _ = try await Self.repository(port: port, store: stateStore, dir: dir).backUp()
+            XCTFail("accepted an answer about a different snapshot")
+        } catch BackupError.rejected(let code, _) {
+            XCTAssertEqual(code, "reference_mismatch")
+        }
+        XCTAssertTrue(try stateStore.load().snapshots.isEmpty, "the local chain was poisoned")
+    }
+
+    /// A purchase can outlive the process. The refused snapshot has to
+    /// still be there afterwards, or the retry re-composes and the
+    /// person pays twice.
+    func testPendingPaymentSurvivesRelaunch() async throws {
+        let dir = try Self.directory()
+        var state = BackupState()
+        state.acceptedTermsId = ScriptedPort.termsId
+        let stateStore = MemoryStateStore(state: state)
+        let port = ScriptedPort(acceptedTermsId: ScriptedPort.termsId)
+
+        guard case .paymentRequired(_, _, let pending) =
+            try await Self.repository(port: port, store: stateStore, dir: dir).backUp()
+        else {
+            return XCTFail("expected a payment refusal")
+        }
+
+        // A fresh repository over the same state and directory — the
+        // relaunch.
+        let resumed = try await Self.repository(port: port, store: stateStore, dir: dir)
+            .pendingPayment(in: dir)
+        XCTAssertEqual(resumed?.operationId, pending.operationId)
+        XCTAssertEqual(resumed?.snapshotReference, pending.snapshotReference)
+        XCTAssertEqual(resumed?.acceptedTermsId, pending.acceptedTermsId)
+    }
+
+    /// A declared limit large enough to overflow the cap arithmetic must
+    /// clamp, not trap. Every other operator-controlled figure earns a
+    /// refusal; this one was earning a crash.
+    func testHostileRetainedLimitDoesNotTrap() async throws {
+        respond(200, "[]")
+        let client = try makeClient(maximumRetainedSnapshots: Int.max)
+        XCTAssertLessThanOrEqual(client.listResponseCap, URLSessionBackupClient.maxListResponseBytes)
+        _ = try await client.listSnapshots()
+    }
+
     // MARK: - Fixtures
+
+    static func directory() throws -> URL {
+        let url = URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    static func repository(
+        port: any BackupPort,
+        store: any BackupStateStoring,
+        dir: URL
+    ) -> BackupRepository {
+        BackupRepository(
+            port: port,
+            composer: BackupComposer(
+                source: EmptySource(), mediaPolicy: .descriptorsOnly, workingDirectory: dir),
+            stateStore: store,
+            keyMaterial: BackupKeys.material(
+                seed: Data(repeating: 0xEE, count: 64), componentId: "onym:component:op"))
+    }
 
     static func manifest(maximumRetainedSnapshots: Int?) throws -> BackupOperatorManifest {
         var limits = ""
@@ -461,6 +580,9 @@ private actor ScriptedPort: BackupPort {
     private let uploadStatus: BackupOutcomeStatus
     private var retained: [RetainedSnapshot] = []
     private var listFails = false
+    private var queryOutcome: BackupOutcome?
+    private var queryFails = false
+    private var alreadyRetainedEcho: SnapshotReference?
     private(set) var seenOperationIds: [String] = []
 
     init(
@@ -477,6 +599,9 @@ private actor ScriptedPort: BackupPort {
 
     func setRetained(_ rows: [RetainedSnapshot]) { retained = rows }
     func setListFails(_ value: Bool) { listFails = value }
+    func setQueryOutcome(_ outcome: BackupOutcome?) { queryOutcome = outcome }
+    func setQueryFails(_ value: Bool) { queryFails = value }
+    func setAlreadyRetainedEcho(_ reference: SnapshotReference) { alreadyRetainedEcho = reference }
 
     func allowPayment() { paymentSatisfied = true }
 
@@ -497,6 +622,12 @@ private actor ScriptedPort: BackupPort {
 
     func preflight(_ snapshot: SealedSnapshot) async throws -> BackupPreflight {
         seenOperationIds.append(snapshot.operationId)
+        if let echo = alreadyRetainedEcho {
+            return .alreadyRetained(
+                BackupOutcome(
+                    operationId: snapshot.operationId, componentId: "onym:component:op",
+                    status: .alreadyRetained, snapshotReference: echo))
+        }
         guard paymentSatisfied else {
             throw BackupError.paymentRequired(
                 componentId: "onym:component:op",
@@ -529,7 +660,10 @@ private actor ScriptedPort: BackupPort {
     func exportSnapshots(to directory: URL) async throws -> BackupExport {
         BackupExport(directory: directory, snapshots: [], receipts: [])
     }
-    func queryOutcome(operationId: String) async throws -> BackupOutcome? { nil }
+    func queryOutcome(operationId: String) async throws -> BackupOutcome? {
+        if queryFails { throw BackupError.operatorUnavailable }
+        return queryOutcome
+    }
 
     /// The digest of the terms fixture below, computed the same way the
     /// client computes it. Fabricating one here would have made every
@@ -560,4 +694,18 @@ private actor ScriptedPort: BackupPort {
            "erasureReceipts":"P1Y","entitlementRecords":"P1Y"}}
         """.utf8)
     }
+}
+
+
+/// Records which hosts a stubbed session was actually asked to contact.
+private final class HostRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var seen: [String] = []
+
+    func record(_ host: String?) {
+        guard let host else { return }
+        lock.withLock { if !seen.contains(host) { seen.append(host) } }
+    }
+
+    var hosts: [String] { lock.withLock { seen } }
 }

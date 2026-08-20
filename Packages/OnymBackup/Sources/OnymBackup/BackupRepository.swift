@@ -73,6 +73,31 @@ public actor BackupRepository {
         return try await place(snapshot, state: &state, now: now)
     }
 
+    /// The snapshot waiting on a purchase, if one survived a relaunch.
+    ///
+    /// Returns `nil` when the recorded sealed bytes are gone — there is
+    /// nothing to retry, and reporting a pending payment we cannot honour
+    /// would strand the caller in a purchase flow with no snapshot at the
+    /// end of it.
+    public func pendingPayment(in workingDirectory: URL) throws -> SealedSnapshot? {
+        guard let pending = try stateStore.load().awaitingPayment else { return nil }
+        let url = workingDirectory.appending(path: pending.sealedBytesFilename)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return SealedSnapshot(
+            operationId: pending.operationId,
+            snapshotReference: try SnapshotReference(
+                digest: pending.digest, sealedByteSize: pending.sealedByteSize),
+            sealedBytesURL: url,
+            sealedAt: pending.refusedAt,
+            acceptedTermsId: pending.acceptedTermsId,
+            supersedes: try pending.supersedesDigest.flatMap { digest in
+                try pending.supersedesByteSize.map {
+                    try SnapshotReference(digest: digest, sealedByteSize: $0)
+                }
+            }
+        )
+    }
+
     /// Retry a snapshot that was refused for payment, byte for byte.
     ///
     /// Takes the `SealedSnapshot` the refusal handed back rather than
@@ -96,8 +121,23 @@ public actor BackupRepository {
         } catch let error as BackupError {
             switch error {
             case .paymentRequired(let componentId, let offerIds, _):
-                // The sealed bytes stay on disk. Nothing is discarded
-                // for a refusal that a purchase resolves.
+                // The sealed bytes stay on disk *and* the fact that they
+                // are owed a purchase is written down. A StoreKit
+                // purchase routinely resolves after a relaunch, and a
+                // snapshot remembered only in a returned enum would be
+                // swept as scratch — re-composed, re-salted, and paid
+                // for twice.
+                state.awaitingPayment = BackupState.PendingPayment(
+                    operationId: snapshot.operationId,
+                    digest: snapshot.snapshotReference.digest,
+                    sealedByteSize: snapshot.snapshotReference.sealedByteSize,
+                    sealedBytesFilename: snapshot.sealedBytesURL.lastPathComponent,
+                    acceptedTermsId: snapshot.acceptedTermsId,
+                    supersedesDigest: snapshot.supersedes?.digest,
+                    supersedesByteSize: snapshot.supersedes?.sealedByteSize,
+                    refusedAt: now
+                )
+                try stateStore.save(state)
                 return .paymentRequired(
                     componentId: componentId, offerIds: offerIds, pending: snapshot)
             case .termsChanged(let currentTermsId):
@@ -109,7 +149,18 @@ public actor BackupRepository {
 
         switch preflight {
         case .alreadyRetained(let outcome):
-            let reference = outcome.snapshotReference ?? snapshot.snapshotReference
+            // An echoed reference that is not the one we asked about is
+            // an operator answering a different question. Recording it
+            // would let a counterparty choose what the next run
+            // supersedes.
+            if let echoed = outcome.snapshotReference,
+               echoed.digest != snapshot.snapshotReference.digest {
+                throw BackupError.rejected(
+                    code: "reference_mismatch",
+                    message: "the operator answered about a different snapshot"
+                )
+            }
+            let reference = snapshot.snapshotReference
             // Recorded like any other retention. Skipping it would leave
             // the next run's `supersedes` pointing at a stale ancestor —
             // the operator holds this snapshot, whoever put it there.
@@ -120,6 +171,7 @@ public actor BackupRepository {
                 status: outcome.status
             )
             state.lastSuccessAt = now
+            state.clearPendingPayment(for: snapshot.operationId)
             try stateStore.save(state)
             try discard(snapshot)
             return .alreadyRetained(reference)
@@ -133,7 +185,8 @@ public actor BackupRepository {
                 BackupState.PendingOperation(
                     operationId: snapshot.operationId,
                     digest: snapshot.snapshotReference.digest,
-                    startedAt: now
+                    startedAt: now,
+                    acceptedTermsId: snapshot.acceptedTermsId
                 )
             )
             try stateStore.save(state)
@@ -166,6 +219,7 @@ public actor BackupRepository {
                 status: outcome.status
             )
             state.lastSuccessAt = now
+            state.clearPendingPayment(for: snapshot.operationId)
             try stateStore.save(state)
             try discard(snapshot)
             return .retained(snapshot.snapshotReference)
@@ -205,17 +259,56 @@ public actor BackupRepository {
             if let row = retainedByDigest[pending.digest] {
                 state.record(
                     reference: row.snapshotReference,
-                    acceptedTermsId: row.acceptedTermsId,
+                    // Our own pin, not the operator's echo. Which terms a
+                    // stored snapshot was accepted under is not a fact a
+                    // counterparty gets to restate.
+                    acceptedTermsId: pending.acceptedTermsId ?? state.acceptedTermsId ?? "",
                     at: pending.startedAt,
                     status: .retained
                 )
                 continue
             }
-            // Not in the list. Ask about the operation itself, in case
-            // the operator distinguishes a refusal we should surface —
-            // but either way it is no longer outstanding.
-            if let outcome = try? await port.queryOutcome(operationId: pending.operationId),
-               outcome.status == .unknown || outcome.status == .unreachable {
+
+            // Not in the list yet. That is not the same as never having
+            // happened: an upload can be accepted and still in flight.
+            let outcome: BackupOutcome?
+            do {
+                outcome = try await port.queryOutcome(operationId: pending.operationId)
+            } catch {
+                // Could not ask. A failed query resolves nothing — the
+                // same rule as a failed list, and for the same reason.
+                stillPending.append(pending)
+                continue
+            }
+
+            guard let outcome else {
+                // The operator answered and has no record. Combined with
+                // its absence from the retained list, the upload did not
+                // result in retention.
+                continue
+            }
+            switch outcome.status {
+            case .retained, .alreadyRetained:
+                // Not in the list but claimed retained. Believe the
+                // digest we sent, never the one echoed back.
+                state.record(
+                    reference: try SnapshotReference(
+                        digest: pending.digest,
+                        sealedByteSize: outcome.snapshotReference?.sealedByteSize ?? 0
+                    ),
+                    acceptedTermsId: pending.acceptedTermsId ?? state.acceptedTermsId ?? "",
+                    at: pending.startedAt,
+                    status: .retained
+                )
+            case .rejected:
+                // Refused, definitively. Resolved.
+                continue
+            default:
+                // queuedLocally, submitted, accepted, unknown,
+                // unreachable — all still in flight. Resolving these
+                // negatively would compose a second snapshot on top of
+                // one the operator is still working on, and charge for
+                // both.
                 stillPending.append(pending)
             }
         }

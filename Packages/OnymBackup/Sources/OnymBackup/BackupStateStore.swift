@@ -24,6 +24,9 @@ public struct BackupState: Sendable, Equatable, Codable {
     /// `queryOutcome` resolves them — silence is not success, and the
     /// only way that stays true is if the uncertainty is durable.
     public var pendingOperations: [PendingOperation] = []
+    /// Set while a snapshot waits on a purchase. Its sealed bytes must
+    /// survive until the retry resolves.
+    public var awaitingPayment: PendingPayment?
     public var receipts: [Data] = []
 
     public struct RecordedSnapshot: Sendable, Equatable, Codable {
@@ -38,9 +41,35 @@ public struct BackupState: Sendable, Equatable, Codable {
         public let operationId: String
         public let digest: String
         public let startedAt: Date
+        /// The terms *we* pinned when this went out. Reconciliation
+        /// records this rather than the digest an operator echoes back,
+        /// so a counterparty cannot rewrite which terms a stored
+        /// snapshot was accepted under.
+        public var acceptedTermsId: String?
+    }
+
+    /// A snapshot the operator refused for payment, kept across launches.
+    ///
+    /// A purchase routinely outlives the process — StoreKit will happily
+    /// resolve one after a relaunch — and without this the retry has
+    /// nothing to send. It would re-compose, mint a new salt, and the
+    /// person would pay to store the same history a second time.
+    public struct PendingPayment: Sendable, Equatable, Codable {
+        public let operationId: String
+        public let digest: String
+        public let sealedByteSize: Int
+        public let sealedBytesFilename: String
+        public let acceptedTermsId: String
+        public let supersedesDigest: String?
+        public let supersedesByteSize: Int?
+        public let refusedAt: Date
     }
 
     public init() {}
+
+    mutating func clearPendingPayment(for operationId: String) {
+        if awaitingPayment?.operationId == operationId { awaitingPayment = nil }
+    }
 
     /// Append a retention to the chain, replacing any earlier record of
     /// the same digest so a reconciliation cannot double-count what an
