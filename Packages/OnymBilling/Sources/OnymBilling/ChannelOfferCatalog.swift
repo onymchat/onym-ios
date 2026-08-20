@@ -73,8 +73,6 @@ public struct ChannelOfferCatalog: Sendable {
         return ChannelOfferCatalog(offers: offers)
     }
 
-
-
     public func offer(forOfferId offerId: String, componentId: String) -> ChannelOffer? {
         offers.first { $0.offerId == offerId && $0.componentId == componentId }
     }

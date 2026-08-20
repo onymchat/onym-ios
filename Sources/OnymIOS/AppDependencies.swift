@@ -107,15 +107,15 @@ struct AppDependencies {
     /// renders without the discovery stack (nil under the UI-test
     /// harness — same pattern as the moderation factories).
     let makeDiscoverySettingsFlow: (@MainActor () -> DiscoverySettingsFlow)?
+    /// The consented backup operator, cheap to read. Lets the root view
+    /// tell "the operator changed" from "Settings was opened again"
+    /// without rebuilding the whole stack to find out.
+    let consentedBackupComponentId: (@MainActor () -> String?)?
     /// Settings → Device Backup. Async and optional: resolving it reads
     /// the pinned consent record and derives a seat key, and it is
     /// legitimately `nil` when no backup operator has been consented to
     /// or the identity has no recovery phrase to derive from. The
     /// section hides rather than offering a screen that cannot work.
-    /// The consented backup operator, cheap to read. Lets the root view
-    /// tell "the operator changed" from "Settings was opened again"
-    /// without rebuilding the whole stack to find out.
-    let consentedBackupComponentId: (@MainActor () -> String?)?
     let makeDeviceBackupView: (@MainActor () async -> DeviceBackupSettingsView?)?
     /// Onboarding flow factory. Non-nil whenever onboarding is
     /// AVAILABLE in this build (always in production; under

@@ -104,9 +104,11 @@ public final class DeviceBackupSettingsFlow {
         // The consented operator moved out from under this state. Nothing
         // recorded here means anything to the new one, so the only honest
         // next step is enrolment.
-        if let current = currentComponentId(),
-           let enrolled = stored.componentId,
-           current != enrolled {
+        // Includes state written before the operator was recorded at
+        // all: nil is not "matches", it is "cannot tell", and guessing
+        // in favour of proceeding is how a snapshot reaches the wrong
+        // operator. Re-enrolment is the cost, and it is one screen.
+        if currentComponentId() != stored.componentId {
             state.status = .operatorChanged
             return
         }

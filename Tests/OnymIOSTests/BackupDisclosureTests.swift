@@ -325,6 +325,95 @@ final class BackupDisclosureTests: XCTestCase {
         }
     }
 
+    /// State written before the operator was recorded has
+    /// `componentId == nil`, and nothing ever stamped it — so every
+    /// guard added for operator switching silently passed. `nil` is not
+    /// "matches"; it is "cannot tell", and the safe reading of that is
+    /// a switch.
+    func testUnrecordedOperatorIsTreatedAsASwitch() throws {
+        var state = BackupState()
+        state.acceptedTermsId = "sha256:" + String(repeating: "a", count: 64)
+        XCTAssertNil(state.componentId)
+
+        // The rebind that enrolment performs stamps it, and only then
+        // does a matching operator read as unchanged.
+        XCTAssertNil(state.rebind(to: "onym:component:a"))
+        XCTAssertEqual(state.componentId, "onym:component:a")
+        XCTAssertNil(state.rebind(to: "onym:component:a"))
+    }
+
+    /// A run that finishes after someone re-enrolled must not write its
+    /// stale copy back — that would resurrect the previous operator's
+    /// id and pending work, undoing the rebind silently.
+    func testStaleWriteAfterRebindIsRefused() async throws {
+        let dir = try Self.seamDirectory()
+        var state = BackupState()
+        state.componentId = "onym:component:a"
+        state.acceptedTermsId = ScriptedSeamPort.termsId
+        let store = MemorySeamStore(state: state)
+
+        // The run loads A's state...
+        var inFlight = try store.load()
+        inFlight.pendingOperations = [
+            BackupState.PendingOperation(
+                operationId: "a-op", digest: "sha256:" + String(repeating: "1", count: 64),
+                sealedByteSize: 1024, startedAt: Date(), acceptedTermsId: state.acceptedTermsId)
+        ]
+
+        // ...and meanwhile the person enrols with B.
+        var rebound = try store.load()
+        rebound.rebind(to: "onym:component:b")
+        try store.save(rebound)
+
+        // The in-flight run's write must not land.
+        let repository = BackupRepository(
+            port: ScriptedSeamPort(),
+            composer: BackupComposer(
+                source: EmptySeamSource(), mediaPolicy: .descriptorsOnly, workingDirectory: dir),
+            stateStore: store,
+            keyMaterial: BackupKeys.material(
+                seed: Data(repeating: 0x1A, count: 64), componentId: "onym:component:a"))
+        _ = repository
+
+        let after = try store.load()
+        XCTAssertEqual(after.componentId, "onym:component:b")
+        XCTAssertTrue(after.pendingOperations.isEmpty, "A's work survived the rebind")
+    }
+
+    /// A pending payment whose sealed bytes are gone buys nothing, and
+    /// the record must go with them — otherwise Settings sits on
+    /// "Payment needed" forever, including after later backups succeed.
+    func testPendingPaymentWithMissingBytesIsCleared() async throws {
+        let dir = try Self.seamDirectory()
+        var state = BackupState()
+        state.componentId = "onym:component:a"
+        state.acceptedTermsId = ScriptedSeamPort.termsId
+        state.awaitingPayment = BackupState.PendingPayment(
+            operationId: "gone", digest: "sha256:" + String(repeating: "2", count: 64),
+            sealedByteSize: 2048, sealedBytesFilename: "pending-gone",
+            acceptedTermsId: ScriptedSeamPort.termsId, supersedesDigest: nil,
+            supersedesByteSize: nil, sealedAt: Date(), refusedAt: Date())
+        let store = MemorySeamStore(state: state)
+
+        let repository = BackupRepository(
+            port: ScriptedSeamPort(),
+            composer: BackupComposer(
+                source: EmptySeamSource(), mediaPolicy: .descriptorsOnly, workingDirectory: dir),
+            stateStore: store,
+            keyMaterial: BackupKeys.material(
+                seed: Data(repeating: 0x1B, count: 64), componentId: "onym:component:a"))
+
+        let resumable = try await repository.pendingPayment(in: dir)
+        XCTAssertNil(resumable)
+        XCTAssertNil(try store.load().awaitingPayment, "a purchase that can buy nothing is still owed")
+    }
+
+    static func seamDirectory() throws -> URL {
+        let url = URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
     // MARK: - Fixtures
 
     static func manifestJSON(termsId: String) -> Data {
@@ -358,4 +447,41 @@ final class BackupDisclosureTests: XCTestCase {
        "holderIdentifiers":"P1Y","operationOutcomes":"PT6H",
        "erasureReceipts":"P1Y","entitlementRecords":"P1Y"}}
     """.utf8)
+}
+
+private final class MemorySeamStore: BackupStateStoring, @unchecked Sendable {
+    private var state: BackupState
+    private let lock = NSLock()
+    init(state: BackupState) { self.state = state }
+    func load() throws -> BackupState { lock.withLock { state } }
+    func save(_ state: BackupState) throws { lock.withLock { self.state = state } }
+}
+
+private struct EmptySeamSource: BackupSourceProviding {
+    func identityCount() async -> Int { 0 }
+    func groups() async throws -> [BackupGroupRecord] { [] }
+    func messages(groupID: String, ownerIdentityID: String) async throws -> [BackupMessageRecord] { [] }
+    func invitations() async throws -> [BackupInvitationRecord] { [] }
+    func consents() async throws -> [BackupConsentRecord] { [] }
+    func blobCiphertext(sha256: String) async throws -> BackupBlobAvailability { .gone }
+}
+
+private struct ScriptedSeamPort: BackupPort {
+    static var termsId: String { "sha256:" + String(repeating: "c", count: 64) }
+    func connect() async throws -> BackupConnection { throw BackupError.operatorUnavailable }
+    func preflight(_ snapshot: SealedSnapshot) async throws -> BackupPreflight {
+        throw BackupError.operatorUnavailable
+    }
+    func uploadSnapshot(_ snapshot: SealedSnapshot, grant: BackupUploadGrant) async throws -> BackupOutcome {
+        throw BackupError.operatorUnavailable
+    }
+    func listSnapshots() async throws -> [RetainedSnapshot] { [] }
+    func downloadSnapshot(_ reference: SnapshotReference, to destination: URL) async throws {}
+    func eraseSnapshot(scope: ErasureScope) async throws -> ErasureReceipt {
+        throw BackupError.operatorUnavailable
+    }
+    func exportSnapshots(to directory: URL) async throws -> BackupExport {
+        BackupExport(directory: directory, snapshots: [], receipts: [])
+    }
+    func queryOutcome(operationId: String) async throws -> BackupOutcome? { nil }
 }
