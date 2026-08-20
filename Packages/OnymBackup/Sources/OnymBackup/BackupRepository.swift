@@ -109,10 +109,20 @@ public actor BackupRepository {
 
         switch preflight {
         case .alreadyRetained(let outcome):
-            try discard(snapshot)
+            let reference = outcome.snapshotReference ?? snapshot.snapshotReference
+            // Recorded like any other retention. Skipping it would leave
+            // the next run's `supersedes` pointing at a stale ancestor —
+            // the operator holds this snapshot, whoever put it there.
+            state.record(
+                reference: reference,
+                acceptedTermsId: snapshot.acceptedTermsId,
+                at: now,
+                status: outcome.status
+            )
             state.lastSuccessAt = now
             try stateStore.save(state)
-            return .alreadyRetained(outcome.snapshotReference ?? snapshot.snapshotReference)
+            try discard(snapshot)
+            return .alreadyRetained(reference)
 
         case .granted(let grant):
             // Recorded *before* the upload, not after. If the response
@@ -138,23 +148,22 @@ public actor BackupRepository {
                 return .unknown(operationId: snapshot.operationId)
             }
 
-            state.pendingOperations.removeAll { $0.operationId == snapshot.operationId }
             guard outcome.status.isRetention else {
-                // `submitted` and `accepted` are not retention. Recording
-                // either as success is the lie this vocabulary exists to
-                // prevent.
+                // `submitted` and `accepted` are not retention, and the
+                // pending record stays. Clearing it here would drop the
+                // uncertainty on the floor — reconcile would never
+                // re-query, and "silence is not success" would hold only
+                // until the next line of code.
                 try stateStore.save(state)
                 return .unknown(operationId: snapshot.operationId)
             }
+            state.pendingOperations.removeAll { $0.operationId == snapshot.operationId }
 
-            state.snapshots.append(
-                BackupState.RecordedSnapshot(
-                    digest: snapshot.snapshotReference.digest,
-                    sealedByteSize: snapshot.snapshotReference.sealedByteSize,
-                    acceptedTermsId: snapshot.acceptedTermsId,
-                    uploadedAt: now,
-                    statusRaw: outcome.status.rawValue
-                )
+            state.record(
+                reference: snapshot.snapshotReference,
+                acceptedTermsId: snapshot.acceptedTermsId,
+                at: now,
+                status: outcome.status
             )
             state.lastSuccessAt = now
             try stateStore.save(state)
@@ -163,31 +172,50 @@ public actor BackupRepository {
         }
     }
 
-    /// Ask the operator about operations we lost track of.
+    /// Resolve operations we lost track of.
+    ///
+    /// Two sources, in order of authority. `listSnapshots` says what is
+    /// *retained*, which is the question actually being asked;
+    /// `queryOutcome` says what happened to one operation, and an
+    /// operator only keeps those for a declared window measured in hours
+    /// (§15 of the profile). Querying alone would therefore leave any
+    /// response lost for longer than that window pending forever,
+    /// re-asked on every run for the life of the install.
+    ///
+    /// So: if the digest is in the retained list, it is retained. If the
+    /// list came back and the digest is not in it, the upload did not
+    /// result in retention and the record is resolved — negatively, but
+    /// resolved. Only a list we could not fetch leaves things pending,
+    /// because that is the one case where we genuinely do not know.
     private func reconcile(_ state: inout BackupState) async throws {
         guard !state.pendingOperations.isEmpty else { return }
+
+        guard let retained = try? await port.listSnapshots() else {
+            // No list, no conclusions. Uncertainty survives a failed
+            // reconciliation rather than being resolved by it.
+            return
+        }
+        let retainedByDigest = Dictionary(
+            retained.map { ($0.snapshotReference.digest, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+
         var stillPending: [BackupState.PendingOperation] = []
         for pending in state.pendingOperations {
-            guard let outcome = try? await port.queryOutcome(operationId: pending.operationId) else {
-                // No answer, or no record. It stays pending: an
-                // operation we cannot resolve is not an operation that
-                // failed, and dropping it here would quietly convert
-                // uncertainty into a clean slate.
-                stillPending.append(pending)
+            if let row = retainedByDigest[pending.digest] {
+                state.record(
+                    reference: row.snapshotReference,
+                    acceptedTermsId: row.acceptedTermsId,
+                    at: pending.startedAt,
+                    status: .retained
+                )
                 continue
             }
-            if outcome.status.isRetention,
-               let reference = outcome.snapshotReference {
-                state.snapshots.append(
-                    BackupState.RecordedSnapshot(
-                        digest: reference.digest,
-                        sealedByteSize: reference.sealedByteSize,
-                        acceptedTermsId: state.acceptedTermsId ?? "",
-                        uploadedAt: pending.startedAt,
-                        statusRaw: outcome.status.rawValue
-                    )
-                )
-            } else if outcome.status == .unknown || outcome.status == .unreachable {
+            // Not in the list. Ask about the operation itself, in case
+            // the operator distinguishes a refusal we should surface —
+            // but either way it is no longer outstanding.
+            if let outcome = try? await port.queryOutcome(operationId: pending.operationId),
+               outcome.status == .unknown || outcome.status == .unreachable {
                 stillPending.append(pending)
             }
         }

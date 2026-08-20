@@ -40,6 +40,10 @@ public struct URLSessionBackupClient: BackupPort {
     static let perSnapshotEntryBytes = 1 << 10
     /// Transfer framing only; unrelated to the sealing chunk size.
     static let uploadChunkBytes = 8 << 20
+    /// The largest transfer chunk we will honour from a grant. A whole
+    /// chunk is buffered to sign and send it, so this is a memory bound
+    /// as much as an arithmetic one.
+    static let maxUploadChunkBytes = 64 << 20
 
     public init(
         manifest: BackupOperatorManifest,
@@ -145,15 +149,28 @@ public struct URLSessionBackupClient: BackupPort {
         _ snapshot: SealedSnapshot,
         grant: BackupUploadGrant
     ) async throws -> BackupOutcome {
+        // The grant is operator-controlled arithmetic applied to our
+        // file, so it is checked against the file before a byte moves.
+        // An over-large `chunkBytes` would overflow the offset
+        // computation and trap; a `chunkCount` one too small would
+        // upload a truncated snapshot and only fail at commit, after
+        // paying for the whole transfer.
+        let size = snapshot.snapshotReference.sealedByteSize
+        guard
+            grant.chunkBytes > 0,
+            grant.chunkBytes <= Self.maxUploadChunkBytes,
+            grant.chunkCount >= 0,
+            grant.chunkCount == (size + grant.chunkBytes - 1) / grant.chunkBytes
+        else {
+            throw BackupError.localFailure(reason: .invalidUploadGrant)
+        }
+
         let handle = try FileHandle(forReadingFrom: snapshot.sealedBytesURL)
         defer { try? handle.close() }
 
         for index in 0..<grant.chunkCount {
-            try handle.seek(toOffset: UInt64(index * grant.chunkBytes))
+            try handle.seek(toOffset: UInt64(index) * UInt64(grant.chunkBytes))
             guard let chunk = try handle.read(upToCount: grant.chunkBytes), !chunk.isEmpty else {
-                // The grant promised more chunks than the sealed file
-                // has. Uploading a short snapshot would only be caught
-                // at commit, after paying for the transfer.
                 throw BackupError.invalidReference
             }
             _ = try await send(

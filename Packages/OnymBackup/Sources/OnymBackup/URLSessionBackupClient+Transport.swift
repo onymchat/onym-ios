@@ -185,6 +185,16 @@ extension URLSessionBackupClient {
             }
         }
         if !buffer.isEmpty { try handle.write(contentsOf: buffer) }
+
+        // Short is as wrong as long. Without this a truncated body
+        // returns success and hands the caller a partial file —
+        // `exportSnapshots` re-verifies afterwards, but
+        // `downloadSnapshot` would not, and a restore is exactly where a
+        // silently-short file must not arrive.
+        guard total == maxBytes else {
+            try? FileManager.default.removeItem(at: destination)
+            throw BackupError.incompleteSnapshot
+        }
     }
 
     /// Map a non-2xx onto the domain vocabulary of §14, keeping the

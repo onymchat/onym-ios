@@ -239,6 +239,169 @@ final class BackupAdapterTests: XCTestCase {
                        "the pinned terms were silently replaced")
     }
 
+    /// `submitted` is not retention, and the pending record has to
+    /// survive it. Clearing the record here would mean reconcile never
+    /// re-queries and the uncertainty is gone — "silence is not success"
+    /// holding only until the next line of code.
+    func testNonRetentionOutcomeKeepsThePendingRecord() async throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        var state = BackupState()
+        state.acceptedTermsId = ScriptedPort.termsId
+        let stateStore = MemoryStateStore(state: state)
+        let port = ScriptedPort(
+            acceptedTermsId: ScriptedPort.termsId, paymentSatisfied: true, uploadStatus: .submitted)
+
+        let repository = BackupRepository(
+            port: port,
+            composer: BackupComposer(
+                source: EmptySource(), mediaPolicy: .descriptorsOnly, workingDirectory: dir),
+            stateStore: stateStore,
+            keyMaterial: BackupKeys.material(
+                seed: Data(repeating: 0xBB, count: 64), componentId: "onym:component:op"))
+
+        guard case .unknown = try await repository.backUp() else {
+            return XCTFail("`submitted` must not read as success")
+        }
+        let saved = try stateStore.load()
+        XCTAssertEqual(saved.pendingOperations.count, 1, "the uncertainty was discarded")
+        XCTAssertTrue(saved.snapshots.isEmpty)
+    }
+
+    /// A pending operation resolves against the retained list, which is
+    /// the authority on what is held. Without this it would be re-queried
+    /// forever once the operator's outcome record expires — the profile
+    /// keeps those for hours.
+    func testPendingResolvesAgainstTheRetainedList() async throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let digest = "sha256:" + String(repeating: "7", count: 64)
+        var state = BackupState()
+        state.acceptedTermsId = ScriptedPort.termsId
+        state.pendingOperations = [
+            BackupState.PendingOperation(operationId: "lost", digest: digest, startedAt: Date())
+        ]
+        let stateStore = MemoryStateStore(state: state)
+        let port = ScriptedPort(acceptedTermsId: ScriptedPort.termsId, paymentSatisfied: true)
+        await port.setRetained([
+            RetainedSnapshot(
+                snapshotReference: try SnapshotReference(digest: digest, sealedByteSize: 2048),
+                acceptedTermsId: ScriptedPort.termsId,
+                retainedAt: Date())
+        ])
+
+        let repository = BackupRepository(
+            port: port,
+            composer: BackupComposer(
+                source: EmptySource(), mediaPolicy: .descriptorsOnly, workingDirectory: dir),
+            stateStore: stateStore,
+            keyMaterial: BackupKeys.material(
+                seed: Data(repeating: 0xCC, count: 64), componentId: "onym:component:op"))
+        _ = try await repository.backUp()
+
+        let saved = try stateStore.load()
+        XCTAssertTrue(
+            saved.pendingOperations.allSatisfy { $0.operationId != "lost" },
+            "a resolved operation stayed pending")
+        XCTAssertTrue(saved.snapshots.contains { $0.digest == digest })
+    }
+
+    /// A list we could not fetch resolves nothing. Uncertainty must
+    /// survive a failed reconciliation rather than be cleared by it.
+    func testFailedListLeavesPendingIntact() async throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        var state = BackupState()
+        state.acceptedTermsId = ScriptedPort.termsId
+        state.pendingOperations = [
+            BackupState.PendingOperation(
+                operationId: "lost",
+                digest: "sha256:" + String(repeating: "8", count: 64),
+                startedAt: Date())
+        ]
+        let stateStore = MemoryStateStore(state: state)
+        let port = ScriptedPort(acceptedTermsId: ScriptedPort.termsId, paymentSatisfied: true)
+        await port.setListFails(true)
+
+        let repository = BackupRepository(
+            port: port,
+            composer: BackupComposer(
+                source: EmptySource(), mediaPolicy: .descriptorsOnly, workingDirectory: dir),
+            stateStore: stateStore,
+            keyMaterial: BackupKeys.material(
+                seed: Data(repeating: 0xDD, count: 64), componentId: "onym:component:op"))
+        _ = try await repository.backUp()
+
+        XCTAssertEqual(try stateStore.load().pendingOperations.count, 1)
+    }
+
+    /// A grant whose arithmetic does not describe our file is refused
+    /// before a byte is sent — an over-large chunk size would trap on
+    /// the offset computation, and an under-count would upload a
+    /// truncated snapshot that only fails at commit.
+    func testHostileUploadGrantIsRefused() async throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let sealed = dir.appending(path: "sealed")
+        try Data(repeating: 5, count: 4096).write(to: sealed)
+        let snapshot = SealedSnapshot(
+            operationId: "op",
+            snapshotReference: try SnapshotReference(
+                digest: "sha256:" + String(repeating: "a", count: 64), sealedByteSize: 4096),
+            sealedBytesURL: sealed, sealedAt: Date(),
+            acceptedTermsId: ScriptedPort.termsId)
+
+        for grant in [
+            BackupUploadGrant(uploadId: "u", chunkBytes: Int.max, chunkCount: 1,
+                              expiresAt: Date().addingTimeInterval(60)),
+            BackupUploadGrant(uploadId: "u", chunkBytes: 1024, chunkCount: 1,
+                              expiresAt: Date().addingTimeInterval(60)),
+        ] {
+            do {
+                _ = try await makeClient().uploadSnapshot(snapshot, grant: grant)
+                XCTFail("accepted a grant that does not describe the file")
+            } catch BackupError.localFailure(let reason) {
+                XCTAssertEqual(reason, .invalidUploadGrant)
+            }
+        }
+    }
+
+    /// A body shorter than the reference is a truncated file, not a
+    /// successful download.
+    func testShortDownloadIsRefused() async throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let destination = dir.appending(path: "snapshot")
+        StubURLProtocol.set { request in
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (Data(repeating: 1, count: 10), response)
+        }
+        let reference = try SnapshotReference(
+            digest: "sha256:" + String(repeating: "a", count: 64), sealedByteSize: 4096)
+        do {
+            try await makeClient().downloadSnapshot(reference, to: destination)
+            XCTFail("a short body was accepted")
+        } catch BackupError.incompleteSnapshot {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+        }
+    }
+
+    /// An unreadable-but-present state file must not read as a first
+    /// run: the next save would overwrite the pinned terms and every
+    /// pending operation with an empty file.
+    func testUnreadableStateFileThrowsRatherThanReadingAsEmpty() throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appending(path: "state.json")
+        try Data("not json".utf8).write(to: url)
+        XCTAssertThrowsError(try FileBackupStateStore(url: url).load())
+
+        // Absent is still a first run.
+        let fresh = dir.appending(path: "absent.json")
+        XCTAssertEqual(try FileBackupStateStore(url: fresh).load(), BackupState())
+    }
+
     // MARK: - Fixtures
 
     static func manifest(maximumRetainedSnapshots: Int?) throws -> BackupOperatorManifest {
@@ -295,13 +458,25 @@ private actor ScriptedPort: BackupPort {
     private let acceptedTermsId: String
     private var paymentSatisfied: Bool
     private let uploadFails: Bool
+    private let uploadStatus: BackupOutcomeStatus
+    private var retained: [RetainedSnapshot] = []
+    private var listFails = false
     private(set) var seenOperationIds: [String] = []
 
-    init(acceptedTermsId: String, paymentSatisfied: Bool = false, uploadFails: Bool = false) {
+    init(
+        acceptedTermsId: String,
+        paymentSatisfied: Bool = false,
+        uploadFails: Bool = false,
+        uploadStatus: BackupOutcomeStatus = .retained
+    ) {
         self.acceptedTermsId = acceptedTermsId
         self.paymentSatisfied = paymentSatisfied
         self.uploadFails = uploadFails
+        self.uploadStatus = uploadStatus
     }
+
+    func setRetained(_ rows: [RetainedSnapshot]) { retained = rows }
+    func setListFails(_ value: Bool) { listFails = value }
 
     func allowPayment() { paymentSatisfied = true }
 
@@ -339,11 +514,14 @@ private actor ScriptedPort: BackupPort {
         return BackupOutcome(
             operationId: snapshot.operationId,
             componentId: "onym:component:op",
-            status: .retained,
+            status: uploadStatus,
             snapshotReference: snapshot.snapshotReference)
     }
 
-    func listSnapshots() async throws -> [RetainedSnapshot] { [] }
+    func listSnapshots() async throws -> [RetainedSnapshot] {
+        if listFails { throw BackupError.operatorUnavailable }
+        return retained
+    }
     func downloadSnapshot(_ reference: SnapshotReference, to destination: URL) async throws {}
     func eraseSnapshot(scope: ErasureScope) async throws -> ErasureReceipt {
         throw BackupError.operatorUnavailable

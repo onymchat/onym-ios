@@ -41,6 +41,27 @@ public struct BackupState: Sendable, Equatable, Codable {
     }
 
     public init() {}
+
+    /// Append a retention to the chain, replacing any earlier record of
+    /// the same digest so a reconciliation cannot double-count what an
+    /// upload already recorded.
+    mutating func record(
+        reference: SnapshotReference,
+        acceptedTermsId: String,
+        at date: Date,
+        status: BackupOutcomeStatus
+    ) {
+        snapshots.removeAll { $0.digest == reference.digest }
+        snapshots.append(
+            RecordedSnapshot(
+                digest: reference.digest,
+                sealedByteSize: reference.sealedByteSize,
+                acceptedTermsId: acceptedTermsId,
+                uploadedAt: date,
+                statusRaw: status.rawValue
+            )
+        )
+    }
 }
 
 /// Persists `BackupState`.
@@ -58,13 +79,25 @@ public struct FileBackupStateStore: BackupStateStoring {
     }
 
     public func load() throws -> BackupState {
-        guard let data = try? Data(contentsOf: url) else { return BackupState() }
+        // Absent is a first run. *Unreadable* is not: an I/O error, or a
+        // read attempted while the device is locked and the file is under
+        // complete protection, would otherwise return an empty state that
+        // the next save writes over the real one — dropping the pinned
+        // terms and every pending operation. Exactly what the corrupt
+        // branch below refuses, arrived at by a different door.
+        guard FileManager.default.fileExists(atPath: url.path) else { return BackupState() }
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch {
+            throw BackupError.localFailure(reason: .stateUnreadable)
+        }
         guard let state = try? JSONDecoder().decode(BackupState.self, from: data) else {
             // A corrupt state file must not read as "no backup
             // configured": that would silently drop the pinned terms and
             // the pending-operation list, and the next upload would go
             // out under terms nobody re-consented to.
-            throw BackupError.localFailure(reason: .archiveUnreadable)
+            throw BackupError.localFailure(reason: .stateUnreadable)
         }
         return state
     }
