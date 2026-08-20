@@ -343,41 +343,46 @@ final class BackupDisclosureTests: XCTestCase {
     }
 
     /// A run that finishes after someone re-enrolled must not write its
-    /// stale copy back — that would resurrect the previous operator's
-    /// id and pending work, undoing the rebind silently.
+    /// stale copy back — that would resurrect the previous operator's id
+    /// and pending work, undoing the rebind silently.
+    ///
+    /// The previous version of this test built a repository, never
+    /// called it, and asserted state it had saved itself. It passed
+    /// vacuously and was exactly the test that should have caught
+    /// `backUp` still using raw saves. This one drives `backUp` and has
+    /// the *port* perform the re-enrolment mid-run, which is when it
+    /// really happens: during one of the awaits.
     func testStaleWriteAfterRebindIsRefused() async throws {
         let dir = try Self.seamDirectory()
         var state = BackupState()
-        state.componentId = "onym:component:a"
-        state.acceptedTermsId = ScriptedSeamPort.termsId
-        let store = MemorySeamStore(state: state)
-
-        // The run loads A's state...
-        var inFlight = try store.load()
-        inFlight.pendingOperations = [
+        state.componentId = "onym:component:op"
+        state.acceptedTermsId = RebindingPort.termsId
+        state.pendingOperations = [
             BackupState.PendingOperation(
                 operationId: "a-op", digest: "sha256:" + String(repeating: "1", count: 64),
-                sealedByteSize: 1024, startedAt: Date(), acceptedTermsId: state.acceptedTermsId)
+                sealedByteSize: 1024, startedAt: Date(),
+                acceptedTermsId: RebindingPort.termsId)
         ]
+        let store = MemorySeamStore(state: state)
 
-        // ...and meanwhile the person enrols with B.
-        var rebound = try store.load()
-        rebound.rebind(to: "onym:component:b")
-        try store.save(rebound)
-
-        // The in-flight run's write must not land.
+        // `connect()` rebinds the store to a different operator, standing
+        // in for the person completing enrolment while this run is in
+        // flight.
+        let port = RebindingPort(store: store)
         let repository = BackupRepository(
-            port: ScriptedSeamPort(),
+            port: port,
             composer: BackupComposer(
                 source: EmptySeamSource(), mediaPolicy: .descriptorsOnly, workingDirectory: dir),
             stateStore: store,
             keyMaterial: BackupKeys.material(
-                seed: Data(repeating: 0x1A, count: 64), componentId: "onym:component:a"))
-        _ = repository
+                seed: Data(repeating: 0x1A, count: 64), componentId: "onym:component:op"))
+
+        _ = try? await repository.backUp()
 
         let after = try store.load()
-        XCTAssertEqual(after.componentId, "onym:component:b")
-        XCTAssertTrue(after.pendingOperations.isEmpty, "A's work survived the rebind")
+        XCTAssertEqual(after.componentId, "onym:component:b", "the rebind was undone")
+        XCTAssertTrue(after.pendingOperations.isEmpty, "operator A's work was resurrected")
+        XCTAssertNil(after.acceptedTermsId, "the new operator's enrolment was overwritten")
     }
 
     /// A pending payment whose sealed bytes are gone buys nothing, and
@@ -387,16 +392,16 @@ final class BackupDisclosureTests: XCTestCase {
         let dir = try Self.seamDirectory()
         var state = BackupState()
         state.componentId = "onym:component:a"
-        state.acceptedTermsId = ScriptedSeamPort.termsId
+        state.acceptedTermsId = RebindingPort.termsId
         state.awaitingPayment = BackupState.PendingPayment(
             operationId: "gone", digest: "sha256:" + String(repeating: "2", count: 64),
             sealedByteSize: 2048, sealedBytesFilename: "pending-gone",
-            acceptedTermsId: ScriptedSeamPort.termsId, supersedesDigest: nil,
+            acceptedTermsId: RebindingPort.termsId, supersedesDigest: nil,
             supersedesByteSize: nil, sealedAt: Date(), refusedAt: Date())
         let store = MemorySeamStore(state: state)
 
         let repository = BackupRepository(
-            port: ScriptedSeamPort(),
+            port: RebindingPort(store: MemorySeamStore(state: BackupState())),
             composer: BackupComposer(
                 source: EmptySeamSource(), mediaPolicy: .descriptorsOnly, workingDirectory: dir),
             stateStore: store,
@@ -466,9 +471,45 @@ private struct EmptySeamSource: BackupSourceProviding {
     func blobCiphertext(sha256: String) async throws -> BackupBlobAvailability { .gone }
 }
 
-private struct ScriptedSeamPort: BackupPort {
-    static var termsId: String { "sha256:" + String(repeating: "c", count: 64) }
-    func connect() async throws -> BackupConnection { throw BackupError.operatorUnavailable }
+
+/// Performs a re-enrolment during `connect()`, which is where one
+/// really lands: inside one of `backUp`'s awaits.
+private struct RebindingPort: BackupPort {
+    /// The digest the fixture terms actually hash to, so the run's
+    /// terms check passes and it proceeds to a write.
+    static var termsId: String {
+        (try? BackupTerms.decode(raw: BackupDisclosureTests.termsJSON).termsId) ?? ""
+    }
+    let store: any BackupStateStoring
+
+    func connect() async throws -> BackupConnection {
+        var rebound = try store.load()
+        rebound.rebind(to: "onym:component:b")
+        rebound.acceptedTermsId = nil
+        try store.save(rebound)
+
+        // And then *succeed*, reporting the operator the run still
+        // believes it is talking to. This is the whole point: an earlier
+        // version of this port threw here, so `backUp` unwound before it
+        // ever reached a save and the test passed with the bug
+        // reinstated. The run has to get as far as writing.
+        let terms = try BackupTerms.decode(raw: BackupDisclosureTests.termsJSON)
+        return BackupConnection(
+            manifest: try BackupOperatorManifest(
+                manifest: SignedServiceManifest(
+                    raw: BackupDisclosureTests.manifestJSON(termsId: terms.termsId))),
+            profile: BackupImplementationProfile(
+                implementationVersion: 1,
+                implementationProfileId: BackupProfile.implementationProfileId,
+                backupProfileId: BackupProfile.portableProfileId,
+                digestSuite: BackupProfile.digestSuite,
+                sealingSuite: BackupProfile.sealingSuite,
+                incrementModel: BackupProfile.incrementModel,
+                authentication: [BackupProfile.authentication],
+                paymentRefusal: BackupProfile.paymentRefusal),
+            terms: terms)
+    }
+
     func preflight(_ snapshot: SealedSnapshot) async throws -> BackupPreflight {
         throw BackupError.operatorUnavailable
     }
@@ -484,4 +525,41 @@ private struct ScriptedSeamPort: BackupPort {
         BackupExport(directory: directory, snapshots: [], receipts: [])
     }
     func queryOutcome(operationId: String) async throws -> BackupOutcome? { nil }
+}
+
+/// A pending payment sealed under terms that have since been superseded
+/// can never be sent, so the record must go with them.
+extension BackupDisclosureTests {
+    func testPendingPaymentUnderSupersededTermsIsCleared() async throws {
+        let dir = try Self.seamDirectory()
+        let sealed = dir.appending(path: "pending-old")
+        try Data(repeating: 7, count: 32).write(to: sealed)
+
+        var state = BackupState()
+        state.componentId = "onym:component:op"
+        state.acceptedTermsId = "sha256:" + String(repeating: "n", count: 64)
+        state.awaitingPayment = BackupState.PendingPayment(
+            operationId: "old", digest: "sha256:" + String(repeating: "2", count: 64),
+            sealedByteSize: 32, sealedBytesFilename: "pending-old",
+            // Pinned to the *previous* terms.
+            acceptedTermsId: "sha256:" + String(repeating: "o", count: 64),
+            supersedesDigest: nil, supersedesByteSize: nil,
+            sealedAt: Date(), refusedAt: Date())
+        let store = MemorySeamStore(state: state)
+
+        let repository = BackupRepository(
+            port: RebindingPort(store: MemorySeamStore(state: BackupState())),
+            composer: BackupComposer(
+                source: EmptySeamSource(), mediaPolicy: .descriptorsOnly, workingDirectory: dir),
+            stateStore: store,
+            keyMaterial: BackupKeys.material(
+                seed: Data(repeating: 0x2B, count: 64), componentId: "onym:component:op"))
+
+        let resumable = try await repository.pendingPayment(in: dir)
+        XCTAssertNil(resumable)
+        XCTAssertNil(try store.load().awaitingPayment, "Settings would sit on Payment needed forever")
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: sealed.path),
+            "sealed bytes nobody will ever send were kept")
+    }
 }

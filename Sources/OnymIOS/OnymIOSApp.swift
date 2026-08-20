@@ -841,6 +841,16 @@ struct OnymIOSApp: App {
         let identities = identityRepository
         let seatAccessKeys = IdentitySeatAccessKeys(identities: identities)
         let channelOfferCatalog = ChannelOfferCatalog.bundled()
+        if !channelOfferCatalog.rejectedProductIds.isEmpty {
+            // A clash makes both offers unsellable, which is safe but
+            // invisible — a paid offer would simply never resolve, with
+            // nothing to say why. Logged always, and fatal in DEBUG,
+            // because the catalog is committed and a duplicate there is
+            // a mistake to fix rather than a condition to tolerate.
+            let clashing = channelOfferCatalog.rejectedProductIds.joined(separator: ", ")
+            print("[billing] channel offers dropped for duplicate productId: \(clashing)")
+            assertionFailure("duplicate productId in ChannelOffers.json: \(clashing)")
+        }
         // No temporary-directory fallback. Purchased credentials there
         // would sit somewhere the OS purges and without complete file
         // protection, unlike everything else in the backup directory —

@@ -62,6 +62,11 @@ public actor BackupRepository {
         defer { isRunning = false }
 
         var state = try stateStore.load()
+        // Captured before the first suspension. Every write below is
+        // conditional on the enrolment still being this one — `backUp`
+        // awaits `connect`, `reconcile` and `compose`, and a
+        // re-enrolment can land during any of them.
+        let enrolled = state.componentId
 
         guard let acceptedTermsId = state.acceptedTermsId else {
             // Nothing has been consented to. Enrolment is a decision, and
@@ -82,7 +87,7 @@ public actor BackupRepository {
         // Fresh consent is a screen, not an inference.
         if let mismatch = try await operatorOrTermsMismatch(state: state, now: now) {
             state.lastAttemptAt = now
-            try stateStore.save(state)
+            try commit(state, expecting: enrolled)
             return mismatch
         }
         _ = acceptedTermsId
@@ -102,7 +107,7 @@ public actor BackupRepository {
         // rather than showing a silent no-op.
         guard state.pendingOperations.isEmpty else {
             state.lastAttemptAt = now
-            try stateStore.save(state)
+            try commit(state, expecting: enrolled)
             return .awaitingReconciliation(
                 operationIds: state.pendingOperations.map(\.operationId))
         }
@@ -126,7 +131,7 @@ public actor BackupRepository {
             now: now
         )
         state.lastAttemptAt = now
-        try stateStore.save(state)
+        try commit(state, expecting: enrolled)
         return try await place(snapshot, state: &state, now: now)
     }
 
@@ -141,14 +146,26 @@ public actor BackupRepository {
         guard let pending = state.awaitingPayment else { return nil }
         let url = (workingDirectory ?? composer.workingDirectory)
             .appending(path: pending.sealedBytesFilename)
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            // The bytes are gone, so there is nothing to retry — and the
-            // record has to go with them. Leaving it would strand the
-            // settings screen on "Payment needed" forever, including
-            // after later backups succeed, for a purchase that can no
-            // longer buy anything.
+        // Two ways a pending payment stops being retriable, and both
+        // have to clear the record — otherwise Settings sits on
+        // "Payment needed" forever, with no offers to show and no route
+        // to enrolment, for a purchase that can no longer buy anything.
+        let bytesGone = !FileManager.default.fileExists(atPath: url.path)
+        // The second door, which the missing-bytes fix did not cover:
+        // terms re-accepted under the same operator. `retry` correctly
+        // refuses a snapshot pinned to superseded terms, and refusing
+        // forever without clearing is the same stranding by a different
+        // route.
+        let termsSuperseded = pending.acceptedTermsId != state.acceptedTermsId
+        guard !bytesGone, !termsSuperseded else {
             state.awaitingPayment = nil
             try stateStore.save(state)
+            if !bytesGone {
+                // Sealed under terms nobody is enrolled under now. It
+                // will never be sent, and it is ciphertext nobody will
+                // claim.
+                try? FileManager.default.removeItem(at: url)
+            }
             return nil
         }
         return SealedSnapshot(

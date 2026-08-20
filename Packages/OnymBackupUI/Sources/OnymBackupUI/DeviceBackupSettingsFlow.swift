@@ -155,6 +155,11 @@ public final class DeviceBackupSettingsFlow {
                     state.status = .paymentRequired(offerIds: offerIds)
                     return
                 default:
+                    // Anything else — terms moved under it, operator
+                    // changed — means this snapshot is not sendable.
+                    // `pendingPayment()` has already cleared the record
+                    // in those cases, so falling through to compose is
+                    // safe rather than leaving a stale one behind.
                     break
                 }
             }
