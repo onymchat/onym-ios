@@ -587,6 +587,110 @@ final class BackupAdapterTests: XCTestCase {
             "a partial file was left at a caller-owned path")
     }
 
+    /// Reconciling first only prevents double storage if failing to
+    /// reconcile also stops us. Otherwise a run that cannot reach the
+    /// operator mints a fresh salt and digest every time, and the
+    /// operator retains each one beside the copy we lost track of.
+    func testUnreconciledWorkBlocksComposition() async throws {
+        let dir = try Self.directory()
+        var state = BackupState()
+        state.acceptedTermsId = ScriptedPort.termsId
+        state.pendingOperations = [
+            BackupState.PendingOperation(
+                operationId: "lost", digest: "sha256:" + String(repeating: "9", count: 64),
+                sealedByteSize: 2048, startedAt: Date(), acceptedTermsId: ScriptedPort.termsId)
+        ]
+        let stateStore = MemoryStateStore(state: state)
+        let port = ScriptedPort(acceptedTermsId: ScriptedPort.termsId, paymentSatisfied: true)
+        await port.setListFails(true)
+
+        let result = try await Self.repository(port: port, store: stateStore, dir: dir).backUp()
+        guard case .awaitingReconciliation(let ids) = result else {
+            return XCTFail("composed a new snapshot over unresolved work: \(result)")
+        }
+        XCTAssertEqual(ids, ["lost"])
+        let seen = await port.seenOperationIds
+        XCTAssertTrue(seen.isEmpty, "a snapshot was preflighted despite unresolved work")
+    }
+
+    /// A pending operation resolved later is still older. Appending it
+    /// to the tail would make the next snapshot supersede a stale
+    /// ancestor.
+    func testReconciledRetentionDoesNotBecomeTheNewestAncestor() throws {
+        var state = BackupState()
+        let older = try SnapshotReference(
+            digest: "sha256:" + String(repeating: "1", count: 64), sealedByteSize: 1024)
+        let newer = try SnapshotReference(
+            digest: "sha256:" + String(repeating: "2", count: 64), sealedByteSize: 2048)
+
+        state.record(reference: newer, acceptedTermsId: "t", at: Date(), status: .retained)
+        // Resolved afterwards, but uploaded before.
+        state.record(
+            reference: older, acceptedTermsId: "t",
+            at: Date().addingTimeInterval(-3600), status: .retained)
+
+        XCTAssertEqual(state.newestSnapshot?.digest, newer.digest)
+        XCTAssertEqual(state.snapshots.map(\.digest), [older.digest, newer.digest])
+    }
+
+    /// Resolving an operation must also close out any purchase it was
+    /// waiting on, or the caller is stranded buying storage for a
+    /// snapshot the operator already holds.
+    func testResolvedOperationClearsThePendingPurchase() async throws {
+        let dir = try Self.directory()
+        var state = BackupState()
+        state.acceptedTermsId = ScriptedPort.termsId
+        let stateStore = MemoryStateStore(state: state)
+        let port = ScriptedPort(acceptedTermsId: ScriptedPort.termsId)
+
+        guard case .paymentRequired(_, _, let pending) =
+            try await Self.repository(port: port, store: stateStore, dir: dir).backUp()
+        else {
+            return XCTFail("expected a payment refusal")
+        }
+
+        // The operator turns out to hold it after all.
+        var withPending = try stateStore.load()
+        withPending.pendingOperations = [
+            BackupState.PendingOperation(
+                operationId: pending.operationId,
+                digest: pending.snapshotReference.digest,
+                sealedByteSize: pending.snapshotReference.sealedByteSize,
+                startedAt: Date(), acceptedTermsId: ScriptedPort.termsId)
+        ]
+        try stateStore.save(withPending)
+        await port.setRetained([
+            RetainedSnapshot(
+                snapshotReference: pending.snapshotReference,
+                acceptedTermsId: ScriptedPort.termsId, retainedAt: Date())
+        ])
+        await port.setPaymentSatisfied(true)
+
+        let repository = Self.repository(port: port, store: stateStore, dir: dir)
+        _ = try await repository.backUp()
+        XCTAssertNil(try stateStore.load().awaitingPayment, "still owes a purchase it does not need")
+        let resumable = try await repository.pendingPayment(in: dir)
+        XCTAssertNil(resumable)
+    }
+
+    /// Two interleaved runs must not each save a stale copy over the
+    /// other — the loser would take the winner's pending record with it,
+    /// and that record is the whole uncertainty design.
+    func testConcurrentRunsAreSerialized() async throws {
+        let dir = try Self.directory()
+        var state = BackupState()
+        state.acceptedTermsId = ScriptedPort.termsId
+        let stateStore = MemoryStateStore(state: state)
+        let port = ScriptedPort(acceptedTermsId: ScriptedPort.termsId, paymentSatisfied: true)
+        let repository = Self.repository(port: port, store: stateStore, dir: dir)
+
+        async let first = repository.backUp()
+        async let second = repository.backUp()
+        let results = try await [first, second]
+        XCTAssertEqual(results.filter { $0 == .alreadyRunning }.count, 1,
+                       "both runs proceeded concurrently")
+    }
+
     // MARK: - Fixtures
 
     static func directory() throws -> URL {
@@ -687,6 +791,7 @@ private actor ScriptedPort: BackupPort {
     func setListFails(_ value: Bool) { listFails = value }
     func setQueryOutcome(_ outcome: BackupOutcome?) { queryOutcome = outcome }
     func setQueryFails(_ value: Bool) { queryFails = value }
+    func setPaymentSatisfied(_ value: Bool) { paymentSatisfied = value }
     func setAlreadyRetainedEcho(_ reference: SnapshotReference) { alreadyRetainedEcho = reference }
 
     func allowPayment() { paymentSatisfied = true }

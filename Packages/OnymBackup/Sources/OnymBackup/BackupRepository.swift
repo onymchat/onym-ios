@@ -10,6 +10,16 @@ public actor BackupRepository {
     private let stateStore: any BackupStateStoring
     private let keyMaterial: BackupKeyMaterial
 
+    /// Set while a run is in flight.
+    ///
+    /// Actor reentrancy is real: `backUp` loads state at entry and saves
+    /// across many `await port.*` suspension points, so two interleaved
+    /// runs would each save their own stale copy — and the one that lost
+    /// would take the other's just-written pending record with it. That
+    /// record is the entire uncertainty design, so runs are serialized
+    /// rather than merged.
+    private var isRunning = false
+
     public init(
         port: any BackupPort,
         composer: BackupComposer,
@@ -33,10 +43,19 @@ public actor BackupRepository {
         case termsChanged(currentTermsId: String?)
         /// The request went out and we never learned what happened.
         case unknown(operationId: String)
+        /// Earlier work is unresolved and could not be reconciled, so
+        /// nothing new was composed.
+        case awaitingReconciliation(operationIds: [String])
+        /// Another run is already in flight.
+        case alreadyRunning
     }
 
     /// Compose a fresh snapshot and try to place it.
     public func backUp(now: Date = Date()) async throws -> RunResult {
+        guard !isRunning else { return .alreadyRunning }
+        isRunning = true
+        defer { isRunning = false }
+
         var state = try stateStore.load()
 
         // Reconcile before adding to the pile. An operation whose result
@@ -44,6 +63,20 @@ public actor BackupRepository {
         // second snapshot on top of an unresolved first is how a person
         // ends up paying to store the same history twice.
         try await reconcile(&state)
+
+        // And if it is *still* unresolved, do not compose. Reconciling
+        // first only prevents double storage if failing to reconcile
+        // also stops us — otherwise a run that cannot reach the operator
+        // mints a fresh salt and digest every time, and the operator
+        // retains each one beside the copy we lost track of. The caller
+        // is told, so a UI can say "checking on an earlier backup"
+        // rather than showing a silent no-op.
+        guard state.pendingOperations.isEmpty else {
+            state.lastAttemptAt = now
+            try stateStore.save(state)
+            return .awaitingReconciliation(
+                operationIds: state.pendingOperations.map(\.operationId))
+        }
 
         guard let acceptedTermsId = state.acceptedTermsId else {
             // Nothing has been consented to. Enrolment is a decision, and
@@ -63,7 +96,7 @@ public actor BackupRepository {
         let snapshot = try await composer.compose(
             keyMaterial: keyMaterial,
             acceptedTermsId: acceptedTermsId,
-            supersedes: try state.snapshots.last.map {
+            supersedes: try state.newestSnapshot.map {
                 // `try?` here would turn an unreadable ancestor into a
                 // snapshot claiming to supersede nothing, quietly
                 // breaking the chain. The store refuses to *read*
@@ -89,9 +122,10 @@ public actor BackupRepository {
     /// nothing to retry, and reporting a pending payment we cannot honour
     /// would strand the caller in a purchase flow with no snapshot at the
     /// end of it.
-    public func pendingPayment(in workingDirectory: URL) throws -> SealedSnapshot? {
+    public func pendingPayment(in workingDirectory: URL? = nil) throws -> SealedSnapshot? {
         guard let pending = try stateStore.load().awaitingPayment else { return nil }
-        let url = workingDirectory.appending(path: pending.sealedBytesFilename)
+        let url = (workingDirectory ?? composer.workingDirectory)
+            .appending(path: pending.sealedBytesFilename)
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         return SealedSnapshot(
             operationId: pending.operationId,
@@ -116,6 +150,10 @@ public actor BackupRepository {
     /// and would charge the person for a second copy of the same
     /// history.
     public func retry(_ snapshot: SealedSnapshot, now: Date = Date()) async throws -> RunResult {
+        guard !isRunning else { return .alreadyRunning }
+        isRunning = true
+        defer { isRunning = false }
+
         var state = try stateStore.load()
         return try await place(snapshot, state: &state, now: now)
     }
@@ -184,7 +222,7 @@ public actor BackupRepository {
             state.lastSuccessAt = now
             state.clearPendingPayment(for: snapshot.operationId)
             try stateStore.save(state)
-            try discard(snapshot)
+            discard(snapshot)
             return .alreadyRetained(reference)
 
         case .granted(let grant):
@@ -233,7 +271,7 @@ public actor BackupRepository {
             state.lastSuccessAt = now
             state.clearPendingPayment(for: snapshot.operationId)
             try stateStore.save(state)
-            try discard(snapshot)
+            discard(snapshot)
             return .retained(snapshot.snapshotReference)
         }
     }
@@ -285,6 +323,7 @@ public actor BackupRepository {
                     at: pending.startedAt,
                     status: .retained
                 )
+                resolve(pending, in: &state)
                 continue
             }
 
@@ -304,6 +343,7 @@ public actor BackupRepository {
                 // The operator answered and has no record. Combined with
                 // its absence from the retained list, the upload did not
                 // result in retention.
+                resolve(pending, in: &state, retained: false)
                 continue
             }
             switch outcome.status {
@@ -337,8 +377,11 @@ public actor BackupRepository {
                     at: pending.startedAt,
                     status: .retained
                 )
+                resolve(pending, in: &state)
             case .rejected:
-                // Refused, definitively. Resolved.
+                // Refused, definitively. Resolved — including any
+                // purchase it was waiting on, which buys nothing now.
+                resolve(pending, in: &state, retained: false)
                 continue
             default:
                 // queuedLocally, submitted, accepted, unknown,
@@ -353,10 +396,39 @@ public actor BackupRepository {
         try stateStore.save(state)
     }
 
-    /// Remove sealed bytes once they are no longer needed. Failing to
-    /// delete is not worth failing a completed backup over; the working
-    /// directory is swept on the next run.
-    private func discard(_ snapshot: SealedSnapshot) throws {
+    /// Close out a pending operation: clear any purchase it was waiting
+    /// on, drop its sealed bytes, and — when it landed — record that a
+    /// backup succeeded.
+    ///
+    /// Without the first part, `pendingPayment(in:)` keeps reporting a
+    /// purchase owed for a snapshot the operator already holds, which is
+    /// precisely the stranding its own doc comment warns about.
+    private func resolve(
+        _ pending: BackupState.PendingOperation,
+        in state: inout BackupState,
+        retained: Bool = true
+    ) {
+        if let payment = state.awaitingPayment, payment.operationId == pending.operationId {
+            discardSealedBytes(named: payment.sealedBytesFilename)
+            state.awaitingPayment = nil
+        }
+        if retained {
+            // A backup that landed is a backup that landed, whichever
+            // run found out about it.
+            state.lastSuccessAt = max(state.lastSuccessAt ?? pending.startedAt, pending.startedAt)
+        }
+    }
+
+    /// Remove sealed bytes once they are no longer needed.
+    ///
+    /// Not throwing: failing to delete is not worth failing a completed
+    /// backup over, and the working directory is swept on the next run.
+    private func discard(_ snapshot: SealedSnapshot) {
         try? FileManager.default.removeItem(at: snapshot.sealedBytesURL)
+    }
+
+    private func discardSealedBytes(named filename: String) {
+        try? FileManager.default.removeItem(
+            at: composer.workingDirectory.appending(path: filename))
     }
 }

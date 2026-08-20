@@ -38,8 +38,6 @@ public struct URLSessionBackupClient: BackupPort {
     /// figure is inside the signed manifest the person consented to.
     static let maxJSONResponseBytes = 4 << 20
     static let perSnapshotEntryBytes = 1 << 10
-    /// Transfer framing only; unrelated to the sealing chunk size.
-    static let uploadChunkBytes = 8 << 20
     /// The largest transfer chunk we will honour from a grant. A whole
     /// chunk is buffered to sign and send it, so this is a memory bound
     /// as much as an arithmetic one.

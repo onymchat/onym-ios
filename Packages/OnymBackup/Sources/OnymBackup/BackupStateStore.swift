@@ -99,6 +99,16 @@ public struct BackupState: Sendable, Equatable, Codable {
                 statusRaw: status.rawValue
             )
         )
+        // Kept in time order, not resolution order. A pending operation
+        // resolved later is still *older*, and appending it to the tail
+        // would make the next snapshot supersede a stale ancestor.
+        snapshots.sort { $0.uploadedAt < $1.uploadedAt }
+    }
+
+    /// The snapshot a new one should supersede: the newest by upload
+    /// time, which is not necessarily the last one recorded.
+    var newestSnapshot: RecordedSnapshot? {
+        snapshots.max { $0.uploadedAt < $1.uploadedAt }
     }
 }
 
