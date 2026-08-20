@@ -6,6 +6,7 @@ import OnymIdentityUI
 import OnymRecovery
 import OnymChatsCore
 import OnymModeration
+import OnymBackupUI
 import OnymModerationUI
 import OnymDiscovery
 
@@ -46,6 +47,13 @@ public struct SettingsView: View {
     /// moderation/discovery factories. The closure fires only after
     /// the confirmation alert.
     let onRestartOnboarding: (@MainActor () -> Void)?
+    /// Settings → Device Backup. Optional so the section hides when the
+    /// app has not wired it — same pattern as moderation and discovery.
+    ///
+    /// Note the name: `makeBackupFlow` above is the *recovery phrase*
+    /// backup, which is a different thing entirely. One protects the
+    /// key; this protects the history.
+    let makeDeviceBackupView: (@MainActor () -> DeviceBackupSettingsView)?
 
     public init(
         makeBackupFlow: @escaping @MainActor () -> RecoveryPhraseBackupFlow,
@@ -59,7 +67,8 @@ public struct SettingsView: View {
         makeModerationConsentFlow: (@MainActor (ModerationConsentFlow.Mode) -> ModerationConsentFlow)? = nil,
         makeModerationCaseFlow: (@MainActor (CaseNotice) -> ModerationCaseFlow)? = nil,
         makeDiscoverySettingsFlow: (@MainActor () -> DiscoverySettingsFlow)? = nil,
-        onRestartOnboarding: (@MainActor () -> Void)? = nil
+        onRestartOnboarding: (@MainActor () -> Void)? = nil,
+        makeDeviceBackupView: (@MainActor () -> DeviceBackupSettingsView)? = nil
     ) {
         self.makeBackupFlow = makeBackupFlow
         self.makeRelayerSettingsFlow = makeRelayerSettingsFlow
@@ -73,6 +82,7 @@ public struct SettingsView: View {
         self.makeModerationCaseFlow = makeModerationCaseFlow
         self.makeDiscoverySettingsFlow = makeDiscoverySettingsFlow
         self.onRestartOnboarding = onRestartOnboarding
+        self.makeDeviceBackupView = makeDeviceBackupView
     }
 
     @State private var showRecoveryPhrase = false
@@ -210,6 +220,31 @@ public struct SettingsView: View {
                     .accessibilityIdentifier("settings.blossom_relays_row")
                 }
                 SettingsFootnote("Nostr relays and Blossom servers carry your messages and media. Replace them with your own instances for maximum privacy.")
+
+                // Absent until the app supplies it, like every other
+                // optional section here — a build without backup wired
+                // shows no backup row rather than a dead one.
+                if let makeDeviceBackupView {
+                    SettingsSectionLabel("BACKUP")
+                    SettingsCard {
+                        NavigationLink {
+                            makeDeviceBackupView()
+                        } label: {
+                            SettingsRow(
+                                title: "Device Backup",
+                                subtitle: "A sealed copy of this phone's history",
+                                last: true
+                            ) {
+                                SettingsIconTile(
+                                    symbol: "externaldrive.badge.timemachine",
+                                    bg: SettingsTile.blue)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("settings.device_backup_row")
+                    }
+                    SettingsFootnote("A backup is sealed on this phone before it leaves. The operator keeps bytes it cannot read, and only your recovery phrase can open them.")
+                }
 
                 // The section gates on the two original factories; the
                 // case factory only enriches the open-case banner and

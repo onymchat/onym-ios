@@ -18,6 +18,7 @@ let package = Package(
         .package(path: "../OnymDesign"),
         .package(path: "../OnymModeration"),
         .package(path: "../OnymModerationUI"),
+        .package(path: "../OnymBackupUI"),
         .package(path: "../OnymDiscovery"),
         .package(path: "../OnymFoundation"),
     ],
@@ -35,6 +36,7 @@ let package = Package(
                 "OnymDesign",
                 "OnymModeration",
                 "OnymModerationUI",
+                "OnymBackupUI",
                 "OnymDiscovery",
                 "OnymFoundation",
             ]

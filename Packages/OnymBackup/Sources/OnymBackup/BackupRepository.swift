@@ -396,6 +396,45 @@ public actor BackupRepository {
         try stateStore.save(state)
     }
 
+    /// What the operator says it holds for this holder.
+    ///
+    /// The operator's list is authoritative about retention; the local
+    /// chain records what *we* did. They can differ — a snapshot
+    /// uploaded from another device, or one whose response we lost — and
+    /// a surface showing "your backups" should show the operator's
+    /// answer rather than our memory of it.
+    public func listSnapshots() async throws -> [RetainedSnapshot] {
+        try await port.listSnapshots()
+    }
+
+    /// Erase, and record the receipt.
+    ///
+    /// The receipt is kept because its `excludedScope` outlives the
+    /// snapshot it describes: what an erasure did not reach is the part
+    /// a person may need to re-read long afterwards.
+    @discardableResult
+    public func erase(scope: ErasureScope) async throws -> ErasureReceipt {
+        let receipt = try await port.eraseSnapshot(scope: scope)
+        var state = try stateStore.load()
+        state.receipts.append(receipt.rawBytes)
+        if case .snapshot(let reference) = scope {
+            state.snapshots.removeAll { $0.digest == reference.digest }
+        } else {
+            state.snapshots.removeAll()
+        }
+        try stateStore.save(state)
+        return receipt
+    }
+
+    /// Export every retained snapshot in portable form.
+    ///
+    /// Never gated on payment here, and it must not be gated at the
+    /// operator either — retention is not leverage over someone's own
+    /// history.
+    public func export(to directory: URL) async throws -> BackupExport {
+        try await port.exportSnapshots(to: directory)
+    }
+
     /// Close out a pending operation: clear any purchase it was waiting
     /// on, drop its sealed bytes, and — when it landed — record that a
     /// backup succeeded.
