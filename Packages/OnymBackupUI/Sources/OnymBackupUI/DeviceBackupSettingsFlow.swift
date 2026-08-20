@@ -23,10 +23,34 @@ public final class DeviceBackupSettingsFlow {
         /// The operator published new terms. Uploads stop until they
         /// have been seen and accepted.
         case termsChanged
+        /// A different operator is consented to than the one this state
+        /// was enrolled with.
+        case operatorChanged
         /// Earlier work could not be resolved, so nothing new was
         /// composed. Not a failure — and not success either.
         case checkingEarlierBackup
         case failed(message: String)
+    }
+
+    /// Whether the person needs to go through enrolment.
+    ///
+    /// `.off` alone was not enough, and the gap was the whole point of
+    /// the enrolment route: after consenting to a new operator, the
+    /// stored terms id from the *old* one is still there, so the status
+    /// read as enrolled, the "Set Up Backup" row never appeared, and
+    /// every Back Up Now returned `termsChanged` with nowhere to go. A
+    /// protection that only runs on first enrolment is not a protection
+    /// against switching.
+    public var needsEnrolment: Bool { Self.needsEnrolment(for: state.status) }
+
+    /// Pure, so the routing can be checked without a repository — the
+    /// previous version of this rule was wrong in a way only a human
+    /// clicking through Settings would have found.
+    nonisolated public static func needsEnrolment(for status: Status) -> Bool {
+        switch status {
+        case .off, .termsChanged, .operatorChanged: true
+        default: false
+        }
     }
 
     public struct State: Equatable {
@@ -43,6 +67,9 @@ public final class DeviceBackupSettingsFlow {
 
     private let repository: BackupRepository
     private let stateStore: any BackupStateStoring
+    /// The operator consented to *now*, which is not necessarily the one
+    /// this state was enrolled with.
+    private let currentComponentId: @Sendable () -> String?
     private let schedule: BackupSchedule
     /// Drawn once for this flow's lifetime. Re-drawing per check would
     /// let frequent polling sample until it found a small value, which
@@ -52,10 +79,12 @@ public final class DeviceBackupSettingsFlow {
     public init(
         repository: BackupRepository,
         stateStore: any BackupStateStoring,
+        currentComponentId: @escaping @Sendable () -> String? = { nil },
         schedule: BackupSchedule = .default
     ) {
         self.repository = repository
         self.stateStore = stateStore
+        self.currentComponentId = currentComponentId
         self.schedule = schedule
         self.sessionJitter = schedule.drawJitter()
     }
@@ -70,6 +99,24 @@ public final class DeviceBackupSettingsFlow {
         }
         guard stored.acceptedTermsId != nil else {
             state.status = .off
+            return
+        }
+        // The consented operator moved out from under this state. Nothing
+        // recorded here means anything to the new one, so the only honest
+        // next step is enrolment.
+        // Includes state written before the operator was recorded at
+        // all: nil is not "matches", it is "cannot tell", and guessing
+        // in favour of proceeding is how a snapshot reaches the wrong
+        // operator. Re-enrolment is the cost, and it is one screen.
+        if currentComponentId() != stored.componentId {
+            state.status = .operatorChanged
+            return
+        }
+        // A snapshot already sealed and refused for payment outranks
+        // idle: it is owed a retry, and showing "On" would leave a person
+        // who has since paid wondering why nothing happens.
+        if stored.awaitingPayment != nil {
+            state.status = .paymentRequired(offerIds: [])
             return
         }
         // Unresolved work outranks "on". An upload whose result we never
@@ -94,6 +141,28 @@ public final class DeviceBackupSettingsFlow {
     public func backUpNow() async {
         state.status = .running
         do {
+            // A snapshot refused for payment is retried byte for byte
+            // before anything new is composed. Composing instead would
+            // mint a fresh salt and digest, so the person would have
+            // bought storage for a snapshot that is then never sent —
+            // and would be asked to buy again for its replacement.
+            if let pending = try await repository.pendingPayment() {
+                switch try await repository.retry(pending) {
+                case .retained, .alreadyRetained:
+                    refresh()
+                    return
+                case .paymentRequired(_, let offerIds, _):
+                    state.status = .paymentRequired(offerIds: offerIds)
+                    return
+                default:
+                    // Anything else — terms moved under it, operator
+                    // changed — means this snapshot is not sendable.
+                    // `pendingPayment()` has already cleared the record
+                    // in those cases, so falling through to compose is
+                    // safe rather than leaving a stale one behind.
+                    break
+                }
+            }
             switch try await repository.backUp() {
             case .retained, .alreadyRetained:
                 refresh()
@@ -101,6 +170,8 @@ public final class DeviceBackupSettingsFlow {
                 state.status = .paymentRequired(offerIds: offerIds)
             case .termsChanged:
                 state.status = .termsChanged
+            case .operatorChanged:
+                state.status = .operatorChanged
             case .awaitingReconciliation:
                 state.status = .checkingEarlierBackup
             case .unknown:

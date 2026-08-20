@@ -28,10 +28,20 @@ public struct URLSessionBackupClient: BackupPort {
     let session: URLSession
     let entitlement: @Sendable () async -> Data?
 
-    /// The read-write origin from the manifest the person consented to.
-    /// Bound once and never rewritten — an operator does not get to move
-    /// a signed request somewhere else.
-    var endpoint: URL { manifest.endpoint }
+    /// A development override for the operator's endpoint.
+    ///
+    /// Deliberately a construction parameter rather than something an
+    /// operator response can set: the point of binding to the manifest
+    /// is that a *counterparty* cannot move a signed request, and a
+    /// local-testing flag chosen by whoever built the app is a different
+    /// thing entirely. Nil in Release, where the caller does not offer
+    /// one.
+    let endpointOverride: URL?
+
+    /// The read-write origin from the manifest the person consented to,
+    /// unless a build-time override replaces it. Bound once and never
+    /// rewritten by anything the operator says.
+    var endpoint: URL { endpointOverride ?? manifest.endpoint }
 
     /// Caps on response bodies we are willing to read. Sealed streams
     /// are bounded by the operator's declared maximum instead — that
@@ -64,11 +74,13 @@ public struct URLSessionBackupClient: BackupPort {
         manifest: BackupOperatorManifest,
         material: BackupKeyMaterial,
         session: URLSession = URLSessionBackupClient.defaultSession,
+        endpointOverride: URL? = nil,
         entitlement: @escaping @Sendable () async -> Data? = { nil }
     ) {
         self.manifest = manifest
         self.material = material
         self.session = session
+        self.endpointOverride = endpointOverride
         self.entitlement = entitlement
     }
 
@@ -87,6 +99,18 @@ public struct URLSessionBackupClient: BackupPort {
         )
     }()
 
+    /// Terms live under whichever origin we are actually talking to,
+    /// so an endpoint override has to move them too — otherwise a local
+    /// operator would be checked against the production one's terms.
+    static func termsURL(base: URL, digest: String) -> URL? {
+        let prefixed = digest.hasPrefix(BackupFormat.digestPrefix)
+            ? digest
+            : BackupFormat.digestPrefix + digest
+        guard BackupFormat.isDigest(prefixed) else { return nil }
+        let hex = String(prefixed.dropFirst(BackupFormat.digestPrefix.count))
+        return base.appending(path: "terms").appending(path: "\(hex).json")
+    }
+
     // MARK: - BackupPort
 
     public func connect() async throws -> BackupConnection {
@@ -94,7 +118,7 @@ public struct URLSessionBackupClient: BackupPort {
         let profile = try BackupImplementationProfile.review(raw: profileBytes)
 
         let digest = manifest.declaredTermsDigest
-        guard let termsURL = manifest.termsURL(digest: digest) else {
+        guard let termsURL = Self.termsURL(base: endpoint, digest: digest) else {
             throw BackupError.termsUnavailable
         }
         let termsBytes = try await get(url: termsURL, signed: false)

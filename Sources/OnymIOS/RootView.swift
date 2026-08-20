@@ -1,6 +1,7 @@
 import SwiftUI
 import OnymSearch
 import OnymChatsUI
+import OnymBackupUI
 import OnymSettings
 import OnymModerationUI
 import OnymDiscovery
@@ -53,6 +54,24 @@ struct RootView: View {
     /// onboarding, `needsReconsent` presents the same surface with the
     /// reason attached, and anything else dismisses it.
     @State private var consentPresentation: ConsentPresentation?
+    /// Resolved once at appear, because building it reads a pinned
+    /// consent record and derives a seat key — neither of which belongs
+    /// in a view body that re-runs on every redraw. `nil` means no
+    /// backup operator is consented to, and the Settings section hides.
+    @State private var deviceBackupView: DeviceBackupSettingsView?
+    /// Guards against two resolutions overlapping — building one reads a
+    /// consent record and derives a seat key, and the later of two
+    /// in-flight resolutions could otherwise land first.
+    @State private var resolvingDeviceBackup = false
+    /// Which operator the current backup view was built for.
+    ///
+    /// Re-resolving unconditionally on every visit to Settings rebuilt
+    /// the flow underneath a running backup, discarding its state
+    /// mid-upload. The view is only replaced when the consented operator
+    /// actually changed.
+    @State private var deviceBackupComponentId: String?
+    /// A resolution asked for while one was in flight.
+    @State private var deviceBackupResolutionPending = false
 
     /// `fullScreenCover(item:)` needs identity, and the two consent
     /// gates the root can host are exactly "no mandate yet" and "the
@@ -112,6 +131,22 @@ struct RootView: View {
             consentPresentation = presentationUnlessOnboarding(
                 for: dependencies.moderationGateFlow.gate
             )
+            await resolveDeviceBackupView()
+        }
+        .onChange(of: selectedTab) { _, tab in
+            // Re-resolved when Settings is opened, not only at launch.
+            // Consenting to a backup operator mid-session otherwise left
+            // the section missing until the next launch, which reads as
+            // the consent not having worked.
+            guard tab == .settings else { return }
+            Task { await resolveDeviceBackupView() }
+        }
+        .onChange(of: consentPresentation) { _, presentation in
+            // Consent can also be given *while already on* Settings, in
+            // which case the tab never changes. Re-resolve when a consent
+            // sheet closes.
+            guard presentation == nil else { return }
+            Task { await resolveDeviceBackupView() }
         }
         .onChange(of: dependencies.moderationGateFlow.gate) { _, gate in
             consentPresentation = presentationUnlessOnboarding(for: gate)
@@ -200,6 +235,39 @@ struct RootView: View {
     /// so presenting both would stack two identical obligations. The
     /// gate itself keeps running — its answer is re-read the moment
     /// onboarding completes.
+    /// Builds the backup screen, or leaves it absent.
+    ///
+    /// Absent is an ordinary answer: no consented operator, or an
+    /// identity with no recovery phrase to derive a key from. Both mean
+    /// the Settings section hides rather than offering something that
+    /// cannot produce an openable snapshot.
+    private func resolveDeviceBackupView() async {
+        guard let makeDeviceBackupView = dependencies.makeDeviceBackupView else { return }
+        guard !resolvingDeviceBackup else {
+            // Queued, not dropped. A request that arrives mid-resolution
+            // is usually the one that matters — the consent that just
+            // landed — and discarding it leaves the section describing
+            // the operator from before.
+            deviceBackupResolutionPending = true
+            return
+        }
+
+        resolvingDeviceBackup = true
+        defer { resolvingDeviceBackup = false }
+
+        repeat {
+            deviceBackupResolutionPending = false
+            // Nothing to do when the operator has not changed. Rebuilding
+            // here would hand Settings a fresh flow and throw away a
+            // backup that is running.
+            let componentId = dependencies.consentedBackupComponentId?()
+            if deviceBackupView == nil || componentId != deviceBackupComponentId {
+                deviceBackupView = await makeDeviceBackupView()
+                deviceBackupComponentId = componentId
+            }
+        } while deviceBackupResolutionPending
+    }
+
     private func presentationUnlessOnboarding(
         for gate: ModerationGateFlow.RootGate
     ) -> ConsentPresentation? {
@@ -267,7 +335,8 @@ struct RootView: View {
                         makeDiscoverySettingsFlow: dependencies.makeDiscoverySettingsFlow,
                         onRestartOnboarding: dependencies.onboardingRestart.map { restart in
                             { restart.requestRestart() }
-                        }
+                        },
+                        makeDeviceBackupView: deviceBackupView.map { view in { view } }
                     )
                 }
                 .safeAreaInset(edge: .bottom, spacing: 0) {

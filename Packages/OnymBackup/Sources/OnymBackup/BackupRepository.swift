@@ -41,6 +41,11 @@ public actor BackupRepository {
         case paymentRequired(componentId: String, offerIds: [String], pending: SealedSnapshot)
         /// Terms moved. Uploading would pin something nobody agreed to.
         case termsChanged(currentTermsId: String?)
+        /// A different operator is now consented to than the one this
+        /// state was enrolled with. Nothing may be uploaded, reconciled
+        /// or retried until the person has enrolled with the new one —
+        /// none of the recorded work means anything to it.
+        case operatorChanged(previousComponentId: String, currentComponentId: String)
         /// The request went out and we never learned what happened.
         case unknown(operationId: String)
         /// Earlier work is unresolved and could not be reconciled, so
@@ -57,11 +62,40 @@ public actor BackupRepository {
         defer { isRunning = false }
 
         var state = try stateStore.load()
+        // Captured before the first suspension. Every write below is
+        // conditional on the enrolment still being this one — `backUp`
+        // awaits `connect`, `reconcile` and `compose`, and a
+        // re-enrolment can land during any of them.
+        let enrolled = state.componentId
 
-        // Reconcile before adding to the pile. An operation whose result
-        // we never learned may well have succeeded, and composing a
-        // second snapshot on top of an unresolved first is how a person
-        // ends up paying to store the same history twice.
+        guard let acceptedTermsId = state.acceptedTermsId else {
+            // Nothing has been consented to. Enrolment is a decision, and
+            // the repository does not make it on the person's behalf.
+            throw BackupError.termsUnavailable
+        }
+
+        // Terms and operator are checked *before* reconciling, not after.
+        //
+        // Reconciliation talks to whichever operator this repository was
+        // built for, using operation ids recorded against whoever was
+        // consented to when they were written. If those are not the same
+        // operator, reconciling first hands operator B a list of operator
+        // A's operations — the cross-operator leak the rebind on
+        // enrolment exists to prevent, arrived at through a different
+        // door.
+        // Do not upload, do not re-pin, do not "helpfully" accept.
+        // Fresh consent is a screen, not an inference.
+        if let mismatch = try await operatorOrTermsMismatch(state: state, now: now) {
+            state.lastAttemptAt = now
+            try commit(state, expecting: enrolled)
+            return mismatch
+        }
+        _ = acceptedTermsId
+
+        // Only now: an operation whose result we never learned may well
+        // have succeeded, and composing a second snapshot on top of an
+        // unresolved first is how a person ends up paying to store the
+        // same history twice.
         try await reconcile(&state)
 
         // And if it is *still* unresolved, do not compose. Reconciling
@@ -73,24 +107,9 @@ public actor BackupRepository {
         // rather than showing a silent no-op.
         guard state.pendingOperations.isEmpty else {
             state.lastAttemptAt = now
-            try stateStore.save(state)
+            try commit(state, expecting: enrolled)
             return .awaitingReconciliation(
                 operationIds: state.pendingOperations.map(\.operationId))
-        }
-
-        guard let acceptedTermsId = state.acceptedTermsId else {
-            // Nothing has been consented to. Enrolment is a decision, and
-            // the repository does not make it on the person's behalf.
-            throw BackupError.termsUnavailable
-        }
-
-        let connection = try await port.connect()
-        if connection.acceptedTermsId != acceptedTermsId {
-            // Do not upload, do not re-pin, do not "helpfully" accept.
-            // Fresh consent is a screen, not an inference.
-            state.lastAttemptAt = now
-            try stateStore.save(state)
-            return .termsChanged(currentTermsId: connection.acceptedTermsId)
         }
 
         let snapshot = try await composer.compose(
@@ -112,7 +131,7 @@ public actor BackupRepository {
             now: now
         )
         state.lastAttemptAt = now
-        try stateStore.save(state)
+        try commit(state, expecting: enrolled)
         return try await place(snapshot, state: &state, now: now)
     }
 
@@ -123,10 +142,32 @@ public actor BackupRepository {
     /// would strand the caller in a purchase flow with no snapshot at the
     /// end of it.
     public func pendingPayment(in workingDirectory: URL? = nil) throws -> SealedSnapshot? {
-        guard let pending = try stateStore.load().awaitingPayment else { return nil }
+        var state = try stateStore.load()
+        guard let pending = state.awaitingPayment else { return nil }
         let url = (workingDirectory ?? composer.workingDirectory)
             .appending(path: pending.sealedBytesFilename)
-        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        // Two ways a pending payment stops being retriable, and both
+        // have to clear the record — otherwise Settings sits on
+        // "Payment needed" forever, with no offers to show and no route
+        // to enrolment, for a purchase that can no longer buy anything.
+        let bytesGone = !FileManager.default.fileExists(atPath: url.path)
+        // The second door, which the missing-bytes fix did not cover:
+        // terms re-accepted under the same operator. `retry` correctly
+        // refuses a snapshot pinned to superseded terms, and refusing
+        // forever without clearing is the same stranding by a different
+        // route.
+        let termsSuperseded = pending.acceptedTermsId != state.acceptedTermsId
+        guard !bytesGone, !termsSuperseded else {
+            state.awaitingPayment = nil
+            try stateStore.save(state)
+            if !bytesGone {
+                // Sealed under terms nobody is enrolled under now. It
+                // will never be sent, and it is ciphertext nobody will
+                // claim.
+                try? FileManager.default.removeItem(at: url)
+            }
+            return nil
+        }
         return SealedSnapshot(
             operationId: pending.operationId,
             snapshotReference: try SnapshotReference(
@@ -155,7 +196,75 @@ public actor BackupRepository {
         defer { isRunning = false }
 
         var state = try stateStore.load()
+        // The same preconditions `backUp` checks, for the same reason —
+        // more so here. This snapshot was sealed under one operator's
+        // terms and pinned to its digest; sending it to a different
+        // operator is the leak this whole seam exists to close, and the
+        // retry path is the shortest route to it.
+        if let mismatch = try await operatorOrTermsMismatch(state: state, now: now) {
+            return mismatch
+        }
+        // And the snapshot's own pin must match what we are enrolled
+        // under. A snapshot left over from earlier terms is not one to
+        // send now.
+        guard snapshot.acceptedTermsId == state.acceptedTermsId else {
+            return .termsChanged(currentTermsId: state.acceptedTermsId)
+        }
         return try await place(snapshot, state: &state, now: now)
+    }
+
+    /// Save, unless someone re-enrolled underneath us.
+    ///
+    /// Enrolment runs on the main actor and rewrites this file; a run
+    /// here loads at the start and saves across several network hops.
+    /// An upload finishing after a re-enrolment would otherwise write
+    /// back its stale copy — resurrecting the previous operator's
+    /// `componentId` and pending operations, and silently undoing the
+    /// rebind that was the whole point.
+    ///
+    /// So the write is conditional on the enrolment not having moved.
+    /// Losing our own bookkeeping is the right side to fail on: the
+    /// snapshot itself is either retained or not regardless, and the
+    /// next run reconciles against the operator rather than trusting
+    /// this file.
+    @discardableResult
+    private func commit(_ state: BackupState, expecting enrolled: String?) throws -> Bool {
+        let current = try stateStore.load()
+        guard current.componentId == enrolled, current.acceptedTermsId == state.acceptedTermsId
+        else {
+            return false
+        }
+        try stateStore.save(state)
+        return true
+    }
+
+    /// Shared precondition: are we still talking to the operator this
+    /// state was enrolled with, under the terms it pinned?
+    ///
+    /// Returns the result to hand back, or `nil` to proceed.
+    private func operatorOrTermsMismatch(
+        state: BackupState,
+        now: Date
+    ) async throws -> RunResult? {
+        let connection = try await port.connect()
+        // `componentId` is nil for state written before it was recorded.
+        // That is not "matches" — we cannot tell, and guessing in favour
+        // of proceeding is how a snapshot reaches the wrong operator. It
+        // is treated as a switch, which routes to enrolment.
+        guard let enrolled = state.componentId else {
+            return .operatorChanged(
+                previousComponentId: "",
+                currentComponentId: connection.manifest.componentId)
+        }
+        if enrolled != connection.manifest.componentId {
+            return .operatorChanged(
+                previousComponentId: enrolled,
+                currentComponentId: connection.manifest.componentId)
+        }
+        if connection.acceptedTermsId != state.acceptedTermsId {
+            return .termsChanged(currentTermsId: connection.acceptedTermsId)
+        }
+        return nil
     }
 
     private func place(
@@ -163,6 +272,9 @@ public actor BackupRepository {
         state: inout BackupState,
         now: Date
     ) async throws -> RunResult {
+        // What we were enrolled with when this run began. Every write
+        // below is conditional on it still being true.
+        let enrolled = state.componentId
         let preflight: BackupPreflight
         do {
             preflight = try await port.preflight(snapshot)
@@ -186,7 +298,7 @@ public actor BackupRepository {
                     sealedAt: snapshot.sealedAt,
                     refusedAt: now
                 )
-                try stateStore.save(state)
+                try commit(state, expecting: enrolled)
                 return .paymentRequired(
                     componentId: componentId, offerIds: offerIds, pending: snapshot)
             case .termsChanged(let currentTermsId):
@@ -221,7 +333,7 @@ public actor BackupRepository {
             )
             state.lastSuccessAt = now
             state.clearPendingPayment(for: snapshot.operationId)
-            try stateStore.save(state)
+            try commit(state, expecting: enrolled)
             discard(snapshot)
             return .alreadyRetained(reference)
 
@@ -239,7 +351,7 @@ public actor BackupRepository {
                     acceptedTermsId: snapshot.acceptedTermsId
                 )
             )
-            try stateStore.save(state)
+            try commit(state, expecting: enrolled)
 
             let outcome: BackupOutcome
             do {
@@ -257,7 +369,7 @@ public actor BackupRepository {
                 // uncertainty on the floor — reconcile would never
                 // re-query, and "silence is not success" would hold only
                 // until the next line of code.
-                try stateStore.save(state)
+                try commit(state, expecting: enrolled)
                 return .unknown(operationId: snapshot.operationId)
             }
             state.pendingOperations.removeAll { $0.operationId == snapshot.operationId }
@@ -270,7 +382,7 @@ public actor BackupRepository {
             )
             state.lastSuccessAt = now
             state.clearPendingPayment(for: snapshot.operationId)
-            try stateStore.save(state)
+            try commit(state, expecting: enrolled)
             discard(snapshot)
             return .retained(snapshot.snapshotReference)
         }
@@ -293,6 +405,7 @@ public actor BackupRepository {
     /// because that is the one case where we genuinely do not know.
     private func reconcile(_ state: inout BackupState) async throws {
         guard !state.pendingOperations.isEmpty else { return }
+        let enrolled = state.componentId
 
         guard let retained = try? await port.listSnapshots() else {
             // No list, no conclusions. Uncertainty survives a failed
@@ -393,7 +506,7 @@ public actor BackupRepository {
             }
         }
         state.pendingOperations = stillPending
-        try stateStore.save(state)
+        try commit(state, expecting: enrolled)
     }
 
     /// What the operator says it holds for this holder.
@@ -416,13 +529,14 @@ public actor BackupRepository {
     public func erase(scope: ErasureScope) async throws -> ErasureReceipt {
         let receipt = try await port.eraseSnapshot(scope: scope)
         var state = try stateStore.load()
+        let enrolled = state.componentId
         state.receipts.append(receipt.rawBytes)
         if case .snapshot(let reference) = scope {
             state.snapshots.removeAll { $0.digest == reference.digest }
         } else {
             state.snapshots.removeAll()
         }
-        try stateStore.save(state)
+        try commit(state, expecting: enrolled)
         return receipt
     }
 

@@ -27,12 +27,12 @@ public struct DeviceBackupSettingsView: View {
                 }
                 SettingsFootnote(verbatim: statusFootnote)
 
-                if case .off = flow.state.status {
+                if flow.needsEnrolment {
                     if let enrolment = makeEnrolment() {
                         SettingsCard {
                             NavigationLink { enrolment } label: {
                                 SettingsRow(
-                                    title: "Set Up Backup",
+                                    title: enrolmentRowTitle,
                                     subtitle: "Read what it does before turning it on",
                                     last: true
                                 ) {
@@ -44,7 +44,8 @@ public struct DeviceBackupSettingsView: View {
                             .accessibilityIdentifier("backup.setup_row")
                         }
                     }
-                } else {
+                }
+                if !flow.needsEnrolment {
                     SettingsCard {
                         Button {
                             Task { await flow.backUpNow() }
@@ -75,6 +76,17 @@ public struct DeviceBackupSettingsView: View {
         .task {
             flow.refresh()
             await flow.loadSnapshots()
+        }
+    }
+
+    /// The same screen either way, but not the same sentence: someone
+    /// who has backed up before is being asked to re-read terms, not
+    /// to discover the feature.
+    private var enrolmentRowTitle: LocalizedStringKey {
+        switch flow.state.status {
+        case .termsChanged: "Review New Terms"
+        case .operatorChanged: "Set Up With New Operator"
+        default: "Set Up Backup"
         }
     }
 
@@ -134,6 +146,7 @@ public struct DeviceBackupSettingsView: View {
         case .stale: "Out of date"
         case .paymentRequired: "Payment needed"
         case .termsChanged: "Terms changed"
+        case .operatorChanged: "Backup operator changed"
         case .checkingEarlierBackup: "Checking an earlier backup"
         case .failed: "Something went wrong"
         }
@@ -152,6 +165,8 @@ public struct DeviceBackupSettingsView: View {
             "The operator needs a subscription before it will keep a backup"
         case .termsChanged:
             "Read the new terms to continue backing up"
+        case .operatorChanged:
+            "Set up backup again with the operator you chose"
         case .checkingEarlierBackup:
             "An earlier backup has not been confirmed yet"
         case .failed(let message):
@@ -178,6 +193,7 @@ public struct DeviceBackupSettingsView: View {
         case .stale: "exclamationmark.triangle"
         case .paymentRequired: "creditcard"
         case .termsChanged: "doc.badge.ellipsis"
+        case .operatorChanged: "arrow.triangle.swap"
         case .checkingEarlierBackup: "questionmark.circle"
         case .failed: "xmark.octagon"
         }

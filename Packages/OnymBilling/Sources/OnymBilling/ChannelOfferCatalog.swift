@@ -30,9 +30,27 @@ public struct ChannelOffer: Sendable, Equatable, Codable {
 public struct ChannelOfferCatalog: Sendable {
     private let offers: [ChannelOffer]
 
+    /// Duplicated product identifiers are **dropped at construction**,
+    /// not asserted at lookup.
+    ///
+    /// An assert crashes a debug build in the middle of a replay, which
+    /// is the opposite of the refuse-and-retry the lookup promises, and
+    /// does nothing at all in Release. Dropping both sides of a clash
+    /// means the catalog is well-formed by construction: the affected
+    /// offer becomes unsellable, which is visible and safe, rather than
+    /// crediting a purchase to whichever operator sorted first.
     public init(offers: [ChannelOffer]) {
-        self.offers = offers
+        let duplicated = Set(
+            Dictionary(grouping: offers, by: \.productId)
+                .filter { $0.value.count > 1 }
+                .keys)
+        self.offers = offers.filter { !duplicated.contains($0.productId) }
+        self.rejectedProductIds = duplicated.sorted()
     }
+
+    /// Product identifiers dropped as ambiguous. Empty in a well-formed
+    /// catalog; surfaced so a build or a diagnostic can notice.
+    public let rejectedProductIds: [String]
 
     /// Load from a bundled JSON resource.
     ///
@@ -57,6 +75,23 @@ public struct ChannelOfferCatalog: Sendable {
 
     public func offer(forOfferId offerId: String, componentId: String) -> ChannelOffer? {
         offers.first { $0.offerId == offerId && $0.componentId == componentId }
+    }
+
+    /// The reverse lookup a `Transaction.updates` replay needs: StoreKit
+    /// hands back a product identifier, and only the catalog knows which
+    /// seat and offer it was bought for.
+    ///
+    /// **A `productId` must appear at most once.** The reverse lookup has
+    /// no other way to choose, so two components sharing a product would
+    /// redeem a replayed transaction for whichever sorted first —
+    /// crediting one operator for a purchase made from another. Checked
+    /// at load rather than left as a convention.
+    public func offer(forProductId productId: String) -> ChannelOffer? {
+        // Unambiguous by construction — a clash was dropped at load — so
+        // a miss here means the product is not ours to redeem, and the
+        // replay is left unfinished and retried rather than attributed
+        // to a guess.
+        offers.first { $0.productId == productId }
     }
 
     public var productIds: Set<String> { Set(offers.map(\.productId)) }

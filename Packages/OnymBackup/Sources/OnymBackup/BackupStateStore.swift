@@ -76,6 +76,39 @@ public struct BackupState: Sendable, Equatable, Codable {
 
     public init() {}
 
+    /// Point this state at a different operator, discarding everything
+    /// that only meant something to the previous one.
+    ///
+    /// Without this, switching operators left the new one holding the
+    /// old one's operational state: reconciliation would query operator
+    /// B with operator A's operation ids, `refresh()` would report
+    /// checking-an-earlier-backup for work B never saw, and — worst — a
+    /// snapshot awaiting payment, sealed under A's terms and pinned to
+    /// A's digest, could be retried against B. That last one is a
+    /// person paying B to store a snapshot that pins terms B never
+    /// published.
+    ///
+    /// Erasure receipts are kept. They are evidence of something that
+    /// happened, they are never acted on, and destroying them because
+    /// the person changed operator would discard the only durable record
+    /// of what an erasure did and did not reach.
+    ///
+    /// Returns the sealed-bytes filename of a dropped pending payment,
+    /// if there was one, so the caller can remove the file rather than
+    /// orphan it.
+    @discardableResult
+    public mutating func rebind(to newComponentId: String) -> String? {
+        guard componentId != newComponentId else { return nil }
+        let orphan = awaitingPayment?.sealedBytesFilename
+        componentId = newComponentId
+        snapshots.removeAll()
+        pendingOperations.removeAll()
+        awaitingPayment = nil
+        lastSuccessAt = nil
+        lastAttemptAt = nil
+        return orphan
+    }
+
     mutating func clearPendingPayment(for operationId: String) {
         if awaitingPayment?.operationId == operationId { awaitingPayment = nil }
     }

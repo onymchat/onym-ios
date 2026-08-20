@@ -159,6 +159,7 @@ final class BackupAdapterTests: XCTestCase {
         XCTAssertFalse(termsId.isEmpty)
 
         var state = BackupState()
+        state.componentId = "onym:component:op"
         state.acceptedTermsId = termsId
         let stateStore = MemoryStateStore(state: state)
         let port = ScriptedPort(acceptedTermsId: termsId)
@@ -192,6 +193,7 @@ final class BackupAdapterTests: XCTestCase {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let termsId = ScriptedPort.termsId
         var state = BackupState()
+        state.componentId = "onym:component:op"
         state.acceptedTermsId = termsId
         let stateStore = MemoryStateStore(state: state)
         let port = ScriptedPort(acceptedTermsId: termsId, paymentSatisfied: true, uploadFails: true)
@@ -219,6 +221,7 @@ final class BackupAdapterTests: XCTestCase {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let stalePin = "sha256:" + String(repeating: "e", count: 64)
         var state = BackupState()
+        state.componentId = "onym:component:op"
         state.acceptedTermsId = stalePin
         let stateStore = MemoryStateStore(state: state)
         let port = ScriptedPort(acceptedTermsId: ScriptedPort.termsId)
@@ -248,6 +251,7 @@ final class BackupAdapterTests: XCTestCase {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         var state = BackupState()
+        state.componentId = "onym:component:op"
         state.acceptedTermsId = ScriptedPort.termsId
         let stateStore = MemoryStateStore(state: state)
         let port = ScriptedPort(
@@ -278,6 +282,7 @@ final class BackupAdapterTests: XCTestCase {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let digest = "sha256:" + String(repeating: "7", count: 64)
         var state = BackupState()
+        state.componentId = "onym:component:op"
         state.acceptedTermsId = ScriptedPort.termsId
         state.pendingOperations = [
             BackupState.PendingOperation(operationId: "lost", digest: digest, sealedByteSize: 2048, startedAt: Date())
@@ -313,6 +318,7 @@ final class BackupAdapterTests: XCTestCase {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         var state = BackupState()
+        state.componentId = "onym:component:op"
         state.acceptedTermsId = ScriptedPort.termsId
         state.pendingOperations = [
             BackupState.PendingOperation(
@@ -411,6 +417,7 @@ final class BackupAdapterTests: XCTestCase {
         let dir = try Self.directory()
         let digest = "sha256:" + String(repeating: "3", count: 64)
         var state = BackupState()
+        state.componentId = "onym:component:op"
         state.acceptedTermsId = ScriptedPort.termsId
         state.pendingOperations = [
             BackupState.PendingOperation(
@@ -432,6 +439,7 @@ final class BackupAdapterTests: XCTestCase {
     func testFailedQueryLeavesPendingIntact() async throws {
         let dir = try Self.directory()
         var state = BackupState()
+        state.componentId = "onym:component:op"
         state.acceptedTermsId = ScriptedPort.termsId
         state.pendingOperations = [
             BackupState.PendingOperation(
@@ -450,6 +458,7 @@ final class BackupAdapterTests: XCTestCase {
     func testMismatchedEchoedReferenceIsRefused() async throws {
         let dir = try Self.directory()
         var state = BackupState()
+        state.componentId = "onym:component:op"
         state.acceptedTermsId = ScriptedPort.termsId
         let stateStore = MemoryStateStore(state: state)
         let port = ScriptedPort(acceptedTermsId: ScriptedPort.termsId, paymentSatisfied: true)
@@ -472,6 +481,7 @@ final class BackupAdapterTests: XCTestCase {
     func testPendingPaymentSurvivesRelaunch() async throws {
         let dir = try Self.directory()
         var state = BackupState()
+        state.componentId = "onym:component:op"
         state.acceptedTermsId = ScriptedPort.termsId
         let stateStore = MemoryStateStore(state: state)
         let port = ScriptedPort(acceptedTermsId: ScriptedPort.termsId)
@@ -510,6 +520,7 @@ final class BackupAdapterTests: XCTestCase {
         let dir = try Self.directory()
         let digest = "sha256:" + String(repeating: "6", count: 64)
         var state = BackupState()
+        state.componentId = "onym:component:op"
         state.acceptedTermsId = ScriptedPort.termsId
         state.pendingOperations = [
             BackupState.PendingOperation(
@@ -551,6 +562,7 @@ final class BackupAdapterTests: XCTestCase {
     func testCorruptAncestorIsRefusedRatherThanBreakingTheChain() async throws {
         let dir = try Self.directory()
         var state = BackupState()
+        state.componentId = "onym:component:op"
         state.acceptedTermsId = ScriptedPort.termsId
         state.snapshots = [
             BackupState.RecordedSnapshot(
@@ -594,6 +606,7 @@ final class BackupAdapterTests: XCTestCase {
     func testUnreconciledWorkBlocksComposition() async throws {
         let dir = try Self.directory()
         var state = BackupState()
+        state.componentId = "onym:component:op"
         state.acceptedTermsId = ScriptedPort.termsId
         state.pendingOperations = [
             BackupState.PendingOperation(
@@ -639,6 +652,7 @@ final class BackupAdapterTests: XCTestCase {
     func testResolvedOperationClearsThePendingPurchase() async throws {
         let dir = try Self.directory()
         var state = BackupState()
+        state.componentId = "onym:component:op"
         state.acceptedTermsId = ScriptedPort.termsId
         let stateStore = MemoryStateStore(state: state)
         let port = ScriptedPort(acceptedTermsId: ScriptedPort.termsId)
@@ -679,6 +693,7 @@ final class BackupAdapterTests: XCTestCase {
     func testConcurrentRunsAreSerialized() async throws {
         let dir = try Self.directory()
         var state = BackupState()
+        state.componentId = "onym:component:op"
         state.acceptedTermsId = ScriptedPort.termsId
         let stateStore = MemoryStateStore(state: state)
         let port = ScriptedPort(acceptedTermsId: ScriptedPort.termsId, paymentSatisfied: true)

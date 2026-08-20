@@ -16,11 +16,16 @@ import OnymModerationUI
 import OnymDiscovery
 import OnymFoundation
 import OnymOnboarding
+import OnymBackup
+import OnymBackupUI
+import OnymBilling
 
 @main
 struct OnymIOSApp: App {
     private let dependencies: AppDependencies
     private let identityRepository: IdentityRepository
+    /// Held so the replay observer outlives `init`.
+    private let seatTransactionObserver: SeatTransactionObserver
     private let relayerRepository: RelayerRepository
     private let contractsRepository: ContractsRepository
     private let groupRepository: GroupRepository
@@ -435,24 +440,22 @@ struct OnymIOSApp: App {
         // store can't open (rare; FileProtection / sandbox issues).
         // Failure here is non-fatal for the create-group flow, just
         // means newly-created groups don't survive a relaunch.
-        let groupRepository: GroupRepository
-        if let store = try? SwiftDataGroupStore() {
-            groupRepository = GroupRepository(store: store)
-        } else {
-            groupRepository = GroupRepository(store: SwiftDataGroupStore.inMemory())
-        }
+        // Hoisted rather than inlined into the repository: device
+        // backup reads through the same store, and reading through a
+        // second one would let a snapshot disagree with the app about
+        // what exists.
+        let groupStore: any GroupStore = (try? SwiftDataGroupStore())
+            ?? SwiftDataGroupStore.inMemory()
+        let groupRepository = GroupRepository(store: groupStore)
         self.groupRepository = groupRepository
 
         // Chat messages — same fall-back policy as `groupRepository`
         // (on-disk store with in-memory fallback if FileProtection /
         // sandbox blocks the file). Separate `Messages.store` keeps
         // schema migrations from cross-domain wipes.
-        let messageRepository: MessageRepository
-        if let store = try? SwiftDataMessageStore() {
-            messageRepository = MessageRepository(store: store)
-        } else {
-            messageRepository = MessageRepository(store: SwiftDataMessageStore.inMemory())
-        }
+        let messageStore: any MessageStore = (try? SwiftDataMessageStore())
+            ?? SwiftDataMessageStore.inMemory()
+        let messageRepository = MessageRepository(store: messageStore)
         self.messageRepository = messageRepository
 
         // Inbox transport for invitation send. The endpoint list comes
@@ -808,8 +811,120 @@ struct OnymIOSApp: App {
         /// even free offers would gate as not-entitled); the store is
         /// only the fallback for offers the reviewed manifest doesn't
         /// carry. StoreKit slots in behind the same seam later.
+        ///
+        /// StoreKit now sits behind the same seam, composed with the free
+        /// provider rather than replacing it: a free offer must still
+        /// resolve with no store, no network and no credential, because
+        /// an operator charging nothing is a first-class case.
+        ///
+        /// The catalog is what makes a paid offer sellable at all. It
+        /// ships empty until a store product exists, so today every paid
+        /// offer still gates as not-purchasable — the difference is that
+        /// it now does so because there is no product, not because the
+        /// machinery is missing.
+        // Resolved outside the closure: referencing `Self` inside an
+        // escaping closure during `init` captures a self that does not
+        // exist yet.
+        // DEBUG-only, and guarded at the call site because the
+        // resolvers are too. A Release build that honoured a launch
+        // argument would let anyone with device access redirect a
+        // person's history to an operator they never consented to —
+        // the same reason `--enforcement-base-url` has always been
+        // DEBUG-only.
+        #if DEBUG
+        let backupBaseURLOverride = OnymIOSApp.resolveBackupBaseURL(args: args)
+        #else
+        let backupBaseURLOverride: URL? = nil
+        #endif
+        // Local alias: capturing `identityRepository` directly would
+        // capture `self` inside an escaping closure during `init`.
+        let identities = identityRepository
+        let seatAccessKeys = IdentitySeatAccessKeys(identities: identities)
+        let channelOfferCatalog = ChannelOfferCatalog.bundled()
+        if !channelOfferCatalog.rejectedProductIds.isEmpty {
+            // A clash makes both offers unsellable, which is safe but
+            // invisible — a paid offer would simply never resolve, with
+            // nothing to say why. Logged always, and fatal in DEBUG,
+            // because the catalog is committed and a duplicate there is
+            // a mistake to fix rather than a condition to tolerate.
+            let clashing = channelOfferCatalog.rejectedProductIds.joined(separator: ", ")
+            print("[billing] channel offers dropped for duplicate productId: \(clashing)")
+            assertionFailure("duplicate productId in ChannelOffers.json: \(clashing)")
+        }
+        // No temporary-directory fallback. Purchased credentials there
+        // would sit somewhere the OS purges and without complete file
+        // protection, unlike everything else in the backup directory —
+        // so a person's credentials would quietly become less protected
+        // than their snapshots, on the path where something is already
+        // wrong. If the directory cannot be created, the store is
+        // absent: entitlements resolve to nil, paid offers gate as
+        // unavailable, and nothing is written anywhere weaker.
+        let seatEntitlementStore: (any SeatEntitlementStoring)? =
+            (try? BackupSeat.workingDirectory())
+                .map { FileSeatEntitlementStore(url: $0.appending(path: "entitlements.json")) }
+
+        // Replay observer for purchases that were never finished.
+        //
+        // Started here rather than from a view: a transaction replayed
+        // while nothing is listening waits for the launch after next,
+        // and the person who is waiting is one who has already paid.
+        #if DEBUG
+        let billingBaseURL = OnymIOSApp.resolveBillingBaseURL(args: args)
+            ?? URLSessionBillingBrokerClient.defaultBaseURL
+        #else
+        let billingBaseURL = URLSessionBillingBrokerClient.defaultBaseURL
+        #endif
+        let seatTransactionObserver = SeatTransactionObserver(
+            catalog: channelOfferCatalog
+        ) { componentId in
+            // The issuer key is pinned per operator, from the manifest
+            // that operator signed and this person consented to. No
+            // consented manifest means no key to pin, which means no
+            // redemption — an unpinned broker client would accept a
+            // credential from whoever answered the URL.
+            guard
+                let entitlementStore = seatEntitlementStore,
+                let issuerKey = BackupSeat.entitlementIssuerKey(
+                    componentId: componentId, consentStore: pinnedConsentStore)
+            else {
+                return nil
+            }
+            return SeatPurchaseFlow(
+                coordinator: StoreKitPurchaseCoordinator(),
+                broker: URLSessionBillingBrokerClient(
+                    baseURL: billingBaseURL, issuerKey: issuerKey),
+                catalog: channelOfferCatalog,
+                store: entitlementStore,
+                keys: seatAccessKeys,
+                trustedIssuers: { componentId in
+                    BackupSeat.entitlementIssuers(
+                        componentId: componentId, consentStore: pinnedConsentStore)
+                }
+            )
+        }
+        seatTransactionObserver.start()
+        self.seatTransactionObserver = seatTransactionObserver
+
         let makeEntitlements: @Sendable (SignedServiceManifest) -> any EntitlementProviding = { manifest in
-            FreeTierEntitlementProvider(reviewing: manifest, consentStore: pinnedConsentStore)
+            guard let seatEntitlementStore else {
+                // Nowhere safe to keep a credential, so no paid offer can
+                // resolve. Free offers still do, with no network and no
+                // store — which is the case that must never depend on
+                // any of this.
+                return FreeTierEntitlementProvider(
+                    reviewing: manifest, consentStore: pinnedConsentStore)
+            }
+            return StoreKitEntitlementProvider(
+                free: FreeTierEntitlementProvider(
+                    reviewing: manifest, consentStore: pinnedConsentStore),
+                catalog: channelOfferCatalog,
+                store: seatEntitlementStore,
+                keys: seatAccessKeys,
+                trustedIssuers: { componentId in
+                    BackupSeat.entitlementIssuers(
+                        componentId: componentId, consentStore: pinnedConsentStore)
+                }
+            )
         }
 
         /// Manifest `name` when published and non-empty, else the
@@ -1257,6 +1372,22 @@ struct OnymIOSApp: App {
                 )
             },
             makeDiscoverySettingsFlow: makeDiscoverySettingsFlow,
+            consentedBackupComponentId: {
+                BackupSeat.consentedManifest(consentStore: pinnedConsentStore)?.componentId
+            },
+            makeDeviceBackupView: {
+                await BackupSeatComposer(
+                    identities: identities,
+                    groupStore: groupStore,
+                    messageStore: messageStore,
+                    invitationStore: invitationStore,
+                    consentStore: pinnedConsentStore,
+                    blobClient: blossomClient,
+                    endpointOverride: backupBaseURLOverride,
+                    entitlementStore: seatEntitlementStore,
+                    seatKeys: seatAccessKeys
+                ).makeDeviceBackupView()
+            },
             makeOnboardingFlow: makeOnboardingFlow,
             presentOnboardingAtLaunch: shouldOnboard,
             onboardingRestart: onboardingRestartController,
@@ -1265,6 +1396,36 @@ struct OnymIOSApp: App {
     }
 
     #if DEBUG
+    /// `--billing-base-url <https-url>` (DEBUG only): point a dev build
+    /// at a local billing broker. The URL must be https even here —
+    /// reach a local server through a tunnel rather than relaxing
+    /// transport security.
+    private static func resolveBillingBaseURL(args: [String]) -> URL? {
+        guard let flagIndex = args.firstIndex(of: "--billing-base-url"),
+              args.indices.contains(flagIndex + 1),
+              let url = URL(string: args[flagIndex + 1]),
+              url.scheme?.lowercased() == "https"
+        else { return nil }
+        return url
+    }
+
+    /// `--backup-base-url <https-url>` (DEBUG only): point a dev build
+    /// at a local backup operator, overriding the endpoint in the
+    /// consented manifest. The URL must be https even here.
+    ///
+    /// Symmetrical with `--enforcement-base-url`, and DEBUG-only for the
+    /// same reason: in a Release build this would let anyone with device
+    /// access redirect a person's history somewhere they never agreed
+    /// to.
+    private static func resolveBackupBaseURL(args: [String]) -> URL? {
+        guard let flagIndex = args.firstIndex(of: "--backup-base-url"),
+              args.indices.contains(flagIndex + 1),
+              let url = URL(string: args[flagIndex + 1]),
+              url.scheme?.lowercased() == "https"
+        else { return nil }
+        return url
+    }
+
     /// `--enforcement-base-url <url>` (with a DEBUG build): point the
     /// enforcement backend client at a local deployment for driving
     /// the full moderation loop in development. The client enforces

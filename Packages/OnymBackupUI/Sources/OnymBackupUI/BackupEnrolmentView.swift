@@ -16,23 +16,62 @@ import SwiftUI
 /// operator that keeps access logs or excludes a great deal from
 /// erasure has published that, and this screen repeats it.
 public struct BackupEnrolmentView: View {
-    private let disclosure: BackupDisclosure
-    private let onAccept: () -> Void
-    private let onCancel: () -> Void
+    @State private var flow: BackupEnrolmentFlow
+    private let onEnrolled: () -> Void
+    @Environment(\.dismiss) private var dismiss
 
     @State private var scrolledToEnd = false
 
-    public init(
-        disclosure: BackupDisclosure,
-        onAccept: @escaping () -> Void,
-        onCancel: @escaping () -> Void
-    ) {
-        self.disclosure = disclosure
-        self.onAccept = onAccept
-        self.onCancel = onCancel
+    public init(flow: BackupEnrolmentFlow, onEnrolled: @escaping () -> Void = {}) {
+        _flow = State(wrappedValue: flow)
+        self.onEnrolled = onEnrolled
     }
 
     public var body: some View {
+        Group {
+            switch flow.state {
+            case .loading:
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            case .unavailable(let message):
+                unavailable(message)
+            case .ready(let disclosure):
+                disclosureBody(disclosure)
+            case .enrolled:
+                // Nothing is uploaded by enrolling. The screen closes
+                // and the settings surface takes over.
+                Color.clear.onAppear {
+                    onEnrolled()
+                    dismiss()
+                }
+            }
+        }
+        .navigationTitle("Device Backup")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await flow.load() }
+    }
+
+    /// Terms are a precondition for enrolment, so a failure to fetch or
+    /// verify them ends here rather than offering to continue without.
+    private func unavailable(_ message: String) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.largeTitle)
+            Text("The operator's terms could not be verified")
+                .font(.headline)
+            Text(verbatim: message)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Text("Backup cannot be turned on without them.")
+                .font(.callout)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityIdentifier("backup.enrolment.unavailable")
+    }
+
+    private func disclosureBody(_ disclosure: BackupDisclosure) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -118,7 +157,7 @@ public struct BackupEnrolmentView: View {
         }
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 10) {
-                Button(action: onAccept) {
+                Button { flow.accept() } label: {
                     Text("Turn On Backup")
                         .frame(maxWidth: .infinity)
                 }
@@ -126,14 +165,12 @@ public struct BackupEnrolmentView: View {
                 .disabled(!scrolledToEnd)
                 .accessibilityIdentifier("backup.enrolment.accept")
 
-                Button("Not Now", action: onCancel)
+                Button("Not Now") { dismiss() }
                     .accessibilityIdentifier("backup.enrolment.cancel")
             }
             .padding(16)
             .background(.bar)
         }
-        .navigationTitle("Device Backup")
-        .navigationBarTitleDisplayMode(.inline)
     }
 
     /// Whether the disclosure has been scrolled to its end.
