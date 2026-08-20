@@ -239,7 +239,7 @@ public final class DeviceBackupSettingsFlow {
                 apply(result)
             }
         } catch {
-            state.status = .failed(message: String(describing: error))
+            state.status = .failed(message: BackupCopy.describe(error))
         }
     }
 
@@ -381,7 +381,7 @@ public final class DeviceBackupSettingsFlow {
             // something a person may need long afterwards — a failure
             // here is not a reason to destroy the record of an earlier
             // success.
-            state.status = .failed(message: String(describing: error))
+            state.status = .failed(message: BackupCopy.describe(error))
         }
     }
 }

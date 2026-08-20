@@ -63,7 +63,7 @@ public final class BackupEnrolmentFlow {
                     otherOperators: otherOperators))
         } catch {
             self.connection = nil
-            state = .unavailable(message: String(describing: error))
+            state = .unavailable(message: BackupCopy.describe(error))
         }
     }
 
@@ -115,7 +115,7 @@ public final class BackupEnrolmentFlow {
             // Not enrolled. Reporting success over a failed write would
             // leave someone believing their history is being backed up
             // when nothing is pinned.
-            state = .unavailable(message: String(describing: error))
+            state = .unavailable(message: BackupCopy.describe(error))
         }
     }
 }
