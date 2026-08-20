@@ -54,6 +54,17 @@ public struct SettingsView: View {
     /// backup, which is a different thing entirely. One protects the
     /// key; this protects the history.
     let makeDeviceBackupView: (@MainActor () -> DeviceBackupVendorsView)?
+    /// Settings → Backup Operators: the discovery catalog's
+    /// `storage.backup` entries, where a backup operator is found and
+    /// consented to.
+    ///
+    /// Separately optional from `makeDeviceBackupView` because the two
+    /// appear at different times, and the earlier one is this: until
+    /// somebody has consented to an operator there is no Device Backup
+    /// screen to build, so a BACKUP section gated on that factory alone
+    /// could never be reached from a standing start. The section shows
+    /// when EITHER is wired.
+    let makeBackupOperatorSettingsFlow: (@MainActor () -> BackupOperatorSettingsFlow)?
 
     public init(
         makeBackupFlow: @escaping @MainActor () -> RecoveryPhraseBackupFlow,
@@ -68,7 +79,8 @@ public struct SettingsView: View {
         makeModerationCaseFlow: (@MainActor (CaseNotice) -> ModerationCaseFlow)? = nil,
         makeDiscoverySettingsFlow: (@MainActor () -> DiscoverySettingsFlow)? = nil,
         onRestartOnboarding: (@MainActor () -> Void)? = nil,
-        makeDeviceBackupView: (@MainActor () -> DeviceBackupVendorsView)? = nil
+        makeDeviceBackupView: (@MainActor () -> DeviceBackupVendorsView)? = nil,
+        makeBackupOperatorSettingsFlow: (@MainActor () -> BackupOperatorSettingsFlow)? = nil
     ) {
         self.makeBackupFlow = makeBackupFlow
         self.makeRelayerSettingsFlow = makeRelayerSettingsFlow
@@ -83,6 +95,7 @@ public struct SettingsView: View {
         self.makeDiscoverySettingsFlow = makeDiscoverySettingsFlow
         self.onRestartOnboarding = onRestartOnboarding
         self.makeDeviceBackupView = makeDeviceBackupView
+        self.makeBackupOperatorSettingsFlow = makeBackupOperatorSettingsFlow
     }
 
     @State private var showRecoveryPhrase = false
@@ -224,24 +237,59 @@ public struct SettingsView: View {
                 // Absent until the app supplies it, like every other
                 // optional section here — a build without backup wired
                 // shows no backup row rather than a dead one.
-                if let makeDeviceBackupView {
+                //
+                // EITHER factory raises the section. Device Backup only
+                // exists once an operator has been consented to, so
+                // gating the section on it alone made the operator
+                // picker unreachable from the state everybody starts
+                // in: no consent, therefore no section, therefore
+                // nowhere to consent.
+                if makeDeviceBackupView != nil || makeBackupOperatorSettingsFlow != nil {
                     SettingsSectionLabel("BACKUP")
                     SettingsCard {
-                        NavigationLink {
-                            makeDeviceBackupView()
-                        } label: {
-                            SettingsRow(
-                                title: "Device Backup",
-                                subtitle: "Sealed copies of this phone's history",
-                                last: true
-                            ) {
-                                SettingsIconTile(
-                                    symbol: "externaldrive.badge.timemachine",
-                                    bg: SettingsTile.blue)
+                        if let makeDeviceBackupView {
+                            NavigationLink {
+                                makeDeviceBackupView()
+                            } label: {
+                                SettingsRow(
+                                    title: "Device Backup",
+                                    subtitle: "Sealed copies of this phone's history",
+                                    // Last only when the picker row is
+                                    // absent, so the card never draws a
+                                    // divider under its final row.
+                                    last: makeBackupOperatorSettingsFlow == nil
+                                ) {
+                                    SettingsIconTile(
+                                        symbol: "externaldrive.badge.timemachine",
+                                        bg: SettingsTile.blue)
+                                }
                             }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("settings.device_backup_row")
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("settings.device_backup_row")
+                        if let makeBackupOperatorSettingsFlow {
+                            NavigationLink {
+                                BackupOperatorSettingsView(flow: makeBackupOperatorSettingsFlow())
+                            } label: {
+                                SettingsRow(
+                                    title: "Backup Operators",
+                                    // Names the second copy on purpose:
+                                    // consenting to another operator
+                                    // adds one, it does not move the
+                                    // first, and that is the sentence
+                                    // the enrolment screen goes on to
+                                    // repeat.
+                                    subtitle: "Find an operator to hold a copy",
+                                    last: true
+                                ) {
+                                    SettingsIconTile(
+                                        symbol: "externaldrive.badge.plus",
+                                        bg: SettingsTile.blue)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("settings.backup_operators_row")
+                        }
                     }
                     SettingsFootnote("A backup is sealed on this phone before it leaves. The operator keeps bytes it cannot read, and only your recovery phrase can open them.")
                 }

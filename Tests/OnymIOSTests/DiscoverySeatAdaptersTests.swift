@@ -1086,4 +1086,34 @@ final class DiscoverySeatAdaptersTests: XCTestCase {
         let result = try await wrapped.fetchLatest()
         XCTAssertEqual(result, StubRelayersFallback.sentinel)
     }
+
+    // MARK: - Seat vocabulary
+
+    /// The backup seat is pinned in the table even though its accepted
+    /// set is what the strict fallback would produce anyway: the table
+    /// is the readable list of seats this app consents to, and the
+    /// entry is what stops `storage.backup` reading as a seat nobody
+    /// considered.
+    func test_backupSeatType_acceptsOnlyItsOwnSeat() {
+        XCTAssertTrue(SeatManifestVocabulary.accepts(
+            catalogSeatType: "storage.backup", manifestSeat: "storage.backup"))
+        XCTAssertEqual(SeatManifestVocabulary.acceptedManifestSeats["storage.backup"],
+                       ["storage.backup"],
+                       "no aliases — this seat has never been published under another name")
+    }
+
+    /// The reason the table exists at all: a catalog must not be able
+    /// to put some other service in the backup seat by mislabeling its
+    /// entry, nor a backup operator into a seat that would hand it a
+    /// different job.
+    func test_backupSeatType_refusesAnyOtherManifestSeat() {
+        for seat in ["blob.storage", "blossom", "notary", "transport.message", "backup", "storage"] {
+            XCTAssertFalse(
+                SeatManifestVocabulary.accepts(
+                    catalogSeatType: "storage.backup", manifestSeat: seat),
+                "\(seat) must not be accepted into the backup seat")
+        }
+        XCTAssertFalse(SeatManifestVocabulary.accepts(
+            catalogSeatType: "blob.storage", manifestSeat: "storage.backup"))
+    }
 }

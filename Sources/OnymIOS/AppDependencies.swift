@@ -117,6 +117,21 @@ struct AppDependencies {
     /// or the identity has no recovery phrase to derive from. The
     /// section hides rather than offering a screen that cannot work.
     let makeDeviceBackupView: (@MainActor () async -> DeviceBackupVendorsView?)?
+    /// Settings → Backup Operators: the catalog picker a backup
+    /// operator is discovered and consented to through. Optional on the
+    /// same terms as the discovery factories — nil in a build with no
+    /// discovery stack, where there is no catalog to pick from.
+    ///
+    /// Non-nil independently of `makeDeviceBackupView`, and that is the
+    /// point: this is the surface that exists BEFORE any consent, and
+    /// the one that makes the other appear.
+    let makeBackupOperatorSettingsFlow: (@MainActor () -> BackupOperatorSettingsFlow)?
+    /// Raised by the backup picker's consent apply step so the root
+    /// view re-resolves the Device Backup screen immediately. Without
+    /// it a consent given from a Settings sheet — where the tab never
+    /// changes — leaves the section missing until the tab is visited
+    /// again.
+    let backupConsentSignal: BackupConsentSignal?
     /// Onboarding flow factory. Non-nil whenever onboarding is
     /// AVAILABLE in this build (always in production; under
     /// `--ui-testing` only with `--ui-onboarding`, so every existing

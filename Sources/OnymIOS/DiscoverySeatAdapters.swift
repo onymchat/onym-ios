@@ -96,6 +96,21 @@ enum SeatManifestVocabulary {
         // because `SignedServiceManifest`'s docs and onym-system's
         // moderation pages name the seat that way.
         "moderation": ["moderation", "authority"],
+        // onym-backup's operator manifest declares
+        // `seat: "storage.backup"`, and `BackupOperatorManifest`
+        // refuses any manifest whose seat is not exactly that string.
+        // So this entry accepts precisely what the strict fallback
+        // below would accept, and it is written out anyway: the table
+        // is the readable list of every seat this app will consent to,
+        // and a seat absent from it reads as one nobody considered
+        // rather than one deliberately left on the default.
+        //
+        // No aliases. The three above earn theirs from manifests that
+        // really were published under the older spelling; this seat has
+        // never been published under any other, so an alias invented
+        // here would be a second accepted spelling that only a
+        // MISLABELED catalog entry could ever use.
+        "storage.backup": ["storage.backup"],
     ]
 
     /// Unknown catalog seat types (nothing in the table) accept only
