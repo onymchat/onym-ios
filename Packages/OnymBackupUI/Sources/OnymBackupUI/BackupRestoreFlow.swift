@@ -85,17 +85,50 @@ public final class BackupRestoreFlow {
     private let restorer: BackupRestorer
     private let keyMaterial: BackupKeyMaterial
     private let workingDirectory: URL
+    /// Run after a restore has written and *before* the summary is
+    /// shown. The composition root uses it to make the repositories
+    /// re-read the stores the restore wrote straight into.
+    ///
+    /// It lives here, and it has no default, for two reasons.
+    ///
+    /// The restore writes through the app's stores rather than through
+    /// the repositories, deliberately: that is what re-encrypts every
+    /// row under this device's at-rest key. The cost is that the
+    /// in-memory caches the chat list and the open thread subscribe to
+    /// know nothing about it — a restored chat appeared only once some
+    /// unrelated mutation happened to refresh the group cache, and its
+    /// messages never appeared at all, because that thread's cache had
+    /// been populated empty before the restore and was serving what it
+    /// held then. Teaching `AppBackupSink` about repositories would
+    /// have fixed it by making a thin store adapter into something that
+    /// knows about view state; teaching `BackupRestorer` would have put
+    /// UI cache invalidation inside the crypto and I/O it exists to do.
+    /// Neither of those seams should carry this, and the composition
+    /// root is the one place that already holds both the repositories
+    /// and the restorer.
+    ///
+    /// It sits *inside* the flow rather than at the call site because
+    /// the ordering is the requirement: the person must not read
+    /// "1 chats, 3 messages" over a list that has not caught up yet.
+    /// This class is the one thing that knows both that the write
+    /// finished and that the summary is about to be presented, so it can
+    /// enforce that ordering rather than ask each caller to remember it.
+    /// No default value for the same reason — a caller that has nothing
+    /// to refresh should have to write `{}` and mean it.
+    private let didRestore: @Sendable () async -> Void
 
     public init(
         sources: [BackupRestoreSource],
         restorer: BackupRestorer,
         keyMaterial: BackupKeyMaterial,
-        workingDirectory: URL
+        workingDirectory: URL,
+        didRestore: @escaping @Sendable () async -> Void
     ) {
         self.sources = sources
         self.restorer = restorer
         self.keyMaterial = keyMaterial
         self.workingDirectory = workingDirectory
+        self.didRestore = didRestore
     }
 
     public func load() async {
@@ -174,6 +207,11 @@ public final class BackupRestoreFlow {
                 keyMaterial: keyMaterial,
                 workingDirectory: workingDirectory
             )
+            // Before `.restored`, never after. The summary and the chat
+            // list behind it are read in the same glance, and a screen
+            // that says three messages arrived over a thread still
+            // showing none is worse than no summary at all.
+            await didRestore()
             state = .restored(summary)
         } catch {
             // Nothing partial has been written: the restorer verifies the

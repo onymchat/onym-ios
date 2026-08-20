@@ -95,10 +95,10 @@ public actor BackupRestorer {
         // earlier writes have landed. Reported as `restoreInterrupted`
         // so the screen can say so, rather than inheriting the
         // pre-write promise.
-        let wroteGroups: Int
-        let wroteMessages: Int
-        let wroteInvitations: Int
-        let wroteConsents: Int
+        let wroteGroups: BackupSinkOutcome
+        let wroteMessages: BackupSinkOutcome
+        let wroteInvitations: BackupSinkOutcome
+        let wroteConsents: BackupSinkOutcome
         do {
             wroteGroups = try await sink.restore(groups: groups)
             wroteMessages = try await sink.restore(messages: messages)
@@ -111,14 +111,31 @@ public actor BackupRestorer {
             throw BackupError.localFailure(reason: .restoreInterrupted)
         }
 
+        // What could not be read is what the sink *said* could not be
+        // read, not what is left over after subtracting what it wrote.
+        //
+        // The subtraction was `held - written`, and it was wrong for
+        // every row that was already on the device. A restore's writes
+        // are `insertOrUpdate` precisely so that restoring twice, or
+        // onto a phone that has since received some of the same
+        // messages, converges rather than duplicating — and a sink that
+        // reported only *new* rows made every one of those convergences
+        // look like a parse failure. The consent list made it
+        // unmissable: you cannot reach an operator's snapshot without
+        // having consented to that operator, so the consents in the
+        // archive are always already held, and the screen said all of
+        // them "could not be read by this version of Onym".
+        //
+        // Only the sink knows which of the two happened, so only the
+        // sink may say. Arithmetic here cannot recover the distinction.
         var skipped: [String: Int] = [:]
-        for (name, held, written) in [
-            ("groups", groups.count, wroteGroups),
-            ("messages", messages.count, wroteMessages),
-            ("invitations", invitations.count, wroteInvitations),
-            ("consents", consents.count, wroteConsents),
-        ] where held > written {
-            skipped[name] = held - written
+        for (name, outcome) in [
+            ("groups", wroteGroups),
+            ("messages", wroteMessages),
+            ("invitations", wroteInvitations),
+            ("consents", wroteConsents),
+        ] where outcome.unreadable > 0 {
+            skipped[name] = outcome.unreadable
         }
 
         // Only a snapshot that meant to carry blobs can be missing any.
@@ -135,10 +152,10 @@ public actor BackupRestorer {
         }
 
         return BackupRestoreSummary(
-            groups: wroteGroups,
-            messages: wroteMessages,
-            invitations: wroteInvitations,
-            consents: wroteConsents,
+            groups: wroteGroups.landed,
+            messages: wroteMessages.landed,
+            invitations: wroteInvitations.landed,
+            consents: wroteConsents.landed,
             blobs: blobs.count,
             skipped: skipped,
             unresolvedBlobs: unresolved

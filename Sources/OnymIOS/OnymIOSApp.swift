@@ -1500,6 +1500,8 @@ struct OnymIOSApp: App {
                     identities: identities,
                     groupStore: groupStore,
                     messageStore: messageStore,
+                    groupRepository: groupRepository,
+                    messageRepository: messageRepository,
                     invitationStore: invitationStore,
                     consentStore: pinnedConsentStore,
                     blobClient: blossomClient,

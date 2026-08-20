@@ -32,6 +32,13 @@ struct BackupSeatComposer {
     let identities: IdentityRepository
     let groupStore: any GroupStore
     let messageStore: any MessageStore
+    /// The repositories that own the caches the chat list and the open
+    /// thread actually read from. Held alongside the stores, not instead
+    /// of them: a restore still writes through the stores, so each row
+    /// is re-encrypted under this device's at-rest key, and these are
+    /// here only so the caches can be told to catch up once it has.
+    let groupRepository: GroupRepository
+    let messageRepository: MessageRepository
     let invitationStore: any InvitationStore
     let consentStore: any PinnedConsentStore
     let blobClient: (any BlossomClient)?
@@ -280,7 +287,25 @@ struct BackupSeatComposer {
                         // repository and are not used to decrypt
                         // anything.
                         keyMaterial: first.material,
-                        workingDirectory: workingDirectory))
+                        workingDirectory: workingDirectory,
+                        // The restored rows are on disk; nothing that
+                        // renders them knows it yet. `GroupRepository`
+                        // serves a cached roster to every `snapshots`
+                        // subscriber and only re-reads on its own
+                        // mutations, so a restored chat used to surface
+                        // whenever the person next created one — and
+                        // `MessageRepository` caches per thread, so a
+                        // thread opened before the restore kept serving
+                        // the empty list it had cached.
+                        //
+                        // Groups first: the chat list resolves each
+                        // row's latest message, and refreshing messages
+                        // into a roster that does not hold their group
+                        // yet is work thrown away.
+                        didRestore: { [groupRepository, messageRepository] in
+                            await groupRepository.reload()
+                            await messageRepository.reload()
+                        }))
             }
         )
     }

@@ -64,18 +64,54 @@ public enum BackupBlobAvailability: Sendable, Equatable {
     case gone
 }
 
+/// What one kind of row did on its way into local state.
+///
+/// Two numbers rather than one, because a single count cannot tell the
+/// difference between the two reasons a row is not *new* on this device,
+/// and the screen says something very different about each:
+///
+/// - `landed` — the row is on the device now. Freshly inserted, updated
+///   in place, or already present and left alone: all three mean the
+///   history is here, which is the only question the summary asks.
+/// - `unreadable` — the row was handed over and did not land. A shape
+///   from a schema this build does not know, an id that will not parse,
+///   a store that refused the write. Worth saying out loud, because part
+///   of someone's history did not arrive.
+///
+/// The previous shape returned `landed` alone and let `BackupRestorer`
+/// subtract it from what the archive held. That subtraction is where the
+/// two meanings collapsed: a consent already present on the device — and
+/// every restore has at least one, since consenting to an operator is
+/// how you reach its snapshot at all — came out the far side as "could
+/// not be read by this version of Onym". Nothing was wrong; the
+/// arithmetic simply had no way to say so. So the sink says so instead.
+public struct BackupSinkOutcome: Sendable, Equatable {
+    /// Rows that are on the device now, however they got there.
+    public let landed: Int
+    /// Rows handed over that this build could not put anywhere.
+    public let unreadable: Int
+
+    public init(landed: Int, unreadable: Int) {
+        self.landed = landed
+        self.unreadable = unreadable
+    }
+
+    public static let none = BackupSinkOutcome(landed: 0, unreadable: 0)
+}
+
 /// Where a restored snapshot's contents go.
 ///
-/// Every method returns **how many rows it actually wrote**, not how
-/// many it was handed. An implementation that cannot reconstruct a row —
-/// an enum case from a newer schema, an unparseable id — skips it, and a
-/// summary built from the archive's counts would then report restoring
-/// things that are not there. The count has to come from the writer.
+/// Every method reports **what actually landed**, not how many rows it
+/// was handed. An implementation that cannot reconstruct a row — an enum
+/// case from a newer schema, an unparseable id — skips it, and a summary
+/// built from the archive's counts would then report restoring things
+/// that are not there. The count has to come from the writer, and so
+/// does the reason a row is missing from it.
 public protocol BackupSinkProviding: Sendable {
-    @discardableResult func restore(groups: [BackupGroupRecord]) async throws -> Int
-    @discardableResult func restore(messages: [BackupMessageRecord]) async throws -> Int
-    @discardableResult func restore(invitations: [BackupInvitationRecord]) async throws -> Int
-    @discardableResult func restore(consents: [BackupConsentRecord]) async throws -> Int
+    @discardableResult func restore(groups: [BackupGroupRecord]) async throws -> BackupSinkOutcome
+    @discardableResult func restore(messages: [BackupMessageRecord]) async throws -> BackupSinkOutcome
+    @discardableResult func restore(invitations: [BackupInvitationRecord]) async throws -> BackupSinkOutcome
+    @discardableResult func restore(consents: [BackupConsentRecord]) async throws -> BackupSinkOutcome
     /// Hand back one attachment blob. The implementation is responsible
     /// for putting it somewhere the media loaders will find it.
     func restore(blob: BackupBlobRecord) async throws
