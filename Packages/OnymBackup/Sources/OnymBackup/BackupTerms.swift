@@ -38,7 +38,17 @@ public struct BackupTerms: Sendable, Equatable {
     public let metadataRetention: MetadataRetention
 
     public let rawBytes: Data
-    public let signature: Data?
+    /// The document's own `signature` field, which covers the canonical
+    /// bytes with `termsId` and `signature` removed.
+    ///
+    /// Read from the document rather than accepted from a caller. The
+    /// detached `.sig` sibling served beside it signs *different bytes*
+    /// — the exact served ones — so the two are not interchangeable, and
+    /// checking one against the other's message rejects a document that
+    /// is perfectly valid.
+    public let embeddedSignature: Data?
+    /// The detached `.sig` sibling, which covers `rawBytes` verbatim.
+    public let detachedSignature: Data?
 
     public struct Retention: Sendable, Equatable {
         /// `measurable` or `best-effort`, verbatim.
@@ -114,7 +124,7 @@ extension BackupTerms {
     /// a partial value: terms are a precondition for enrolment
     /// (`UI-Backup.md` §13), and half-read terms are worse than none —
     /// they would be pinned and later compared against.
-    public static func decode(raw: Data, signature: Data? = nil) throws -> BackupTerms {
+    public static func decode(raw: Data, detachedSignature: Data? = nil) throws -> BackupTerms {
         guard let object = try? JSONSerialization.jsonObject(with: raw) as? [String: Any] else {
             throw BackupError.termsUnavailable
         }
@@ -202,7 +212,9 @@ extension BackupTerms {
                 entitlementRecords: try string(metadataObject, "entitlementRecords")
             ),
             rawBytes: raw,
-            signature: signature
+            embeddedSignature: (object["signature"] as? String)
+                .flatMap { Data(base64Encoded: $0) },
+            detachedSignature: detachedSignature
         )
         return terms
     }
