@@ -60,7 +60,7 @@ public final class BackupRestoreFlow {
             // work the screen can do.
             state = .ready(snapshots: snapshots.sorted { $0.retainedAt > $1.retainedAt })
         } catch {
-            state = .failed(message: String(describing: error))
+            state = .failed(message: Self.describe(error))
         }
     }
 
@@ -68,7 +68,14 @@ public final class BackupRestoreFlow {
     public func restore(_ snapshot: RetainedSnapshot) async {
         let reference = snapshot.snapshotReference
         state = .restoring(reference)
-        let downloaded = workingDirectory.appending(path: "restore-\(reference.digestHex)")
+        // `sealed-`, not `restore-`. The restorer decrypts to
+        // `restore-<digest>` in this same directory, so the two used to
+        // be the identical path: `BackupOpener` would hold a read handle
+        // on the sealed file and create the plaintext over it. Whether
+        // that works at all depends on whether Foundation replaces the
+        // inode or truncates in place — on truncate semantics every
+        // restore fails as `incompleteSnapshot`.
+        let downloaded = workingDirectory.appending(path: "sealed-\(reference.digestHex)")
         defer { try? FileManager.default.removeItem(at: downloaded) }
 
         do {
@@ -85,7 +92,43 @@ public final class BackupRestoreFlow {
             // whole reference and decodes the entire archive before it
             // touches a store. A failure here means the device is exactly
             // as it was.
-            state = .failed(message: String(describing: error))
+            state = .failed(message: Self.describe(error))
+        }
+    }
+
+    /// A sentence, not a debug description.
+    ///
+    /// `String(describing:)` on a `BackupError` produces things like
+    /// `incompleteSnapshot` or a `URLError` dump — accurate, and useless
+    /// to someone halfway through restoring their messages. The raw
+    /// value is still worth keeping for a log; it is the screen that
+    /// needs plain words.
+    nonisolated static func describe(_ error: Error) -> String {
+        switch error {
+        case BackupError.incompleteSnapshot:
+            return "The backup did not arrive complete, so nothing was restored."
+        case BackupError.retentionExpired:
+            return "The operator no longer holds this backup."
+        case BackupError.accessRefused:
+            return "The operator did not accept this device's key."
+        case BackupError.operatorUnavailable:
+            return "The operator could not be reached. Nothing was changed."
+        case BackupError.localFailure(.stateUnreadable),
+             BackupError.localFailure(.archiveUnreadable):
+            return "The backup could not be read on this device."
+        case BackupError.localFailure(.noRecoveryPhrase):
+            return "This identity has no recovery phrase, so it has no backups to restore."
+        case BackupError.termsUnavailable:
+            return "The operator's terms could not be checked, so nothing was restored."
+        case let error as BackupError:
+            // An operator code we do not model. Its own words beat our
+            // guess at what it meant.
+            if case .rejected(_, let message) = error, let message {
+                return message
+            }
+            return "The restore did not complete. Nothing on this phone was changed."
+        default:
+            return "The restore did not complete. Nothing on this phone was changed."
         }
     }
 }

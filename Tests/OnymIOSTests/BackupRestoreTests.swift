@@ -98,8 +98,8 @@ final class BackupRestoreTests: XCTestCase {
         guard case .failed = await flow.state else {
             return XCTFail("a corrupt snapshot was accepted")
         }
-        let wrote = await sink.groups
-        XCTAssertTrue(wrote.isEmpty, "a partial restore reached the stores")
+        let wroteNothing = await sink.wroteNothing
+        XCTAssertTrue(wroteNothing, "a partial restore reached the stores")
     }
 
     /// An empty list is an ordinary answer — a different operator or a
@@ -123,6 +123,65 @@ final class BackupRestoreTests: XCTestCase {
             return XCTFail("an empty list was reported as a failure")
         }
         XCTAssertTrue(snapshots.isEmpty)
+    }
+
+    /// The download and the decrypt must not share a path.
+    ///
+    /// They did: both were `restore-<digest>` in the same directory, so
+    /// `BackupOpener` held a read handle on the sealed file while
+    /// creating the plaintext over it. Whether that works at all depends
+    /// on Foundation replacing the inode rather than truncating in
+    /// place.
+    func testDownloadAndPlaintextDoNotShareAPath() async throws {
+        let dir = try directory()
+        let material = material()
+        let composer = BackupComposer(
+            source: SeededSource(), mediaPolicy: .descriptorsOnly, workingDirectory: dir)
+        let snapshot = try await composer.compose(
+            keyMaterial: material,
+            acceptedTermsId: "sha256:" + String(repeating: "c", count: 64))
+
+        let flow = await BackupRestoreFlow(
+            repository: BackupRepository(
+                port: HoldingPort(snapshot: snapshot),
+                composer: composer,
+                stateStore: EmptyStateStore(),
+                keyMaterial: material),
+            restorer: BackupRestorer(sink: RecordingSink()),
+            keyMaterial: material,
+            workingDirectory: dir)
+
+        await flow.load()
+        guard case .ready(let snapshots) = await flow.state, let first = snapshots.first else {
+            return XCTFail("not listed")
+        }
+        await flow.restore(first)
+        guard case .restored = await flow.state else {
+            return XCTFail("restore failed: \(await flow.state)")
+        }
+        // Both temporaries are cleaned up, so the check that matters is
+        // that the restore completed at all — with a shared path and
+        // truncate semantics it cannot.
+        let leftovers = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+            .filter { $0.hasPrefix("sealed-") || $0.hasPrefix("restore-") }
+        XCTAssertTrue(leftovers.isEmpty, "temporaries left behind: \(leftovers)")
+    }
+
+    /// A person mid-restore should get a sentence, not a debug dump.
+    func testFailureMessagesAreSentences() {
+        XCTAssertEqual(
+            BackupRestoreFlow.describe(BackupError.incompleteSnapshot),
+            "The backup did not arrive complete, so nothing was restored.")
+        XCTAssertEqual(
+            BackupRestoreFlow.describe(BackupError.retentionExpired),
+            "The operator no longer holds this backup.")
+        // An operator's own words beat our guess at what it meant.
+        XCTAssertEqual(
+            BackupRestoreFlow.describe(
+                BackupError.rejected(code: "tape_library_offline", message: "back Tuesday")),
+            "back Tuesday")
+        XCTAssertFalse(
+            BackupRestoreFlow.describe(URLError(.timedOut)).contains("Error Domain"))
     }
 
     /// The summary is written from what the sink wrote, and says so
@@ -208,17 +267,41 @@ private struct SeededSource: BackupSourceProviding {
     func blobCiphertext(sha256: String) async throws -> BackupBlobAvailability { .gone }
 }
 
+/// Records **every** kind, not just groups.
+///
+/// Recording only groups meant `testFailedRestoreWritesNothing` would
+/// have passed even if messages or invitations had been written before
+/// the failure — the test named the property and checked a quarter of
+/// it.
 private actor RecordingSink: BackupSinkProviding {
     var groups: [BackupGroupRecord] = []
+    var messages: [BackupMessageRecord] = []
+    var invitations: [BackupInvitationRecord] = []
+    var consents: [BackupConsentRecord] = []
+    var blobs: [BackupBlobRecord] = []
+
+    var wroteNothing: Bool {
+        groups.isEmpty && messages.isEmpty && invitations.isEmpty
+            && consents.isEmpty && blobs.isEmpty
+    }
 
     func restore(groups: [BackupGroupRecord]) async throws -> Int {
         self.groups = groups
         return groups.count
     }
-    func restore(messages: [BackupMessageRecord]) async throws -> Int { messages.count }
-    func restore(invitations: [BackupInvitationRecord]) async throws -> Int { 0 }
-    func restore(consents: [BackupConsentRecord]) async throws -> Int { 0 }
-    func restore(blob: BackupBlobRecord) async throws {}
+    func restore(messages: [BackupMessageRecord]) async throws -> Int {
+        self.messages = messages
+        return messages.count
+    }
+    func restore(invitations: [BackupInvitationRecord]) async throws -> Int {
+        self.invitations = invitations
+        return invitations.count
+    }
+    func restore(consents: [BackupConsentRecord]) async throws -> Int {
+        self.consents = consents
+        return consents.count
+    }
+    func restore(blob: BackupBlobRecord) async throws { blobs.append(blob) }
 }
 
 private struct EmptyStateStore: BackupStateStoring {

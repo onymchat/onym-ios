@@ -128,7 +128,10 @@ public struct BackupRestoreView: View {
                 // count it did not write would be the same overstatement
                 // this seat refuses everywhere else.
                 Text(verbatim: "Some entries could not be read by this version of Onym: "
-                    + summary.skipped.map { "\($0.value) \($0.key)" }.sorted().joined(separator: ", "))
+                    + summary.skipped
+                        .sorted { $0.key < $1.key }
+                        .map { "\($0.value) \($0.key)" }
+                        .joined(separator: ", "))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

@@ -84,13 +84,18 @@ struct BackupSeatComposer {
             // and one that silently never uploads again.
             currentComponentId: { consented }
         )
+        // Restored attachment ciphertext, and the client that will
+        // actually serve it. Writing bytes to a directory no loader
+        // reads would let the summary report attachments "restored"
+        // while every one of them still renders via network-or-nothing.
+        let restoredBlobs = workingDirectory.appending(path: "blobs")
         let restorer = BackupRestorer(
             sink: AppBackupSink(
                 groupStore: groupStore,
                 messageStore: messageStore,
                 invitationStore: invitationStore,
                 consentStore: consentStore,
-                blobDirectory: workingDirectory.appending(path: "blobs")))
+                blobDirectory: restoredBlobs))
 
         return DeviceBackupSettingsView(flow: flow) {
             // The consent surface, reachable. Without this the section
