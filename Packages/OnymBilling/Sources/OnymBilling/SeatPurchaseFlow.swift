@@ -151,10 +151,17 @@ public actor SeatPurchaseFlow {
                 alreadyHeld.append(channelOffer.offerId)
                 continue
             }
-            guard
-                let (jws, transaction) = await coordinator.currentTransaction(
-                    for: channelOffer.productId)
-            else {
+            let current: (jws: String, transaction: StoreKit.Transaction)?
+            do {
+                current = try await coordinator.currentTransaction(for: channelOffer.productId)
+            } catch {
+                // The store had something and it did not verify. That is
+                // not "never bought", and reporting it as such is how
+                // somebody pays twice.
+                failures[channelOffer.offerId] = Self.describe(error)
+                continue
+            }
+            guard let (jws, transaction) = current else {
                 // The ordinary answer for something never bought, or a
                 // subscription that lapsed. Not an error, and not
                 // counted as one.

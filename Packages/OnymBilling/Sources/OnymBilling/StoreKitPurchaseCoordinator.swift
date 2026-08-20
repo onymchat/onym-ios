@@ -48,11 +48,24 @@ public actor StoreKitPurchaseCoordinator {
 
     /// Current entitlement for a product, if the store has one — the
     /// restore-purchases and cross-device path.
-    public func currentTransaction(for productId: String) async -> (String, StoreKit.Transaction)? {
+    ///
+    /// `nil` means one thing only: the store has no entitlement for
+    /// this product. A verification failure throws.
+    ///
+    /// It used to `try?` the verification, which collapsed those two
+    /// into the same answer — and the caller reports that answer to
+    /// somebody as "the App Store has no purchase for this identity to
+    /// restore". A person on a replacement phone reads that and buys
+    /// their subscription a second time, having been told a signature
+    /// problem was an absence. `jws(from:)` throws on `.unverified`
+    /// precisely so this cannot be mistaken for nothing.
+    public func currentTransaction(
+        for productId: String
+    ) async throws -> (String, StoreKit.Transaction)? {
         guard let verification = await StoreKit.Transaction.currentEntitlement(for: productId) else {
             return nil
         }
-        return try? Self.jws(from: verification)
+        return try Self.jws(from: verification)
     }
 
     /// Ask the store to sync, for an explicit "Restore Purchases".
@@ -80,7 +93,12 @@ public actor StoreKitPurchaseCoordinator {
             // StoreKit could not verify its own signature. The broker
             // would refuse it too; failing here saves a round trip and
             // keeps an unverifiable receipt off the network.
-            throw BillingError.purchaseFailed(reason: "unverified: \(error)")
+            //
+            // Its own case rather than `purchaseFailed`: on the restore
+            // path this is a purchase that exists and could not be
+            // read, which is the opposite of the "no purchase" the
+            // caller would otherwise report.
+            throw BillingError.transactionUnverified(reason: String(describing: error))
         }
     }
 }

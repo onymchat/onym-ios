@@ -32,6 +32,14 @@ public enum BillingError: Error, Equatable, Sendable {
     case offerNotSellable(offerId: String)
     /// StoreKit refused, or the person cancelled.
     case purchaseFailed(reason: String)
+    /// StoreKit produced a transaction whose own signature did not
+    /// check out.
+    ///
+    /// Its own case because it is not an absence and must never be
+    /// reported as one: the store *has* a record of this purchase, and
+    /// telling somebody there is nothing to restore is how they buy it
+    /// again.
+    case transactionUnverified(reason: String)
     /// The broker rejected the submission, with its own code preserved.
     case brokerRejected(code: String, message: String?)
     case brokerUnavailable
@@ -83,6 +91,8 @@ extension BillingError: LocalizedError {
             case "pending": return "The purchase is waiting for approval."
             default: return "The App Store could not complete the purchase."
             }
+        case .transactionUnverified:
+            return "The App Store's record of this purchase did not verify on this phone. Try again."
         case .brokerRejected(let code, let message):
             // Its own account of itself beats our guess at what it
             // meant — and an unrecognised code is still worth naming,

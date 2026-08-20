@@ -84,6 +84,58 @@ final class BackupPurchaseRestoreTests: XCTestCase {
         XCTAssertTrue(syncFailed, "a failed sync must reach the surface that renders the claim")
     }
 
+    /// A purchase the store has but cannot verify is not a purchase
+    /// the store does not have.
+    ///
+    /// The third instance of one shape in this flow: something unknown
+    /// rendered as a definitive negative. Here the negative is "the App
+    /// Store has no purchase for this identity", and the person reading
+    /// it is deciding whether to buy their subscription again.
+    func testAnUnverifiableTransactionIsReportedRatherThanReadAsNoPurchase() async throws {
+        let paid = try vendor(componentId: "onym:component:a", displayName: "A")
+        let flow = DeviceBackupVendorsFlow(
+            vendors: [paid],
+            fanOut: BackupFanOut(vendors: [], composer: try composer(), archiveRoot: material().archiveRoot),
+            restorePurchasesForOperator: { _ in
+                SeatPurchaseFlow.RestoreResult(
+                    restored: [],
+                    alreadyHeld: [],
+                    heldUnknown: false,
+                    failures: [
+                        "o": BillingError.transactionUnverified(reason: "signature")
+                            .errorDescription ?? "",
+                    ])
+            },
+            syncPurchasesWithStore: { true }
+        )
+
+        await flow.restorePurchases()
+
+        guard case .finished(_, _, _, _, _, let failures) = flow.purchaseRestore else {
+            return XCTFail("the sweep did not finish: \(flow.purchaseRestore)")
+        }
+        XCTAssertEqual(failures.count, 1, "an unverifiable transaction must survive to the surface")
+        XCTAssertTrue(
+            failures[0].contains("did not verify"),
+            "the row must say what happened, not report an absence: \(failures[0])")
+    }
+
+    /// And the error itself must not read as a debugger's output.
+    func testUnverifiedTransactionsSayWhatHappened() {
+        XCTAssertEqual(
+            BillingError.transactionUnverified(reason: "anything").errorDescription,
+            "The App Store's record of this purchase did not verify on this phone. Try again.")
+        XCTAssertEqual(
+            BillingError.brokerRejected(code: "invalid_transaction", message: "Already refunded.")
+                .errorDescription,
+            "Already refunded.",
+            "the broker's own words are the ones worth showing")
+        XCTAssertEqual(
+            BillingError.brokerRejected(code: "invalid_transaction", message: nil).errorDescription,
+            "The billing service refused this purchase (invalid_transaction).",
+            "an unrecognised refusal still names its code, which is what support asks for")
+    }
+
     // MARK: - Fixtures
 
     private func material() -> BackupKeyMaterial {
