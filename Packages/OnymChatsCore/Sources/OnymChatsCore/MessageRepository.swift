@@ -154,6 +154,33 @@ public actor MessageRepository {
         notifyChange()
     }
 
+    /// Re-read every cached thread from the store.
+    ///
+    /// For writes that went into the `MessageStore` without passing
+    /// through here — the only one today is a backup restore, which
+    /// writes through the app's stores so each row is re-encrypted under
+    /// this device's at-rest key, and therefore bypasses the repository
+    /// that owns this cache. Without this, a thread whose cache was
+    /// populated *before* the restore keeps serving what it held then,
+    /// and an open chat stays empty while its messages sit on disk.
+    ///
+    /// Every cached thread, not the ones a caller believes were
+    /// touched. Threads this session never opened are not in `cached` at
+    /// all and will read the store on first subscribe, so they need
+    /// nothing; the cached ones are the entire exposure, and there are
+    /// only ever as many of those as the person has opened since launch.
+    /// Narrowing it to "affected" threads would mean the restore telling
+    /// the repository which keys it wrote — a list that is wrong the
+    /// moment a record is skipped, and whose failure mode is a chat that
+    /// silently stays empty. A restore is rare; a restore that
+    /// half-refreshes is the bug this method exists to close.
+    public func reload() async {
+        for key in cached.keys {
+            await refresh(key)
+        }
+        notifyChange()
+    }
+
     // MARK: - Subscriptions
 
     /// Reactive stream of messages for one thread. Emits the current

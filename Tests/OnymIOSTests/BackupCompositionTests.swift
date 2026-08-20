@@ -229,16 +229,16 @@ private actor StubSink: BackupSinkProviding {
     var messages: [BackupMessageRecord] = []
     var blobs: [BackupBlobRecord] = []
 
-    func restore(groups: [BackupGroupRecord]) async throws -> Int {
+    func restore(groups: [BackupGroupRecord]) async throws -> BackupSinkOutcome {
         self.groups = groups
-        return groups.count
+        return BackupSinkOutcome(landed: groups.count, unreadable: 0)
     }
-    func restore(messages: [BackupMessageRecord]) async throws -> Int {
+    func restore(messages: [BackupMessageRecord]) async throws -> BackupSinkOutcome {
         self.messages = messages
-        return messages.count
+        return BackupSinkOutcome(landed: messages.count, unreadable: 0)
     }
-    func restore(invitations: [BackupInvitationRecord]) async throws -> Int { 0 }
-    func restore(consents: [BackupConsentRecord]) async throws -> Int { 0 }
+    func restore(invitations: [BackupInvitationRecord]) async throws -> BackupSinkOutcome { .none }
+    func restore(consents: [BackupConsentRecord]) async throws -> BackupSinkOutcome { .none }
     func restore(blob: BackupBlobRecord) async throws { blobs.append(blob) }
 }
 
@@ -246,9 +246,13 @@ private actor StubSink: BackupSinkProviding {
 /// Writes only the first group it is handed, standing in for a sink that
 /// meets a row from a schema it does not understand.
 private actor RefusingSink: BackupSinkProviding {
-    func restore(groups: [BackupGroupRecord]) async throws -> Int { min(groups.count, 1) }
-    func restore(messages: [BackupMessageRecord]) async throws -> Int { messages.count }
-    func restore(invitations: [BackupInvitationRecord]) async throws -> Int { 0 }
-    func restore(consents: [BackupConsentRecord]) async throws -> Int { 0 }
+    func restore(groups: [BackupGroupRecord]) async throws -> BackupSinkOutcome {
+        BackupSinkOutcome(landed: min(groups.count, 1), unreadable: groups.count - min(groups.count, 1))
+    }
+    func restore(messages: [BackupMessageRecord]) async throws -> BackupSinkOutcome {
+        BackupSinkOutcome(landed: messages.count, unreadable: 0)
+    }
+    func restore(invitations: [BackupInvitationRecord]) async throws -> BackupSinkOutcome { .none }
+    func restore(consents: [BackupConsentRecord]) async throws -> BackupSinkOutcome { .none }
     func restore(blob: BackupBlobRecord) async throws {}
 }

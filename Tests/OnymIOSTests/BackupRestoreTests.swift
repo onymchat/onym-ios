@@ -1,7 +1,13 @@
 import Foundation
+import OnymChatsCore
+import OnymFoundation
+import OnymGroup
+import OnymIdentity
+import OnymPersistence
 import XCTest
 @testable import OnymBackup
 @testable import OnymBackupUI
+@testable import OnymIOS
 
 /// History restore.
 ///
@@ -48,7 +54,8 @@ final class BackupRestoreTests: XCTestCase {
             ],
             restorer: BackupRestorer(sink: sink),
             keyMaterial: material,
-            workingDirectory: dir)
+            workingDirectory: dir,
+            didRestore: {})
 
         await flow.load()
         guard case .ready(let snapshots) = await flow.state, let first = snapshots.first else {
@@ -97,7 +104,8 @@ final class BackupRestoreTests: XCTestCase {
             ],
             restorer: BackupRestorer(sink: sink),
             keyMaterial: material,
-            workingDirectory: dir)
+            workingDirectory: dir,
+            didRestore: {})
 
         await flow.load()
         guard case .ready(let snapshots) = await flow.state, let first = snapshots.first else {
@@ -131,7 +139,8 @@ final class BackupRestoreTests: XCTestCase {
             ],
             restorer: BackupRestorer(sink: RecordingSink()),
             keyMaterial: material,
-            workingDirectory: dir)
+            workingDirectory: dir,
+            didRestore: {})
 
         await flow.load()
         guard case .ready(let snapshots) = await flow.state else {
@@ -206,7 +215,8 @@ final class BackupRestoreTests: XCTestCase {
             // reviewer identified in the real sink.
             restorer: BackupRestorer(sink: FailsMidWriteSink()),
             keyMaterial: material,
-            workingDirectory: dir)
+            workingDirectory: dir,
+            didRestore: {})
 
         await flow.load()
         guard case .ready(let snapshots) = await flow.state, let first = snapshots.first else {
@@ -253,6 +263,261 @@ final class BackupRestoreTests: XCTestCase {
                     groups: 2, messages: 5, invitations: 0, consents: 0, blobs: 0,
                     unresolvedBlobs: [])),
             "2 chats, 5 messages")
+    }
+
+    // MARK: - What the person sees when the summary appears
+
+    /// The bug QA found, from the outside: a restore reported "1 chats"
+    /// over a chat list that stayed empty, and the chat surfaced only
+    /// once the person happened to create another one — because
+    /// creating one is a `GroupRepository` mutation and a restore is
+    /// not.
+    ///
+    /// So this subscribes *before* the restore, which is what primes the
+    /// cache with the empty roster, and then asks for the next snapshot
+    /// with nothing else touching the repository in between.
+    func testARestoredGroupReachesSubscribersWithNoOtherMutation() async throws {
+        let dir = try directory()
+        let owner = IdentityID()
+        let groupStore = SwiftDataGroupStore.inMemory()
+        let messageStore = SwiftDataMessageStore.inMemory()
+        let groups = GroupRepository(store: groupStore, currentIdentityID: owner)
+        let messages = MessageRepository(store: messageStore)
+
+        let stream = groups.snapshots
+        var roster = stream.makeAsyncIterator()
+        let before = await roster.next()
+        XCTAssertEqual(before?.count, 0, "the roster was not primed empty")
+
+        try await Self.runRestore(
+            in: dir, owner: owner, groupStore: groupStore, messageStore: messageStore,
+            didRestore: {
+                await groups.reload()
+                await messages.reload()
+            })
+
+        let after = await roster.next()
+        XCTAssertEqual(
+            after?.first?.name, "Weekend plans",
+            "the restored chat never reached the list the person was looking at")
+    }
+
+    /// The half of it that survived the first sighting: the chat came
+    /// back and the thread stayed empty. `MessageRepository` caches per
+    /// thread, so a thread whose cache was filled *before* the restore
+    /// keeps serving what it held then — an empty list, forever, since
+    /// nothing else in the app writes those rows.
+    func testRestoredMessagesReachAThreadCachedEmptyBeforeTheRestore() async throws {
+        let dir = try directory()
+        let owner = IdentityID()
+        let groupStore = SwiftDataGroupStore.inMemory()
+        let messageStore = SwiftDataMessageStore.inMemory()
+        let groups = GroupRepository(store: groupStore, currentIdentityID: owner)
+        let messages = MessageRepository(store: messageStore)
+
+        let stream = messages.snapshots(groupID: Self.restoredGroupID, owner: owner)
+        var thread = stream.makeAsyncIterator()
+        let before = await thread.next()
+        XCTAssertEqual(before?.count, 0, "the thread was not primed empty")
+
+        try await Self.runRestore(
+            in: dir, owner: owner, groupStore: groupStore, messageStore: messageStore,
+            didRestore: {
+                await groups.reload()
+                await messages.reload()
+            })
+
+        let after = await thread.next()
+        XCTAssertEqual(
+            after?.first?.body, "see you at six",
+            "the restored messages never reached the open thread")
+    }
+
+    /// A store that refuses the write is not a row restored. The sink
+    /// used to `await store.insertOrUpdate(…)` and then add one
+    /// regardless, so "1 chats, 3 messages" read the same whether three
+    /// messages had landed or none had — which is most of why this took
+    /// a QA pass to see at all.
+    func testAWriteTheStoreRefusedIsNotCounted() async throws {
+        let sink = AppBackupSink(
+            groupStore: RefusingGroupStore(),
+            messageStore: RefusingMessageStore(),
+            invitationStore: SwiftDataInvitationStore.inMemory(),
+            consentStore: MemoryConsentStore(),
+            blobDirectory: try directory())
+
+        let groups = try await sink.restore(groups: [Self.groupRecord(owner: IdentityID())])
+        XCTAssertEqual(groups, BackupSinkOutcome(landed: 0, unreadable: 1))
+
+        let messages = try await sink.restore(messages: [Self.messageRecord(owner: IdentityID())])
+        XCTAssertEqual(messages, BackupSinkOutcome(landed: 0, unreadable: 1))
+    }
+
+    /// Already here is not unreadable.
+    ///
+    /// Every restore carries at least one consent the device already
+    /// holds — you cannot reach an operator's snapshot without having
+    /// consented to that operator — and the summary was rendering the
+    /// shortfall as "could not be read by this version of Onym". Someone
+    /// was told four consents were unreadable for four consents that
+    /// were simply already theirs.
+    func testAConsentAlreadyOnTheDeviceIsNotReportedAsUnreadable() async throws {
+        let (record, raw) = try Self.consent(componentId: "onym:component:op")
+        let store = MemoryConsentStore([record])
+        let sink = AppBackupSink(
+            groupStore: SwiftDataGroupStore.inMemory(),
+            messageStore: SwiftDataMessageStore.inMemory(),
+            invitationStore: SwiftDataInvitationStore.inMemory(),
+            consentStore: store,
+            blobDirectory: try directory())
+
+        let outcome = try await sink.restore(
+            consents: [BackupConsentRecord(componentId: "onym:component:op", raw: raw)])
+        XCTAssertEqual(
+            outcome.unreadable, 0,
+            "a consent the device already held was reported as unparseable")
+        XCTAssertEqual(outcome.landed, 1)
+        XCTAssertEqual(
+            try store.load().count, 1, "an already-held consent was written a second time")
+    }
+
+    /// The alarming sentence still has to be reachable, or the fix above
+    /// would just have silenced it. Bytes that are not a consent record
+    /// are the one case that earns it.
+    func testAConsentThatWillNotDecodeIsReportedAsUnreadable() async throws {
+        let sink = AppBackupSink(
+            groupStore: SwiftDataGroupStore.inMemory(),
+            messageStore: SwiftDataMessageStore.inMemory(),
+            invitationStore: SwiftDataInvitationStore.inMemory(),
+            consentStore: MemoryConsentStore(),
+            blobDirectory: try directory())
+
+        let outcome = try await sink.restore(
+            consents: [
+                BackupConsentRecord(
+                    componentId: "onym:component:op",
+                    raw: Data(#"{"from":"a later schema"}"#.utf8))
+            ])
+        XCTAssertEqual(outcome, BackupSinkOutcome(landed: 0, unreadable: 1))
+    }
+
+    /// Restoring the same snapshot twice converges rather than
+    /// duplicating — and the second run must report the same thing the
+    /// first did. Counting only *new* rows would have the second restore
+    /// announce that everything in the archive was unreadable.
+    func testASecondRestoreOfTheSameRowsStillCountsThemAsLanded() async throws {
+        let owner = IdentityID()
+        let sink = AppBackupSink(
+            groupStore: SwiftDataGroupStore.inMemory(),
+            messageStore: SwiftDataMessageStore.inMemory(),
+            invitationStore: SwiftDataInvitationStore.inMemory(),
+            consentStore: MemoryConsentStore(),
+            blobDirectory: try directory())
+        let record = Self.groupRecord(owner: owner)
+
+        let first = try await sink.restore(groups: [record])
+        let second = try await sink.restore(groups: [record])
+        XCTAssertEqual(first, BackupSinkOutcome(landed: 1, unreadable: 0))
+        XCTAssertEqual(
+            second, BackupSinkOutcome(landed: 1, unreadable: 0),
+            "restoring a chat that was already here read as a chat that could not be read")
+    }
+
+    // MARK: - Fixtures for the above
+
+    fileprivate static let restoredGroupID = String(repeating: "c", count: 64)
+
+    /// Seal a snapshot holding one group and one message for `owner`,
+    /// serve it from a stand-in operator, and restore it through the
+    /// real `AppBackupSink` and the real flow — so the ordering under
+    /// test is the shipped one: refresh first, summary second.
+    private static func runRestore(
+        in dir: URL,
+        owner: IdentityID,
+        groupStore: any GroupStore,
+        messageStore: any MessageStore,
+        didRestore: @escaping @Sendable () async -> Void
+    ) async throws {
+        let material = BackupKeys.material(
+            seed: Data(repeating: 0x5E, count: 64), componentId: "onym:component:op")
+        let composer = BackupComposer(
+            source: OwnedSource(owner: owner), mediaPolicy: .descriptorsOnly,
+            workingDirectory: dir)
+        let snapshot = try await composer.compose(
+            keyMaterial: material,
+            acceptedTermsId: "sha256:" + String(repeating: "a", count: 64))
+
+        let flow = await BackupRestoreFlow(
+            sources: [
+                BackupRestoreSource(
+                    componentId: "onym:component:test-operator",
+                    displayName: "Test Operator",
+                    repository: BackupRepository(
+                        port: HoldingPort(snapshot: snapshot),
+                        composer: composer,
+                        stateStore: EmptyStateStore(),
+                        keyMaterial: material))
+            ],
+            restorer: BackupRestorer(
+                sink: AppBackupSink(
+                    groupStore: groupStore,
+                    messageStore: messageStore,
+                    invitationStore: SwiftDataInvitationStore.inMemory(),
+                    consentStore: MemoryConsentStore(),
+                    blobDirectory: dir.appending(path: "blobs"))),
+            keyMaterial: material,
+            workingDirectory: dir,
+            didRestore: didRestore)
+
+        await flow.load()
+        guard case .ready(let rows) = await flow.state, let row = rows.first else {
+            throw XCTSkip("the operator's snapshot was not listed")
+        }
+        await flow.restore(row)
+        guard case .restored = await flow.state else {
+            throw XCTSkip("restore did not complete: \(await flow.state)")
+        }
+    }
+
+    fileprivate static func groupRecord(owner: IdentityID) -> BackupGroupRecord {
+        BackupGroupRecord(
+            id: restoredGroupID, ownerIdentityID: owner.rawValue.uuidString,
+            name: "Weekend plans", groupSecret: Data(repeating: 0xEE, count: 32),
+            createdAt: Date(), membersJSON: Data("[]".utf8),
+            memberProfilesJSON: Data("{}".utf8), epoch: 0,
+            salt: Data(repeating: 1, count: 32), commitment: nil, tierRaw: 0,
+            groupTypeRaw: "tyranny", adminPubkeyHex: nil, adminEd25519PubkeyHex: nil,
+            isPublishedOnChain: false, avatarJPEG: nil, lastReadAt: nil,
+            invitationMessage: nil)
+    }
+
+    fileprivate static func messageRecord(owner: IdentityID) -> BackupMessageRecord {
+        BackupMessageRecord(
+            id: UUID().uuidString, groupID: restoredGroupID,
+            ownerIdentityID: owner.rawValue.uuidString,
+            senderBlsPubkeyHex: "ab", body: "see you at six", sentAt: Date(),
+            directionRaw: "outgoing", statusRaw: "sent", groupTypeRaw: "tyranny",
+            replyToMessageID: nil, failureReasonRaw: nil, moderationAuthenticityProof: nil,
+            imageAttachmentJSON: nil, videoAttachmentJSON: nil, albumAttachmentsJSON: nil,
+            voiceAttachmentJSON: nil, systemEventJSON: nil)
+    }
+
+    /// One pinned consent, and the exact bytes an archive would carry
+    /// for it. Built by decoding the bytes rather than by minting a
+    /// signed manifest: what is under test is the *counting*, and the
+    /// record only has to be one the sink's decoder accepts.
+    private static func consent(componentId: String) throws -> (PinnedConsentRecord, Data) {
+        let raw = try JSONSerialization.data(withJSONObject: [
+            "componentId": componentId,
+            "seatType": "storage.backup",
+            "manifestHash": "sha256:" + String(repeating: "1", count: 64),
+            "manifestBytes": Data("{}".utf8).base64EncodedString(),
+            "acceptedAt": "2026-01-01T00:00:00Z",
+            "isActive": true,
+        ])
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return (try decoder.decode(PinnedConsentRecord.self, from: raw), raw)
     }
 }
 
@@ -339,23 +604,80 @@ private actor RecordingSink: BackupSinkProviding {
             && consents.isEmpty && blobs.isEmpty
     }
 
-    func restore(groups: [BackupGroupRecord]) async throws -> Int {
+    func restore(groups: [BackupGroupRecord]) async throws -> BackupSinkOutcome {
         self.groups = groups
-        return groups.count
+        return BackupSinkOutcome(landed: groups.count, unreadable: 0)
     }
-    func restore(messages: [BackupMessageRecord]) async throws -> Int {
+    func restore(messages: [BackupMessageRecord]) async throws -> BackupSinkOutcome {
         self.messages = messages
-        return messages.count
+        return BackupSinkOutcome(landed: messages.count, unreadable: 0)
     }
-    func restore(invitations: [BackupInvitationRecord]) async throws -> Int {
+    func restore(invitations: [BackupInvitationRecord]) async throws -> BackupSinkOutcome {
         self.invitations = invitations
-        return invitations.count
+        return BackupSinkOutcome(landed: invitations.count, unreadable: 0)
     }
-    func restore(consents: [BackupConsentRecord]) async throws -> Int {
+    func restore(consents: [BackupConsentRecord]) async throws -> BackupSinkOutcome {
         self.consents = consents
-        return consents.count
+        return BackupSinkOutcome(landed: consents.count, unreadable: 0)
     }
     func restore(blob: BackupBlobRecord) async throws { blobs.append(blob) }
+}
+
+/// One group and one message, both owned by a caller-chosen identity —
+/// `SeededSource` mints a fresh owner each call, which is fine when
+/// nothing downstream has to *find* the rows and useless when a
+/// repository filtered by identity does.
+private struct OwnedSource: BackupSourceProviding {
+    let owner: IdentityID
+
+    func identityCount() async -> Int { 1 }
+    func groups() async throws -> [BackupGroupRecord] {
+        [BackupRestoreTests.groupRecord(owner: owner)]
+    }
+    func messages(groupID: String, ownerIdentityID: String) async throws -> [BackupMessageRecord] {
+        [BackupRestoreTests.messageRecord(owner: owner)]
+    }
+    func invitations() async throws -> [BackupInvitationRecord] { [] }
+    func consents() async throws -> [BackupConsentRecord] { [] }
+    func blobCiphertext(sha256: String) async throws -> BackupBlobAvailability { .gone }
+}
+
+/// A store that persists nothing and says so, the way the real one does
+/// when `encode` gives way.
+private actor RefusingGroupStore: GroupStore {
+    func list() async -> [ChatGroup] { [] }
+    func insertOrUpdate(_ group: ChatGroup) -> Bool { false }
+    func markPublished(id: String, ownerIDString: String, commitment: Data?) {}
+    func markRead(id: String, ownerIDString: String, at date: Date) {}
+    func delete(id: String, ownerIDString: String) {}
+    func deleteOwner(_ ownerIDString: String) {}
+}
+
+private actor RefusingMessageStore: MessageStore {
+    func list(groupID: String, ownerIDString: String) -> [ChatMessage] { [] }
+    func latestMessage(groupID: String, ownerIDString: String) -> ChatMessage? { nil }
+    func unreadCount(groupID: String, ownerIDString: String, since: Date) -> Int { 0 }
+    func search(ownerIDString: String, query: String, limit: Int) -> [ChatMessage] { [] }
+    func insertOrUpdate(_ message: ChatMessage) -> MessageInsertOutcome { .failed }
+    func updateStatus(
+        id: UUID, ownerIDString: String, status: MessageStatus,
+        failureReason: SendFailureReason?
+    ) {}
+    func needsDeliveredAck(id: UUID, ownerIDString: String) -> Bool { false }
+    func markDeliveredAckSent(id: UUID, ownerIDString: String) {}
+    func delete(id: UUID, ownerIDString: String) {}
+    func deleteGroup(groupID: String, ownerIDString: String) {}
+    func deleteOwner(_ ownerIDString: String) {}
+    func deleteAll() {}
+}
+
+private final class MemoryConsentStore: PinnedConsentStore, @unchecked Sendable {
+    private var records: [PinnedConsentRecord]
+
+    init(_ records: [PinnedConsentRecord] = []) { self.records = records }
+
+    func load() throws -> [PinnedConsentRecord] { records }
+    func save(_ records: [PinnedConsentRecord]) throws { self.records = records }
 }
 
 private struct EmptyStateStore: BackupStateStoring {
@@ -367,11 +689,15 @@ private struct EmptyStateStore: BackupStateStoring {
 /// Writes groups, then fails — the shape of a consent or blob write
 /// throwing after earlier rows have already landed.
 private actor FailsMidWriteSink: BackupSinkProviding {
-    func restore(groups: [BackupGroupRecord]) async throws -> Int { groups.count }
-    func restore(messages: [BackupMessageRecord]) async throws -> Int { messages.count }
-    func restore(invitations: [BackupInvitationRecord]) async throws -> Int {
+    func restore(groups: [BackupGroupRecord]) async throws -> BackupSinkOutcome {
+        BackupSinkOutcome(landed: groups.count, unreadable: 0)
+    }
+    func restore(messages: [BackupMessageRecord]) async throws -> BackupSinkOutcome {
+        BackupSinkOutcome(landed: messages.count, unreadable: 0)
+    }
+    func restore(invitations: [BackupInvitationRecord]) async throws -> BackupSinkOutcome {
         throw BackupError.localFailure(reason: .archiveUnreadable)
     }
-    func restore(consents: [BackupConsentRecord]) async throws -> Int { 0 }
+    func restore(consents: [BackupConsentRecord]) async throws -> BackupSinkOutcome { .none }
     func restore(blob: BackupBlobRecord) async throws {}
 }
