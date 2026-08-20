@@ -825,24 +825,45 @@ struct OnymIOSApp: App {
         // Resolved outside the closure: referencing `Self` inside an
         // escaping closure during `init` captures a self that does not
         // exist yet.
+        // DEBUG-only, and guarded at the call site because the
+        // resolvers are too. A Release build that honoured a launch
+        // argument would let anyone with device access redirect a
+        // person's history to an operator they never consented to —
+        // the same reason `--enforcement-base-url` has always been
+        // DEBUG-only.
+        #if DEBUG
         let backupBaseURLOverride = OnymIOSApp.resolveBackupBaseURL(args: args)
+        #else
+        let backupBaseURLOverride: URL? = nil
+        #endif
         // Local alias: capturing `identityRepository` directly would
         // capture `self` inside an escaping closure during `init`.
         let identities = identityRepository
         let seatAccessKeys = IdentitySeatAccessKeys(identities: identities)
         let channelOfferCatalog = ChannelOfferCatalog.bundled()
-        let seatEntitlementStore = FileSeatEntitlementStore(
-            url: (try? BackupSeat.workingDirectory().appending(path: "entitlements.json"))
-                ?? URL(fileURLWithPath: NSTemporaryDirectory())
-                    .appending(path: "entitlements.json"))
+        // No temporary-directory fallback. Purchased credentials there
+        // would sit somewhere the OS purges and without complete file
+        // protection, unlike everything else in the backup directory —
+        // so a person's credentials would quietly become less protected
+        // than their snapshots, on the path where something is already
+        // wrong. If the directory cannot be created, the store is
+        // absent: entitlements resolve to nil, paid offers gate as
+        // unavailable, and nothing is written anywhere weaker.
+        let seatEntitlementStore: (any SeatEntitlementStoring)? =
+            (try? BackupSeat.workingDirectory())
+                .map { FileSeatEntitlementStore(url: $0.appending(path: "entitlements.json")) }
 
         // Replay observer for purchases that were never finished.
         //
         // Started here rather than from a view: a transaction replayed
         // while nothing is listening waits for the launch after next,
         // and the person who is waiting is one who has already paid.
+        #if DEBUG
         let billingBaseURL = OnymIOSApp.resolveBillingBaseURL(args: args)
             ?? URLSessionBillingBrokerClient.defaultBaseURL
+        #else
+        let billingBaseURL = URLSessionBillingBrokerClient.defaultBaseURL
+        #endif
         let seatTransactionObserver = SeatTransactionObserver(
             catalog: channelOfferCatalog
         ) { componentId in
@@ -851,8 +872,10 @@ struct OnymIOSApp: App {
             // consented manifest means no key to pin, which means no
             // redemption — an unpinned broker client would accept a
             // credential from whoever answered the URL.
-            guard let issuerKey = await BackupSeat.entitlementIssuerKey(
-                componentId: componentId, consentStore: pinnedConsentStore)
+            guard
+                let entitlementStore = seatEntitlementStore,
+                let issuerKey = await BackupSeat.entitlementIssuerKey(
+                    componentId: componentId, consentStore: pinnedConsentStore)
             else {
                 return nil
             }
@@ -861,7 +884,7 @@ struct OnymIOSApp: App {
                 broker: URLSessionBillingBrokerClient(
                     baseURL: billingBaseURL, issuerKey: issuerKey),
                 catalog: channelOfferCatalog,
-                store: seatEntitlementStore,
+                store: entitlementStore,
                 keys: seatAccessKeys,
                 trustedIssuers: { componentId in
                     BackupSeat.entitlementIssuers(
@@ -873,7 +896,15 @@ struct OnymIOSApp: App {
         self.seatTransactionObserver = seatTransactionObserver
 
         let makeEntitlements: @Sendable (SignedServiceManifest) -> any EntitlementProviding = { manifest in
-            StoreKitEntitlementProvider(
+            guard let seatEntitlementStore else {
+                // Nowhere safe to keep a credential, so no paid offer can
+                // resolve. Free offers still do, with no network and no
+                // store — which is the case that must never depend on
+                // any of this.
+                return FreeTierEntitlementProvider(
+                    reviewing: manifest, consentStore: pinnedConsentStore)
+            }
+            return StoreKitEntitlementProvider(
                 free: FreeTierEntitlementProvider(
                     reviewing: manifest, consentStore: pinnedConsentStore),
                 catalog: channelOfferCatalog,
@@ -1339,7 +1370,9 @@ struct OnymIOSApp: App {
                     invitationStore: invitationStore,
                     consentStore: pinnedConsentStore,
                     blobClient: blossomClient,
-                    endpointOverride: backupBaseURLOverride
+                    endpointOverride: backupBaseURLOverride,
+                    entitlementStore: seatEntitlementStore,
+                    seatKeys: seatAccessKeys
                 ).makeDeviceBackupView()
             },
             makeOnboardingFlow: makeOnboardingFlow,
@@ -1350,8 +1383,10 @@ struct OnymIOSApp: App {
     }
 
     #if DEBUG
-    /// `--billing-base-url <https-url>`: point a dev build at a local
-    /// billing broker. https only, same rule as every other override.
+    /// `--billing-base-url <https-url>` (DEBUG only): point a dev build
+    /// at a local billing broker. The URL must be https even here —
+    /// reach a local server through a tunnel rather than relaxing
+    /// transport security.
     private static func resolveBillingBaseURL(args: [String]) -> URL? {
         guard let flagIndex = args.firstIndex(of: "--billing-base-url"),
               args.indices.contains(flagIndex + 1),
@@ -1361,13 +1396,14 @@ struct OnymIOSApp: App {
         return url
     }
 
-    /// `--backup-base-url <https-url>`: point a dev build at a local
-    /// backup operator. https only, in every build — reach a local
-    /// server through a tunnel rather than relaxing transport security.
+    /// `--backup-base-url <https-url>` (DEBUG only): point a dev build
+    /// at a local backup operator, overriding the endpoint in the
+    /// consented manifest. The URL must be https even here.
     ///
-    /// Symmetrical with `--enforcement-base-url`, and used for the same
-    /// reason: exercising the real loop against a deployment you control
-    /// beats a stub that agrees with you.
+    /// Symmetrical with `--enforcement-base-url`, and DEBUG-only for the
+    /// same reason: in a Release build this would let anyone with device
+    /// access redirect a person's history somewhere they never agreed
+    /// to.
     private static func resolveBackupBaseURL(args: [String]) -> URL? {
         guard let flagIndex = args.firstIndex(of: "--backup-base-url"),
               args.indices.contains(flagIndex + 1),

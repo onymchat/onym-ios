@@ -59,6 +59,10 @@ struct RootView: View {
     /// in a view body that re-runs on every redraw. `nil` means no
     /// backup operator is consented to, and the Settings section hides.
     @State private var deviceBackupView: DeviceBackupSettingsView?
+    /// Guards against two resolutions overlapping — building one reads a
+    /// consent record and derives a seat key, and the later of two
+    /// in-flight resolutions could otherwise land first.
+    @State private var resolvingDeviceBackup = false
 
     /// `fullScreenCover(item:)` needs identity, and the two consent
     /// gates the root can host are exactly "no mandate yet" and "the
@@ -118,9 +122,15 @@ struct RootView: View {
             consentPresentation = presentationUnlessOnboarding(
                 for: dependencies.moderationGateFlow.gate
             )
-            if let makeDeviceBackupView = dependencies.makeDeviceBackupView {
-                deviceBackupView = await makeDeviceBackupView()
-            }
+            await resolveDeviceBackupView()
+        }
+        .onChange(of: selectedTab) { _, tab in
+            // Re-resolved when Settings is opened, not only at launch.
+            // Consenting to a backup operator mid-session otherwise left
+            // the section missing until the next launch, which reads as
+            // the consent not having worked.
+            guard tab == .settings else { return }
+            Task { await resolveDeviceBackupView() }
         }
         .onChange(of: dependencies.moderationGateFlow.gate) { _, gate in
             consentPresentation = presentationUnlessOnboarding(for: gate)
@@ -209,6 +219,21 @@ struct RootView: View {
     /// so presenting both would stack two identical obligations. The
     /// gate itself keeps running — its answer is re-read the moment
     /// onboarding completes.
+    /// Builds the backup screen, or leaves it absent.
+    ///
+    /// Absent is an ordinary answer: no consented operator, or an
+    /// identity with no recovery phrase to derive a key from. Both mean
+    /// the Settings section hides rather than offering something that
+    /// cannot produce an openable snapshot.
+    private func resolveDeviceBackupView() async {
+        guard let makeDeviceBackupView = dependencies.makeDeviceBackupView,
+              !resolvingDeviceBackup
+        else { return }
+        resolvingDeviceBackup = true
+        defer { resolvingDeviceBackup = false }
+        deviceBackupView = await makeDeviceBackupView()
+    }
+
     private func presentationUnlessOnboarding(
         for gate: ModerationGateFlow.RootGate
     ) -> ConsentPresentation? {
