@@ -96,6 +96,15 @@ public actor BackupFanOut {
     ///    last; and
     /// 7. upload, one operator at a time.
     ///
+    /// Step 2 and step 7 both connect and reconcile, so a run costs two
+    /// round trips per operator rather than one. That is deliberate: the
+    /// second is a small request immediately before a multi-hundred-
+    /// megabyte upload, it re-checks the terms pin against what the
+    /// operator is publishing *now* rather than what it published before
+    /// the seal, and the alternative — carrying a `BackupConnection`
+    /// forward from step 2 — makes the upload's precondition a stale
+    /// one.
+    ///
     /// Uploads are sequential rather than concurrent. A snapshot is
     /// routinely hundreds of megabytes and this is a phone: two at once
     /// halves neither's time and doubles the chance both are interrupted.
@@ -119,7 +128,21 @@ public actor BackupFanOut {
             // screen says "not set up", which is the honest word and the
             // one with something to do about it — a row here reading
             // "termsUnavailable" would be neither.
-            guard (try? vendor.stateStore.load())?.acceptedTermsId != nil else { continue }
+            //
+            // An *unreadable* state file is a different thing entirely
+            // and must not take the same exit: a locked device or a
+            // corrupt file would silently drop the operator out of the
+            // run, and a person would read the absence of a row as
+            // nothing being wrong. The store already refuses to return
+            // an empty state for that case; this refuses to invent one.
+            let stored: BackupState
+            do {
+                stored = try vendor.stateStore.load()
+            } catch {
+                outcomes[vendor.componentId] = .failed(message: String(describing: error))
+                continue
+            }
+            guard stored.acceptedTermsId != nil else { continue }
 
             if let settled = await retryPendingPayment(at: vendor, now: now) {
                 outcomes[vendor.componentId] = settled

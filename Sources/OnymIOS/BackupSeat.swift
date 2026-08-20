@@ -49,9 +49,7 @@ enum BackupSeat {
         var seen: Set<String> = []
         var manifests: [BackupOperatorManifest] = []
         // Newest record first, so the active pin wins for a component
-        // that has been re-consented; the result is then flipped back
-        // into acceptance order so the list on screen does not reshuffle
-        // when somebody re-reads terms.
+        // that has been re-consented.
         for record in records.reversed() where record.isActive {
             guard
                 !seen.contains(record.componentId),
@@ -64,14 +62,19 @@ enum BackupSeat {
             seen.insert(record.componentId)
             manifests.append(backup)
         }
-        return manifests.reversed()
-    }
-
-    /// The most recently consented backup operator, if there is one.
-    static func consentedManifest(
-        consentStore: any PinnedConsentStore
-    ) -> BackupOperatorManifest? {
-        consentedManifests(consentStore: consentStore).last
+        // Sorted by componentId, which is the only key here that does
+        // not move.
+        //
+        // Store position looks like acceptance order and is not one:
+        // `accept` appends, so re-reading an operator's terms moves it
+        // to the tail and reorders the list. `acceptedAt` on the active
+        // record moves for the same reason, and the *earliest* record
+        // for a component is evicted once its history passes the cap. A
+        // list that reshuffles is not cosmetic here — the root view
+        // rebuilds the whole backup stack when this list changes, which
+        // would throw away a running backup because somebody re-read
+        // some terms.
+        return manifests.sorted { $0.componentId < $1.componentId }
     }
 
     /// What to call an operator on screen.

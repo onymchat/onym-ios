@@ -63,29 +63,34 @@ public final class DeviceBackupVendorsFlow {
 
     public var summary: Summary {
         if isRunning { return .running }
-        let statuses = vendors.map(\.flow.state.status)
-        let enrolled = statuses.filter { !DeviceBackupSettingsFlow.needsEnrolment(for: $0) }
-        guard !enrolled.isEmpty else { return .off(consented: vendors.count) }
 
         var healthy = 0
         var attention = 0
+        var notSetUp = 0
         var lastSuccess: Date?
-        for status in enrolled {
-            switch status {
+        for vendor in vendors {
+            switch vendor.flow.state.status {
+            case .off:
+                notSetUp += 1
             case .idle(let at):
                 healthy += 1
                 lastSuccess = [lastSuccess, at].compactMap { $0 }.max()
             case .running:
                 healthy += 1
-            default:
-                // stale, paymentRequired, checkingEarlierBackup, failed.
-                // Each of these means this operator is not currently
-                // holding what it is supposed to hold.
+            case .stale, .paymentRequired, .termsChanged, .operatorChanged,
+                 .checkingEarlierBackup, .failed:
+                // Every one of these means this operator is not
+                // currently holding what it is supposed to hold.
+                // `termsChanged` and `operatorChanged` are counted here
+                // rather than folded in with "not set up": uploads have
+                // stopped at an operator that *is* set up, and calling
+                // that Off would read as a choice the person made.
                 attention += 1
             }
         }
         if attention > 0 { return .needsAttention(attention: attention, healthy: healthy) }
-        return .on(operators: healthy, lastSuccessAt: lastSuccess)
+        if healthy > 0 { return .on(operators: healthy, lastSuccessAt: lastSuccess) }
+        return .off(consented: notSetUp)
     }
 
     /// How many operators hold at least one snapshot right now.
@@ -109,11 +114,23 @@ public final class DeviceBackupVendorsFlow {
     public func backUpAllNow() async {
         guard !isRunning else { return }
         isRunning = true
-        lastRun = await fanOut.backUpAll()
+        let outcomes = await fanOut.backUpAll()
+        lastRun = outcomes
         isRunning = false
         // Each operator's own screen reads its own state file; the
         // fan-out wrote them all.
         refresh()
+        // And then what the state files cannot say. A run blocked on new
+        // terms or a changed operator writes nothing, so a refresh alone
+        // would show the last successful backup and call it On — for an
+        // operator that has stopped accepting uploads.
+        for outcome in outcomes {
+            guard let vendor = vendors.first(where: { $0.id == outcome.componentId }) else { continue }
+            switch outcome.result {
+            case .ran(let result): vendor.flow.apply(result)
+            case .failed(let message): vendor.flow.applyFailure(message: message)
+            }
+        }
     }
 
     /// The opportunistic path: run only if the schedule permits it.

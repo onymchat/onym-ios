@@ -27,6 +27,13 @@ public struct BackupRestoreView: View {
                     } else {
                         list(snapshots)
                     }
+                    // Outside both branches on purpose. It used to live
+                    // inside `list`, so an outage that left the list
+                    // empty rendered "no operator holds anything" with
+                    // nothing to say that one of them never answered —
+                    // telling someone their history is gone on the
+                    // evidence of a network failure.
+                    unreachableNote
 
                 case .restoring(let reference):
                     VStack(spacing: 10) {
@@ -74,12 +81,18 @@ public struct BackupRestoreView: View {
     /// operator or a different identity has a different holder key and
     /// sees nothing. Saying so beats leaving someone to conclude their
     /// history is gone.
+    ///
+    /// Unless an operator did not answer, in which case the list is not
+    /// an answer at all and must not be phrased as one.
     private var empty: some View {
         VStack(spacing: 10) {
-            Image(systemName: "tray").font(.largeTitle)
-            Text("No backups here")
+            Image(systemName: flow.unreachableOperators.isEmpty ? "tray" : "wifi.exclamationmark")
+                .font(.largeTitle)
+            Text(flow.unreachableOperators.isEmpty ? "No backups here" : "Nothing found yet")
                 .font(.headline)
-            Text("No operator you have set up holds anything for this identity. If you backed up under a different identity, or with an operator this device has not been set up with, that is where it will be.")
+            Text(flow.unreachableOperators.isEmpty
+                ? "No operator you have set up holds anything for this identity. If you backed up under a different identity, or with an operator this device has not been set up with, that is where it will be."
+                : "The operators that answered hold nothing for this identity. That is not the whole picture — one of them could not be reached, and what it holds is unknown.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -87,6 +100,18 @@ public struct BackupRestoreView: View {
         .frame(maxWidth: .infinity)
         .padding(.top, 40)
         .accessibilityIdentifier("backup.restore.empty")
+    }
+
+    /// Named rather than swallowed: someone deciding whether their
+    /// history is recoverable must not read one operator's silence as
+    /// another's answer.
+    @ViewBuilder
+    private var unreachableNote: some View {
+        if !flow.unreachableOperators.isEmpty {
+            SettingsFootnote(
+                verbatim: "Could not reach \(flow.unreachableOperators.joined(separator: ", ")). Anything held there is not in this list.")
+                .accessibilityIdentifier("backup.restore.unreachable")
+        }
     }
 
     private func list(_ snapshots: [RestorableSnapshot]) -> some View {
@@ -112,15 +137,6 @@ public struct BackupRestoreView: View {
             }
             SettingsFootnote(
                 "Sizes are rounded into buckets, so they do not tell you how much history a backup holds.")
-
-            if !flow.unreachableOperators.isEmpty {
-                // A short list that looks complete is the failure mode
-                // here: someone deciding whether their history is
-                // recoverable must not be shown one operator's silence
-                // as another's answer.
-                SettingsFootnote(
-                    verbatim: "Could not reach \(flow.unreachableOperators.joined(separator: ", ")). Anything held there is not in this list.")
-            }
         }
     }
 

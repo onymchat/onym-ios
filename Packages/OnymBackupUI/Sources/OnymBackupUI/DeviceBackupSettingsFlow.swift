@@ -120,6 +120,22 @@ public final class DeviceBackupSettingsFlow {
             state.status = .operatorChanged
             return
         }
+        // A refusal recorded by the last run outranks everything below
+        // it, including a pending payment: an operator that has stopped
+        // accepting uploads is not idle however recent its last
+        // success, and a purchase made before the terms moved buys
+        // nothing until somebody has read them. This is the state that
+        // routes to the screen where they can.
+        switch stored.lastBlockedReason {
+        case .termsChanged:
+            state.status = .termsChanged
+            return
+        case .operatorChanged:
+            state.status = .operatorChanged
+            return
+        case nil:
+            break
+        }
         // A snapshot already sealed and refused for payment outranks
         // idle: it is owed a retry, and showing "On" would leave a person
         // who has since paid wondering why nothing happens.
@@ -171,28 +187,56 @@ public final class DeviceBackupSettingsFlow {
                     break
                 }
             }
-            switch try await repository.backUp() {
-            case .retained, .alreadyRetained:
-                refresh()
-            case .paymentRequired(_, let offerIds, _):
-                state.status = .paymentRequired(offerIds: offerIds)
-            case .termsChanged:
-                state.status = .termsChanged
-            case .operatorChanged:
-                state.status = .operatorChanged
-            case .awaitingReconciliation:
-                state.status = .checkingEarlierBackup
-            case .unknown:
-                // Never rendered as success. The bytes may be held; only
-                // the operator can say, and it has not.
-                state.status = .failed(
-                    message: "The result of the last backup is still unknown.")
-            case .alreadyRunning:
+            let result = try await repository.backUp()
+            if case .alreadyRunning = result {
                 state.status = .running
+            } else {
+                apply(result)
             }
         } catch {
             state.status = .failed(message: String(describing: error))
         }
+    }
+
+    /// Take on the result of a run this flow did not make.
+    ///
+    /// A fan-out drives the repositories directly, so its results never
+    /// pass through here — and most of what a run can report is not
+    /// written to local state at all. `termsChanged` and
+    /// `operatorChanged` in particular stop uploads without recording
+    /// anything, so `refresh()` alone reads the state of a device that
+    /// last backed up successfully and says "On". An operator that has
+    /// stopped accepting uploads until somebody re-reads its terms would
+    /// show as healthy until it happened to go stale, with no route to
+    /// the screen that fixes it.
+    ///
+    /// So the run tells the flow what it learned. Only downwards:
+    /// `retained` re-reads state rather than asserting success from a
+    /// return value.
+    public func apply(_ result: BackupRepository.RunResult) {
+        switch result {
+        case .retained, .alreadyRetained:
+            refresh()
+        case .paymentRequired(_, let offerIds, _):
+            state.status = .paymentRequired(offerIds: offerIds)
+        case .termsChanged:
+            state.status = .termsChanged
+        case .operatorChanged:
+            state.status = .operatorChanged
+        case .awaitingReconciliation:
+            state.status = .checkingEarlierBackup
+        case .unknown:
+            // Never rendered as success. The bytes may be held; only the
+            // operator can say, and it has not.
+            state.status = .failed(message: "The result of the last backup is still unknown.")
+        case .alreadyRunning:
+            break
+        }
+    }
+
+    /// Report that a run threw before it could reach a result.
+    public func applyFailure(message: String) {
+        state.status = .failed(message: message)
     }
 
     /// Run only if the schedule permits it — the opportunistic path.

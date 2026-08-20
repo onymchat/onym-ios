@@ -193,9 +193,10 @@ public struct DeviceBackupVendorsView: View {
         case .running:
             return "Uploading"
         case .needsAttention(let attention, let healthy):
-            return healthy == 0
-                ? "\(attention) of your operators needs attention"
-                : "\(healthy) up to date · \(attention) needs attention"
+            let needing = attention == 1
+                ? "1 operator needs attention"
+                : "\(attention) operators need attention"
+            return healthy == 0 ? needing : "\(healthy) up to date · \(needing)"
         }
     }
 

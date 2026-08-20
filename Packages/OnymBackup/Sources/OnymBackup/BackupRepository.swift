@@ -193,6 +193,15 @@ public actor BackupRepository {
         // Fresh consent is a screen, not an inference.
         if let mismatch = try await operatorOrTermsMismatch(state: state, now: now) {
             state.lastAttemptAt = now
+            // Written down, not just returned. A caller that forgets to
+            // render the return value is one bug; a device that forgets
+            // it was refused is every subsequent launch reporting a
+            // backup that has not run since.
+            switch mismatch {
+            case .termsChanged: state.lastBlockedReason = .termsChanged
+            case .operatorChanged: state.lastBlockedReason = .operatorChanged
+            default: break
+            }
             try commit(state, expecting: enrolled)
             return .blocked(mismatch)
         }
@@ -216,6 +225,11 @@ public actor BackupRepository {
             return .blocked(.awaitingReconciliation(
                 operationIds: state.pendingOperations.map(\.operationId)))
         }
+        // Cleared only by getting past the check that set it: the
+        // operator is the one this state was enrolled with, publishing
+        // the terms it pinned. The caller commits this along with
+        // whatever the run does next.
+        state.lastBlockedReason = nil
         return .ready(state, acceptedTermsId: acceptedTermsId)
     }
 
