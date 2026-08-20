@@ -99,7 +99,12 @@ public struct DeviceBackupVendorsView: View {
                     } label: {
                         SettingsRow(
                             title: "Operator",
-                            subtitle: Self.subtitle(for: vendor, run: flow.lastResult(for: vendor.id)),
+                            subtitle: Self.subtitle(for: vendor, run: flow.lastRun(for: vendor.id)),
+                            // Two lines, because the thing worth reading
+                            // here is a failure message, and one line
+                            // middle-truncates it exactly when it
+                            // matters.
+                            subtitleLineLimit: 2,
                             last: index == flow.vendors.count - 1
                         ) {
                             SettingsIconTile(
@@ -124,11 +129,14 @@ public struct DeviceBackupVendorsView: View {
     /// as one would be a bug waiting for a translator.
     private static func subtitle(
         for vendor: DeviceBackupVendorsFlow.Vendor,
-        run: BackupFanOut.VendorResult?
+        run: BackupFanOut.Outcome?
     ) -> String {
         var line = vendor.displayName + " · " + describe(vendor.flow.state.status)
-        if case .failed(let message) = run {
+        if case .failed(let message) = run?.result {
             line += " · last run: " + message
+        } else if run?.resumedPayment == true {
+            // It backed up, and not the same thing everyone else got.
+            line += " · the backup you paid for went up; the newest changes go next time"
         }
         return line
     }
@@ -207,7 +215,7 @@ public struct DeviceBackupVendorsView: View {
         case .needsAttention:
             "An operator that is out of date is not holding your recent history. Open it below to see what it is waiting for."
         default:
-            "Backups only run while the app is open. If you have not opened Onym in a while, nothing has been backed up."
+            "Backups run only when you tap Back Up Now. Nothing is uploaded on its own, so if you have not backed up in a while, nothing has been backed up."
         }
     }
 

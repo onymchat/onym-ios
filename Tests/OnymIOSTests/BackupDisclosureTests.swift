@@ -72,11 +72,13 @@ final class BackupDisclosureTests: XCTestCase {
     }
 
     /// The schedule copy must not promise more than the build does.
-    /// Uploads are foreground-only, so "automatic" would be a lie, and
-    /// whole-snapshot means every run re-uploads everything.
+    /// Uploads happen on a tap and nowhere else — nothing calls
+    /// `backUpIfDue` — so "automatic" would be a lie, and whole-snapshot
+    /// means every run re-uploads everything.
     func testScheduleCopyDoesNotOverpromise() throws {
         let text = try disclosure().whenBackupsHappen.lowercased()
-        XCTAssertTrue(text.contains("cannot back up in the background"))
+        XCTAssertTrue(text.contains("not in the background"))
+        XCTAssertTrue(text.contains("does not back up on its own"))
         XCTAssertTrue(text.contains("whole history"))
         XCTAssertFalse(text.contains("automatically"))
     }
@@ -99,14 +101,21 @@ final class BackupDisclosureTests: XCTestCase {
         XCTAssertEqual(included.value, "Included in the backup")
     }
 
-    /// The schedule sentence follows the policy rather than being
-    /// written beside it.
-    func testScheduleSentenceTracksThePolicy() {
-        var schedule = BackupSchedule.default
-        schedule.requiresCharging = false
-        let sentence = BackupDisclosure.scheduleSentence(schedule).lowercased()
-        XCTAssertTrue(sentence.contains("on wi-fi"))
-        XCTAssertFalse(sentence.contains("charging"))
+    /// The schedule sentence describes what this build does, not what
+    /// `BackupSchedule` could do.
+    ///
+    /// It used to assert the sentence tracked the policy — Wi-Fi in,
+    /// charging out — which was a fine rule for copy about a behaviour
+    /// that existed. `backUpIfDue` has no caller, so the sentence was
+    /// describing an opportunistic run that never happens, on the screen
+    /// whose whole job is to say what will happen. This pins the honest
+    /// claim instead, and will fail the day somebody wires the schedule
+    /// without revisiting the copy.
+    func testScheduleSentenceClaimsOnlyWhatThisBuildDoes() {
+        let sentence = BackupDisclosure.scheduleSentence(.default).lowercased()
+        XCTAssertTrue(sentence.contains("when you tap back up now"))
+        XCTAssertTrue(sentence.contains("does not back up on its own"))
+        XCTAssertFalse(sentence.contains("may also"))
     }
 
     func testOpportunisticRunRespectsConditions() {

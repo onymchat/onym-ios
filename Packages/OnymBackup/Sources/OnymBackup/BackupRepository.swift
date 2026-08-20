@@ -714,7 +714,10 @@ public actor BackupRepository {
     /// Remove sealed bytes once they are no longer needed.
     ///
     /// Not throwing: failing to delete is not worth failing a completed
-    /// backup over, and the working directory is swept on the next run.
+    /// backup over. What it leaves behind is collected by
+    /// `BackupComposer.sweepWorkingDirectory`, which a fan-out runs
+    /// before it composes — this used to claim a sweep that did not
+    /// exist.
     private func discard(_ snapshot: SealedSnapshot) {
         try? FileManager.default.removeItem(at: snapshot.sealedBytesURL)
     }

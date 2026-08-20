@@ -155,6 +155,48 @@ public actor BackupComposer {
         )
     }
 
+    /// Delete working files nobody will claim.
+    ///
+    /// Written because a comment in `BackupRepository` claimed the
+    /// working directory "is swept on the next run" and nothing ever
+    /// swept it. The claim mattered: a run that ends `unknown` keeps its
+    /// sealed bytes deliberately — the upload may have landed — but
+    /// reconciliation resolves that by asking the operator, never by
+    /// re-reading the file, so nothing ever deleted it. Every unresolved
+    /// run left a full-size snapshot on the device, permanently, once
+    /// per operator.
+    ///
+    /// `claimed` is the filenames that must survive: the sealed bytes of
+    /// snapshots awaiting a purchase, which are the one case where the
+    /// file itself is still needed. Everything else here is scratch.
+    ///
+    /// Age-guarded because a manual per-operator run can be sealing into
+    /// this directory right now, and a sweep is not worth a race with
+    /// it.
+    public func sweepWorkingDirectory(
+        claiming claimed: Set<String>,
+        olderThan age: TimeInterval = 24 * 60 * 60,
+        now: Date = Date()
+    ) {
+        let prefixes = ["pending-", "archive-", "scratch-"]
+        guard
+            let entries = try? FileManager.default.contentsOfDirectory(
+                at: workingDirectory,
+                includingPropertiesForKeys: [.contentModificationDateKey],
+                options: [.skipsHiddenFiles])
+        else {
+            return
+        }
+        for url in entries {
+            let name = url.lastPathComponent
+            guard prefixes.contains(where: name.hasPrefix), !claimed.contains(name) else { continue }
+            let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate
+            guard let modified, now.timeIntervalSince(modified) > age else { continue }
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
     static func newIdentifier() throws -> String {
         try SecureRandom.data(16).map { String(format: "%02x", $0) }.joined()
     }

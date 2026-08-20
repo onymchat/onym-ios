@@ -1,31 +1,6 @@
 import Foundation
 import OnymBackup
 
-/// Restoring history from a snapshot.
-///
-/// **This does not restore an identity and does not wipe one.** The two
-/// are separate and it is worth being precise, because conflating them
-/// is how a restore screen becomes dangerous:
-///
-/// - *Identity* restore replaces the keys this device holds, wiping
-///   every existing identity. It lives in onboarding, where nothing is
-///   at stake, and is not reachable from here.
-/// - *History* restore — this — derives its key from the identity the
-///   device already has and writes messages and groups through the app's
-///   own stores. Nothing is replaced, nothing is deleted; a restored row
-///   that already exists is updated in place.
-///
-/// So someone moving to a new phone restores their identity from the
-/// recovery phrase during onboarding, chooses their backup operator, and
-/// then comes here for their history.
-///
-/// It reads from every operator the person keeps backups with, not one.
-/// Each operator sealed its own copy with its own salt, so their
-/// snapshots are separate rows with separate references — a copy is not
-/// interchangeable with another copy on the wire, only in what it
-/// contains. That is the point of keeping two: if one operator cannot be
-/// reached, or its copy will not open, the other's is a different set of
-/// bytes and may well do.
 /// One operator a restore may read from.
 public struct BackupRestoreSource: Sendable {
     public let componentId: String
@@ -59,6 +34,31 @@ public struct RestorableSnapshot: Identifiable, Equatable, Sendable {
     }
 }
 
+/// Restoring history from a snapshot.
+///
+/// **This does not restore an identity and does not wipe one.** The two
+/// are separate and it is worth being precise, because conflating them
+/// is how a restore screen becomes dangerous:
+///
+/// - *Identity* restore replaces the keys this device holds, wiping
+///   every existing identity. It lives in onboarding, where nothing is
+///   at stake, and is not reachable from here.
+/// - *History* restore — this — derives its key from the identity the
+///   device already has and writes messages and groups through the app's
+///   own stores. Nothing is replaced, nothing is deleted; a restored row
+///   that already exists is updated in place.
+///
+/// So someone moving to a new phone restores their identity from the
+/// recovery phrase during onboarding, chooses their backup operator, and
+/// then comes here for their history.
+///
+/// It reads from every operator the person keeps backups with, not one.
+/// Each operator sealed its own copy with its own salt, so their
+/// snapshots are separate rows with separate references — a copy is not
+/// interchangeable with another copy on the wire, only in what it
+/// contains. That is the point of keeping two: if one operator cannot be
+/// reached, or its copy will not open, the other's is a different set of
+/// bytes and may well do.
 @MainActor
 @Observable
 public final class BackupRestoreFlow {

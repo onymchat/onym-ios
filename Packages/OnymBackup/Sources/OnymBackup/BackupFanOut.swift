@@ -61,10 +61,23 @@ public actor BackupFanOut {
         public let componentId: String
         public let displayName: String
         public let result: VendorResult
+        /// True when this operator's row is the result of resuming a
+        /// snapshot that had been refused for payment, rather than of
+        /// this run's fresh one.
+        ///
+        /// The distinction is not pedantic. A resumed snapshot is as old
+        /// as its contents, and the operator that took it is *not*
+        /// holding what the others just received — so "backed up just
+        /// now", which is what a local success time reads as, would be
+        /// the summary rounding up again.
+        public let resumedPayment: Bool
         public var id: String { componentId }
     }
 
     private let vendors: [Vendor]
+    /// Operators whose row in the current run came from resuming a
+    /// payment rather than from this run's snapshot.
+    private var resumedPayments: Set<String> = []
     private let composer: BackupComposer
     /// The archive key ladder, which is derived from the recovery seed
     /// alone and is therefore identity-wide rather than per operator: a
@@ -121,6 +134,13 @@ public actor BackupFanOut {
     public func backUpAll(now: Date = Date()) async -> [Outcome] {
         var outcomes: [String: VendorResult] = [:]
         var candidates: [Vendor] = []
+        resumedPayments = []
+
+        // Before anything else: collect what earlier runs left. Sealed
+        // bytes from a run that ended `unknown` are never re-read, and
+        // without this they accumulate at full snapshot size, once per
+        // operator, for the life of the install.
+        await composer.sweepWorkingDirectory(claiming: claimedSealedBytes())
 
         for vendor in vendors {
             // An operator that has been consented to but never set up is
@@ -146,6 +166,13 @@ public actor BackupFanOut {
 
             if let settled = await retryPendingPayment(at: vendor, now: now) {
                 outcomes[vendor.componentId] = settled
+                // Resumed, so this operator is out of this run's fresh
+                // compose: it has just been paid for and stored the
+                // older snapshot, and sending the new one on top would
+                // charge for storing the same history twice in one run.
+                // The row says so rather than letting a fresh success
+                // time imply otherwise.
+                resumedPayments.insert(vendor.componentId)
                 continue
             }
             do {
@@ -192,11 +219,17 @@ public actor BackupFanOut {
                 let result = try await vendor.repository.place(prepared: snapshot, now: now)
                 outcomes[vendor.componentId] = .ran(result)
                 switch result {
-                case .paymentRequired, .unknown:
-                    // Still owed something: a purchase to resolve, or an
-                    // operator to say what it did with them.
-                    // `pendingPayment` and the next run's reconciliation
-                    // both need the file where it is.
+                case .paymentRequired:
+                    // Owed a purchase, and `pendingPayment` resumes it
+                    // from this exact file.
+                    break
+                case .unknown:
+                    // Kept, but not because anything reads it back:
+                    // reconciliation asks the operator and never
+                    // re-opens the bytes. They are kept because the
+                    // upload may have landed and deleting them mid-
+                    // flight is worse than keeping them for a day. The
+                    // sweep at the top of the next run collects them.
                     break
                 case .retained, .alreadyRetained:
                     // The repository drops the bytes itself on the paths
@@ -216,6 +249,16 @@ public actor BackupFanOut {
             }
         }
         return collate(outcomes)
+    }
+
+    /// Filenames the sweep must not touch: sealed bytes an operator is
+    /// waiting on a purchase for, which are resumed byte for byte.
+    private func claimedSealedBytes() -> Set<String> {
+        Set(
+            vendors.compactMap {
+                (try? $0.stateStore.load())?.awaitingPayment?.sealedBytesFilename
+            }
+        )
     }
 
     /// Retry a snapshot one operator refused for payment.
@@ -255,7 +298,12 @@ public actor BackupFanOut {
     private func collate(_ outcomes: [String: VendorResult]) -> [Outcome] {
         vendors.compactMap { vendor in
             outcomes[vendor.componentId].map {
-                Outcome(componentId: vendor.componentId, displayName: vendor.displayName, result: $0)
+                Outcome(
+                    componentId: vendor.componentId,
+                    displayName: vendor.displayName,
+                    result: $0,
+                    resumedPayment: resumedPayments.contains(vendor.componentId)
+                )
             }
         }
     }

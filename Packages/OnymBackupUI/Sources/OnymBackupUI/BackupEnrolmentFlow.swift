@@ -31,7 +31,7 @@ public final class BackupEnrolmentFlow {
     /// Operators this identity is already enrolled with. Only used to
     /// say what adding another one does — enrolling here changes
     /// nothing about them.
-    private let otherOperators: [String]
+    private let otherOperators: [BackupDisclosure.OtherOperator]
     private var connection: BackupConnection?
 
     public init(
@@ -40,7 +40,7 @@ public final class BackupEnrolmentFlow {
         workingDirectory: URL,
         schedule: BackupSchedule = .default,
         mediaPolicy: BackupMediaPolicy = .descriptorsOnly,
-        otherOperators: [String] = []
+        otherOperators: [BackupDisclosure.OtherOperator] = []
     ) {
         self.port = port
         self.stateStore = stateStore

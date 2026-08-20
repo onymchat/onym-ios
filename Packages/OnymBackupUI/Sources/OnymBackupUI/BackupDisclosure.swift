@@ -64,13 +64,30 @@ public struct BackupDisclosure: Sendable, Equatable {
     /// keeps access logs, or names four sub-processors, has said so in a
     /// signed document, and the surface's job is to repeat it rather
     /// than summarise it into something more comfortable.
-    /// `otherOperators` names the operators this identity is *already*
-    /// enrolled with, so the surface can say what adding one more does.
+    /// An operator this identity is already enrolled with, as far as
+    /// its *pinned* terms describe it.
+    ///
+    /// Jurisdictions come from the terms bytes the person consented to,
+    /// not from a live fetch and not from a guess. Nothing here knows
+    /// who owns an operator, so nothing here says anything about it.
+    public struct OtherOperator: Sendable, Equatable {
+        public let name: String
+        public let jurisdictions: [String]
+
+        public init(name: String, jurisdictions: [String]) {
+            self.name = name
+            self.jurisdictions = jurisdictions
+        }
+    }
+
+    /// `otherOperators` describes the operators this identity is
+    /// *already* enrolled with, so the surface can say what adding one
+    /// more does.
     public static func from(
         connection: BackupConnection,
         schedule: BackupSchedule,
         mediaPolicy: BackupMediaPolicy,
-        otherOperators: [String] = []
+        otherOperators: [OtherOperator] = []
     ) -> BackupDisclosure {
         let terms = connection.terms
         var items: [Item] = [
@@ -159,22 +176,72 @@ public struct BackupDisclosure: Sendable, Equatable {
                 and nobody can make one for you.
                 """,
             whenBackupsHappen: Self.scheduleSentence(schedule),
-            additionalCopies: Self.additionalCopiesSentence(otherOperators),
+            additionalCopies: Self.additionalCopiesSentence(
+                otherOperators, jurisdictions: terms.jurisdictions),
             operatorName: connection.manifest.componentId,
             items: items
         )
     }
 
     /// What a second operator actually means, when there already is one.
-    static func additionalCopiesSentence(_ otherOperators: [String]) -> String? {
+    ///
+    /// Every clause is checkable against something signed. An earlier
+    /// draft said the new operator was "held by a different company, in
+    /// a different country, under different terms" — of which this knows
+    /// exactly one: the terms are its own, because a terms digest is
+    /// what enrolment pins. Nothing here knows who owns an operator, and
+    /// two operators can perfectly well be in the same country, which
+    /// would have made a consent screen state something false in order
+    /// to sound more reassuring. That is the precise failure §14.11
+    /// exists to prevent.
+    ///
+    /// Jurisdiction is the one part that *is* knowable, from the pinned
+    /// terms on both sides — so it is stated as what it is, including
+    /// when it is the unhelpful answer: two copies under the same
+    /// authorities are two copies one order can reach.
+    static func additionalCopiesSentence(
+        _ otherOperators: [OtherOperator],
+        jurisdictions: [String]
+    ) -> String? {
         guard !otherOperators.isEmpty else { return nil }
-        let names = otherOperators.joined(separator: ", ")
+        let names = otherOperators.map(\.name).joined(separator: ", ")
+        var sentence = """
+            You already back up to \(names). Setting this one up does not replace it — it adds \
+            a second complete copy of your history, kept under this operator's own terms and \
+            paid for separately. Everyone in your chats has their messages kept in one more \
+            place. Setting this one up does not turn the other one off.
+            """
+        if let jurisdiction = Self.jurisdictionSentence(otherOperators, jurisdictions: jurisdictions) {
+            sentence += " " + jurisdiction
+        }
+        return sentence
+    }
+
+    /// Where the two copies actually sit, when both sides said so.
+    ///
+    /// Silent when either side's terms did not reach us. An unstated
+    /// jurisdiction is not evidence of a different one.
+    static func jurisdictionSentence(
+        _ otherOperators: [OtherOperator],
+        jurisdictions: [String]
+    ) -> String? {
+        let known = otherOperators.filter { !$0.jurisdictions.isEmpty }
+        guard !jurisdictions.isEmpty, !known.isEmpty else { return nil }
+        let mine = Set(jurisdictions)
+        let shared = known.filter { !mine.isDisjoint(with: Set($0.jurisdictions)) }
+        if shared.isEmpty {
+            return """
+                This one stores in \(jurisdictions.joined(separator: ", ")); \
+                \(known.map(\.name).joined(separator: ", ")) stores your backup somewhere else.
+                """
+        }
+        let overlap = shared
+            .flatMap { $0.jurisdictions }
+            .filter { mine.contains($0) }
         return """
-            You already back up to \(names). Setting this one up does not replace it — it adds a second complete \
-            copy of your history, held by a different company, in a different country, under \
-            different terms, and paid for separately. Everyone in your chats has their \
-            messages kept in one more place. Setting this one up does not turn the other \
-            one off.
+            Both this operator and \(shared.map(\.name).joined(separator: ", ")) store in \
+            \(Array(Set(overlap)).sorted().joined(separator: ", ")), so one authority can reach \
+            both copies.
             """
     }
 
@@ -189,17 +256,26 @@ public struct BackupDisclosure: Sendable, Equatable {
         return "once an hour"
     }
 
+    /// What this build actually does, which is less than the schedule
+    /// describes.
+    ///
+    /// `BackupSchedule` models an opportunistic run — on Wi-Fi, while
+    /// charging, at most once per interval — and `backUpIfDue` executes
+    /// it, and *nothing calls it*. So the sentence this screen used to
+    /// show ("Onym may also back up on its own while the app is open, on
+    /// Wi-Fi") described a policy rather than a behaviour, on the one
+    /// screen whose entire job is to say what will happen. Someone
+    /// reading it would reasonably never tap the button again.
+    ///
+    /// It says tap-only until something calls `backUpIfDue`. The
+    /// conditions stay in the schedule, where they will be true the day
+    /// they are wired.
     static func scheduleSentence(_ schedule: BackupSchedule) -> String {
-        var conditions: [String] = []
-        if schedule.requiresWiFi { conditions.append("on Wi-Fi") }
-        if schedule.requiresCharging { conditions.append("while charging") }
-        let when = conditions.isEmpty ? "" : " " + conditions.joined(separator: " and ")
-        let cadence = Self.cadence(schedule.minimumInterval)
+        _ = schedule
         return """
-            Backups run when you tap Back Up Now. Onym may also back up on its own while \
-            the app is open\(when), at most \(cadence). It cannot back up in the background, \
-            so if you never open the app, nothing is backed up. Each backup uploads your \
-            whole history, not just what changed.
+            Backups run when you tap Back Up Now, and only then. This version does not back up \
+            on its own — not in the background, and not while the app is open. Each backup \
+            uploads your whole history, not just what changed.
             """
     }
 }

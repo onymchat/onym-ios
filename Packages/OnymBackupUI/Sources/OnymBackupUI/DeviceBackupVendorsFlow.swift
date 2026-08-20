@@ -93,7 +93,9 @@ public final class DeviceBackupVendorsFlow {
         return .off(consented: notSetUp)
     }
 
-    /// How many operators hold at least one snapshot right now.
+    /// How many operators are set up — that is, are not waiting on
+    /// enrolment, new terms, or a re-enrolment. Not the same as how many
+    /// hold a snapshot: one set up a minute ago holds nothing yet.
     public var enrolledCount: Int {
         vendors.filter { !DeviceBackupSettingsFlow.needsEnrolment(for: $0.flow.state.status) }.count
     }
@@ -145,7 +147,7 @@ public final class DeviceBackupVendorsFlow {
 
     /// What one operator reported in the last run, if it reported
     /// anything.
-    public func lastResult(for componentId: String) -> BackupFanOut.VendorResult? {
-        lastRun.first { $0.componentId == componentId }?.result
+    public func lastRun(for componentId: String) -> BackupFanOut.Outcome? {
+        lastRun.first { $0.componentId == componentId }
     }
 }

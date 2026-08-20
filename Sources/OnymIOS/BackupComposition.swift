@@ -203,11 +203,8 @@ struct BackupSeatComposer {
                         // second operator does rather than let it read
                         // as switching.
                         otherOperators: stacks
-                            .filter {
-                                $0.componentId != componentId
-                                    && (try? $0.stateStore.load())?.acceptedTermsId != nil
-                            }
-                            .map(\.displayName)
+                            .filter { $0.componentId != componentId }
+                            .compactMap(Self.otherOperator(from:))
                     )
                 ) {
                     flow.refresh()
@@ -232,6 +229,29 @@ struct BackupSeatComposer {
                         workingDirectory: workingDirectory))
             }
         )
+    }
+
+    /// One already-enrolled operator, described only by what it signed.
+    ///
+    /// Its jurisdictions come from the terms bytes this device pinned
+    /// when the person consented — `acceptedTermsRaw`, kept for exactly
+    /// this kind of question — rather than from a fetch that could
+    /// answer differently today. Returns `nil` for an operator that is
+    /// not enrolled, which has no copy to speak of, and reports empty
+    /// jurisdictions rather than guessing when the pinned bytes will not
+    /// decode.
+    private static func otherOperator(from stack: Stack) -> BackupDisclosure.OtherOperator? {
+        guard
+            let stored = try? stack.stateStore.load(),
+            stored.acceptedTermsId != nil
+        else {
+            return nil
+        }
+        let jurisdictions = stored.acceptedTermsRaw
+            .flatMap { try? BackupTerms.decode(raw: $0) }?
+            .jurisdictions ?? []
+        return BackupDisclosure.OtherOperator(
+            name: stack.displayName, jurisdictions: jurisdictions)
     }
 
     /// The credential to present, chosen at request time.

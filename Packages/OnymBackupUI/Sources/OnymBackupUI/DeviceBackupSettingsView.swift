@@ -26,7 +26,14 @@ public struct DeviceBackupSettingsView: View {
             VStack(alignment: .leading, spacing: 16) {
                 SettingsSectionLabel("STATUS")
                 SettingsCard {
-                    SettingsRow(title: statusTitle, subtitle: statusSubtitle, last: true) {
+                    SettingsRow(
+                        title: statusTitle,
+                        subtitle: statusSubtitle,
+                        // A failure message renders here, and one line
+                        // middle-truncates it exactly when it matters.
+                        subtitleLineLimit: 3,
+                        last: true
+                    ) {
                         SettingsIconTile(symbol: statusSymbol, bg: SettingsTile.blue)
                     }
                     .accessibilityIdentifier("backup.status_row")
@@ -191,7 +198,7 @@ public struct DeviceBackupSettingsView: View {
     private var statusFootnote: String {
         switch flow.state.status {
         case .stale:
-            "Backups only run while the app is open. If you have not opened Onym in a while, nothing has been backed up."
+            "Backups run only when you tap Back Up Now. Nothing is uploaded on its own, so if you have not backed up in a while, nothing has been backed up."
         case .checkingEarlierBackup:
             "Nothing new is uploaded until the earlier one is resolved, so you are not charged to store the same history twice."
         default:
