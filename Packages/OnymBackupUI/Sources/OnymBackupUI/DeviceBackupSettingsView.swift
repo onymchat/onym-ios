@@ -7,12 +7,16 @@ public struct DeviceBackupSettingsView: View {
     @State private var flow: DeviceBackupSettingsFlow
     private let makeEnrolment: () -> BackupEnrolmentView?
 
+    private let makeRestore: () -> BackupRestoreView?
+
     public init(
         flow: DeviceBackupSettingsFlow,
-        makeEnrolment: @escaping () -> BackupEnrolmentView?
+        makeEnrolment: @escaping () -> BackupEnrolmentView?,
+        makeRestore: @escaping () -> BackupRestoreView? = { nil }
     ) {
         _flow = State(wrappedValue: flow)
         self.makeEnrolment = makeEnrolment
+        self.makeRestore = makeRestore
     }
 
     public var body: some View {
@@ -65,6 +69,7 @@ public struct DeviceBackupSettingsView: View {
                     SettingsFootnote(
                         "Each backup uploads everything, not just what changed — there is no incremental upload yet.")
 
+                    restoreSection
                     snapshotsSection
                 }
             }
@@ -87,6 +92,33 @@ public struct DeviceBackupSettingsView: View {
         case .termsChanged: "Review New Terms"
         case .operatorChanged: "Set Up With New Operator"
         default: "Set Up Backup"
+        }
+    }
+
+    /// Restore is offered whenever backup is set up, not only on a
+    /// fresh device.
+    ///
+    /// It adds history rather than replacing it, and it does not touch
+    /// the identity — the wiping kind of restore is identity restore,
+    /// which lives in onboarding and is not reachable from here. Someone
+    /// who lost a chat, or who set up a second device, has the same
+    /// reason to want this as someone with a new phone.
+    @ViewBuilder
+    private var restoreSection: some View {
+        if let restore = makeRestore() {
+            SettingsCard {
+                NavigationLink { restore } label: {
+                    SettingsRow(
+                        title: "Restore From Backup",
+                        subtitle: "Adds messages and chats — nothing is deleted",
+                        last: true
+                    ) {
+                        SettingsIconTile(symbol: "arrow.down.circle", bg: SettingsTile.green)
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("backup.restore_row")
+            }
         }
     }
 

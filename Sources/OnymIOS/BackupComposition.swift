@@ -84,6 +84,14 @@ struct BackupSeatComposer {
             // and one that silently never uploads again.
             currentComponentId: { consented }
         )
+        let restorer = BackupRestorer(
+            sink: AppBackupSink(
+                groupStore: groupStore,
+                messageStore: messageStore,
+                invitationStore: invitationStore,
+                consentStore: consentStore,
+                blobDirectory: workingDirectory.appending(path: "blobs")))
+
         return DeviceBackupSettingsView(flow: flow) {
             // The consent surface, reachable. Without this the section
             // rendered a status card with no way to turn backup on, and
@@ -97,6 +105,17 @@ struct BackupSeatComposer {
             ) {
                 flow.refresh()
             }
+        } makeRestore: {
+            // Reachable from the moment backup is set up. Building it
+            // here rather than leaving a `nil` factory is deliberate:
+            // every unreachable screen in this stack has been a screen
+            // someone believed shipped.
+            BackupRestoreView(
+                flow: BackupRestoreFlow(
+                    repository: repository,
+                    restorer: restorer,
+                    keyMaterial: material,
+                    workingDirectory: workingDirectory))
         }
     }
 
