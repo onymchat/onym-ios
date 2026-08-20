@@ -743,9 +743,27 @@ public actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelop
     }
 
     /// Mints a fresh BIP39 identity (or restores from `mnemonic` when
-    /// non-nil), persists it under a new `IdentityID`, and inserts
-    /// into the in-memory cache. Does NOT broadcast or touch
-    /// `currentID`; callers do.
+    /// non-nil), persists it under the `IdentityID` derived from its
+    /// entropy, and inserts into the in-memory cache. Does NOT broadcast
+    /// or touch `currentID`; callers do.
+    ///
+    /// Both branches derive: a freshly-generated phrase gets a derived ID
+    /// for exactly the reason an imported one does — today's new identity
+    /// is the one someone re-imports from a recovery phrase in a year, and
+    /// if its ID were random at birth the restore would find nothing.
+    /// Randomising only the generate path would have left the bug
+    /// perfectly intact for every identity that has not been created yet.
+    ///
+    /// Because the ID is now a function of the entropy, adding a mnemonic
+    /// the device already holds resolves to an ID that is already loaded.
+    /// That returns the existing identity untouched rather than appending
+    /// a second slot: under random IDs it produced two indistinguishable
+    /// identities with identical keys (already a latent bug); appending it
+    /// now would put the same ID in `orderedIDs` twice and double every
+    /// broadcast summary. The caller's `name` is deliberately not applied
+    /// to the existing identity — an import is not a rename, and silently
+    /// relabelling an identity the user already has is a worse surprise
+    /// than ignoring a name they probably did not type.
     private func addLocked(name: String?, mnemonic: String?) throws -> IdentityID {
         var entropy: Data
         if let mnemonic {
@@ -763,7 +781,8 @@ public actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelop
             entropy = parsed
         }
         defer { entropy.resetBytes(in: 0..<entropy.count) }
-        let id = IdentityID()
+        let id = IdentityID(derivedFromEntropy: entropy)
+        if cache[id] != nil { return id }
         let resolvedName = name?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
             ?? Self.fallbackName(forNewSlot: orderedIDs.count + 1)
         var snapshot = Self.snapshot(fromEntropy: entropy)

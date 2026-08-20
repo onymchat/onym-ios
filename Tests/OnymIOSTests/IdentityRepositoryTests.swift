@@ -1,5 +1,6 @@
 import XCTest
 @testable import OnymIOS
+import OnymFoundation
 @testable import OnymIdentity
 
 /// Each test uses its own Keychain service so test runs are isolated and
@@ -151,6 +152,112 @@ final class IdentityRepositoryTests: XCTestCase {
         }
     }
 
+    // MARK: - Entropy-derived IdentityID
+
+    /// The restore bug in one test. Chats and messages are owner-scoped,
+    /// so if importing a phrase minted a new `IdentityID` the restored
+    /// archive belonged to an identity that no longer existed on the
+    /// device: the summary counted "1 chats, 50 messages" and the chat
+    /// list stayed empty, across restarts. The ID must survive a wipe and
+    /// a re-import of the same phrase.
+    func test_restore_sameMnemonicYieldsSameIdentityID() async throws {
+        let mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+        _ = try await repo.restore(mnemonic: mnemonic)
+        let first = try await selectedID()
+
+        try await repo.wipe()
+        _ = try await repo.restore(mnemonic: mnemonic)
+        let second = try await selectedID()
+
+        XCTAssertEqual(first, second,
+                       "re-importing a recovery phrase must land on the identity that owns the backed-up rows")
+    }
+
+    func test_restore_differentMnemonicsYieldDifferentIdentityIDs() async throws {
+        _ = try await repo.restore(
+            mnemonic: "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+        )
+        let first = try await selectedID()
+
+        try await repo.wipe()
+        _ = try await repo.restore(
+            mnemonic: "legal winner thank year wave sausage worth useful legal winner thank yellow"
+        )
+        let second = try await selectedID()
+
+        XCTAssertNotEqual(first, second,
+                          "two phrases must not collide onto one identity slot")
+    }
+
+    /// A freshly-generated identity is derived too — it is the identity
+    /// someone re-imports from a recovery phrase later, and that import
+    /// has to find it.
+    func test_bootstrap_generatedIdentityIsReachableByItsOwnPhrase() async throws {
+        let generated = try await repo.bootstrap()
+        let id = try await selectedID()
+        let phrase = try XCTUnwrap(generated.recoveryPhrase)
+
+        try await repo.wipe()
+        _ = try await repo.restore(mnemonic: phrase)
+
+        let reimported = await repo.currentSelectedID()
+        XCTAssertEqual(reimported, id,
+                       "an identity minted today must be restorable from its own phrase tomorrow")
+    }
+
+    /// Adding a phrase the device already holds resolves to the ID it is
+    /// already stored under. It must return that identity, not append a
+    /// duplicate `orderedIDs` entry that doubles every broadcast summary.
+    func test_add_sameMnemonicTwice_doesNotDuplicateTheIdentity() async throws {
+        let mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+        let first = try await repo.add(mnemonic: mnemonic)
+        let second = try await repo.add(mnemonic: mnemonic)
+
+        XCTAssertEqual(first, second)
+        XCTAssertEqual(try keychain.list().count, 1,
+                       "one phrase is one identity, however many times it is imported")
+        let summaries = try await repo.currentIdentities()
+        XCTAssertEqual(summaries.count, 1)
+    }
+
+    /// **No migration, on purpose.** Identities that already exist on a
+    /// device keep the random UUID they were persisted under — this change
+    /// derives IDs at mint time and rewrites nothing. Loading must
+    /// therefore hand back the stored ID untouched, even though its
+    /// entropy would now derive a different one. The visible consequence
+    /// is stated in the PR: a backup taken by a pre-existing identity
+    /// still will not restore after a re-import. Assert the property
+    /// rather than assume it, because a well-meaning "fix up the ID on
+    /// load" would silently orphan every row already keyed to the old one.
+    func test_load_preexistingIdentity_keepsItsPersistedRandomID() async throws {
+        let mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+        let entropy = try XCTUnwrap(Bip39.entropyFromMnemonic(mnemonic))
+        let legacyID = IdentityID()  // what the old code minted: random, unrelated to the entropy
+        XCTAssertNotEqual(legacyID, IdentityID(derivedFromEntropy: entropy))
+
+        let seed = Bip39.seedFromMnemonic(mnemonic)
+        try keychain.write(legacyID, StoredSnapshot(
+            name: "Legacy",
+            entropy: entropy,
+            nostrSecretKey: Bip39.deriveNostrKey(from: seed),
+            blsSecretKey: Bip39.deriveBlsKey(from: seed)
+        ))
+
+        let freshRepo = IdentityRepository(
+            keychain: keychain,
+            selectionStore: .inMemory(),
+            installMarker: .inMemory(initiallySet: true),
+            protectedData: .always
+        )
+        _ = try await freshRepo.bootstrap()
+
+        let loadedID = await freshRepo.currentSelectedID()
+        XCTAssertEqual(loadedID, legacyID,
+                       "an already-persisted identity must not be re-keyed under it")
+        XCTAssertEqual(try keychain.list(), [legacyID],
+                       "no migration: nothing is rewritten under the derived ID")
+    }
+
     // MARK: - wipe
 
     func test_wipe_clearsKeychainAndCurrentIdentity() async throws {
@@ -294,6 +401,19 @@ final class IdentityRepositoryTests: XCTestCase {
         let bSnaps = await b.snapshots
         XCTAssertEqual(aSnaps, [nil, identity])
         XCTAssertEqual(bSnaps, [nil, identity])
+    }
+
+    // MARK: - Helpers
+
+    /// `currentSelectedID()` is actor-isolated and `XCTUnwrap` takes an
+    /// autoclosure, which can't await — hop once here so the ID assertions
+    /// stay one line each.
+    private func selectedID(
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async throws -> IdentityID {
+        let id = await repo.currentSelectedID()
+        return try XCTUnwrap(id, "no identity is selected", file: file, line: line)
     }
 }
 
