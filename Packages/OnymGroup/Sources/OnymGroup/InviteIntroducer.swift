@@ -122,12 +122,34 @@ public actor InviteIntroducer {
     ) async throws -> IntroCapability {
         let key = owner.rawValue.uuidString + ":"
             + groupId.map { String(format: "%02x", $0) }.joined()
-        // Wait out any predecessor; its failure is not ours to handle.
-        while let running = inFlight[key] {
-            _ = try? await running.value
-            if inFlight[key] == running { inFlight[key] = nil }
+
+        // Chained, not polled. The previous version awaited the running
+        // task *before* installing its own:
+        //
+        //     while let running = inFlight[key] { await running.value; … }
+        //     let task = Task { try await body() }
+        //     inFlight[key] = task
+        //
+        // That `await` is a suspension point with nothing installed
+        // behind it, so arrival order was not preserved — two callers
+        // could both pass the loop and the later arrival could run
+        // first. Concretely: `rotate` and `currentOrMint` racing, with
+        // `currentOrMint` winning, hands a caller the old shared link
+        // and then `rotate` revokes it. The caller walks away with a
+        // link that is already dead, which is the one outcome this
+        // serialization exists to prevent.
+        //
+        // Installing the successor synchronously — before any
+        // suspension — makes the queue first-in-first-out by
+        // construction: whoever entered the actor first is ahead, and
+        // each body waits for exactly the one in front of it.
+        let predecessor = inFlight[key]
+        let task = Task {
+            // A predecessor's failure is not ours to handle; we only
+            // need it finished.
+            _ = try? await predecessor?.value
+            return try await body()
         }
-        let task = Task { try await body() }
         inFlight[key] = task
         defer { if inFlight[key] == task { inFlight[key] = nil } }
         return try await task.value
