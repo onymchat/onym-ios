@@ -59,17 +59,19 @@ public struct DeviceBackupVendorsView: View {
                     }
                     SettingsFootnote(
                         "Each backup uploads everything, not just what changed — there is no incremental upload yet.")
-
                 }
 
                 // Outside the enrolled gate on purpose. Reading a backup
                 // needs the recovery phrase and the operator's name, not
                 // a terms pin — `listSnapshots` and `download` consult no
                 // local state at all. Inside the gate it disappeared
-                // exactly when it was most wanted: a new phone with
-                // nothing set up yet, or every operator republishing its
-                // terms at once, which now counts as not-enrolled and
-                // took the restore route down with it.
+                // exactly when it was most wanted: a new phone with an
+                // operator consented to and nothing set up yet, or every
+                // operator republishing its terms at once, which counts
+                // as not-enrolled and took the restore route with it.
+                // Hiding restore until someone agrees to *store* a
+                // backup asks them to take on a new obligation before
+                // they may read what they already have.
                 SettingsCard {
                     NavigationLink { makeRestore() } label: {
                         SettingsRow(
@@ -84,6 +86,8 @@ public struct DeviceBackupVendorsView: View {
                     .accessibilityIdentifier("backup.restore_row")
                 }
 
+                restorePurchases
+
                 operators
             }
             .padding(.horizontal, 16)
@@ -94,6 +98,90 @@ public struct DeviceBackupVendorsView: View {
         .task {
             flow.refresh()
             await flow.loadSnapshots()
+        }
+        // Its own task, so it runs beside the snapshot list rather than
+        // in front of it. On the overwhelmingly common path it recovers
+        // nothing, and making everyone wait for StoreKit and a credential
+        // verification per operator to find that out delays the screen
+        // for no one's benefit. The sweep reloads the list itself if it
+        // actually recovers something — which is the only case where the
+        // list's answer would have changed.
+        .task {
+            await flow.restorePurchasesIfNeeded()
+        }
+    }
+
+    /// Recovering what was already paid for.
+    ///
+    /// Its own row rather than a line inside the payment-needed state,
+    /// because the person who needs it most cannot see that state yet:
+    /// on a new phone nothing has been uploaded, so no operator has
+    /// refused anything, and the refusal that would have offered a
+    /// purchase has not happened. They arrive knowing only that they
+    /// paid for this once.
+    @ViewBuilder
+    private var restorePurchases: some View {
+        if flow.canRestorePurchases {
+            SettingsCard {
+                Button {
+                    Task { await flow.restorePurchases() }
+                } label: {
+                    SettingsRow(
+                        title: "Restore Purchases",
+                        subtitle: purchaseRestoreSubtitle,
+                        last: true
+                    ) {
+                        SettingsIconTile(symbol: "arrow.clockwise.circle", bg: SettingsTile.gray)
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(flow.purchaseRestore == .running)
+                .accessibilityIdentifier("backup.restore_purchases_row")
+            }
+            SettingsFootnote(
+                "If you paid for storage on another phone, this brings that purchase to this one. You are not charged again.")
+        }
+    }
+
+    private var purchaseRestoreSubtitle: String {
+        switch flow.purchaseRestore {
+        case .idle:
+            return "Bring a subscription bought on another phone to this one"
+        case .running:
+            return "Checking with the App Store…"
+        case .finished(
+            let restored, let held, let checked, let heldUnknown, let syncFailed, let failures):
+            if let first = failures.first {
+                // The operator's own words, not a count. A failure here
+                // is the difference between someone getting what they
+                // paid for and buying it twice.
+                return first
+            }
+            if restored > 0 {
+                return restored == 1
+                    ? "1 purchase restored"
+                    : "\(restored) purchases restored"
+            }
+            if syncFailed, restored == 0 {
+                // Nothing was asked, so nothing may be concluded. The
+                // person on a replacement phone is exactly who would
+                // act on a wrong answer here.
+                return "Could not reach the App Store — try again"
+            }
+            if heldUnknown {
+                // Neither "already set up" nor "nothing there": this
+                // phone could not read what it holds, and both of the
+                // other answers would be claims it cannot make.
+                return "Could not check what this phone already has — try again"
+            }
+            if held > 0 { return "Nothing to restore — this phone is already set up" }
+            // Only claimable if something actually asked. An operator
+            // with no pinned issuer is never checked, and reporting that
+            // as the App Store's answer is a positive claim made without
+            // a question.
+            return checked > 0
+                ? "The App Store has no purchase for this identity to restore"
+                : "No operator here sells storage through this app"
         }
     }
 
@@ -226,7 +314,7 @@ public struct DeviceBackupVendorsView: View {
         case .off(let consented):
             return consented == 0
                 ? "Your history stays on this phone only"
-                : "Your history stays on this phone until you set an operator up"
+                : "Nothing is being backed up yet — you can still restore an earlier backup below"
         case .on(let operators, let notSetUp, let lastSuccessAt):
             // The oldest of the operators' last successes, so the
             // sentence describes the copy a person is actually relying

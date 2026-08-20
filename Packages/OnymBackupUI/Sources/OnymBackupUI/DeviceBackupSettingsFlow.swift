@@ -32,6 +32,12 @@ public final class DeviceBackupSettingsFlow {
         case failed(message: String)
     }
 
+    /// Whether this operator is waiting on a purchase.
+    public var isPaymentRequired: Bool {
+        if case .paymentRequired = state.status { return true }
+        return false
+    }
+
     /// Whether the person needs to go through enrolment.
     ///
     /// `.off` alone was not enough, and the gap was the whole point of
@@ -294,6 +300,17 @@ public final class DeviceBackupSettingsFlow {
         case .alreadyRunning:
             break
         }
+    }
+
+    /// A credential arrived for an operator that is waiting on one.
+    ///
+    /// The status stays `paymentRequired`, because it is derived from a
+    /// snapshot still sitting unsent — a credential does not place those
+    /// bytes, only a run does. Saying so beats a screen that keeps
+    /// reading "Payment needed" with no explanation after someone has
+    /// just restored the purchase it was asking for.
+    public func noteRestoredPurchase() {
+        lastRunNote = "Purchase restored — tap Back Up Now to finish this backup."
     }
 
     /// Report that a run threw before it could reach a result.

@@ -42,6 +42,17 @@ struct BackupSeatComposer {
     /// credential and never asks for one.
     let entitlementStore: (any SeatEntitlementStoring)?
     let seatKeys: any SeatAccessKeyProviding
+    /// Recovers a credential for a purchase made on another device.
+    /// `nil` when this build cannot sell anything, in which case the
+    /// screen offers no restore-purchases row rather than one that
+    /// always reports nothing.
+    let makePurchaseFlow: (@Sendable (String) async -> SeatPurchaseFlow?)?
+    /// Whether this build can actually sell anything for an operator.
+    /// A free operator declares no offers, and a build whose bundled
+    /// catalog is missing sells nothing at all — in both cases a Restore
+    /// Purchases row would prompt for an App Store password and then
+    /// always answer "nothing to restore".
+    let sellsOffers: (@Sendable (String) -> Bool)?
 
     /// One operator's assembled stack, before it becomes a screen.
     private struct Stack {
@@ -201,7 +212,11 @@ struct BackupSeatComposer {
                 // material carries the same one. Taking it from the first
                 // is not a choice about which operator is special.
                 archiveRoot: first.material.archiveRoot
-            )
+            ),
+            restorePurchasesForOperator: stacks.contains(where: { sellsOffers?($0.componentId) == true })
+                ? Self.purchaseRestorer(makePurchaseFlow)
+                : nil,
+            syncPurchasesWithStore: Self.storeSyncer()
         )
 
         // Restored attachment ciphertext, and the client that will
@@ -349,6 +364,55 @@ struct BackupSeatComposer {
             .jurisdictions ?? []
         return BackupDisclosure.OtherOperator(
             name: stack.displayName, jurisdictions: jurisdictions)
+    }
+
+    /// Turns the purchase-flow factory into the sweep the screen calls.
+    ///
+    /// Per operator, because a `SeatPurchaseFlow` pins the issuer key it
+    /// will verify a broker's answer against, and that key comes from
+    /// the operator's own signed manifest. There is no app-wide broker
+    /// client, and a credential must not be able to nominate its own
+    /// authority.
+    private static func purchaseRestorer(
+        _ makePurchaseFlow: (@Sendable (String) async -> SeatPurchaseFlow?)?
+    ) -> (@Sendable (String) async -> SeatPurchaseFlow.RestoreResult?)? {
+        guard let makePurchaseFlow else { return nil }
+        return { @Sendable componentId in
+            // `nil` means this operator was not checked — no pinned
+            // issuer to verify a broker's answer against — which the
+            // caller must not report as the App Store having nothing.
+            guard let flow = await makePurchaseFlow(componentId) else { return nil }
+            return await flow.restorePurchases(componentId: componentId)
+        }
+    }
+
+    /// The account-wide sync, done once per tap and belonging to no
+    /// operator.
+    ///
+    /// It used to be routed through the first operator's
+    /// `SeatPurchaseFlow`, which was wrong twice over. That flow exists
+    /// only when the operator pins an entitlement issuer, so a free
+    /// operator sorting first made the sync a silent no-op — and the
+    /// sweep then went on to report that the App Store had no purchase
+    /// for this identity, which nothing had asked it. `AppStore.sync()`
+    /// is a property of the Apple account: no seat, no broker, no
+    /// issuer, so it is built from a bare coordinator and cannot be
+    /// skipped by whichever operator happens to sort first.
+    ///
+    /// Returns whether it actually synced. A failure is not a reason to
+    /// skip the sweep — `currentEntitlement` answers from what the
+    /// device already knows — but it is a reason for the sweep to stop
+    /// short of concluding anything about what the store holds.
+    private static func storeSyncer() -> (@Sendable () async -> Bool)? {
+        let coordinator = StoreKitPurchaseCoordinator()
+        return { @Sendable in
+            do {
+                try await coordinator.sync()
+                return true
+            } catch {
+                return false
+            }
+        }
     }
 
     /// The credential to present, chosen at request time.
