@@ -280,7 +280,7 @@ final class BackupAdapterTests: XCTestCase {
         var state = BackupState()
         state.acceptedTermsId = ScriptedPort.termsId
         state.pendingOperations = [
-            BackupState.PendingOperation(operationId: "lost", digest: digest, startedAt: Date())
+            BackupState.PendingOperation(operationId: "lost", digest: digest, sealedByteSize: 2048, startedAt: Date())
         ]
         let stateStore = MemoryStateStore(state: state)
         let port = ScriptedPort(acceptedTermsId: ScriptedPort.termsId, paymentSatisfied: true)
@@ -318,7 +318,7 @@ final class BackupAdapterTests: XCTestCase {
             BackupState.PendingOperation(
                 operationId: "lost",
                 digest: "sha256:" + String(repeating: "8", count: 64),
-                startedAt: Date())
+                sealedByteSize: 2048, startedAt: Date())
         ]
         let stateStore = MemoryStateStore(state: state)
         let port = ScriptedPort(acceptedTermsId: ScriptedPort.termsId, paymentSatisfied: true)
@@ -414,8 +414,8 @@ final class BackupAdapterTests: XCTestCase {
         state.acceptedTermsId = ScriptedPort.termsId
         state.pendingOperations = [
             BackupState.PendingOperation(
-                operationId: "inflight", digest: digest, startedAt: Date(),
-                acceptedTermsId: ScriptedPort.termsId)
+                operationId: "inflight", digest: digest, sealedByteSize: 2048,
+                startedAt: Date(), acceptedTermsId: ScriptedPort.termsId)
         ]
         let stateStore = MemoryStateStore(state: state)
         let port = ScriptedPort(acceptedTermsId: ScriptedPort.termsId, paymentSatisfied: true)
@@ -436,7 +436,7 @@ final class BackupAdapterTests: XCTestCase {
         state.pendingOperations = [
             BackupState.PendingOperation(
                 operationId: "lost", digest: "sha256:" + String(repeating: "4", count: 64),
-                startedAt: Date(), acceptedTermsId: ScriptedPort.termsId)
+                sealedByteSize: 2048, startedAt: Date(), acceptedTermsId: ScriptedPort.termsId)
         ]
         let stateStore = MemoryStateStore(state: state)
         let port = ScriptedPort(acceptedTermsId: ScriptedPort.termsId, paymentSatisfied: true)
@@ -499,6 +499,92 @@ final class BackupAdapterTests: XCTestCase {
         let client = try makeClient(maximumRetainedSnapshots: Int.max)
         XCTAssertLessThanOrEqual(client.listResponseCap, URLSessionBackupClient.maxListResponseBytes)
         _ = try await client.listSnapshots()
+    }
+
+    /// A `retained` answer carrying no reference must not be able to
+    /// wedge every future run. Reconcile ran before composing, so one
+    /// unbuildable reference aborted `backUp` before it could save,
+    /// leaving the operation unresolved and the next run to hit the same
+    /// line — a permanent brick delivered by a *success* answer.
+    func testTerseRetainedAnswerDoesNotWedgeFutureRuns() async throws {
+        let dir = try Self.directory()
+        let digest = "sha256:" + String(repeating: "6", count: 64)
+        var state = BackupState()
+        state.acceptedTermsId = ScriptedPort.termsId
+        state.pendingOperations = [
+            BackupState.PendingOperation(
+                operationId: "terse", digest: digest, sealedByteSize: 4096,
+                startedAt: Date(), acceptedTermsId: ScriptedPort.termsId)
+        ]
+        let stateStore = MemoryStateStore(state: state)
+        let port = ScriptedPort(acceptedTermsId: ScriptedPort.termsId, paymentSatisfied: true)
+        // Retained, with nothing else said.
+        await port.setQueryOutcome(
+            BackupOutcome(operationId: "terse", componentId: "onym:component:op", status: .retained))
+
+        _ = try await Self.repository(port: port, store: stateStore, dir: dir).backUp()
+        let saved = try stateStore.load()
+        XCTAssertTrue(saved.pendingOperations.isEmpty, "the operation never resolved")
+        XCTAssertTrue(saved.snapshots.contains { $0.digest == digest })
+        XCTAssertEqual(
+            saved.snapshots.first { $0.digest == digest }?.sealedByteSize, 4096,
+            "believed the operator over our own record")
+
+        // And the next run still works, which is the actual claim.
+        _ = try await Self.repository(port: port, store: stateStore, dir: dir).backUp()
+    }
+
+    /// The issuers are the reason this refusal exists — without them a
+    /// caller cannot know where to get a fresh credential.
+    func testInvalidEntitlementCarriesIssuers() async throws {
+        respond(401, #"{"error":"invalid_entitlement","message":"expired","entitlementIssuers":["onym:key:bb"]}"#)
+        do {
+            _ = try await makeClient().preflight(Self.snapshot())
+            XCTFail("expected a refusal")
+        } catch BackupError.invalidEntitlement(let issuers) {
+            XCTAssertEqual(issuers, ["onym:key:bb"])
+        }
+    }
+
+    /// An unreadable ancestor must not silently become "supersedes
+    /// nothing" — that mints a snapshot claiming to start a new chain.
+    func testCorruptAncestorIsRefusedRatherThanBreakingTheChain() async throws {
+        let dir = try Self.directory()
+        var state = BackupState()
+        state.acceptedTermsId = ScriptedPort.termsId
+        state.snapshots = [
+            BackupState.RecordedSnapshot(
+                digest: "not-a-digest", sealedByteSize: 0,
+                acceptedTermsId: ScriptedPort.termsId, uploadedAt: Date(),
+                statusRaw: BackupOutcomeStatus.retained.rawValue)
+        ]
+        let stateStore = MemoryStateStore(state: state)
+        let port = ScriptedPort(acceptedTermsId: ScriptedPort.termsId, paymentSatisfied: true)
+
+        do {
+            _ = try await Self.repository(port: port, store: stateStore, dir: dir).backUp()
+            XCTFail("composed a snapshot that silently supersedes nothing")
+        } catch BackupError.localFailure(let reason) {
+            XCTAssertEqual(reason, .stateUnreadable)
+        }
+    }
+
+    /// A caller-owned destination must not keep a partial file when the
+    /// transfer fails partway.
+    func testFailedDownloadLeavesNoPartialFile() async throws {
+        let dir = try Self.directory()
+        let destination = dir.appending(path: "snapshot")
+        StubURLProtocol.set { request in
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (Data(repeating: 1, count: 32), response)
+        }
+        let reference = try SnapshotReference(
+            digest: "sha256:" + String(repeating: "a", count: 64), sealedByteSize: 1 << 20)
+        _ = try? await makeClient().downloadSnapshot(reference, to: destination)
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: destination.path),
+            "a partial file was left at a caller-owned path")
     }
 
     // MARK: - Fixtures

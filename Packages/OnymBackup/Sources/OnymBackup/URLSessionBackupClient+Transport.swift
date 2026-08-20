@@ -130,15 +130,18 @@ extension URLSessionBackupClient {
         guard let http = response as? HTTPURLResponse else {
             throw BackupError.operatorUnavailable
         }
-        var data = Data()
-        data.reserveCapacity(min(maxResponseBytes, 1 << 20))
+        // Accumulated into an array rather than appended to `Data` one
+        // byte at a time: at a 32 MiB cap the per-append cost is the
+        // dominant term, and this runs on someone's phone.
+        var bytes = [UInt8]()
+        bytes.reserveCapacity(min(maxResponseBytes, 1 << 20))
         for try await byte in stream {
-            data.append(byte)
-            if data.count > maxResponseBytes {
+            bytes.append(byte)
+            if bytes.count > maxResponseBytes {
                 throw BackupError.operatorUnavailable
             }
         }
-        return (data, http)
+        return (Data(bytes), http)
     }
 
     /// Stream a body straight to disk, bounded by what the reference
@@ -156,12 +159,12 @@ extension URLSessionBackupClient {
             // a `where` clause — the latter stops appending but keeps
             // draining, so an unbounded error body would still be read
             // to completion.
-            var body = Data()
+            var body = [UInt8]()
             for try await byte in stream {
                 if body.count >= 8 << 10 { break }
                 body.append(byte)
             }
-            try Self.check(http, body)
+            try Self.check(http, Data(body))
             return
         }
 
@@ -171,9 +174,21 @@ extension URLSessionBackupClient {
             attributes: [.protectionKey: FileProtectionType.complete]
         )
         let handle = try FileHandle(forWritingTo: destination)
-        defer { try? handle.close() }
 
-        var buffer = Data()
+        // `destination` is caller-owned — a restore path, not the swept
+        // working directory — so *any* exit that is not a complete file
+        // takes the partial with it. A write error and a network drop
+        // leave the same wreckage as an over-long body, and the same
+        // argument applies: a restore is where a silently-short file
+        // must not arrive.
+        var complete = false
+        defer {
+            try? handle.close()
+            if !complete { try? FileManager.default.removeItem(at: destination) }
+        }
+
+        var buffer = [UInt8]()
+        buffer.reserveCapacity(1 << 20)
         var total = 0
         for try await byte in stream {
             buffer.append(byte)
@@ -182,25 +197,18 @@ extension URLSessionBackupClient {
                 // More bytes than the reference claims. The digest check
                 // would catch it later, after writing all of them to a
                 // device that may not have the room.
-                try? FileManager.default.removeItem(at: destination)
                 throw BackupError.incompleteSnapshot
             }
             if buffer.count >= 1 << 20 {
-                try handle.write(contentsOf: buffer)
+                try handle.write(contentsOf: Data(buffer))
                 buffer.removeAll(keepingCapacity: true)
             }
         }
-        if !buffer.isEmpty { try handle.write(contentsOf: buffer) }
+        if !buffer.isEmpty { try handle.write(contentsOf: Data(buffer)) }
 
-        // Short is as wrong as long. Without this a truncated body
-        // returns success and hands the caller a partial file —
-        // `exportSnapshots` re-verifies afterwards, but
-        // `downloadSnapshot` would not, and a restore is exactly where a
-        // silently-short file must not arrive.
-        guard total == maxBytes else {
-            try? FileManager.default.removeItem(at: destination)
-            throw BackupError.incompleteSnapshot
-        }
+        // Short is as wrong as long.
+        guard total == maxBytes else { throw BackupError.incompleteSnapshot }
+        complete = true
     }
 
     /// Map a non-2xx onto the domain vocabulary of §14, keeping the
@@ -217,6 +225,7 @@ extension URLSessionBackupClient {
             let maximumRetainedSnapshots: Int?
             let retainedBytes: Int?
             let limitBytes: Int?
+            let entitlementIssuers: [String]?
             let paymentRequired: PaymentRequired?
 
             struct PaymentRequired: Decodable {
@@ -245,7 +254,14 @@ extension URLSessionBackupClient {
                 entitlementIssuers: payment.entitlementIssuers
             )
         case "invalid_entitlement":
-            throw BackupError.invalidEntitlement(entitlementIssuers: [])
+            // The issuers are the whole point of this refusal: without
+            // them a caller cannot know which issuer to obtain a fresh
+            // credential from.
+            throw BackupError.invalidEntitlement(
+                entitlementIssuers: envelope.entitlementIssuers
+                    ?? envelope.paymentRequired?.entitlementIssuers
+                    ?? []
+            )
         case "signature_invalid":
             throw BackupError.accessRefused
         case "snapshot_too_large":

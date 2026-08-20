@@ -40,6 +40,11 @@ public struct BackupState: Sendable, Equatable, Codable {
     public struct PendingOperation: Sendable, Equatable, Codable {
         public let operationId: String
         public let digest: String
+        /// Our own record of the size. Reconciliation rebuilds the
+        /// reference from this rather than from whatever an operator
+        /// does or does not echo back — a terse answer must not be able
+        /// to produce an unbuildable reference.
+        public var sealedByteSize: Int?
         public let startedAt: Date
         /// The terms *we* pinned when this went out. Reconciliation
         /// records this rather than the digest an operator echoes back,
@@ -62,6 +67,10 @@ public struct BackupState: Sendable, Equatable, Codable {
         public let acceptedTermsId: String
         public let supersedesDigest: String?
         public let supersedesByteSize: Int?
+        /// When the snapshot was sealed. Distinct from `refusedAt`: a
+        /// resumed snapshot is as old as its contents, not as old as the
+        /// refusal.
+        public let sealedAt: Date
         public let refusedAt: Date
     }
 

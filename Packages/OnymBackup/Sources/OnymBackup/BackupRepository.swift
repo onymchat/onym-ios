@@ -63,9 +63,19 @@ public actor BackupRepository {
         let snapshot = try await composer.compose(
             keyMaterial: keyMaterial,
             acceptedTermsId: acceptedTermsId,
-            supersedes: state.snapshots.last.map {
-                try? SnapshotReference(digest: $0.digest, sealedByteSize: $0.sealedByteSize)
-            } ?? nil,
+            supersedes: try state.snapshots.last.map {
+                // `try?` here would turn an unreadable ancestor into a
+                // snapshot claiming to supersede nothing, quietly
+                // breaking the chain. The store refuses to *read*
+                // corrupt state for the same reason; it should not be
+                // written past here either.
+                do {
+                    return try SnapshotReference(
+                        digest: $0.digest, sealedByteSize: $0.sealedByteSize)
+                } catch {
+                    throw BackupError.localFailure(reason: .stateUnreadable)
+                }
+            },
             now: now
         )
         state.lastAttemptAt = now
@@ -88,7 +98,7 @@ public actor BackupRepository {
             snapshotReference: try SnapshotReference(
                 digest: pending.digest, sealedByteSize: pending.sealedByteSize),
             sealedBytesURL: url,
-            sealedAt: pending.refusedAt,
+            sealedAt: pending.sealedAt,
             acceptedTermsId: pending.acceptedTermsId,
             supersedes: try pending.supersedesDigest.flatMap { digest in
                 try pending.supersedesByteSize.map {
@@ -135,6 +145,7 @@ public actor BackupRepository {
                     acceptedTermsId: snapshot.acceptedTermsId,
                     supersedesDigest: snapshot.supersedes?.digest,
                     supersedesByteSize: snapshot.supersedes?.sealedByteSize,
+                    sealedAt: snapshot.sealedAt,
                     refusedAt: now
                 )
                 try stateStore.save(state)
@@ -185,6 +196,7 @@ public actor BackupRepository {
                 BackupState.PendingOperation(
                     operationId: snapshot.operationId,
                     digest: snapshot.snapshotReference.digest,
+                    sealedByteSize: snapshot.snapshotReference.sealedByteSize,
                     startedAt: now,
                     acceptedTermsId: snapshot.acceptedTermsId
                 )
@@ -257,12 +269,19 @@ public actor BackupRepository {
         var stillPending: [BackupState.PendingOperation] = []
         for pending in state.pendingOperations {
             if let row = retainedByDigest[pending.digest] {
+                // Our own pin, not the operator's echo. Which terms a
+                // stored snapshot was accepted under is not a fact a
+                // counterparty gets to restate — and an empty pin is not
+                // something this type writes.
+                guard let pinnedTerms = pending.acceptedTermsId ?? state.acceptedTermsId,
+                      !pinnedTerms.isEmpty
+                else {
+                    stillPending.append(pending)
+                    continue
+                }
                 state.record(
                     reference: row.snapshotReference,
-                    // Our own pin, not the operator's echo. Which terms a
-                    // stored snapshot was accepted under is not a fact a
-                    // counterparty gets to restate.
-                    acceptedTermsId: pending.acceptedTermsId ?? state.acceptedTermsId ?? "",
+                    acceptedTermsId: pinnedTerms,
                     at: pending.startedAt,
                     status: .retained
                 )
@@ -290,13 +309,31 @@ public actor BackupRepository {
             switch outcome.status {
             case .retained, .alreadyRetained:
                 // Not in the list but claimed retained. Believe the
-                // digest we sent, never the one echoed back.
+                // digest and the size *we* recorded, never the ones
+                // echoed back — and if we cannot rebuild the reference
+                // from our own record, keep the operation pending rather
+                // than throwing.
+                //
+                // Throwing here wedged everything: reconcile ran before
+                // composing, so a single unbuildable reference aborted
+                // `backUp` before it could save, leaving the operation
+                // unresolved and every subsequent run to hit the same
+                // line. A terse — or hostile — operator could brick
+                // backups permanently with a *success* answer.
+                guard
+                    let size = pending.sealedByteSize ?? outcome.snapshotReference?.sealedByteSize,
+                    let reference = try? SnapshotReference(digest: pending.digest, sealedByteSize: size),
+                    let pinnedTerms = pending.acceptedTermsId ?? state.acceptedTermsId,
+                    !pinnedTerms.isEmpty
+                else {
+                    // An empty terms pin is exactly what the rest of this
+                    // type refuses to write.
+                    stillPending.append(pending)
+                    continue
+                }
                 state.record(
-                    reference: try SnapshotReference(
-                        digest: pending.digest,
-                        sealedByteSize: outcome.snapshotReference?.sealedByteSize ?? 0
-                    ),
-                    acceptedTermsId: pending.acceptedTermsId ?? state.acceptedTermsId ?? "",
+                    reference: reference,
+                    acceptedTermsId: pinnedTerms,
                     at: pending.startedAt,
                     status: .retained
                 )
