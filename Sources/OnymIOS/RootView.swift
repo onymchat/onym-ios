@@ -149,6 +149,16 @@ struct RootView: View {
             guard presentation == nil else { return }
             Task { await resolveDeviceBackupView() }
         }
+        .onChange(of: dependencies.backupConsentSignal?.revision) { _, _ in
+            // And a backup operator is consented to from a sheet over
+            // the Settings tab — no tab change, and the moderation
+            // cover above is a different surface entirely. Neither
+            // trigger fires, so the picker raises this one itself.
+            // `resolveDeviceBackupView` still decides whether anything
+            // is rebuilt: it compares the consented operators and
+            // leaves a running backup alone when they have not changed.
+            Task { await resolveDeviceBackupView() }
+        }
         .onChange(of: dependencies.moderationGateFlow.gate) { _, gate in
             consentPresentation = presentationUnlessOnboarding(for: gate)
         }
@@ -337,7 +347,8 @@ struct RootView: View {
                         onRestartOnboarding: dependencies.onboardingRestart.map { restart in
                             { restart.requestRestart() }
                         },
-                        makeDeviceBackupView: deviceBackupView.map { view in { view } }
+                        makeDeviceBackupView: deviceBackupView.map { view in { view } },
+                        makeBackupOperatorSettingsFlow: dependencies.makeBackupOperatorSettingsFlow
                     )
                 }
                 .safeAreaInset(edge: .bottom, spacing: 0) {

@@ -1058,6 +1058,103 @@ struct OnymIOSApp: App {
             )
         }
 
+        // The backup seat's entitlement resolution, which cannot be the
+        // shared `makeEntitlements` above.
+        //
+        // That one pins its trusted issuers from the ACTIVE consent
+        // record (`BackupSeat.entitlementIssuers`), which is the right
+        // rule everywhere except here, on the surface where the record
+        // does not exist yet. On a first consent it answers with no
+        // issuers, every stored credential then fails verification, no
+        // paid offer resolves as entitled — and `canAccept` refuses a
+        // manifest that carries only paid offers. A person who has
+        // already bought this operator's storage (on this phone before
+        // withdrawing, or on the phone they just restored from a
+        // recovery phrase) would find Accept permanently disabled with
+        // nothing on screen to explain it.
+        //
+        // So the issuers come from the manifest UNDER REVIEW: the exact
+        // digest-pinned, signature-verified bytes on the consent screen,
+        // read through `BackupOperatorManifest` rather than a second
+        // hand-rolled field read. That keeps the rule this codebase
+        // actually cares about — a credential never nominates its own
+        // authority — while sourcing the pin from the document the
+        // person is being asked to agree to. Any OTHER component falls
+        // back to the pinned record, because a manifest may only speak
+        // for itself.
+        let makeBackupEntitlements: @Sendable (SignedServiceManifest) -> any EntitlementProviding = { manifest in
+            let free = FreeTierEntitlementProvider(
+                reviewing: manifest, consentStore: pinnedConsentStore)
+            guard let seatEntitlementStore else {
+                // Nowhere safe to keep a credential — same answer as the
+                // shared provider: free offers still resolve with no
+                // store and no network.
+                return free
+            }
+            let reviewedIssuers = (try? BackupOperatorManifest(manifest: manifest))?
+                .entitlementIssuers ?? []
+            return StoreKitEntitlementProvider(
+                free: free,
+                catalog: channelOfferCatalog,
+                store: seatEntitlementStore,
+                keys: seatAccessKeys,
+                trustedIssuers: { componentId in
+                    guard componentId == manifest.componentId else {
+                        return BackupSeat.entitlementIssuers(
+                            componentId: componentId, consentStore: pinnedConsentStore)
+                    }
+                    return reviewedIssuers
+                }
+            )
+        }
+
+        // Raised on every accepted backup consent so the root view
+        // rebuilds the Device Backup screen there and then.
+        let backupConsentSignal = BackupConsentSignal()
+
+        let backupCatalogPicker = discoveryCatalog.map { catalog in
+            DiscoveryModulePicker(
+                // `BackupSeat.seat` is the catalog seat type as well as
+                // the manifest seat: there is no legacy known-list
+                // fetcher for this seat to borrow a constant from,
+                // because backup has no published default list and no
+                // auto-populate — an operator is only ever adopted by an
+                // explicit consent, which is exactly what this picker
+                // is.
+                entries: { await catalog.entries(BackupSeat.seat) },
+                activeConsent: { try? pinnedConsentStore.activeRecord(componentId: $0) },
+                entriesStream: makeSeatEntriesStream.map { make in
+                    { make(BackupSeat.seat) }
+                },
+                makeConsentFlow: { entry in
+                    ModuleConsentFlow(
+                        entry: entry,
+                        fetchManifestBytes: catalog.fetchManifestBytes,
+                        consentStore: pinnedConsentStore,
+                        selectionStore: seatSelectionStore,
+                        makeEntitlements: makeBackupEntitlements,
+                        apply: { manifest in
+                            // Nothing is written anywhere: the pinned
+                            // consent record IS the enrolment, and
+                            // `BackupSeat.consentedManifests` reads it
+                            // directly. What this step does is refuse a
+                            // manifest the seat cannot use, so nobody is
+                            // shown "Service added" over an operator
+                            // that will never produce a Settings row.
+                            // Extracted (BackupCatalogConsent) so that
+                            // refusal is unit-tested.
+                            try BackupCatalogConsent.apply(manifest: manifest)
+                            // Only after the manifest is known usable —
+                            // a signal raised before it would rebuild
+                            // the backup stack for an operator that is
+                            // about to be reported as not added.
+                            backupConsentSignal.consentRecorded()
+                        }
+                    )
+                }
+            )
+        }
+
         // Settings-flow factories, declared once because the
         // onboarding steps reuse them VERBATIM: a step surface and its
         // Settings screen are the same flow over the same repository +
@@ -1081,6 +1178,12 @@ struct OnymIOSApp: App {
         }
         let makeDiscoverySettingsFlow = discoveryRepository.map { repo in
             { @MainActor in DiscoverySettingsFlow(repository: repo) }
+        }
+        // Built from the picker, so a build without discovery has no
+        // Backup Operators row at all rather than one leading to a list
+        // that can never fill.
+        let makeBackupOperatorSettingsFlow = backupCatalogPicker.map { picker in
+            { @MainActor in BackupOperatorSettingsFlow(discovery: picker) }
         }
 
         // Onboarding factories. Built whenever onboarding is AVAILABLE
@@ -1409,6 +1512,8 @@ struct OnymIOSApp: App {
                     }
                 ).makeDeviceBackupView()
             },
+            makeBackupOperatorSettingsFlow: makeBackupOperatorSettingsFlow,
+            backupConsentSignal: backupConsentSignal,
             makeOnboardingFlow: makeOnboardingFlow,
             presentOnboardingAtLaunch: shouldOnboard,
             onboardingRestart: onboardingRestartController,
