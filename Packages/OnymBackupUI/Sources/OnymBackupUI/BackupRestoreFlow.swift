@@ -18,15 +18,56 @@ import OnymBackup
 /// So someone moving to a new phone restores their identity from the
 /// recovery phrase during onboarding, chooses their backup operator, and
 /// then comes here for their history.
+///
+/// It reads from every operator the person keeps backups with, not one.
+/// Each operator sealed its own copy with its own salt, so their
+/// snapshots are separate rows with separate references — a copy is not
+/// interchangeable with another copy on the wire, only in what it
+/// contains. That is the point of keeping two: if one operator cannot be
+/// reached, or its copy will not open, the other's is a different set of
+/// bytes and may well do.
+/// One operator a restore may read from.
+public struct BackupRestoreSource: Sendable {
+    public let componentId: String
+    public let displayName: String
+    public let repository: BackupRepository
+
+    public init(componentId: String, displayName: String, repository: BackupRepository) {
+        self.componentId = componentId
+        self.displayName = displayName
+        self.repository = repository
+    }
+}
+
+/// One snapshot, and which operator is holding it.
+///
+/// The operator is part of the row rather than a filter above the list
+/// because it is part of the choice: these are different bytes in
+/// different jurisdictions, taken at different moments, and which one a
+/// person restores from is a decision only they can make.
+public struct RestorableSnapshot: Identifiable, Equatable, Sendable {
+    public let snapshot: RetainedSnapshot
+    public let componentId: String
+    public let operatorName: String
+
+    public var id: String { componentId + "|" + snapshot.snapshotReference.digest }
+
+    public init(snapshot: RetainedSnapshot, componentId: String, operatorName: String) {
+        self.snapshot = snapshot
+        self.componentId = componentId
+        self.operatorName = operatorName
+    }
+}
+
 @MainActor
 @Observable
 public final class BackupRestoreFlow {
     public enum State: Equatable {
         case loading
-        /// What the operator holds for this holder key. Empty is an
+        /// What the operators hold for this holder key. Empty is an
         /// ordinary answer — a different operator, or a different
         /// identity, has a different holder key and sees nothing.
-        case ready(snapshots: [RetainedSnapshot])
+        case ready(snapshots: [RestorableSnapshot])
         case restoring(SnapshotReference)
         case restored(BackupRestoreSummary)
         /// `partial` is true when writing had already begun, so the
@@ -35,19 +76,23 @@ public final class BackupRestoreFlow {
     }
 
     public private(set) var state: State = .loading
+    /// Operators that could not be listed, by name. Named rather than
+    /// swallowed: a person deciding whether their history is recoverable
+    /// should not be shown a short list that looks complete.
+    public private(set) var unreachableOperators: [String] = []
 
-    private let repository: BackupRepository
+    private let sources: [BackupRestoreSource]
     private let restorer: BackupRestorer
     private let keyMaterial: BackupKeyMaterial
     private let workingDirectory: URL
 
     public init(
-        repository: BackupRepository,
+        sources: [BackupRestoreSource],
         restorer: BackupRestorer,
         keyMaterial: BackupKeyMaterial,
         workingDirectory: URL
     ) {
-        self.repository = repository
+        self.sources = sources
         self.restorer = restorer
         self.keyMaterial = keyMaterial
         self.workingDirectory = workingDirectory
@@ -55,22 +100,52 @@ public final class BackupRestoreFlow {
 
     public func load() async {
         state = .loading
-        do {
-            let snapshots = try await repository.listSnapshots()
-            // Newest first: the one a person almost always wants is the
-            // last one taken, and making them read dates to find it is
-            // work the screen can do.
-            state = .ready(snapshots: snapshots.sorted { $0.retainedAt > $1.retainedAt })
-        } catch {
-            // Listing failed; nothing was written because nothing was
-            // attempted.
-            state = .failed(message: Self.describe(error), partial: false)
+        unreachableOperators = []
+        var rows: [RestorableSnapshot] = []
+        var unreachable: [String] = []
+        for source in sources {
+            do {
+                let snapshots = try await source.repository.listSnapshots()
+                rows += snapshots.map {
+                    RestorableSnapshot(
+                        snapshot: $0,
+                        componentId: source.componentId,
+                        operatorName: source.displayName)
+                }
+            } catch {
+                // One operator being unreachable is not a failed
+                // restore screen — the others may be holding exactly
+                // what this person needs. It is also not nothing, so it
+                // is named.
+                unreachable.append(source.displayName)
+            }
         }
+        unreachableOperators = unreachable
+        if rows.isEmpty, !sources.isEmpty, unreachable.count == sources.count {
+            // Nothing answered. Reporting "no backups" here would tell
+            // someone their history is gone on the evidence of a network
+            // failure.
+            state = .failed(
+                message: "No backup operator could be reached, so what they hold is unknown.",
+                partial: false)
+            return
+        }
+        // Newest first, across operators: the one a person almost always
+        // wants is the last one taken, and making them read dates to find
+        // it is work the screen can do.
+        state = .ready(snapshots: rows.sorted { $0.snapshot.retainedAt > $1.snapshot.retainedAt })
     }
 
-    /// Download, verify, and apply one snapshot.
-    public func restore(_ snapshot: RetainedSnapshot) async {
-        let reference = snapshot.snapshotReference
+    /// Download, verify, and apply one snapshot, from the operator that
+    /// holds it.
+    public func restore(_ row: RestorableSnapshot) async {
+        guard let source = sources.first(where: { $0.componentId == row.componentId }) else {
+            state = .failed(
+                message: "That backup's operator is no longer set up on this device.",
+                partial: false)
+            return
+        }
+        let reference = row.snapshot.snapshotReference
         state = .restoring(reference)
         // `sealed-`, not `restore-`. The restorer decrypts to
         // `restore-<digest>` in this same directory, so the two used to
@@ -83,7 +158,7 @@ public final class BackupRestoreFlow {
         defer { try? FileManager.default.removeItem(at: downloaded) }
 
         do {
-            try await repository.download(reference, to: downloaded)
+            try await source.repository.download(reference, to: downloaded)
             let summary = try await restorer.restore(
                 sealedURL: downloaded,
                 reference: reference,

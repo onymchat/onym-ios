@@ -65,11 +65,18 @@ public final class DeviceBackupSettingsFlow {
 
     public private(set) var state = State()
 
+    /// The operator this screen is about.
+    ///
+    /// One flow per operator: a person may keep the same history with
+    /// several at once, and each has its own terms pin, its own chain,
+    /// its own payment and its own idea of whether it is up to date.
+    /// Nothing here aggregates — `DeviceBackupVendorsFlow` does that.
+    public let componentId: String
+    /// What to call this operator on screen.
+    public let displayName: String
+
     private let repository: BackupRepository
     private let stateStore: any BackupStateStoring
-    /// The operator consented to *now*, which is not necessarily the one
-    /// this state was enrolled with.
-    private let currentComponentId: @Sendable () -> String?
     private let schedule: BackupSchedule
     /// Drawn once for this flow's lifetime. Re-drawing per check would
     /// let frequent polling sample until it found a small value, which
@@ -77,14 +84,16 @@ public final class DeviceBackupSettingsFlow {
     private let sessionJitter: TimeInterval
 
     public init(
+        componentId: String,
+        displayName: String,
         repository: BackupRepository,
         stateStore: any BackupStateStoring,
-        currentComponentId: @escaping @Sendable () -> String? = { nil },
         schedule: BackupSchedule = .default
     ) {
+        self.componentId = componentId
+        self.displayName = displayName
         self.repository = repository
         self.stateStore = stateStore
-        self.currentComponentId = currentComponentId
         self.schedule = schedule
         self.sessionJitter = schedule.drawJitter()
     }
@@ -101,14 +110,13 @@ public final class DeviceBackupSettingsFlow {
             state.status = .off
             return
         }
-        // The consented operator moved out from under this state. Nothing
-        // recorded here means anything to the new one, so the only honest
-        // next step is enrolment.
-        // Includes state written before the operator was recorded at
-        // all: nil is not "matches", it is "cannot tell", and guessing
-        // in favour of proceeding is how a snapshot reaches the wrong
-        // operator. Re-enrolment is the cost, and it is one screen.
-        if currentComponentId() != stored.componentId {
+        // This state does not belong to the operator this screen is
+        // about. With one state file per operator that means state
+        // written before the operator was recorded at all. `nil` is not
+        // "matches", it is "cannot tell", and guessing in favour of
+        // proceeding is how a snapshot reaches the wrong operator.
+        // Re-enrolment is the cost, and it is one screen.
+        if stored.componentId != componentId {
             state.status = .operatorChanged
             return
         }

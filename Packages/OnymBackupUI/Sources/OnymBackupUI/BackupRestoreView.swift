@@ -5,7 +5,7 @@ import SwiftUI
 /// Settings → Device Backup → Restore.
 public struct BackupRestoreView: View {
     @State private var flow: BackupRestoreFlow
-    @State private var confirming: RetainedSnapshot?
+    @State private var confirming: RestorableSnapshot?
 
     public init(flow: BackupRestoreFlow) {
         _flow = State(wrappedValue: flow)
@@ -59,9 +59,9 @@ public struct BackupRestoreView: View {
             titleVisibility: .visible
         ) {
             Button("Restore") {
-                if let snapshot = confirming {
+                if let row = confirming {
                     confirming = nil
-                    Task { await flow.restore(snapshot) }
+                    Task { await flow.restore(row) }
                 }
             }
             Button("Cancel", role: .cancel) { confirming = nil }
@@ -79,7 +79,7 @@ public struct BackupRestoreView: View {
             Image(systemName: "tray").font(.largeTitle)
             Text("No backups here")
                 .font(.headline)
-            Text("This operator holds nothing for this identity. If you backed up with a different operator, or under a different identity, choose that one instead.")
+            Text("No operator you have set up holds anything for this identity. If you backed up under a different identity, or with an operator this device has not been set up with, that is where it will be.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -89,18 +89,17 @@ public struct BackupRestoreView: View {
         .accessibilityIdentifier("backup.restore.empty")
     }
 
-    private func list(_ snapshots: [RetainedSnapshot]) -> some View {
+    private func list(_ snapshots: [RestorableSnapshot]) -> some View {
         Group {
             SettingsSectionLabel("BACKUPS")
             SettingsCard {
-                ForEach(Array(snapshots.enumerated()), id: \.element.snapshotReference) {
-                    index, snapshot in
+                ForEach(Array(snapshots.enumerated()), id: \.element.id) { index, row in
                     Button {
-                        confirming = snapshot
+                        confirming = row
                     } label: {
                         SettingsRow(
                             title: index == 0 ? "Most recent" : "Earlier backup",
-                            subtitle: Self.subtitle(for: snapshot),
+                            subtitle: Self.subtitle(for: row),
                             last: index == snapshots.count - 1
                         ) {
                             SettingsIconTile(symbol: "shippingbox", bg: SettingsTile.blue)
@@ -108,11 +107,20 @@ public struct BackupRestoreView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier(
-                        "backup.restore.snapshot.\(snapshot.snapshotReference.digestHex)")
+                        "backup.restore.snapshot.\(row.snapshot.snapshotReference.digestHex)")
                 }
             }
             SettingsFootnote(
                 "Sizes are rounded into buckets, so they do not tell you how much history a backup holds.")
+
+            if !flow.unreachableOperators.isEmpty {
+                // A short list that looks complete is the failure mode
+                // here: someone deciding whether their history is
+                // recoverable must not be shown one operator's silence
+                // as another's answer.
+                SettingsFootnote(
+                    verbatim: "Could not reach \(flow.unreachableOperators.joined(separator: ", ")). Anything held there is not in this list.")
+            }
         }
     }
 
@@ -182,10 +190,13 @@ public struct BackupRestoreView: View {
         return parts.isEmpty ? "Nothing to add — it was all already here." : parts.joined(separator: ", ")
     }
 
-    static func subtitle(for snapshot: RetainedSnapshot) -> String {
-        let date = snapshot.retainedAt.formatted(date: .abbreviated, time: .shortened)
+    /// The operator's name leads, because with more than one set up it
+    /// is the first thing that distinguishes two otherwise identical
+    /// rows — and because restoring is choosing whose copy to trust.
+    static func subtitle(for row: RestorableSnapshot) -> String {
+        let date = row.snapshot.retainedAt.formatted(date: .abbreviated, time: .shortened)
         let size = ByteCountFormatter.string(
-            fromByteCount: Int64(snapshot.snapshotReference.sealedByteSize), countStyle: .file)
-        return "\(date) · about \(size)"
+            fromByteCount: Int64(row.snapshot.snapshotReference.sealedByteSize), countStyle: .file)
+        return "\(row.operatorName) · \(date) · about \(size)"
     }
 }

@@ -29,6 +29,15 @@ public struct BackupDisclosure: Sendable, Equatable {
     /// promises "automatic" while uploads are foreground-only would be
     /// the easiest lie in the product.
     public let whenBackupsHappen: String
+    /// Present only when this identity already backs up somewhere else.
+    ///
+    /// Adding an operator is not the same decision as choosing one, and
+    /// the surface must not let it read as one: a second operator is a
+    /// second complete copy, in a second jurisdiction, under a second
+    /// company's terms, paid for twice — and it extends the life of
+    /// everyone else's messages a second time (`UI-Backup.md` §14.11).
+    /// A person who thinks they are switching should find out here.
+    public let additionalCopies: String?
     public let operatorName: String
     public let items: [Item]
 
@@ -36,12 +45,14 @@ public struct BackupDisclosure: Sendable, Equatable {
         thirdPartyConsequence: String,
         noResetPath: String,
         whenBackupsHappen: String,
+        additionalCopies: String? = nil,
         operatorName: String,
         items: [Item]
     ) {
         self.thirdPartyConsequence = thirdPartyConsequence
         self.noResetPath = noResetPath
         self.whenBackupsHappen = whenBackupsHappen
+        self.additionalCopies = additionalCopies
         self.operatorName = operatorName
         self.items = items
     }
@@ -53,10 +64,13 @@ public struct BackupDisclosure: Sendable, Equatable {
     /// keeps access logs, or names four sub-processors, has said so in a
     /// signed document, and the surface's job is to repeat it rather
     /// than summarise it into something more comfortable.
+    /// `otherOperators` names the operators this identity is *already*
+    /// enrolled with, so the surface can say what adding one more does.
     public static func from(
         connection: BackupConnection,
         schedule: BackupSchedule,
-        mediaPolicy: BackupMediaPolicy
+        mediaPolicy: BackupMediaPolicy,
+        otherOperators: [String] = []
     ) -> BackupDisclosure {
         let terms = connection.terms
         var items: [Item] = [
@@ -145,9 +159,23 @@ public struct BackupDisclosure: Sendable, Equatable {
                 and nobody can make one for you.
                 """,
             whenBackupsHappen: Self.scheduleSentence(schedule),
+            additionalCopies: Self.additionalCopiesSentence(otherOperators),
             operatorName: connection.manifest.componentId,
             items: items
         )
+    }
+
+    /// What a second operator actually means, when there already is one.
+    static func additionalCopiesSentence(_ otherOperators: [String]) -> String? {
+        guard !otherOperators.isEmpty else { return nil }
+        let names = otherOperators.joined(separator: ", ")
+        return """
+            You already back up to \(names). Setting this one up does not replace it — it adds a second complete \
+            copy of your history, held by a different company, in a different country, under \
+            different terms, and paid for separately. Everyone in your chats has their \
+            messages kept in one more place. Setting this one up does not turn the other \
+            one off.
+            """
     }
 
     /// Describes the configured interval rather than asserting a day.

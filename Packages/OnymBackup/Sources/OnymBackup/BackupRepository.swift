@@ -55,17 +55,123 @@ public actor BackupRepository {
         case alreadyRunning
     }
 
+    /// Whether a run may proceed at this operator right now.
+    public enum Readiness: Sendable, Equatable {
+        case ready
+        /// The reason nothing may be sent, in the same words a run would
+        /// have returned.
+        case blocked(RunResult)
+    }
+
     /// Compose a fresh snapshot and try to place it.
     public func backUp(now: Date = Date()) async throws -> RunResult {
         guard !isRunning else { return .alreadyRunning }
         isRunning = true
         defer { isRunning = false }
 
+        var state: BackupState
+        let acceptedTermsId: String
+        switch try await evaluatePreconditions(now: now) {
+        case .blocked(let result):
+            return result
+        case .ready(let ready, let terms):
+            state = ready
+            acceptedTermsId = terms
+        }
+        let enrolled = state.componentId
+
+        let snapshot = try await composer.compose(
+            keyMaterial: keyMaterial,
+            acceptedTermsId: acceptedTermsId,
+            supersedes: try supersededReference(in: state),
+            now: now
+        )
+        state.lastAttemptAt = now
+        try commit(state, expecting: enrolled)
+        return try await place(snapshot, state: &state, now: now)
+    }
+
+    /// Place bytes sealed elsewhere in this run at *this* operator.
+    ///
+    /// The seam that lets one person keep the same history with more
+    /// than one operator at once. The history is read once and sealed
+    /// once per operator (`BackupComposer.seal`); everything an operator
+    /// is told is stamped here, because none of it is a property of the
+    /// bytes:
+    ///
+    /// - the terms digest **this** device pinned with **this** operator,
+    ///   never another's;
+    /// - the position the snapshot takes in **this** operator's chain,
+    ///   which is not the same as another's — one operator may have
+    ///   missed the snapshot the other is superseding; and
+    /// - a fresh operation id, so two operators never reconcile on a
+    ///   shared identifier that would link their two holders.
+    ///
+    /// On a blocked result the sealed bytes are left untouched: the
+    /// caller minted them and is the only one that knows whether another
+    /// operator is still to receive its own copy.
+    public func place(prepared: PreparedSnapshot, now: Date = Date()) async throws -> RunResult {
+        guard !isRunning else { return .alreadyRunning }
+        isRunning = true
+        defer { isRunning = false }
+
+        var state: BackupState
+        let acceptedTermsId: String
+        switch try await evaluatePreconditions(now: now) {
+        case .blocked(let result):
+            return result
+        case .ready(let ready, let terms):
+            state = ready
+            acceptedTermsId = terms
+        }
+        let enrolled = state.componentId
+
+        let snapshot = prepared.addressed(
+            operationId: try BackupComposer.newIdentifier(),
+            acceptedTermsId: acceptedTermsId,
+            supersedes: try supersededReference(in: state)
+        )
+        state.lastAttemptAt = now
+        try commit(state, expecting: enrolled)
+        return try await place(snapshot, state: &state, now: now)
+    }
+
+    /// Ask whether a run may proceed, without composing anything.
+    ///
+    /// Reading a whole history and sealing it is expensive, and a
+    /// snapshot no operator will accept is expense for nothing — so a
+    /// fan-out over several operators asks first and composes only if
+    /// somebody can take it. Reconciliation of earlier work happens
+    /// here, which is why this is not a pure read.
+    public func prepare(now: Date = Date()) async throws -> Readiness {
+        guard !isRunning else { return .blocked(.alreadyRunning) }
+        isRunning = true
+        defer { isRunning = false }
+
+        switch try await evaluatePreconditions(now: now) {
+        case .blocked(let result): return .blocked(result)
+        case .ready: return .ready
+        }
+    }
+
+    private enum Preconditions {
+        case ready(BackupState, acceptedTermsId: String)
+        case blocked(RunResult)
+    }
+
+    /// Everything that must hold before a byte is sent, in order.
+    ///
+    /// Extracted rather than duplicated: `backUp`, `place(prepared:)` and
+    /// `prepare` must apply the *same* rules, and a second copy of this
+    /// sequence is a second place for one of them to drift — which on
+    /// this path means a snapshot reaching an operator nobody consented
+    /// to.
+    private func evaluatePreconditions(now: Date) async throws -> Preconditions {
         var state = try stateStore.load()
         // Captured before the first suspension. Every write below is
-        // conditional on the enrolment still being this one — `backUp`
-        // awaits `connect`, `reconcile` and `compose`, and a
-        // re-enrolment can land during any of them.
+        // conditional on the enrolment still being this one — this
+        // awaits `connect` and `reconcile`, and a re-enrolment can land
+        // during either.
         let enrolled = state.componentId
 
         guard let acceptedTermsId = state.acceptedTermsId else {
@@ -88,9 +194,8 @@ public actor BackupRepository {
         if let mismatch = try await operatorOrTermsMismatch(state: state, now: now) {
             state.lastAttemptAt = now
             try commit(state, expecting: enrolled)
-            return mismatch
+            return .blocked(mismatch)
         }
-        _ = acceptedTermsId
 
         // Only now: an operation whose result we never learned may well
         // have succeeded, and composing a second snapshot on top of an
@@ -108,31 +213,32 @@ public actor BackupRepository {
         guard state.pendingOperations.isEmpty else {
             state.lastAttemptAt = now
             try commit(state, expecting: enrolled)
-            return .awaitingReconciliation(
-                operationIds: state.pendingOperations.map(\.operationId))
+            return .blocked(.awaitingReconciliation(
+                operationIds: state.pendingOperations.map(\.operationId)))
         }
+        return .ready(state, acceptedTermsId: acceptedTermsId)
+    }
 
-        let snapshot = try await composer.compose(
-            keyMaterial: keyMaterial,
-            acceptedTermsId: acceptedTermsId,
-            supersedes: try state.newestSnapshot.map {
-                // `try?` here would turn an unreadable ancestor into a
-                // snapshot claiming to supersede nothing, quietly
-                // breaking the chain. The store refuses to *read*
-                // corrupt state for the same reason; it should not be
-                // written past here either.
-                do {
-                    return try SnapshotReference(
-                        digest: $0.digest, sealedByteSize: $0.sealedByteSize)
-                } catch {
-                    throw BackupError.localFailure(reason: .stateUnreadable)
-                }
-            },
-            now: now
-        )
-        state.lastAttemptAt = now
-        try commit(state, expecting: enrolled)
-        return try await place(snapshot, state: &state, now: now)
+    /// The snapshot a new one supersedes *at this operator*.
+    ///
+    /// Read from this operator's own chain, never from another's: two
+    /// operators enrolled at different times, or one that missed a run,
+    /// hold different newest snapshots, and pointing one at the other's
+    /// ancestor would describe a chain it never had.
+    private func supersededReference(in state: BackupState) throws -> SnapshotReference? {
+        try state.newestSnapshot.map {
+            // `try?` here would turn an unreadable ancestor into a
+            // snapshot claiming to supersede nothing, quietly breaking
+            // the chain. The store refuses to *read* corrupt state for
+            // the same reason; it should not be written past here
+            // either.
+            do {
+                return try SnapshotReference(
+                    digest: $0.digest, sealedByteSize: $0.sealedByteSize)
+            } catch {
+                throw BackupError.localFailure(reason: .stateUnreadable)
+            }
+        }
     }
 
     /// The snapshot waiting on a purchase, if one survived a relaunch.

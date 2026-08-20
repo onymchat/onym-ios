@@ -85,6 +85,16 @@ public struct BackupEnrolmentView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityIdentifier("backup.enrolment.operator")
 
+                if let additionalCopies = disclosure.additionalCopies {
+                    // Above the rest, because it changes what the whole
+                    // screen is: not "choose an operator" but "add one".
+                    headline(
+                        "This adds a second copy — it does not move the first",
+                        additionalCopies,
+                        symbol: "square.on.square",
+                        identifier: "backup.enrolment.additional_copies")
+                }
+
                 headline(
                     "This copies other people's messages too",
                     disclosure.thirdPartyConsequence,

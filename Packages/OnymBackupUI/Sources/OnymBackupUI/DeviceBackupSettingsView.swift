@@ -2,29 +2,23 @@ import OnymBackup
 import OnymDesign
 import SwiftUI
 
-/// Settings → Device Backup.
+/// Settings → Device Backup → one operator.
+///
+/// One screen per operator, reached from `DeviceBackupVendorsView`.
+/// Everything here is about this operator alone: its terms, its
+/// snapshots, its payment, and a Back Up Now that sends to it and to
+/// nobody else. Restore is not here — it reads across every operator at
+/// once, so it belongs one level up.
 public struct DeviceBackupSettingsView: View {
     @State private var flow: DeviceBackupSettingsFlow
     private let makeEnrolment: () -> BackupEnrolmentView?
 
-    /// Whether restore is available at all, and separately how to build
-    /// it. Split because the row's *presence* is evaluated on every body
-    /// pass while the screen itself is needed only when someone taps
-    /// through — asking the factory each time built a whole flow, and a
-    /// repository with it, to answer a yes/no question.
-    private let canRestore: Bool
-    private let makeRestore: () -> BackupRestoreView
-
     public init(
         flow: DeviceBackupSettingsFlow,
-        canRestore: Bool = false,
-        makeEnrolment: @escaping () -> BackupEnrolmentView?,
-        makeRestore: @escaping () -> BackupRestoreView
+        makeEnrolment: @escaping () -> BackupEnrolmentView?
     ) {
         _flow = State(wrappedValue: flow)
         self.makeEnrolment = makeEnrolment
-        self.canRestore = canRestore
-        self.makeRestore = makeRestore
     }
 
     public var body: some View {
@@ -64,7 +58,7 @@ public struct DeviceBackupSettingsView: View {
                         } label: {
                             SettingsRow(
                                 title: "Back Up Now",
-                                subtitle: "Uploads your whole history",
+                                subtitle: "Uploads your whole history to this operator",
                                 last: true
                             ) {
                                 SettingsIconTile(symbol: "arrow.up.circle", bg: SettingsTile.blue)
@@ -77,14 +71,15 @@ public struct DeviceBackupSettingsView: View {
                     SettingsFootnote(
                         "Each backup uploads everything, not just what changed — there is no incremental upload yet.")
 
-                    restoreSection
                     snapshotsSection
                 }
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 24)
         }
-        .navigationTitle("Device Backup")
+        // The operator's own name: with several set up, "Device Backup"
+        // on every one of them is a screen you cannot tell from the last.
+        .navigationTitle(Text(verbatim: flow.displayName))
         .navigationBarTitleDisplayMode(.inline)
         .task {
             flow.refresh()
@@ -100,33 +95,6 @@ public struct DeviceBackupSettingsView: View {
         case .termsChanged: "Review New Terms"
         case .operatorChanged: "Set Up With New Operator"
         default: "Set Up Backup"
-        }
-    }
-
-    /// Restore is offered whenever backup is set up, not only on a
-    /// fresh device.
-    ///
-    /// It adds history rather than replacing it, and it does not touch
-    /// the identity — the wiping kind of restore is identity restore,
-    /// which lives in onboarding and is not reachable from here. Someone
-    /// who lost a chat, or who set up a second device, has the same
-    /// reason to want this as someone with a new phone.
-    @ViewBuilder
-    private var restoreSection: some View {
-        if canRestore {
-            SettingsCard {
-                NavigationLink { makeRestore() } label: {
-                    SettingsRow(
-                        title: "Restore From Backup",
-                        subtitle: "Adds messages and chats — nothing is deleted",
-                        last: true
-                    ) {
-                        SettingsIconTile(symbol: "arrow.down.circle", bg: SettingsTile.green)
-                    }
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("backup.restore_row")
-            }
         }
     }
 
