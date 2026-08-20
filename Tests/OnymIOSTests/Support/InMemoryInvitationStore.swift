@@ -17,10 +17,10 @@ actor InMemoryInvitationStore: InvitationStore {
     }
 
     @discardableResult
-    func save(_ record: IncomingInvitationRecord) -> Bool {
-        if rows[record.id] != nil { return false }
+    func save(_ record: IncomingInvitationRecord) -> InvitationSaveOutcome {
+        if rows[record.id] != nil { return .duplicate }
         rows[record.id] = record
-        return true
+        return .saved
     }
 
     func updateStatus(id: String, status: IncomingInvitationStatus) {

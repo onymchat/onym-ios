@@ -55,8 +55,11 @@ public actor SwiftDataGroupStore: GroupStore {
     }
 
     @discardableResult
-    public func insertOrUpdate(_ group: ChatGroup) -> Bool {
-        guard let encoded = try? Self.encode(group) else { return false }
+    public func insertOrUpdate(_ group: ChatGroup) -> GroupInsertOutcome {
+        // The one ending that persists nothing. It is spelled `.failed`
+        // rather than sharing a word with the update branch below
+        // precisely so a caller counting rows cannot mistake the two.
+        guard let encoded = try? Self.encode(group) else { return .failed }
 
         let id = group.id
         let owner = encoded.ownerIdentityIDString
@@ -82,12 +85,12 @@ public actor SwiftDataGroupStore: GroupStore {
             existing.encryptedAvatar = encoded.encryptedAvatar
             existing.encryptedInvitationMessage = encoded.encryptedInvitationMessage
             try? context.save()
-            return false
+            return .updated
         }
 
         context.insert(encoded)
         try? context.save()
-        return true
+        return .inserted
     }
 
     public func markPublished(id: String, ownerIDString: String, commitment: Data?) {

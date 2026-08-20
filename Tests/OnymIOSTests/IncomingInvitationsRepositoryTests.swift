@@ -39,13 +39,13 @@ final class IncomingInvitationsRepositoryTests: XCTestCase {
     // MARK: - recordIncoming
 
     func test_recordIncoming_savesViaStore() async {
-        let inserted = await repository.recordIncoming(
+        let outcome = await repository.recordIncoming(
             id: "evt-1",
             ownerIdentityID: ownerA,
             payload: Data("hello".utf8),
             receivedAt: Date()
         )
-        XCTAssertTrue(inserted)
+        XCTAssertEqual(outcome, .saved)
         let stored = await store.list()
         XCTAssertEqual(stored.count, 1)
         XCTAssertEqual(stored[0].id, "evt-1")
@@ -58,8 +58,8 @@ final class IncomingInvitationsRepositoryTests: XCTestCase {
         let now = Date()
         let first = await repository.recordIncoming(id: "evt-1", ownerIdentityID: ownerA, payload: Data(), receivedAt: now)
         let second = await repository.recordIncoming(id: "evt-1", ownerIdentityID: ownerA, payload: Data(), receivedAt: now)
-        XCTAssertTrue(first)
-        XCTAssertFalse(second)
+        XCTAssertEqual(first, .saved)
+        XCTAssertEqual(second, .duplicate)
         let stored = await store.list()
         XCTAssertEqual(stored.count, 1)
     }
@@ -117,8 +117,8 @@ final class IncomingInvitationsRepositoryTests: XCTestCase {
         // Second recordIncoming with same id is a dedup no-op — no
         // snapshot push, otherwise subscribers would see redundant
         // identical lists.
-        let inserted = await repository.recordIncoming(id: "evt-1", ownerIdentityID: ownerA, payload: Data(), receivedAt: Date())
-        XCTAssertFalse(inserted)
+        let outcome = await repository.recordIncoming(id: "evt-1", ownerIdentityID: ownerA, payload: Data(), receivedAt: Date())
+        XCTAssertEqual(outcome, .duplicate)
 
         // Trigger a real mutation to advance the iterator past the
         // would-be dedup tick — if the dedup had pushed, this next

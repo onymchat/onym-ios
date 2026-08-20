@@ -27,6 +27,17 @@ import OnymPersistence
 /// made*, and "1 chats, 3 messages" read identically whether three
 /// messages were on the device or none were — which is precisely how a
 /// restore that wrote nothing survived QA looking like a success.
+///
+/// Taking a store at its word requires the word to be unambiguous.
+/// Groups and invitations both used to answer `false` for a row that
+/// was persisted and for one that was not, so this file read `list()`
+/// before writing and inferred which `false` it had from whether the
+/// key was already present. That worked, and it is gone: all three
+/// stores now report their own outcome. The inference is not kept
+/// alongside as a cross-check — two mechanisms answering one question
+/// leaves the next reader unable to tell which one is authoritative,
+/// and the pre-read was always the weaker of the two, reconstructing
+/// from the outside what the store knew from the inside.
 struct AppBackupSink: BackupSinkProviding {
     let groupStore: any GroupStore
     let messageStore: any MessageStore
@@ -46,26 +57,6 @@ struct AppBackupSink: BackupSinkProviding {
     func restore(groups: [BackupGroupRecord]) async throws -> BackupSinkOutcome {
         var landed = 0
         var unreadable = 0
-        // What is already here, before anything is written.
-        //
-        // `GroupStore.insertOrUpdate` answers `true` on insert and
-        // `false` on *both* of the other two endings: a row updated in
-        // place, and an encode that failed having persisted nothing.
-        // Counting `false` as a failure would report every re-restore as
-        // unreadable; counting it as a success would report a store that
-        // refused the write as restored. Neither is true, and the
-        // returned `Bool` cannot tell them apart on its own.
-        //
-        // Knowing which keys existed beforehand does tell them apart:
-        // `false` for a key that was already here is the update branch,
-        // which persisted; `false` for a key that was not is the encode
-        // guard, which did not. One `list()` at the top of a rare
-        // operation buys that, and the alternative — widening
-        // `GroupStore.insertOrUpdate` to an outcome enum the way
-        // `MessageStore` already has — is the better shape but reaches
-        // into every caller of a hot path for the sake of the one caller
-        // that is cold.
-        var present = Set(await groupStore.list().map(Self.key))
         for record in groups {
             // A record we cannot reconstruct is skipped rather than
             // fatal, and the reason is asymmetric: the whole archive was
@@ -84,9 +75,7 @@ struct AppBackupSink: BackupSinkProviding {
                 unreadable += 1
                 continue
             }
-            let key = Self.key(record.id, ownerID)
-            let existed = present.contains(key)
-            let inserted = await groupStore.insertOrUpdate(
+            let outcome = await groupStore.insertOrUpdate(
                 ChatGroup(
                     id: record.id,
                     ownerIdentityID: ownerID,
@@ -108,19 +97,17 @@ struct AppBackupSink: BackupSinkProviding {
                     invitationMessage: record.invitationMessage
                 )
             )
-            if inserted || existed {
-                // Inserted, or updated in place. Either way the group is
-                // on this device now, which is the only thing the
-                // summary claims.
-                present.insert(key)
-                landed += 1
-            } else {
-                // `false` for a key nothing held a moment ago: the store
-                // could not encode the row and persisted nothing. Saying
-                // so is the whole point — a chat the person can see in
-                // the summary and not in their chat list is worse than
-                // one the summary never promised.
+            // `.inserted` or `.updated` — either way the group is on
+            // this device now, which is the only thing the summary
+            // claims. `.failed` is the store saying it could not encode
+            // the row and persisted nothing, and saying so is the whole
+            // point: a chat the person can see in the summary and not in
+            // their chat list is worse than one the summary never
+            // promised.
+            if outcome == .failed {
                 unreadable += 1
+            } else {
+                landed += 1
             }
         }
         return BackupSinkOutcome(landed: landed, unreadable: unreadable)
@@ -141,11 +128,11 @@ struct AppBackupSink: BackupSinkProviding {
                 unreadable += 1
                 continue
             }
-            // No pre-read here: `MessageStore.insertOrUpdate` already
-            // returns the three-way answer that `GroupStore` has to have
-            // reconstructed above. `.inserted` and `.updated` both mean
-            // the row is on the device; `.failed` means the encrypt or
-            // the save gave way and nothing is.
+            // `.inserted` and `.updated` both mean the row is on the
+            // device; `.failed` means the encrypt or the save gave way
+            // and nothing is. `MessageStore` has answered this way since
+            // it was written, which is why the message path never grew
+            // the pre-read the other two have now shed.
             let outcome = await messageStore.insertOrUpdate(
                 ChatMessage(
                     id: id,
@@ -180,12 +167,6 @@ struct AppBackupSink: BackupSinkProviding {
     func restore(invitations: [BackupInvitationRecord]) async throws -> BackupSinkOutcome {
         var landed = 0
         var unreadable = 0
-        // The same ambiguity as groups, in a different disguise:
-        // `InvitationStore.save` answers `false` for a dedup hit *and*
-        // for a payload it could not encrypt. An invitation the device
-        // already holds is the ordinary case on any second restore, and
-        // it must not read as one this build could not parse.
-        var present = Set(await invitationStore.list().map(\.id))
         for record in invitations {
             guard
                 let ownerID = IdentityID(record.ownerIdentityID),
@@ -194,8 +175,7 @@ struct AppBackupSink: BackupSinkProviding {
                 unreadable += 1
                 continue
             }
-            let existed = present.contains(record.id)
-            let inserted = await invitationStore.save(
+            let outcome = await invitationStore.save(
                 IncomingInvitationRecord(
                     id: record.id,
                     ownerIdentityID: ownerID,
@@ -204,11 +184,14 @@ struct AppBackupSink: BackupSinkProviding {
                     status: status
                 )
             )
-            if inserted || existed {
-                present.insert(record.id)
-                landed += 1
-            } else {
+            // `.duplicate` is the ordinary case on any second restore
+            // — an invitation the device already holds — and counting it
+            // as landed is what keeps it from being reported as one this
+            // build could not parse. Only `.failed` wrote nothing.
+            if outcome == .failed {
                 unreadable += 1
+            } else {
+                landed += 1
             }
         }
         return BackupSinkOutcome(landed: landed, unreadable: unreadable)
@@ -275,19 +258,6 @@ struct AppBackupSink: BackupSinkProviding {
             to: blobDirectory.appending(path: blob.sha256),
             options: [.atomic, .completeFileProtection]
         )
-    }
-
-    /// A group's row identity: `(id, owner)`, not `id`. Two local
-    /// identities in the same on-chain group keep separate rows, and
-    /// keying on the id alone would read the second one's arrival as an
-    /// update to the first — counted as landed while the store was
-    /// actually inserting.
-    private static func key(_ group: ChatGroup) -> String {
-        key(group.id, group.ownerIdentityID)
-    }
-
-    private static func key(_ id: String, _ owner: IdentityID) -> String {
-        "\(id)|\(owner.rawValue.uuidString)"
     }
 
     private static func decode<T: Decodable>(_ type: T.Type, _ json: Data?) -> T? {

@@ -271,10 +271,10 @@ private actor FanoutInvitationStore: InvitationStore {
     }
 
     @discardableResult
-    func save(_ record: IncomingInvitationRecord) -> Bool {
-        guard rows[record.id] == nil else { return false }
+    func save(_ record: IncomingInvitationRecord) -> InvitationSaveOutcome {
+        guard rows[record.id] == nil else { return .duplicate }
         rows[record.id] = record
-        return true
+        return .saved
     }
 
     func updateStatus(id: String, status: IncomingInvitationStatus) {

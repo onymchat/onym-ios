@@ -29,16 +29,23 @@ public actor IncomingInvitationsRepository {
         self.currentIdentityID = currentIdentityID
     }
 
-    /// Idempotent on `id`. Returns `true` when a new invitation was
-    /// inserted, `false` if `id` was already present (subscribers don't
-    /// see a snapshot in the no-op case).
+    /// Idempotent on `id`. Passes the store's `InvitationSaveOutcome`
+    /// straight through rather than flattening it back to a `Bool`,
+    /// for the same reason the store stopped returning one: `false`
+    /// here meant "already had it" and "could not store it" at once,
+    /// and this is the layer interactors call.
+    ///
+    /// Subscribers see a snapshot only on `.saved`. `.duplicate` left
+    /// the row exactly as it was and `.failed` wrote nothing at all —
+    /// in neither case did the store's contents change, so re-yielding
+    /// the same list to every subscriber would be churn, not news.
     @discardableResult
     public func recordIncoming(
         id: String,
         ownerIdentityID: IdentityID,
         payload: Data,
         receivedAt: Date
-    ) async -> Bool {
+    ) async -> InvitationSaveOutcome {
         let record = IncomingInvitation(
             id: id,
             ownerIdentityID: ownerIdentityID,
@@ -46,10 +53,10 @@ public actor IncomingInvitationsRepository {
             receivedAt: receivedAt,
             status: .pending
         )
-        let inserted = await store.save(record)
-        guard inserted else { return false }
+        let outcome = await store.save(record)
+        guard outcome == .saved else { return outcome }
         await refreshFromStore()
-        return true
+        return outcome
     }
 
     public func updateStatus(id: String, status: IncomingInvitationStatus) async {

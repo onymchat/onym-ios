@@ -30,11 +30,24 @@ public actor GroupRepository {
     /// `GroupStore.insertOrUpdate`). Any subsequent insert with the
     /// same id overwrites the row in place — the chain-anchor flow
     /// uses this to flip `isPublishedOnChain` and bump the commitment.
+    ///
+    /// Passes the store's `GroupInsertOutcome` straight through, the
+    /// way `MessageRepository.insert` passes `MessageInsertOutcome`.
+    /// Narrowing it back to `Bool` here would put the ambiguity the
+    /// store just shed one layer up, where the next caller to write
+    /// `if inserted { … }` finds it again — and every caller in this
+    /// repo discards the value anyway, so nothing is paying for the
+    /// wider type.
+    ///
+    /// The refresh is unconditional, including after `.failed`: the
+    /// snapshot is re-read from the store rather than patched, so
+    /// re-yielding what the store actually holds is correct in all
+    /// three cases and costs a list on a path that just did a write.
     @discardableResult
-    public func insert(_ group: ChatGroup) async -> Bool {
-        let inserted = await store.insertOrUpdate(group)
+    public func insert(_ group: ChatGroup) async -> GroupInsertOutcome {
+        let outcome = await store.insertOrUpdate(group)
         await refreshFromStore()
-        return inserted
+        return outcome
     }
 
     /// Mark a group as anchored on chain. The commitment, when

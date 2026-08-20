@@ -1,4 +1,5 @@
 import Foundation
+import OnymChain
 import OnymChatsCore
 import OnymFoundation
 import OnymGroup
@@ -423,6 +424,125 @@ final class BackupRestoreTests: XCTestCase {
             "restoring a chat that was already here read as a chat that could not be read")
     }
 
+    // MARK: - The stores answer for themselves (#293 follow-up)
+
+    /// The point of the whole change, stated once as a contract.
+    ///
+    /// `GroupStore.insertOrUpdate` used to answer `Bool`, and `false`
+    /// covered both a row updated in place and a row it could not encode
+    /// and did not write. A caller counting what landed cannot act on
+    /// that: counting `false` as failure reports every restore onto a
+    /// device that already holds rows as unreadable, and counting it as
+    /// success reports a refused write as restored. Both were shipped
+    /// bugs. Three cases, three answers, and a caller can now tell them
+    /// apart without reading the store first.
+    func testAGroupStoreTellsItsThreeOutcomesApart() async {
+        let store = SwiftDataGroupStore.inMemory()
+        let group = ChatGroup(
+            id: Self.restoredGroupID, ownerIdentityID: IdentityID(),
+            name: "Weekend plans", groupSecret: Data(repeating: 0xEE, count: 32),
+            createdAt: Date(), members: [], memberProfiles: [:], epoch: 0,
+            salt: Data(repeating: 1, count: 32), commitment: nil, tier: .small,
+            groupType: .tyranny, adminPubkeyHex: nil, adminEd25519PubkeyHex: nil,
+            isPublishedOnChain: false, avatarJPEG: nil, lastReadAt: nil,
+            invitationMessage: nil)
+
+        var updated = group
+        updated.epoch = 7
+
+        let first = await store.insertOrUpdate(group)
+        let second = await store.insertOrUpdate(updated)
+        let refused = await RefusingGroupStore().insertOrUpdate(group)
+
+        XCTAssertEqual(first, .inserted)
+        XCTAssertEqual(second, .updated, "an in-place overwrite is not a failed write")
+        XCTAssertEqual(refused, .failed)
+        XCTAssertNotEqual(
+            second, refused,
+            "a row that was persisted and a row that was not must never be the same answer")
+    }
+
+    /// Same contract for invitations, with the middle case meaning the
+    /// opposite thing: a second save is declined so the first row
+    /// survives, which is why it is `.duplicate` and not `.updated`.
+    func testAnInvitationStoreTellsItsThreeOutcomesApart() async {
+        let store = SwiftDataInvitationStore.inMemory()
+        let record = IncomingInvitationRecord(
+            id: "evt-1", ownerIdentityID: IdentityID(), payload: Data("hello".utf8),
+            receivedAt: Date(), status: .pending)
+
+        let first = await store.save(record)
+        let second = await store.save(record)
+        let refused = await RefusingInvitationStore().save(record)
+
+        XCTAssertEqual(first, .saved)
+        XCTAssertEqual(second, .duplicate, "a row already here is not a write that failed")
+        XCTAssertEqual(refused, .failed)
+        XCTAssertNotEqual(
+            second, refused,
+            "a row that is on the device and one that never was must never be the same answer")
+    }
+
+    /// #293 proved this for groups by reading the store before writing.
+    /// It has to keep holding now that the pre-read is gone and the
+    /// store's own word is the only thing the count rests on.
+    func testASecondRestoreOfTheSameInvitationsStillCountsThemAsLanded() async throws {
+        let sink = AppBackupSink(
+            groupStore: SwiftDataGroupStore.inMemory(),
+            messageStore: SwiftDataMessageStore.inMemory(),
+            invitationStore: SwiftDataInvitationStore.inMemory(),
+            consentStore: MemoryConsentStore(),
+            blobDirectory: try directory())
+        let record = Self.invitationRecord(owner: IdentityID())
+
+        let first = try await sink.restore(invitations: [record])
+        let second = try await sink.restore(invitations: [record])
+        XCTAssertEqual(first, BackupSinkOutcome(landed: 1, unreadable: 0))
+        XCTAssertEqual(
+            second, BackupSinkOutcome(landed: 1, unreadable: 0),
+            "an invitation that was already here read as one that could not be read")
+    }
+
+    /// The other half: with `.duplicate` counted as landed, `.failed`
+    /// has to still reach the summary, or the fix would just have
+    /// silenced the honest half of the old `false`.
+    func testAnInvitationTheStoreRefusedIsNotCounted() async throws {
+        let sink = AppBackupSink(
+            groupStore: SwiftDataGroupStore.inMemory(),
+            messageStore: SwiftDataMessageStore.inMemory(),
+            invitationStore: RefusingInvitationStore(),
+            consentStore: MemoryConsentStore(),
+            blobDirectory: try directory())
+
+        let outcome = try await sink.restore(
+            invitations: [Self.invitationRecord(owner: IdentityID())])
+        XCTAssertEqual(outcome, BackupSinkOutcome(landed: 0, unreadable: 1))
+    }
+
+    /// A group updated in place is a group on the device. This is the
+    /// case the naive `if written { landed += 1 }` gets wrong, and it is
+    /// worth pinning at the sink rather than only at the store, because
+    /// the sink is where the number the person reads is computed.
+    func testAGroupUpdatedInPlaceIsCountedAsLandedNotAsUnreadable() async throws {
+        let owner = IdentityID()
+        let groupStore = SwiftDataGroupStore.inMemory()
+        let sink = AppBackupSink(
+            groupStore: groupStore,
+            messageStore: SwiftDataMessageStore.inMemory(),
+            invitationStore: SwiftDataInvitationStore.inMemory(),
+            consentStore: MemoryConsentStore(),
+            blobDirectory: try directory())
+
+        _ = try await sink.restore(groups: [Self.groupRecord(owner: owner)])
+        let again = try await sink.restore(groups: [Self.groupRecord(owner: owner)])
+
+        let rows = await groupStore.list()
+        XCTAssertEqual(again, BackupSinkOutcome(landed: 1, unreadable: 0))
+        XCTAssertEqual(
+            rows.count, 1,
+            "the second restore duplicated the row instead of updating it")
+    }
+
     // MARK: - Fixtures for the above
 
     fileprivate static let restoredGroupID = String(repeating: "c", count: 64)
@@ -489,6 +609,12 @@ final class BackupRestoreTests: XCTestCase {
             groupTypeRaw: "tyranny", adminPubkeyHex: nil, adminEd25519PubkeyHex: nil,
             isPublishedOnChain: false, avatarJPEG: nil, lastReadAt: nil,
             invitationMessage: nil)
+    }
+
+    fileprivate static func invitationRecord(owner: IdentityID) -> BackupInvitationRecord {
+        BackupInvitationRecord(
+            id: "evt-1", ownerIdentityID: owner.rawValue.uuidString,
+            payload: Data("sealed".utf8), receivedAt: Date(), statusRaw: "pending")
     }
 
     fileprivate static func messageRecord(owner: IdentityID) -> BackupMessageRecord {
@@ -646,7 +772,7 @@ private struct OwnedSource: BackupSourceProviding {
 /// when `encode` gives way.
 private actor RefusingGroupStore: GroupStore {
     func list() async -> [ChatGroup] { [] }
-    func insertOrUpdate(_ group: ChatGroup) -> Bool { false }
+    func insertOrUpdate(_ group: ChatGroup) -> GroupInsertOutcome { .failed }
     func markPublished(id: String, ownerIDString: String, commitment: Data?) {}
     func markRead(id: String, ownerIDString: String, at date: Date) {}
     func delete(id: String, ownerIDString: String) {}
@@ -669,6 +795,17 @@ private actor RefusingMessageStore: MessageStore {
     func deleteGroup(groupID: String, ownerIDString: String) {}
     func deleteOwner(_ ownerIDString: String) {}
     func deleteAll() {}
+}
+
+/// A store that cannot encrypt the payload — the one ending where
+/// `save` writes nothing. It used to be indistinguishable from the
+/// dedup hit above it.
+private actor RefusingInvitationStore: InvitationStore {
+    func list() -> [IncomingInvitationRecord] { [] }
+    func save(_ record: IncomingInvitationRecord) -> InvitationSaveOutcome { .failed }
+    func updateStatus(id: String, status: IncomingInvitationStatus) {}
+    func delete(id: String) {}
+    func deleteOwner(_ ownerIDString: String) {}
 }
 
 private final class MemoryConsentStore: PinnedConsentStore, @unchecked Sendable {
