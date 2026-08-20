@@ -706,7 +706,161 @@ final class BackupAdapterTests: XCTestCase {
                        "both runs proceeded concurrently")
     }
 
+    // MARK: - The rolling retention window
+
+    /// A full operator refuses every later backup forever, because
+    /// `supersedes` frees nothing. So the client makes room: one new
+    /// snapshot, one erasure, and the upload goes through.
+    func testAtTheLimitTheOldestIsErasedAndTheNewSnapshotLands() async throws {
+        let dir = try Self.directory()
+        let chain = try Self.agreedChain(count: 2)
+        let stateStore = MemoryStateStore(state: Self.enrolled(holding: chain.recorded))
+        let port = ScriptedPort(
+            acceptedTermsId: ScriptedPort.termsId, paymentSatisfied: true, retainedLimit: 2)
+        await port.setRetained(chain.rows)
+
+        let result = try await Self.repository(port: port, store: stateStore, dir: dir).backUp()
+        guard case .retained = result else {
+            return XCTFail("the backup was refused instead of making room: \(result)")
+        }
+
+        let erased = await port.erasedScopes
+        let stillHeld = await port.retainedDigests
+        XCTAssertEqual(
+            erased, [chain.rows[0].snapshotReference.digest],
+            "exactly the oldest retained snapshot should have gone, and only it")
+        XCTAssertEqual(
+            stillHeld, [chain.rows[1].snapshotReference.digest],
+            "the most recent backup was erased to make room")
+
+        let saved = try stateStore.load()
+        XCTAssertEqual(saved.receipts.count, 1, "an erasure that left no receipt")
+        XCTAssertFalse(
+            saved.snapshots.contains { $0.digest == chain.rows[0].snapshotReference.digest },
+            "the local chain still claims a snapshot this device erased")
+    }
+
+    /// Room to spare means nothing is touched. Pruning to a floor rather
+    /// than to a fit would throw away backups the operator was happy to
+    /// keep.
+    func testBelowTheLimitNothingIsErased() async throws {
+        let dir = try Self.directory()
+        let chain = try Self.agreedChain(count: 2)
+        let stateStore = MemoryStateStore(state: Self.enrolled(holding: chain.recorded))
+        let port = ScriptedPort(
+            acceptedTermsId: ScriptedPort.termsId, paymentSatisfied: true, retainedLimit: 5)
+        await port.setRetained(chain.rows)
+
+        _ = try await Self.repository(port: port, store: stateStore, dir: dir).backUp()
+        let erased = await port.erasedScopes
+        XCTAssertEqual(erased, [], "erased with three slots still free")
+        XCTAssertTrue(try stateStore.load().receipts.isEmpty)
+    }
+
+    /// An absent `maximumRetainedSnapshots` is absent, not a default.
+    /// Erasing a person's backups to satisfy a limit nobody published
+    /// would be the client inventing the rule it then enforces.
+    func testAnOperatorDeclaringNoLimitIsNeverPruned() async throws {
+        let dir = try Self.directory()
+        let chain = try Self.agreedChain(count: 3)
+        let stateStore = MemoryStateStore(state: Self.enrolled(holding: chain.recorded))
+        let port = ScriptedPort(
+            acceptedTermsId: ScriptedPort.termsId, paymentSatisfied: true, retainedLimit: nil)
+        await port.setRetained(chain.rows)
+
+        _ = try await Self.repository(port: port, store: stateStore, dir: dir).backUp()
+        let erased = await port.erasedScopes
+        let stillHeld = await port.retainedDigests
+        XCTAssertEqual(erased, [], "pruned against a limit the operator never declared")
+        XCTAssertEqual(stillHeld.count, 3)
+    }
+
+    /// The window is opened before the upload, so an upload that then
+    /// fails costs a slot. The claim being tested is the bound on that:
+    /// what goes is always an *older* copy, and the person's most recent
+    /// backup is still at the operator afterwards.
+    func testAFailedUploadAfterPruningStillLeavesTheMostRecentBackup() async throws {
+        let dir = try Self.directory()
+        let chain = try Self.agreedChain(count: 2)
+        let stateStore = MemoryStateStore(state: Self.enrolled(holding: chain.recorded))
+        let port = ScriptedPort(
+            acceptedTermsId: ScriptedPort.termsId, paymentSatisfied: true,
+            uploadFails: true, retainedLimit: 2)
+        await port.setRetained(chain.rows)
+
+        guard case .unknown = try await Self.repository(port: port, store: stateStore, dir: dir).backUp()
+        else {
+            return XCTFail("a lost upload must not resolve to success or failure")
+        }
+        let erased = await port.erasedScopes
+        let stillHeld = await port.retainedDigests
+        XCTAssertEqual(erased, [chain.rows[0].snapshotReference.digest])
+        XCTAssertEqual(
+            stillHeld, [chain.rows[1].snapshotReference.digest],
+            "a failed upload left the holder with no backup at this operator")
+    }
+
+    /// An operator declaring a limit of one has nothing prunable: the
+    /// only snapshot there is also the newest. Erasing it would leave
+    /// the person with no backup at all for the length of an upload, so
+    /// they get the operator's own refusal instead and can erase
+    /// deliberately if that is what they want.
+    func testTheOnlyBackupIsNeverErasedToMakeRoom() async throws {
+        let dir = try Self.directory()
+        let chain = try Self.agreedChain(count: 1)
+        let stateStore = MemoryStateStore(state: Self.enrolled(holding: chain.recorded))
+        let port = ScriptedPort(
+            acceptedTermsId: ScriptedPort.termsId, paymentSatisfied: true, retainedLimit: 1)
+        await port.setRetained(chain.rows)
+
+        _ = try await Self.repository(port: port, store: stateStore, dir: dir).backUp()
+        let erased = await port.erasedScopes
+        XCTAssertEqual(
+            erased, [],
+            "erased the holder's only backup to make room for one still in flight")
+    }
+
     // MARK: - Fixtures
+
+    /// State for a device enrolled with the scripted operator, holding
+    /// the given chain.
+    static func enrolled(holding snapshots: [BackupState.RecordedSnapshot]) -> BackupState {
+        var state = BackupState()
+        state.componentId = "onym:component:op"
+        state.acceptedTermsId = ScriptedPort.termsId
+        state.snapshots = snapshots
+        return state
+    }
+
+    /// `count` snapshots an hour apart, oldest first, that the operator
+    /// is holding and this device remembers uploading.
+    ///
+    /// Both halves are needed and they are not interchangeable: the
+    /// window is decided from the operator's list, while what the new
+    /// snapshot supersedes comes from the local chain — and the ancestor
+    /// a snapshot names is one of the two rows pruning must not touch.
+    static func agreedChain(
+        count: Int,
+        now: Date = Date()
+    ) throws -> (rows: [RetainedSnapshot], recorded: [BackupState.RecordedSnapshot]) {
+        var rows: [RetainedSnapshot] = []
+        var recorded: [BackupState.RecordedSnapshot] = []
+        for index in 0..<count {
+            let digest = "sha256:" + String(repeating: String(index + 1), count: 64)
+            let at = now.addingTimeInterval(TimeInterval(-3600 * (count - index)))
+            rows.append(
+                RetainedSnapshot(
+                    snapshotReference: try SnapshotReference(digest: digest, sealedByteSize: 2048),
+                    acceptedTermsId: ScriptedPort.termsId,
+                    retainedAt: at))
+            recorded.append(
+                BackupState.RecordedSnapshot(
+                    digest: digest, sealedByteSize: 2048,
+                    acceptedTermsId: ScriptedPort.termsId, uploadedAt: at,
+                    statusRaw: BackupOutcomeStatus.retained.rawValue))
+        }
+        return (rows, recorded)
+    }
 
     static func directory() throws -> URL {
         let url = URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: UUID().uuidString)
@@ -783,7 +937,9 @@ private actor ScriptedPort: BackupPort {
     private var paymentSatisfied: Bool
     private let uploadFails: Bool
     private let uploadStatus: BackupOutcomeStatus
+    private let retainedLimit: Int?
     private var retained: [RetainedSnapshot] = []
+    private(set) var erasedScopes: [String] = []
     private var listFails = false
     private var queryOutcome: BackupOutcome?
     private var queryFails = false
@@ -794,13 +950,17 @@ private actor ScriptedPort: BackupPort {
         acceptedTermsId: String,
         paymentSatisfied: Bool = false,
         uploadFails: Bool = false,
-        uploadStatus: BackupOutcomeStatus = .retained
+        uploadStatus: BackupOutcomeStatus = .retained,
+        retainedLimit: Int? = 8
     ) {
         self.acceptedTermsId = acceptedTermsId
         self.paymentSatisfied = paymentSatisfied
         self.uploadFails = uploadFails
         self.uploadStatus = uploadStatus
+        self.retainedLimit = retainedLimit
     }
+
+    var retainedDigests: [String] { retained.map(\.snapshotReference.digest) }
 
     func setRetained(_ rows: [RetainedSnapshot]) { retained = rows }
     func setListFails(_ value: Bool) { listFails = value }
@@ -813,7 +973,7 @@ private actor ScriptedPort: BackupPort {
 
     func connect() async throws -> BackupConnection {
         BackupConnection(
-            manifest: try BackupAdapterTests.manifest(maximumRetainedSnapshots: 8),
+            manifest: try BackupAdapterTests.manifest(maximumRetainedSnapshots: retainedLimit),
             profile: BackupImplementationProfile(
                 implementationVersion: 1,
                 implementationProfileId: BackupProfile.implementationProfileId,
@@ -860,8 +1020,29 @@ private actor ScriptedPort: BackupPort {
         return retained
     }
     func downloadSnapshot(_ reference: SnapshotReference, to destination: URL) async throws {}
+
+    /// Erasure the way the operator performs it: the row stops being
+    /// listed, and a receipt comes back. A stub that only recorded the
+    /// call would let a test claim room was made without the list ever
+    /// getting shorter.
     func eraseSnapshot(scope: ErasureScope) async throws -> ErasureReceipt {
-        throw BackupError.operatorUnavailable
+        erasedScopes.append(scope.wireValue)
+        if case .snapshot(let reference) = scope {
+            retained.removeAll { $0.snapshotReference.digest == reference.digest }
+        } else {
+            retained.removeAll()
+        }
+        return ErasureReceipt(
+            receiptId: "receipt-\(erasedScopes.count)",
+            operatorKey: "onym:key:" + String(repeating: "1", count: 64),
+            scope: scope.wireValue,
+            acknowledgedAt: Date(),
+            completionCommittedBy: Date().addingTimeInterval(600),
+            coveredScope: "primary and replicas",
+            excludedScope: "copies other participants hold",
+            termsId: Self.termsId,
+            rawBytes: Data(#"{"receiptId":"\#(erasedScopes.count)"}"#.utf8),
+            signature: nil)
     }
     func exportSnapshots(to directory: URL) async throws -> BackupExport {
         BackupExport(directory: directory, snapshots: [], receipts: [])

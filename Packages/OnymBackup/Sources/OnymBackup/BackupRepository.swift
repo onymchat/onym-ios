@@ -84,12 +84,14 @@ public actor BackupRepository {
 
         var state: BackupState
         let acceptedTermsId: String
+        let retentionLimit: Int?
         switch try await evaluatePreconditions(now: now) {
         case .blocked(let result):
             return result
-        case .ready(let ready, let terms):
+        case .ready(let ready, let terms, let limit):
             state = ready
             acceptedTermsId = terms
+            retentionLimit = limit
         }
         let enrolled = state.componentId
 
@@ -101,7 +103,7 @@ public actor BackupRepository {
         )
         state.lastAttemptAt = now
         try commit(state, expecting: enrolled)
-        return try await place(snapshot, state: &state, now: now)
+        return try await place(snapshot, state: &state, retentionLimit: retentionLimit, now: now)
     }
 
     /// Place bytes sealed elsewhere in this run at *this* operator.
@@ -135,12 +137,14 @@ public actor BackupRepository {
 
         var state: BackupState
         let acceptedTermsId: String
+        let retentionLimit: Int?
         switch try await evaluatePreconditions(now: now) {
         case .blocked(let result):
             return result
-        case .ready(let ready, let terms):
+        case .ready(let ready, let terms, let limit):
             state = ready
             acceptedTermsId = terms
+            retentionLimit = limit
         }
         let enrolled = state.componentId
 
@@ -151,7 +155,7 @@ public actor BackupRepository {
         )
         state.lastAttemptAt = now
         try commit(state, expecting: enrolled)
-        return try await place(snapshot, state: &state, now: now)
+        return try await place(snapshot, state: &state, retentionLimit: retentionLimit, now: now)
     }
 
     /// Ask whether a run may proceed, without composing anything.
@@ -169,7 +173,7 @@ public actor BackupRepository {
         switch try await evaluatePreconditions(now: now) {
         case .blocked(let result):
             return .blocked(result)
-        case .ready(let state, _):
+        case .ready(let state, _, _):
             // Committed here, not left to the caller. A fan-out asks
             // every operator before it composes anything, and if
             // composing then fails there is no later write — the
@@ -197,7 +201,12 @@ public actor BackupRepository {
     }
 
     private enum Preconditions {
-        case ready(BackupState, acceptedTermsId: String)
+        /// The limit is carried out of here rather than re-fetched later
+        /// because it arrives on the same manifest the operator check
+        /// already had to fetch. Asking for it again would be a second
+        /// `connect` — three requests, immediately before an upload —
+        /// to learn a number we were already holding.
+        case ready(BackupState, acceptedTermsId: String, retentionLimit: Int?)
         case blocked(RunResult)
     }
 
@@ -233,7 +242,11 @@ public actor BackupRepository {
         // door.
         // Do not upload, do not re-pin, do not "helpfully" accept.
         // Fresh consent is a screen, not an inference.
-        if let mismatch = try await operatorOrTermsMismatch(state: state, now: now) {
+        let connection: BackupConnection
+        switch try await checkOperatorAndTerms(state: state) {
+        case .matched(let matched):
+            connection = matched
+        case .mismatched(let mismatch):
             state.lastAttemptAt = now
             // Written down, not just returned. A caller that forgets to
             // render the return value is one bug; a device that forgets
@@ -283,7 +296,10 @@ public actor BackupRepository {
         }
         // Cleared by getting past the check that set it, and never
         // carried further than that.
-        return .ready(state, acceptedTermsId: acceptedTermsId)
+        return .ready(
+            state,
+            acceptedTermsId: acceptedTermsId,
+            retentionLimit: connection.manifest.maximumRetainedSnapshots)
     }
 
     /// The snapshot a new one supersedes *at this operator*.
@@ -374,8 +390,10 @@ public actor BackupRepository {
         // terms and pinned to its digest; sending it to a different
         // operator is the leak this whole seam exists to close, and the
         // retry path is the shortest route to it.
-        if let mismatch = try await operatorOrTermsMismatch(state: state, now: now) {
-            return mismatch
+        let connection: BackupConnection
+        switch try await checkOperatorAndTerms(state: state) {
+        case .matched(let matched): connection = matched
+        case .mismatched(let mismatch): return mismatch
         }
         // And the snapshot's own pin must match what we are enrolled
         // under. A snapshot left over from earlier terms is not one to
@@ -385,7 +403,11 @@ public actor BackupRepository {
             try commit(state, expecting: state.componentId)
             return .termsChanged(currentTermsId: state.acceptedTermsId)
         }
-        return try await place(snapshot, state: &state, now: now)
+        return try await place(
+            snapshot,
+            state: &state,
+            retentionLimit: connection.manifest.maximumRetainedSnapshots,
+            now: now)
     }
 
     /// Save, unless someone re-enrolled underneath us.
@@ -413,43 +435,60 @@ public actor BackupRepository {
         return true
     }
 
+    /// What the shared operator-and-terms precondition decided.
+    private enum OperatorCheck {
+        /// Same operator, same terms. The connection is handed back
+        /// rather than dropped: it carries the declared limits, and a
+        /// caller that needs one of them should not have to `connect`
+        /// again to learn what this call already fetched.
+        case matched(BackupConnection)
+        case mismatched(RunResult)
+    }
+
     /// Shared precondition: are we still talking to the operator this
     /// state was enrolled with, under the terms it pinned?
-    ///
-    /// Returns the result to hand back, or `nil` to proceed.
-    private func operatorOrTermsMismatch(
-        state: BackupState,
-        now: Date
-    ) async throws -> RunResult? {
+    private func checkOperatorAndTerms(state: BackupState) async throws -> OperatorCheck {
         let connection = try await port.connect()
         // `componentId` is nil for state written before it was recorded.
         // That is not "matches" — we cannot tell, and guessing in favour
         // of proceeding is how a snapshot reaches the wrong operator. It
         // is treated as a switch, which routes to enrolment.
         guard let enrolled = state.componentId else {
-            return .operatorChanged(
+            return .mismatched(.operatorChanged(
                 previousComponentId: "",
-                currentComponentId: connection.manifest.componentId)
+                currentComponentId: connection.manifest.componentId))
         }
         if enrolled != connection.manifest.componentId {
-            return .operatorChanged(
+            return .mismatched(.operatorChanged(
                 previousComponentId: enrolled,
-                currentComponentId: connection.manifest.componentId)
+                currentComponentId: connection.manifest.componentId))
         }
         if connection.acceptedTermsId != state.acceptedTermsId {
-            return .termsChanged(currentTermsId: connection.acceptedTermsId)
+            return .mismatched(.termsChanged(currentTermsId: connection.acceptedTermsId))
         }
-        return nil
+        return .matched(connection)
     }
 
     private func place(
         _ snapshot: SealedSnapshot,
         state: inout BackupState,
+        retentionLimit: Int?,
         now: Date
     ) async throws -> RunResult {
         // What we were enrolled with when this run began. Every write
         // below is conditional on it still being true.
         let enrolled = state.componentId
+
+        // Before the preflight, not after a refusal. `quota_exceeded`
+        // covers the byte limit and the concurrent-grant limit as well
+        // as the retained count, so treating it as "prune and retry"
+        // would erase somebody's backup to fix a problem that deleting
+        // backups does not solve — and would do it on the strength of a
+        // figure the operator chose. Counting first, against the
+        // operator's own list, only ever erases when a slot is what is
+        // actually missing.
+        try await makeRoom(for: snapshot, limit: retentionLimit, state: &state)
+
         let preflight: BackupPreflight
         do {
             preflight = try await port.preflight(snapshot)
@@ -568,6 +607,158 @@ public actor BackupRepository {
             try commit(state, expecting: enrolled)
             discard(snapshot)
             return .retained(snapshot.snapshotReference)
+        }
+    }
+
+    /// Erase the oldest retained snapshots at this operator until one
+    /// more will fit.
+    ///
+    /// **Why the client does this and not the operator.** The operator
+    /// declares `maximumRetainedSnapshots` and enforces it: an upload
+    /// that would exceed the limit is refused with `quota_exceeded`, and
+    /// it is *right* to refuse rather than quietly dropping something to
+    /// make room — `BackupError.quotaExceeded` says so in as many words,
+    /// and the property behind it is that no code path at the operator
+    /// deletes a snapshot the holder did not ask it to delete. Keeping
+    /// the window here preserves that: what goes out is an ordinary §11
+    /// erase, holder-initiated, signed for, and the receipt is kept on
+    /// this device like any other. Moving it to the operator would be
+    /// less code on both sides and would cost exactly that property.
+    ///
+    /// `supersedes` is not an alternative. It is a recorded pointer and
+    /// nothing more; nothing in the profile obliges an operator to erase
+    /// what a newer snapshot supersedes, and a limit nobody prunes
+    /// against is a limit that fills. A person who backs up routinely
+    /// reaches it, and then stays there: every later run refused, for
+    /// the life of the install, with the *oldest* backup they ever made
+    /// as the newest thing the operator holds.
+    ///
+    /// **Why before the upload rather than after the commit.** Between
+    /// the erase and a retention the holder is one snapshot down, and if
+    /// the upload then fails they have lost their oldest backup and
+    /// gained nothing. Two things make that the better side to fail on.
+    ///
+    /// The first is that what gets erased is never their most recent
+    /// backup — see the exclusions below — so throughout that window
+    /// they still hold a newer copy of the same history at this same
+    /// operator. What they are exposed to is losing an older copy of
+    /// something they still have.
+    ///
+    /// The second is what the alternative costs. Pruning after a
+    /// successful commit, down to `limit - 1` so that the next run
+    /// fits, never opens that window — but it permanently spends a slot:
+    /// an operator declaring 2 would hold 1, one declaring 5 would hold
+    /// 4. That is a standing reduction in what is actually backed up,
+    /// paid every day, to avoid a transient one on the runs where an
+    /// upload fails. And it would still need this same code for a holder
+    /// who is already at the limit today, which is the situation that
+    /// prompted any of this.
+    ///
+    /// The cost admitted: a preflight can still refuse for payment after
+    /// a slot has been freed, and then the erase bought nothing. It is a
+    /// narrow case — at the limit *and* the entitlement has lapsed — and
+    /// the honest fix for it is not to erase later but to have fewer
+    /// reasons to be refused.
+    private func makeRoom(
+        for snapshot: SealedSnapshot,
+        limit: Int?,
+        state: inout BackupState
+    ) async throws {
+        // An operator that declares no limit gets no pruning. The field
+        // is optional on the manifest and absent means absent: inventing
+        // a figure — a local default, or the `snapshotsRetained` prose
+        // in the terms, which is a description and not a bound — would
+        // have this device erasing a person's backups to satisfy a rule
+        // nobody published. Filling up an operator that never said it
+        // was full is the better failure, because at least the refusal
+        // that follows is the operator's own.
+        guard let limit, limit > 0 else { return }
+
+        // The operator's list, not `state.snapshots`. The local chain is
+        // this device's memory of what it uploaded and it is wrong in
+        // both directions — it misses what another device of the same
+        // identity put here, and it keeps what this operator has since
+        // expired. Choosing a digest to erase from that would erase the
+        // wrong one, or erase when nothing needed to go.
+        guard let listed = try? await port.listSnapshots() else {
+            // No list, no pruning. A failed list is not evidence that
+            // there is room and it is not evidence that there is none;
+            // the upload goes ahead, and if it does not fit then
+            // `quota_exceeded` is what the person is shown. Erasing on
+            // the strength of a read that failed is the mistake the
+            // state store throwing, rather than returning empty, exists
+            // to prevent.
+            return
+        }
+        // `already_retained` rows occupy a slot exactly as `retained`
+        // ones do; anything else the operator lists is not being held
+        // and must not be counted as though it were.
+        let held = listed
+            .filter(\.status.isRetention)
+            .sorted {
+                $0.retainedAt == $1.retainedAt
+                    ? $0.snapshotReference.digest < $1.snapshotReference.digest
+                    : $0.retainedAt < $1.retainedAt
+            }
+
+        // Already held means no new slot is needed: the preflight will
+        // answer `already_retained` and nothing will be stored. Erasing
+        // here would be a snapshot destroyed to make room for one that
+        // was never going to take any.
+        guard !held.contains(where: { $0.snapshotReference.digest == snapshot.snapshotReference.digest })
+        else {
+            return
+        }
+
+        let surplus = held.count + 1 - limit
+        guard surplus > 0 else { return }
+
+        // Two rows are off limits, and the guard below makes those
+        // exclusions absolute rather than a preference.
+        //
+        // The newest, because the whole justification for pruning before
+        // the upload is that a failed upload costs an older copy and
+        // never the current one. It also means an operator declaring a
+        // limit of 1 is never pruned by us at all: there is no snapshot
+        // there that is not also the only one. Such a holder is told
+        // `quota_exceeded` and can erase deliberately, which is a worse
+        // experience than a rolling window and a better one than this
+        // device silently leaving them with nothing while an upload is
+        // in flight.
+        //
+        // And whatever this snapshot supersedes, because it is about to
+        // be uploaded pointing at that digest. Erasing an ancestor and
+        // then describing a chain that runs through it invites the
+        // operator to reject the upload for naming something it does not
+        // have — a slot freed and the upload refused anyway.
+        let erasable = held.dropLast().filter {
+            $0.snapshotReference.digest != snapshot.supersedes?.digest
+        }
+        // Make room or make none. Erasing part of what is needed leaves
+        // the holder shorter by real backups and the upload refused just
+        // the same.
+        guard surplus <= erasable.count else { return }
+
+        for row in erasable.prefix(surplus) {
+            let receipt: ErasureReceipt
+            do {
+                receipt = try await port.eraseSnapshot(scope: .snapshot(row.snapshotReference))
+            } catch {
+                // Stopped, not thrown. A housekeeping erase that failed
+                // says nothing about whether this snapshot can be
+                // stored, and failing the run here would replace the
+                // operator's account of the problem with ours. The
+                // upload goes out; if there is still no room the answer
+                // is `quota_exceeded`, and the next run tries this
+                // again.
+                return
+            }
+            // Committed one erasure at a time. The receipt is the only
+            // durable record that this happened, and a batch written
+            // after the last erase is a batch lost by a crash in the
+            // middle of the first.
+            record(receipt, scope: .snapshot(row.snapshotReference), in: &state)
+            try commit(state, expecting: state.componentId)
         }
     }
 
@@ -722,14 +913,30 @@ public actor BackupRepository {
         let receipt = try await port.eraseSnapshot(scope: scope)
         var state = try stateStore.load()
         let enrolled = state.componentId
+        record(receipt, scope: scope, in: &state)
+        try commit(state, expecting: enrolled)
+        return receipt
+    }
+
+    /// Write down one erasure: keep the receipt, drop the local record of
+    /// what it covered.
+    ///
+    /// Shared with the rolling window in `makeRoom`, which erases from
+    /// inside a run and cannot use `erase(scope:)` — that reloads state
+    /// from the store and saves its own copy, so calling it mid-run
+    /// would have the run's next `commit` write a state with no receipt
+    /// in it straight back over the top.
+    private func record(
+        _ receipt: ErasureReceipt,
+        scope: ErasureScope,
+        in state: inout BackupState
+    ) {
         state.receipts.append(receipt.rawBytes)
         if case .snapshot(let reference) = scope {
             state.snapshots.removeAll { $0.digest == reference.digest }
         } else {
             state.snapshots.removeAll()
         }
-        try commit(state, expecting: enrolled)
-        return receipt
     }
 
     /// Export every retained snapshot in portable form.
