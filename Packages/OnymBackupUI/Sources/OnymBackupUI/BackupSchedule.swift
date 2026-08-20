@@ -1,4 +1,5 @@
 import Foundation
+import OnymFoundation
 
 /// When a backup is allowed to run.
 ///
@@ -85,11 +86,36 @@ public struct BackupSchedule: Sendable, Equatable {
     /// Whether an *opportunistic* run may start. A person tapping "Back
     /// up now" bypasses this entirely — an explicit request is not
     /// something to second-guess about battery.
-    public func permitsOpportunisticRun(_ conditions: Conditions, now: Date = Date()) -> Bool {
+    ///
+    /// `jitter` is drawn once per app session by the caller and added to
+    /// the interval. Without it the run fires the instant the interval
+    /// elapses, which is deterministic and therefore correlated with
+    /// whatever the person was doing when the previous one ran — the
+    /// activity signal this seat spends padding and an opaque archive
+    /// suppressing. A declared-but-unapplied jitter would have been
+    /// decoration on top of that.
+    public func permitsOpportunisticRun(
+        _ conditions: Conditions,
+        jitter: TimeInterval,
+        now: Date = Date()
+    ) -> Bool {
         if requiresWiFi && !conditions.onWiFi { return false }
         if requiresCharging && !conditions.charging { return false }
         guard let last = conditions.lastAttemptAt else { return true }
-        return now.timeIntervalSince(last) >= minimumInterval
+        let wait = minimumInterval + min(max(jitter, 0), maximumJitter)
+        return now.timeIntervalSince(last) >= wait
+    }
+
+    /// Draw a jitter offset from the CSPRNG.
+    ///
+    /// Drawn once and held for the session rather than re-drawn per
+    /// check: re-drawing would let a caller that polls frequently
+    /// sample until it got a small value, which is the same as having no
+    /// jitter at all.
+    public func drawJitter() -> TimeInterval {
+        guard maximumJitter > 0, let bytes = try? SecureRandom.data(8) else { return 0 }
+        let value = bytes.reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
+        return maximumJitter * (Double(value % 10_000) / 10_000)
     }
 
     public func isStale(lastSuccessAt: Date?, now: Date = Date()) -> Bool {

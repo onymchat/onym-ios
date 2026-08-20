@@ -112,15 +112,15 @@ final class BackupDisclosureTests: XCTestCase {
         let schedule = BackupSchedule.default
         let ready = BackupSchedule.Conditions(
             onWiFi: true, charging: true, lastSuccessAt: nil, lastAttemptAt: nil)
-        XCTAssertTrue(schedule.permitsOpportunisticRun(ready))
+        XCTAssertTrue(schedule.permitsOpportunisticRun(ready, jitter: 0))
 
         var cellular = ready
         cellular.onWiFi = false
-        XCTAssertFalse(schedule.permitsOpportunisticRun(cellular))
+        XCTAssertFalse(schedule.permitsOpportunisticRun(cellular, jitter: 0))
 
         var recent = ready
         recent.lastAttemptAt = Date()
-        XCTAssertFalse(schedule.permitsOpportunisticRun(recent))
+        XCTAssertFalse(schedule.permitsOpportunisticRun(recent, jitter: 0))
     }
 
     /// A backup that quietly stopped working has to be a visible state
@@ -128,6 +128,79 @@ final class BackupDisclosureTests: XCTestCase {
     func testNeverBackedUpCountsAsStale() {
         XCTAssertTrue(BackupSchedule.default.isStale(lastSuccessAt: nil))
         XCTAssertFalse(BackupSchedule.default.isStale(lastSuccessAt: Date()))
+    }
+
+    /// The gate this screen's central claim rests on.
+    ///
+    /// The first version set the flag from an `onAppear` sentinel in a
+    /// plain `VStack`, which fires at initial layout for offscreen
+    /// children — so "Turn On Backup" was enabled before anyone read a
+    /// word. Tested through the pure predicate now, because a claim
+    /// about consent that only a human can check is the claim most
+    /// likely to quietly stop being true.
+    func testScrollGateOnlyOpensAtTheEnd() {
+        // A long disclosure, sitting at the top: not read.
+        XCTAssertFalse(
+            BackupEnrolmentView.hasReachedEnd(
+                contentOffsetY: 0, containerHeight: 800, contentHeight: 4000))
+
+        // Halfway: still not read.
+        XCTAssertFalse(
+            BackupEnrolmentView.hasReachedEnd(
+                contentOffsetY: 1600, containerHeight: 800, contentHeight: 4000))
+
+        // At the bottom: read.
+        XCTAssertTrue(
+            BackupEnrolmentView.hasReachedEnd(
+                contentOffsetY: 3200, containerHeight: 800, contentHeight: 4000))
+    }
+
+    /// Content shorter than the screen has already been read in full.
+    /// Gating on a scroll that can never happen would lock the button
+    /// forever — a failure that only shows up on a large display.
+    func testShortDisclosureCountsAsRead() {
+        XCTAssertTrue(
+            BackupEnrolmentView.hasReachedEnd(
+                contentOffsetY: 0, containerHeight: 1200, contentHeight: 900))
+    }
+
+    /// A declared-but-unapplied jitter is decoration on top of the
+    /// activity signal it claims to suppress.
+    func testJitterDelaysTheOpportunisticRun() {
+        let schedule = BackupSchedule.default
+        let lastAttempt = Date()
+        let conditions = BackupSchedule.Conditions(
+            onWiFi: true, charging: true, lastSuccessAt: lastAttempt, lastAttemptAt: lastAttempt)
+
+        // Exactly one interval later, with two hours of jitter drawn:
+        // not yet.
+        let atInterval = lastAttempt.addingTimeInterval(schedule.minimumInterval)
+        XCTAssertFalse(
+            schedule.permitsOpportunisticRun(conditions, jitter: 7200, now: atInterval))
+
+        // Past the interval plus the jitter: now.
+        let afterJitter = lastAttempt.addingTimeInterval(schedule.minimumInterval + 7201)
+        XCTAssertTrue(
+            schedule.permitsOpportunisticRun(conditions, jitter: 7200, now: afterJitter))
+    }
+
+    /// Drawn jitter stays inside its declared bound, so the copy that
+    /// describes the cadence cannot be wrong about it.
+    func testDrawnJitterRespectsItsBound() {
+        let schedule = BackupSchedule.default
+        for _ in 0..<64 {
+            let jitter = schedule.drawJitter()
+            XCTAssertGreaterThanOrEqual(jitter, 0)
+            XCTAssertLessThanOrEqual(jitter, schedule.maximumJitter)
+        }
+    }
+
+    /// The cadence sentence follows the configured interval rather than
+    /// asserting a day beside a value that can change.
+    func testCadenceTracksTheInterval() {
+        XCTAssertEqual(BackupDisclosure.cadence(24 * 3600), "once a day")
+        XCTAssertEqual(BackupDisclosure.cadence(72 * 3600), "once every 3 days")
+        XCTAssertEqual(BackupDisclosure.cadence(6 * 3600), "once every 6 hours")
     }
 
     // MARK: - Fixtures

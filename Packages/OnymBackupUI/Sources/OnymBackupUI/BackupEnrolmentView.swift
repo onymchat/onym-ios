@@ -35,6 +35,17 @@ public struct BackupEnrolmentView: View {
     public var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Backing up to")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Text(verbatim: disclosure.operatorName)
+                        .font(.headline)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("backup.enrolment.operator")
+
                 headline(
                     "This copies other people's messages too",
                     disclosure.thirdPartyConsequence,
@@ -83,17 +94,27 @@ public struct BackupEnrolmentView: View {
                 SettingsFootnote(
                     "These terms are pinned to every backup you make under them. If the operator publishes different terms later, backups stop until you have seen them.")
 
-                // Marks the end of the disclosure. Enabling the accept
-                // button only once this has been reached is the cheapest
-                // honest way to keep "read the terms" from being a
-                // formality — the button is not the consent, the reading
-                // is.
-                Color.clear
-                    .frame(height: 1)
-                    .onAppear { scrolledToEnd = true }
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 24)
+        }
+        // Scroll geometry, not an `onAppear` sentinel.
+        //
+        // The first version put a `Color.clear` marker at the bottom of
+        // a plain `VStack` and set the flag in its `onAppear` — which
+        // fires at initial layout for offscreen children too, so the
+        // gate opened immediately and the button was enabled without
+        // anyone reading anything. The claim that "the button is not the
+        // consent, the reading is" was false in the exact way §18.10
+        // warns about: it still compiled, still rendered, and still
+        // looked like a consent screen.
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            Self.hasReachedEnd(
+                contentOffsetY: geometry.contentOffset.y,
+                containerHeight: geometry.containerSize.height,
+                contentHeight: geometry.contentSize.height)
+        } action: { _, reachedEnd in
+            if reachedEnd { scrolledToEnd = true }
         }
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 10) {
@@ -113,6 +134,22 @@ public struct BackupEnrolmentView: View {
         }
         .navigationTitle("Device Backup")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// Whether the disclosure has been scrolled to its end.
+    ///
+    /// Pure, so it can be tested — including the case that matters most
+    /// and is easiest to get wrong: content shorter than the container
+    /// has *already* been read in full, and gating on a scroll that can
+    /// never happen would lock the button forever.
+    static func hasReachedEnd(
+        contentOffsetY: CGFloat,
+        containerHeight: CGFloat,
+        contentHeight: CGFloat,
+        tolerance: CGFloat = 24
+    ) -> Bool {
+        guard contentHeight > containerHeight else { return true }
+        return contentOffsetY + containerHeight >= contentHeight - tolerance
     }
 
     private func headline(

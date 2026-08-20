@@ -44,6 +44,10 @@ public final class DeviceBackupSettingsFlow {
     private let repository: BackupRepository
     private let stateStore: any BackupStateStoring
     private let schedule: BackupSchedule
+    /// Drawn once for this flow's lifetime. Re-drawing per check would
+    /// let frequent polling sample until it found a small value, which
+    /// is the same as no jitter.
+    private let sessionJitter: TimeInterval
 
     public init(
         repository: BackupRepository,
@@ -53,6 +57,7 @@ public final class DeviceBackupSettingsFlow {
         self.repository = repository
         self.stateStore = stateStore
         self.schedule = schedule
+        self.sessionJitter = schedule.drawJitter()
     }
 
     public func refresh() {
@@ -65,6 +70,15 @@ public final class DeviceBackupSettingsFlow {
         }
         guard stored.acceptedTermsId != nil else {
             state.status = .off
+            return
+        }
+        // Unresolved work outranks "on". An upload whose result we never
+        // learned survives a relaunch, and rendering it as idle would
+        // show uncertainty as success on exactly the screen that exists
+        // to prevent that — and would leave the person wondering why
+        // Back Up Now does nothing new.
+        guard stored.pendingOperations.isEmpty else {
+            state.status = .checkingEarlierBackup
             return
         }
         state.status = schedule.isStale(lastSuccessAt: stored.lastSuccessAt)
@@ -104,7 +118,7 @@ public final class DeviceBackupSettingsFlow {
 
     /// Run only if the schedule permits it — the opportunistic path.
     public func backUpIfDue(conditions: BackupSchedule.Conditions) async {
-        guard schedule.permitsOpportunisticRun(conditions) else { return }
+        guard schedule.permitsOpportunisticRun(conditions, jitter: sessionJitter) else { return }
         await backUpNow()
     }
 
@@ -122,7 +136,11 @@ public final class DeviceBackupSettingsFlow {
             state.lastReceipt = try await repository.erase(scope: scope)
             await loadSnapshots()
         } catch {
-            state.lastReceipt = nil
+            // The previous receipt is left alone. It describes an
+            // erasure that did happen, and its excludedScope is
+            // something a person may need long afterwards — a failure
+            // here is not a reason to destroy the record of an earlier
+            // success.
             state.status = .failed(message: String(describing: error))
         }
     }

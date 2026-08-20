@@ -221,10 +221,6 @@ public struct SettingsView: View {
                 }
                 SettingsFootnote("Nostr relays and Blossom servers carry your messages and media. Replace them with your own instances for maximum privacy.")
 
-                // The section gates on the two original factories; the
-                // case factory only enriches the open-case banner and
-                // must not make the whole MODERATION entry vanish for
-                // callers that don't supply it.
                 // Absent until the app supplies it, like every other
                 // optional section here — a build without backup wired
                 // shows no backup row rather than a dead one.
@@ -250,6 +246,10 @@ public struct SettingsView: View {
                     SettingsFootnote("A backup is sealed on this phone before it leaves. The operator keeps bytes it cannot read, and only your recovery phrase can open them.")
                 }
 
+                // The section gates on the two original factories; the
+                // case factory only enriches the open-case banner and
+                // must not make the whole MODERATION entry vanish for
+                // callers that don't supply it.
                 if let makeModerationSettingsFlow, let makeModerationConsentFlow {
                     SettingsSectionLabel("MODERATION")
                     SettingsCard {

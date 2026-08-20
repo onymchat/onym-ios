@@ -11,6 +11,7 @@ let package = Package(
         .package(path: "../OnymBackup"),
         .package(path: "../OnymBilling"),
         .package(path: "../OnymDesign"),
+        .package(path: "../OnymFoundation"),
     ],
     targets: [
         .target(
@@ -19,6 +20,7 @@ let package = Package(
                 "OnymBackup",
                 "OnymBilling",
                 "OnymDesign",
+                "OnymFoundation",
             ]
         ),
     ]

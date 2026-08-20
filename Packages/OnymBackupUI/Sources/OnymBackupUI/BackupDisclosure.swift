@@ -150,14 +150,26 @@ public struct BackupDisclosure: Sendable, Equatable {
         )
     }
 
+    /// Describes the configured interval rather than asserting a day.
+    /// A hardcoded cadence beside a configurable one is a sentence that
+    /// starts true and quietly stops being.
+    static func cadence(_ interval: TimeInterval) -> String {
+        let hours = interval / 3600
+        if hours >= 48 { return "once every \(Int((hours / 24).rounded())) days" }
+        if hours >= 24 { return "once a day" }
+        if hours >= 2 { return "once every \(Int(hours.rounded())) hours" }
+        return "once an hour"
+    }
+
     static func scheduleSentence(_ schedule: BackupSchedule) -> String {
         var conditions: [String] = []
         if schedule.requiresWiFi { conditions.append("on Wi-Fi") }
         if schedule.requiresCharging { conditions.append("while charging") }
         let when = conditions.isEmpty ? "" : " " + conditions.joined(separator: " and ")
+        let cadence = Self.cadence(schedule.minimumInterval)
         return """
             Backups run when you tap Back Up Now. Onym may also back up on its own while \
-            the app is open\(when), at most once a day. It cannot back up in the background, \
+            the app is open\(when), at most \(cadence). It cannot back up in the background, \
             so if you never open the app, nothing is backed up. Each backup uploads your \
             whole history, not just what changed.
             """
