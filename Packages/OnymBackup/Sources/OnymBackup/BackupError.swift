@@ -98,6 +98,14 @@ public enum BackupError: Error, Equatable, Sendable {
         /// finishing. A programming error, named so it does not
         /// masquerade as a corrupt archive.
         case archiveWriterFinished
+        /// The local backup state exists but could not be read or
+        /// decoded. Never treated as "no backup configured": the next
+        /// save would overwrite the pinned terms and the pending
+        /// operations with an empty file.
+        case stateUnreadable
+        /// The operator's upload grant does not describe the snapshot we
+        /// are holding. Refused before any byte is sent.
+        case invalidUploadGrant
     }
 }
 

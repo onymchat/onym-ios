@@ -17,7 +17,12 @@ import OnymFoundation
 public actor BackupComposer {
     private let source: any BackupSourceProviding
     private let mediaPolicy: BackupMediaPolicy
-    private let workingDirectory: URL
+    /// Where sealed snapshots and scratch files live.
+    ///
+    /// Immutable and `Sendable`, so callers outside the actor can read
+    /// it without a hop — the repository needs it to clean up bytes for
+    /// an operation the composer knows nothing about.
+    public let workingDirectory: URL
 
     public init(
         source: any BackupSourceProviding,
