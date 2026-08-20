@@ -884,9 +884,12 @@ struct OnymIOSApp: App {
         #else
         let billingBaseURL = URLSessionBillingBrokerClient.defaultBaseURL
         #endif
-        let seatTransactionObserver = SeatTransactionObserver(
-            catalog: channelOfferCatalog
-        ) { componentId in
+        // One factory, two callers: the observer that redeems replayed
+        // transactions, and the restore-purchases sweep that recovers a
+        // purchase made on a phone this one has never met. Both need the
+        // same per-operator pinning, and a second copy of it would be a
+        // second place for the issuer rule to drift.
+        let makeSeatPurchaseFlow: @Sendable (String) async -> SeatPurchaseFlow? = { componentId in
             // The issuer key is pinned per operator, from the manifest
             // that operator signed and this person consented to. No
             // consented manifest means no key to pin, which means no
@@ -912,6 +915,10 @@ struct OnymIOSApp: App {
                 }
             )
         }
+        let seatTransactionObserver = SeatTransactionObserver(
+            catalog: channelOfferCatalog,
+            makeFlow: makeSeatPurchaseFlow
+        )
         seatTransactionObserver.start()
         self.seatTransactionObserver = seatTransactionObserver
 
@@ -1395,7 +1402,8 @@ struct OnymIOSApp: App {
                     blobClient: blossomClient,
                     endpointOverride: backupBaseURLOverride,
                     entitlementStore: seatEntitlementStore,
-                    seatKeys: seatAccessKeys
+                    seatKeys: seatAccessKeys,
+                    makePurchaseFlow: makeSeatPurchaseFlow
                 ).makeDeviceBackupView()
             },
             makeOnboardingFlow: makeOnboardingFlow,

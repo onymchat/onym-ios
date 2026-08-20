@@ -57,6 +57,126 @@ public actor SeatPurchaseFlow {
         return entitlement
     }
 
+    /// What a restore sweep found.
+    public struct RestoreResult: Sendable, Equatable {
+        /// Offers this device now holds a verified credential for.
+        public let restored: [String]
+        /// Offers already covered before the sweep ran.
+        public let alreadyHeld: [String]
+        /// Offers the store has no entitlement for. The ordinary answer
+        /// for something never bought, or a subscription that lapsed —
+        /// not an error, and not phrased as one.
+        public let notPurchased: [String]
+        /// Offers the store *did* have an entitlement for and this
+        /// device could not turn into a credential, by offer id.
+        public let failures: [String: String]
+
+        public var isEmpty: Bool { restored.isEmpty && alreadyHeld.isEmpty }
+    }
+
+    /// Ask the store to sync before a sweep.
+    ///
+    /// Separate, and only ever an explicit action: `AppStore.sync()`
+    /// prompts for App Store authentication, and a screen that demands a
+    /// password on appear is a screen people learn to back out of. The
+    /// silent sweep below needs none of it.
+    public func syncWithStore() async throws {
+        try await coordinator.sync()
+    }
+
+    /// Recover credentials for purchases this device did not make.
+    ///
+    /// The new-phone path, and the reason it needs its own method:
+    /// `Transaction.updates` replays only transactions that were never
+    /// *finished*, and a purchase completed on the old phone was
+    /// finished there. On the new one it exists solely in
+    /// `Transaction.currentEntitlement`, which nothing was asking.
+    /// Without this, someone who restored their identity from the
+    /// recovery phrase met `payment_required` at an operator they had
+    /// already paid, and the only offered way out was to pay again.
+    ///
+    /// Everything the broker needs is derivable from the recovery
+    /// phrase: the subject is the seat access key for this operator, and
+    /// the credential is sealed to the agreement key derived beside it.
+    /// So this works on a device that has never seen the old one.
+    ///
+    /// One offer failing does not stop the others, and a failure is
+    /// reported rather than swallowed — a sweep that quietly restored
+    /// nothing would look identical to one that had nothing to restore.
+    public func restorePurchases(componentId: String) async -> RestoreResult {
+        var restored: [String] = []
+        var alreadyHeld: [String] = []
+        var notPurchased: [String] = []
+        var failures: [String: String] = [:]
+
+        let held = (try? await heldOfferIds(componentId: componentId)) ?? []
+        for channelOffer in catalog.offers(forComponentId: componentId) {
+            if held.contains(channelOffer.offerId) {
+                // A credential that still verifies needs no broker round
+                // trip. Redeeming anyway would spend the person's
+                // network and the broker's rate limit to arrive back
+                // where we started.
+                alreadyHeld.append(channelOffer.offerId)
+                continue
+            }
+            guard
+                let (jws, transaction) = await coordinator.currentTransaction(
+                    for: channelOffer.productId)
+            else {
+                notPurchased.append(channelOffer.offerId)
+                continue
+            }
+            do {
+                _ = try await redeem(
+                    signedTransaction: jws,
+                    offerId: channelOffer.offerId,
+                    componentId: componentId
+                )
+                restored.append(channelOffer.offerId)
+                // Ordinarily already finished — this transaction came
+                // from `currentEntitlement`, not from a purchase. It is
+                // called anyway for the case that is not ordinary: a
+                // purchase made on this device whose redemption never
+                // completed, which is delivered now.
+                await coordinator.finish(transaction)
+            } catch {
+                failures[channelOffer.offerId] = String(describing: error)
+            }
+        }
+        return RestoreResult(
+            restored: restored,
+            alreadyHeld: alreadyHeld,
+            notPurchased: notPurchased,
+            failures: failures
+        )
+    }
+
+    /// Offers this device already holds a credential for that verifies
+    /// today — not merely one that is stored.
+    private func heldOfferIds(componentId: String) async throws -> Set<String> {
+        let subject = try await keys.seatSubject(componentId: componentId)
+        let verifier = SeatEntitlementVerifier(
+            trustedIssuers: trustedIssuers(componentId),
+            componentId: componentId,
+            subject: subject
+        )
+        var offerIds: Set<String> = []
+        for raw in try store.load() {
+            guard
+                let entitlement = try? SeatEntitlement.decode(raw: raw),
+                (try? verifier.verify(entitlement)) != nil
+            else {
+                // Expired, revoked, or for somebody else. Not held, so
+                // the sweep should try to replace it — which is exactly
+                // what a lapsed subscription that has since been renewed
+                // needs.
+                continue
+            }
+            offerIds.insert(entitlement.offerId)
+        }
+        return offerIds
+    }
+
     /// The Ed25519 keys behind a set of `onym:key:` references.
     ///
     /// An unparseable reference is dropped rather than failing the whole

@@ -42,6 +42,11 @@ struct BackupSeatComposer {
     /// credential and never asks for one.
     let entitlementStore: (any SeatEntitlementStoring)?
     let seatKeys: any SeatAccessKeyProviding
+    /// Recovers a credential for a purchase made on another device.
+    /// `nil` when this build cannot sell anything, in which case the
+    /// screen offers no restore-purchases row rather than one that
+    /// always reports nothing.
+    let makePurchaseFlow: (@Sendable (String) async -> SeatPurchaseFlow?)?
 
     /// One operator's assembled stack, before it becomes a screen.
     private struct Stack {
@@ -201,7 +206,8 @@ struct BackupSeatComposer {
                 // material carries the same one. Taking it from the first
                 // is not a choice about which operator is special.
                 archiveRoot: first.material.archiveRoot
-            )
+            ),
+            restorePurchasesForOperator: Self.purchaseRestorer(makePurchaseFlow)
         )
 
         // Restored attachment ciphertext, and the client that will
@@ -349,6 +355,32 @@ struct BackupSeatComposer {
             .jurisdictions ?? []
         return BackupDisclosure.OtherOperator(
             name: stack.displayName, jurisdictions: jurisdictions)
+    }
+
+    /// Turns the purchase-flow factory into the sweep the screen calls.
+    ///
+    /// Per operator, because a `SeatPurchaseFlow` pins the issuer key it
+    /// will verify a broker's answer against, and that key comes from
+    /// the operator's own signed manifest. There is no app-wide broker
+    /// client, and a credential must not be able to nominate its own
+    /// authority.
+    private static func purchaseRestorer(
+        _ makePurchaseFlow: (@Sendable (String) async -> SeatPurchaseFlow?)?
+    ) -> (@Sendable (String, Bool) async -> SeatPurchaseFlow.RestoreResult?)? {
+        guard let makePurchaseFlow else { return nil }
+        return { @Sendable componentId, syncWithStore in
+            guard let flow = await makePurchaseFlow(componentId) else { return nil }
+            if syncWithStore {
+                // A sync failure is not a reason to skip the sweep:
+                // `currentEntitlement` answers from what the device
+                // already knows, and that is usually everything needed.
+                // Someone who just signed in to a different Apple
+                // account is the case sync is for, and they will tap
+                // again.
+                try? await flow.syncWithStore()
+            }
+            return await flow.restorePurchases(componentId: componentId)
+        }
     }
 
     /// The credential to present, chosen at request time.

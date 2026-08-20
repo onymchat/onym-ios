@@ -94,5 +94,15 @@ public struct ChannelOfferCatalog: Sendable {
         offers.first { $0.productId == productId }
     }
 
+    /// Everything this app can sell for one seat operator.
+    ///
+    /// What a restore-purchases sweep iterates: StoreKit can only be
+    /// asked about a product identifier it knows, so recovering a
+    /// purchase on a new device means asking about each product this
+    /// operator's offers map to.
+    public func offers(forComponentId componentId: String) -> [ChannelOffer] {
+        offers.filter { $0.componentId == componentId }
+    }
+
     public var productIds: Set<String> { Set(offers.map(\.productId)) }
 }
