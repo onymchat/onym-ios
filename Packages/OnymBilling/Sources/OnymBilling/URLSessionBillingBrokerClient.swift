@@ -14,8 +14,13 @@ public struct URLSessionBillingBrokerClient: BillingBrokerClient {
     private let baseURL: URL
     private let session: URLSession
     /// The broker's issuer key, pinned from the operator's manifest.
-    /// A revocation epoch is only believed if it verifies against this.
-    private let issuerKey: Curve25519.Signing.PublicKey?
+    ///
+    /// Required, not optional. It was optional, and when it was nil the
+    /// signature went unchecked while the epoch came back looking
+    /// exactly like a verified one — which is precisely the "anyone who
+    /// can answer this URL revokes a person's storage" case the check
+    /// exists to prevent, arrived at by leaving a default alone.
+    private let issuerKey: Curve25519.Signing.PublicKey
 
     static let maxResponseBytes = 8 << 20
 
@@ -29,7 +34,7 @@ public struct URLSessionBillingBrokerClient: BillingBrokerClient {
     public init(
         baseURL: URL = URLSessionBillingBrokerClient.defaultBaseURL,
         session: URLSession = URLSessionBillingBrokerClient.defaultSession,
-        issuerKey: Curve25519.Signing.PublicKey? = nil
+        issuerKey: Curve25519.Signing.PublicKey
     ) {
         self.baseURL = baseURL
         self.session = session
@@ -58,14 +63,11 @@ public struct URLSessionBillingBrokerClient: BillingBrokerClient {
         else {
             throw BillingError.brokerRejected(code: "malformed_epoch", message: nil)
         }
-        // An unverifiable epoch is not an epoch. Believing one would let
-        // anyone who can answer this URL revoke a person's storage.
-        if let issuerKey {
-            let signingBytes = try ServiceManifestCanonical.signingBytes(
-                of: data, omitting: ["signature"])
-            guard issuerKey.isValidSignature(signature, for: signingBytes) else {
-                throw BillingError.signatureInvalid
-            }
+        // An unverifiable epoch is not an epoch.
+        let signingBytes = try ServiceManifestCanonical.signingBytes(
+            of: data, omitting: ["signature"])
+        guard issuerKey.isValidSignature(signature, for: signingBytes) else {
+            throw BillingError.signatureInvalid
         }
         return RevocationEpoch(
             epoch: wire.epoch,

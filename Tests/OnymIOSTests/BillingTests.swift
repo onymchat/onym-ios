@@ -163,10 +163,94 @@ final class BillingTests: XCTestCase {
         ]
         let bytes = try JSONSerialization.data(withJSONObject: wire)
         XCTAssertThrowsError(
-            try SeatSealedEnvelope.open(envelopeBytes: bytes, recipient: recipient)
+            try SeatSealedEnvelope.open(
+                envelopeBytes: bytes, recipient: recipient, expectedSenders: [])
         ) { error in
             XCTAssertEqual(error as? BillingError, .envelopeUnreadable)
         }
+    }
+
+    /// `redeem` is the `Transaction.updates` replay path, which fires at
+    /// launch — where a read can fail because the file is under complete
+    /// protection and the device has not been unlocked. Swallowing that
+    /// and saving would write one credential over every other purchase
+    /// the person had made.
+    func testRedeemRefusesToSaveOverAnUnreadableStore() async throws {
+        let flow = SeatPurchaseFlow(
+            coordinator: StoreKitPurchaseCoordinator(),
+            broker: StubBroker(sealed: Data()),
+            catalog: ChannelOfferCatalog(offers: []),
+            store: FailingLoadStore(),
+            keys: StubKeys(subject: subject()),
+            trustedIssuers: { _ in [self.issuerReference] })
+
+        do {
+            _ = try await flow.redeem(
+                signedTransaction: "jws", offerId: "backup-monthly-v1",
+                componentId: componentId)
+            XCTFail("saved over a store it could not read")
+        } catch {
+            // The failure arrives before any save. What matters is that
+            // the store was never written.
+        }
+        XCTAssertFalse(FailingLoadStore.didSave, "wrote over credentials it could not read")
+    }
+
+    /// An entry a newer build wrote must survive an older build's
+    /// redeem. Deleting what we cannot decode is a downgrade that eats
+    /// data.
+    func testUndecodableStoredEntriesAreKept() throws {
+        var stored: [Data] = [Data("from a future version".utf8)]
+        let componentId = self.componentId
+        let offerId = "backup-monthly-v1"
+        stored.removeAll { existing in
+            guard let decoded = try? SeatEntitlement.decode(raw: existing) else { return false }
+            return decoded.audience == componentId && decoded.offerId == offerId
+        }
+        XCTAssertEqual(stored.count, 1, "an entry this build cannot decode was dropped")
+    }
+
+    /// An envelope signed by nobody must not open when we were told who
+    /// it must come from.
+    func testUnsignedEnvelopeIsRefusedWhenSenderIsExpected() throws {
+        let recipient = Curve25519.KeyAgreement.PrivateKey()
+        let wire: [String: Any] = [
+            "version": 1,
+            "scheme": SeatSealedEnvelope.scheme,
+            "ephemeral_public_key": Curve25519.KeyAgreement.PrivateKey()
+                .publicKey.rawRepresentation.base64EncodedString(),
+            "nonce": Data(repeating: 2, count: 12).base64EncodedString(),
+            "ciphertext": Data(repeating: 3, count: 16).base64EncodedString(),
+            "authentication_tag": Data(repeating: 4, count: 16).base64EncodedString(),
+        ]
+        let bytes = try JSONSerialization.data(withJSONObject: wire)
+        XCTAssertThrowsError(
+            try SeatSealedEnvelope.open(
+                envelopeBytes: bytes, recipient: recipient,
+                expectedSenders: [issuerKey.publicKey])
+        ) { error in
+            XCTAssertEqual(error as? BillingError, .envelopeUnreadable)
+        }
+    }
+
+    /// A quota that is neither absent nor an integer must be refused,
+    /// not read as "subscription, no quota" — that would give away a
+    /// consumable's units after a valid signature check.
+    func testMalformedQuotaIsRefused() throws {
+        XCTAssertNil(try SeatEntitlement.quota(from: nil))
+        XCTAssertEqual(try SeatEntitlement.quota(from: 5), 5)
+        XCTAssertEqual(try SeatEntitlement.quota(from: "5"), 5)
+        XCTAssertThrowsError(try SeatEntitlement.quota(from: 1.5))
+        XCTAssertThrowsError(try SeatEntitlement.quota(from: "many"))
+        XCTAssertThrowsError(try SeatEntitlement.quota(from: ["units": 5]))
+    }
+
+    /// The house timestamp form has no fractional seconds. Pinned so a
+    /// decoder change cannot quietly start accepting a shape the
+    /// signature was never computed over.
+    func testTimestampsRejectFractionalSeconds() {
+        XCTAssertNotNil(BillingFormat.date(fromRFC3339: "2026-08-20T10:00:00Z"))
+        XCTAssertNil(BillingFormat.date(fromRFC3339: "2026-08-20T10:00:00.500Z"))
     }
 
     /// A free offer resolves with no store, no network, and no
@@ -272,4 +356,23 @@ private final class MemoryEntitlementStore: SeatEntitlementStoring, @unchecked S
     init(raw: [Data] = []) { self.raw = raw }
     func load() throws -> [Data] { lock.withLock { raw } }
     func save(_ rawEntitlements: [Data]) throws { lock.withLock { raw = rawEntitlements } }
+}
+
+
+private struct StubBroker: BillingBrokerClient {
+    let sealed: Data
+    func issueEntitlement(_ request: SeatEntitlementRequest) async throws -> Data { sealed }
+    func refreshEntitlement(_ request: SeatEntitlementRequest) async throws -> Data { sealed }
+    func revocationEpoch() async throws -> RevocationEpoch {
+        throw BillingError.brokerUnavailable
+    }
+}
+
+/// Stands in for a store whose file exists but cannot be read — the
+/// locked-device case.
+private final class FailingLoadStore: SeatEntitlementStoring, @unchecked Sendable {
+    nonisolated(unsafe) static var didSave = false
+
+    func load() throws -> [Data] { throw BillingError.malformedEntitlement }
+    func save(_ rawEntitlements: [Data]) throws { Self.didSave = true }
 }

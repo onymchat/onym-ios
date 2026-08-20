@@ -42,15 +42,20 @@ public enum SeatSealedEnvelope {
 
     /// Open an envelope addressed to `recipient`.
     ///
-    /// `expectedSender`, when given, is the broker's Ed25519 key from
-    /// the operator's manifest. A present-but-invalid signature over the
-    /// ephemeral key throws rather than degrading to "unsigned" — an
-    /// envelope claiming a sender it cannot prove is worse than one
-    /// claiming none.
+    /// `expectedSenders` are the broker keys the operator declares in
+    /// its signed manifest. Passing an empty set means "accept an
+    /// unauthenticated envelope", which is a decision a caller has to
+    /// make explicitly rather than inherit from a default — the whole
+    /// value of the sender check is lost if it can be skipped by
+    /// omission.
+    ///
+    /// A present-but-invalid signature throws rather than degrading to
+    /// "unsigned": an envelope claiming a sender it cannot prove is
+    /// worse than one claiming none.
     public static func open(
         envelopeBytes: Data,
         recipient: Curve25519.KeyAgreement.PrivateKey,
-        expectedSender: Curve25519.Signing.PublicKey? = nil
+        expectedSenders: [Curve25519.Signing.PublicKey]
     ) throws -> Data {
         guard let wire = try? JSONDecoder().decode(Wire.self, from: envelopeBytes) else {
             throw BillingError.envelopeUnreadable
@@ -75,10 +80,11 @@ public enum SeatSealedEnvelope {
             else {
                 throw BillingError.envelopeUnreadable
             }
-            if let expectedSender, sender.rawRepresentation != expectedSender.rawRepresentation {
+            if !expectedSenders.isEmpty,
+               !expectedSenders.contains(where: { $0.rawRepresentation == sender.rawRepresentation }) {
                 throw BillingError.envelopeUnreadable
             }
-        } else if expectedSender != nil {
+        } else if !expectedSenders.isEmpty {
             // We were told who this must come from, and it does not say.
             throw BillingError.envelopeUnreadable
         }

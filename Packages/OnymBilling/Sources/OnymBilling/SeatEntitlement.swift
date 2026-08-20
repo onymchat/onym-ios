@@ -49,6 +49,28 @@ public struct SeatEntitlement: Sendable, Equatable {
 extension SeatEntitlement {
     static let documentType = "SeatEntitlement"
 
+    /// Read a quota, which the canonical form permits as an integer or
+    /// a decimal string (never a float — that has no canonical form).
+    ///
+    /// Anything else is malformed. Reading an unexpected shape as `nil`
+    /// would turn a consumable's purchased units into "subscription, no
+    /// quota" *after* a valid signature check, which is the quietest
+    /// possible way to give away service.
+    static func quota(from value: Any?) throws -> Int? {
+        switch value {
+        case nil, is NSNull:
+            return nil
+        case let number as NSNumber:
+            guard !CFNumberIsFloatType(number) else { throw BillingError.malformedEntitlement }
+            return number.intValue
+        case let text as String:
+            guard let parsed = Int(text) else { throw BillingError.malformedEntitlement }
+            return parsed
+        default:
+            throw BillingError.malformedEntitlement
+        }
+    }
+
     /// Decode without verifying. Callers must go through
     /// `SeatEntitlementVerifier` before treating one as an entitlement —
     /// this exists so the verifier has something to check.
@@ -87,10 +109,7 @@ extension SeatEntitlement {
             entitlementId: try string("entitlementId"),
             notBefore: try date("notBefore"),
             expiresAt: try date("expiresAt"),
-            // A float here is refused by the canonical encoder anyway;
-            // reading it as `Int?` keeps the failure at decode rather
-            // than at signature check, where it would look like tamper.
-            quota: object["quota"] as? Int,
+            quota: try Self.quota(from: object["quota"]),
             status: object["status"] as? String,
             rawBytes: raw,
             signature: signature

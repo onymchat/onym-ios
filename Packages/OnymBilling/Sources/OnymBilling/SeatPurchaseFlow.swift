@@ -57,6 +57,24 @@ public actor SeatPurchaseFlow {
         return entitlement
     }
 
+    /// The Ed25519 keys behind a set of `onym:key:` references.
+    ///
+    /// An unparseable reference is dropped rather than failing the set —
+    /// but if that leaves nothing, the envelope opener refuses, because
+    /// an empty expectation is not the same as no expectation.
+    static func senderKeys(from references: [String]) -> [Curve25519.Signing.PublicKey] {
+        references.compactMap { reference in
+            guard
+                let bytes = BillingFormat.publicKeyBytes(
+                    from: reference, prefix: BillingFormat.keyPrefix),
+                let key = try? Curve25519.Signing.PublicKey(rawRepresentation: bytes)
+            else {
+                return nil
+            }
+            return key
+        }
+    }
+
     /// Turn a store-signed transaction into a stored credential.
     ///
     /// Also the replay path: `Transaction.updates` hands back
@@ -80,7 +98,16 @@ public actor SeatPurchaseFlow {
                 signedTransaction: signedTransaction
             )
         )
-        let raw = try SeatSealedEnvelope.open(envelopeBytes: sealed, recipient: agreementKey)
+        // The sender is pinned to the operator's declared issuers.
+        // Sealing proves only that the answer was meant for this device;
+        // without this, an envelope signed by anyone — or by nobody —
+        // opens, and the sender-authentication path exists but never
+        // runs.
+        let raw = try SeatSealedEnvelope.open(
+            envelopeBytes: sealed,
+            recipient: agreementKey,
+            expectedSenders: Self.senderKeys(from: trustedIssuers(componentId))
+        )
         let entitlement = try SeatEntitlement.decode(raw: raw)
 
         // Verified here, not trusted because it arrived sealed. Sealing
@@ -93,11 +120,28 @@ public actor SeatPurchaseFlow {
             subject: subject
         ).verify(entitlement)
 
-        var stored = (try? store.load()) ?? []
+        // Not `try?`. A failed load here would be followed by a save
+        // that writes only this credential over every other one — and
+        // this is the `Transaction.updates` replay path, which fires at
+        // launch, where a read can legitimately fail because the file is
+        // under complete protection and the device has not been
+        // unlocked. One replayed transaction would then destroy every
+        // purchase the person had made.
+        //
+        // Throwing leaves the transaction unfinished, so the store
+        // replays it once the device is readable. A delayed credential
+        // is recoverable; deleted credentials are not.
+        var stored = try store.load()
+
         // One live credential per offer. Keeping the superseded one
         // would leave a verifier free to pick either.
+        //
+        // Entries this build cannot decode are *kept*. A newer client
+        // may have written a version we do not understand, and an older
+        // build silently deleting it during an unrelated redeem is a
+        // downgrade that eats data. Only positively matched entries go.
         stored.removeAll { existing in
-            guard let decoded = try? SeatEntitlement.decode(raw: existing) else { return true }
+            guard let decoded = try? SeatEntitlement.decode(raw: existing) else { return false }
             return decoded.audience == componentId && decoded.offerId == offerId
         }
         stored.append(raw)
