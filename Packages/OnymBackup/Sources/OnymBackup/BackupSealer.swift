@@ -64,10 +64,16 @@ public enum BackupSealer {
 
         let key = BackupKeys.snapshotKey(archiveRoot: archiveRoot, snapshotSalt: salt)
 
-        FileManager.default.createFile(atPath: sealedURL.path, contents: nil)
-        try (sealedURL as NSURL).setResourceValue(
-            URLFileProtection.complete,
-            forKey: .fileProtectionKey
+        // Protection is set at creation rather than with a follow-up
+        // setResourceValue: the latter throws where data protection is
+        // unavailable (notably the simulator), and failing to seal a
+        // backup because a test host cannot encrypt at rest is the wrong
+        // trade. Passed as an attribute, it is honoured on device and
+        // ignored where it cannot apply.
+        FileManager.default.createFile(
+            atPath: sealedURL.path,
+            contents: nil,
+            attributes: [.protectionKey: FileProtectionType.complete]
         )
         let input = try FileHandle(forReadingFrom: plaintextURL)
         let output = try FileHandle(forWritingTo: sealedURL)
