@@ -99,13 +99,13 @@ public final class PendingChatsFlow {
 
     /// Pending rows for the current identity, newest first.
     public private(set) var rows: [Row] = []
-    /// Rows whose wait ended, mapped to the group that replaced them
-    /// (`row id → group id hex`).
+    /// Where a pending row's wait ended, mapped from the row's id to
+    /// the group that replaced it.
     ///
     /// Kept after the row itself is gone, because the row disappearing
     /// is exactly the moment a screen showing it needs to know where to
-    /// go instead. Bounded by the number of chats this device has ever
-    /// joined — the same order as the chats list.
+    /// go instead. Bounded by the number of chats this identity has —
+    /// the same order as the chats list.
     public private(set) var materialized: [String: String] = [:]
     public var lastError: String?
 
@@ -185,14 +185,17 @@ public final class PendingChatsFlow {
         let repository = self.repository
         groupWatchTask = Task { @MainActor [weak self] in
             for await groups in groups {
-                // Recorded *before* the rows are consumed: afterwards
-                // there is nothing left to say which wait this group
-                // ended, and the pending thread on screen would have no
-                // way to find the chat it just became.
+                // Derived from the snapshot itself rather than from
+                // `rows`, which may not have been filled yet when the
+                // first group emission lands — the same ordering
+                // `consumeForMaterialized` reads through the store to
+                // survive. A pending row's id *is*
+                // `<group hex>:<owner>`, so the mapping needs nothing
+                // else to be exact.
                 if let self {
-                    let landed = Set(groups.map(\.id))
-                    for row in self.rows where landed.contains(row.groupIDHex) {
-                        self.materialized[row.id] = row.groupIDHex
+                    for group in groups {
+                        let rowID = "\(group.id):\(group.ownerIdentityID.rawValue.uuidString)"
+                        self.materialized[rowID] = group.id
                     }
                 }
                 await repository.consumeForMaterialized(
