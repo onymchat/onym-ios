@@ -788,7 +788,13 @@ struct OnymIOSApp: App {
             submitJoin: { cap, label in
                 await pendingChatsSender.send(
                     capability: cap,
-                    joinerDisplayLabel: label
+                    joinerDisplayLabel: label,
+                    // Nothing collects an agreement yet: the screen
+                    // that shows rules and the flow that carries the
+                    // answer land with the joiner UI. Spelled out
+                    // rather than defaulted, so this reads as a stage
+                    // the stack is at and not as a caller that forgot.
+                    agreedRules: nil
                 )
             },
             displayLabel: { [repository] in

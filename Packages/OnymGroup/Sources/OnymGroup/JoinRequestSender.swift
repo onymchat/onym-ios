@@ -41,6 +41,12 @@ public actor JoinRequestSender {
     ///   - agreedRules: the rules text the joiner was shown and
     ///     accepted, or nil when the invitation carried none.
     ///
+    ///     No default value on purpose. The whole reason it is a
+    ///     parameter is that it cannot be derived from `capability`,
+    ///     so a default would make "forgot to pass it" the quiet
+    ///     answer — and the quiet answer reaches the founder as a
+    ///     joiner who declined to agree.
+    ///
     ///     Passed in rather than read off `capability`, because the
     ///     signature has to cover what a person actually saw. The two
     ///     are the same for a link, but an invitation pushed to this
@@ -50,7 +56,7 @@ public actor JoinRequestSender {
     public func send(
         capability: IntroCapability,
         joinerDisplayLabel: String,
-        agreedRules: String? = nil
+        agreedRules: String?
     ) async -> Outcome {
         guard let active = await identity.currentIdentity() else {
             return .noIdentityLoaded
@@ -76,17 +82,33 @@ public actor JoinRequestSender {
         // `joinerSendingPublicKey`, so every member who is later told
         // about this joiner can check it — not just the founder who
         // admitted them.
+        // An invitation that carried rules and a send with none is a
+        // wiring mistake, not a person who declined — and the two are
+        // indistinguishable by the time they reach the founder. Fail
+        // here, where it is still a bug report.
+        if capability.rules != nil, GroupRules.normalized(agreedRules) == nil {
+            return .transportFailed("rules agreement missing for an invite that carries rules")
+        }
         var rulesHash: Data?
         var rulesSignature: Data?
         if let rules = GroupRules.normalized(agreedRules) {
             let hash = GroupRules.hash(rules)
             do {
+                // Bound to the key the payload announces, not to
+                // whichever identity happens to be selected when this
+                // await resumes. A switch across the gap would
+                // otherwise yield a signature verifying against no
+                // announced key — silently, and read by the founder as
+                // a forgery rather than as a race.
                 rulesSignature = try await identity.signWithStellarKey(
                     GroupRules.statement(
                         groupID: capability.groupId,
                         rulesHash: hash,
                         joinerSendingPublicKey: active.stellarPublicKey
-                    )
+                    ),
+                    matchingPublicKeyHex: active.stellarPublicKey
+                        .map { String(format: "%02x", $0) }
+                        .joined()
                 )
                 rulesHash = hash
             } catch {

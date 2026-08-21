@@ -41,9 +41,10 @@ import Foundation
 /// not agreed to anything. For sensitive group names or rules, leave
 /// them nil and let the inviter convey context out-of-band.
 ///
-/// `rules` is capped at `GroupRules.maxLength` so the encoded link
-/// still fits a scannable QR code; see that constant for the
-/// arithmetic.
+/// `rules` is capped at `GroupRules.maxBytes` — UTF-8 bytes, which is
+/// the only unit Swift and Kotlin compute identically, and the unit the
+/// link actually spends — so the encoded link still fits a scannable QR
+/// code. See that constant for the measurements.
 ///
 /// ## Cross-platform contract
 ///
@@ -119,9 +120,10 @@ public struct IntroCapability: Codable, Equatable, Sendable, Identifiable {
             )
         }
         let normalizedRules = GroupRules.normalized(rules)
-        if let normalizedRules, normalizedRules.count > GroupRules.maxLength {
+        if let normalizedRules, !GroupRules.fits(normalizedRules) {
             throw InvalidIntroCapability.shape(
-                "rules: expected at most \(GroupRules.maxLength) characters, got \(normalizedRules.count)"
+                "rules: expected at most \(GroupRules.maxBytes) UTF-8 bytes, "
+                + "got \(normalizedRules.utf8.count)"
             )
         }
         self.introPublicKey = introPublicKey
@@ -154,9 +156,10 @@ public struct IntroCapability: Codable, Equatable, Sendable, Identifiable {
         // sign rules that end mid-sentence, and dropping the field
         // would walk them into a group whose rules they were never
         // shown while the founder believes otherwise.
-        if let rules, rules.count > GroupRules.maxLength {
+        if let rules, !GroupRules.fits(rules) {
             throw InvalidIntroCapability.shape(
-                "rules: expected at most \(GroupRules.maxLength) characters, got \(rules.count)"
+                "rules: expected at most \(GroupRules.maxBytes) UTF-8 bytes, "
+                + "got \(rules.utf8.count)"
             )
         }
         self.introPublicKey = pub
