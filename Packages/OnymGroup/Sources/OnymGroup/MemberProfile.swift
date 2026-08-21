@@ -48,6 +48,21 @@ public struct MemberProfile: Codable, Equatable, Hashable, Sendable {
     /// failing to verify.
     public let rulesHash: Data?
     public let rulesSignature: Data?
+    /// The rules text the group held when this member was admitted —
+    /// the bytes the signature covers.
+    ///
+    /// Retained rather than pointed at. `GroupRules`' own doc is the
+    /// argument: a signature is evidence only if the bytes it covers
+    /// can be produced again, and a hash beside a *live*
+    /// `ChatGroup.invitationMessage` proves that something was agreed
+    /// and never what — one edit and every retained agreement becomes
+    /// unattributable to any text on the device.
+    ///
+    /// It is the admitting device's own copy, never the joiner's: the
+    /// request deliberately doesn't carry the text, because a joiner
+    /// who supplied it would be choosing what their own signature is
+    /// checked against.
+    public let rulesText: String?
 
     enum CodingKeys: String, CodingKey {
         case alias
@@ -55,6 +70,7 @@ public struct MemberProfile: Codable, Equatable, Hashable, Sendable {
         case sendingPubkey = "sending_pubkey"
         case rulesHash = "rules_hash"
         case rulesSignature = "rules_signature"
+        case rulesText = "rules_text"
     }
 
     public init(
@@ -62,13 +78,46 @@ public struct MemberProfile: Codable, Equatable, Hashable, Sendable {
         inboxPublicKey: Data,
         sendingPubkey: Data,
         rulesHash: Data? = nil,
-        rulesSignature: Data? = nil
+        rulesSignature: Data? = nil,
+        rulesText: String? = nil
     ) {
         self.alias = alias
         self.inboxPublicKey = inboxPublicKey
         self.sendingPubkey = sendingPubkey
-        self.rulesHash = rulesHash
-        self.rulesSignature = rulesSignature
+        // Validated here too, not only at decode. The memberwise init
+        // is how the local roster is written, so without this a
+        // malformed pair could be persisted that the wire would have
+        // refused — the two paths should not disagree about what
+        // counts as evidence.
+        let paired = Self.paired(hash: rulesHash, signature: rulesSignature)
+        self.rulesHash = paired.hash
+        self.rulesSignature = paired.signature
+        self.rulesText = paired.hash == nil ? nil : GroupRules.normalized(rulesText)
+    }
+
+    /// Wrong-sized or half-present agreement bytes become no agreement.
+    /// "We can't show they agreed" is what nil already means, and
+    /// rejecting the profile over it would cost a member their inbox
+    /// and verification keys for a field that only adds evidence.
+    static func paired(hash: Data?, signature: Data?) -> (hash: Data?, signature: Data?) {
+        guard hash?.count == 32, signature?.count == 64 else { return (nil, nil) }
+        return (hash, signature)
+    }
+
+    /// Whether this member's stored agreement checks out against the
+    /// text stored with it — the question the retained bytes exist to
+    /// answer, asked in one place so no caller has to reassemble it.
+    ///
+    /// Verifiable by any member, not only the founder who admitted
+    /// them: `sendingPubkey` is announced to everyone.
+    public func agreedToRules(groupID: Data) -> Bool {
+        guard let rulesSignature, let rulesText else { return false }
+        return GroupRules.isAgreement(
+            signature: rulesSignature,
+            rules: rulesText,
+            groupID: groupID,
+            joinerSendingPublicKey: sendingPubkey
+        )
     }
 
     /// The wire-side decode boundary. `MemberProfile` ships inside
@@ -92,21 +141,18 @@ public struct MemberProfile: Codable, Equatable, Hashable, Sendable {
                 "sendingPubkey: expected 32 bytes, got \(sending.count)"
             )
         }
-        let rulesHash = try c.decodeIfPresent(Data.self, forKey: .rulesHash)
-        let rulesSignature = try c.decodeIfPresent(Data.self, forKey: .rulesSignature)
-        // Wrong-sized agreement bytes are dropped, not thrown on. A
-        // malformed signature means "we can't show this member agreed",
-        // which is already what nil means — and rejecting the whole
-        // profile over it would take a member's inbox and verification
-        // keys down with it, breaking the chat for a field that only
-        // ever adds evidence.
-        let sizedHash = rulesHash?.count == 32 ? rulesHash : nil
-        let sizedSignature = rulesSignature?.count == 64 ? rulesSignature : nil
+        let paired = Self.paired(
+            hash: try c.decodeIfPresent(Data.self, forKey: .rulesHash),
+            signature: try c.decodeIfPresent(Data.self, forKey: .rulesSignature)
+        )
         self.alias = alias
         self.inboxPublicKey = inbox
         self.sendingPubkey = sending
-        self.rulesHash = sizedSignature == nil ? nil : sizedHash
-        self.rulesSignature = sizedHash == nil ? nil : sizedSignature
+        self.rulesHash = paired.hash
+        self.rulesSignature = paired.signature
+        self.rulesText = paired.hash == nil
+            ? nil
+            : GroupRules.normalized(try c.decodeIfPresent(String.self, forKey: .rulesText))
     }
 }
 

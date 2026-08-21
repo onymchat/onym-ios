@@ -995,6 +995,7 @@ final class ChatThreadViewControllerTests: XCTestCase {
     private func makeRequest(
         id: String,
         alias: String = "Alice",
+        agreement: JoinRequestApprover.RulesAgreement = .notRequired,
         isInFlight: Bool = false,
         errorText: String? = nil
     ) -> ChatJoinRequestDisplay {
@@ -1002,6 +1003,7 @@ final class ChatThreadViewControllerTests: XCTestCase {
             requestID: id,
             alias: alias,
             fingerprint: "ab12cd34",
+            agreement: agreement,
             isInFlight: isInFlight,
             errorText: errorText
         )

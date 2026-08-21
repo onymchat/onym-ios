@@ -97,25 +97,69 @@ public struct MemberAnnouncementPayload: Codable, Equatable, Sendable {
         /// against this so an insider can't forge another member's
         /// `senderBlsPubkeyHex` claim.
         public let sendingPub: Data
+        /// This member's agreement to the group's rules: the 32-byte
+        /// hash of the text they signed, and the 64-byte Ed25519
+        /// signature over `GroupRules.statement(...)`.
+        ///
+        /// Announced, and not merely kept by the founder who admitted
+        /// them, because the whole point of signing with `sendingPub`
+        /// is that every member already holds the key to check it.
+        /// Left out of the announcement, existing members would learn
+        /// nothing about anyone admitted after them, and "any member
+        /// can verify" would be true only of the admitting device.
+        ///
+        /// Nil for a member admitted before rules existed, or by a
+        /// build that predates them.
+        public let rulesHash: Data?
+        public let rulesSignature: Data?
+        /// The admitting device's copy of the rules those bytes cover.
+        /// Announced with them, because a hash with no text tells the
+        /// recipient that something was agreed and never what — and
+        /// unlike the founder, they have no other copy of the wording
+        /// that was current when this member joined.
+        public let rulesText: String?
 
         enum CodingKeys: String, CodingKey {
             case blsPub = "bls_pub"
             case inboxPub = "inbox_pub"
             case alias
             case sendingPub = "sending_pub"
+            case rulesHash = "rules_hash"
+            case rulesSignature = "rules_signature"
+            case rulesText = "rules_text"
         }
 
         public init(
             blsPub: Data,
             inboxPub: Data,
             alias: String,
-            sendingPub: Data
+            sendingPub: Data,
+            rulesHash: Data? = nil,
+            rulesSignature: Data? = nil,
+            rulesText: String? = nil
         ) throws {
             try Self.validate(blsPub: blsPub, inboxPub: inboxPub, sendingPub: sendingPub)
             self.blsPub = blsPub
             self.inboxPub = inboxPub
             self.alias = alias
             self.sendingPub = sendingPub
+            let paired = Self.paired(hash: rulesHash, signature: rulesSignature)
+            self.rulesHash = paired.hash
+            self.rulesSignature = paired.signature
+            self.rulesText = paired.hash == nil ? nil : GroupRules.normalized(rulesText)
+        }
+
+        /// Wrong-sized or half-present agreement bytes become no
+        /// agreement, rather than taking the announcement down with
+        /// them. "We can't show they agreed" is what nil already
+        /// means, and rejecting here would cost a member their inbox
+        /// and verification keys over a field that only adds evidence.
+        static func paired(
+            hash: Data?,
+            signature: Data?
+        ) -> (hash: Data?, signature: Data?) {
+            guard hash?.count == 32, signature?.count == 64 else { return (nil, nil) }
+            return (hash, signature)
         }
 
         public init(from decoder: Decoder) throws {
@@ -125,10 +169,19 @@ public struct MemberAnnouncementPayload: Codable, Equatable, Sendable {
             let alias = try c.decode(String.self, forKey: .alias)
             let sending = try c.decode(Data.self, forKey: .sendingPub)
             try Self.validate(blsPub: bls, inboxPub: inbox, sendingPub: sending)
+            let paired = Self.paired(
+                hash: try c.decodeIfPresent(Data.self, forKey: .rulesHash),
+                signature: try c.decodeIfPresent(Data.self, forKey: .rulesSignature)
+            )
             self.blsPub = bls
             self.inboxPub = inbox
             self.alias = alias
             self.sendingPub = sending
+            self.rulesHash = paired.hash
+            self.rulesSignature = paired.signature
+            self.rulesText = paired.hash == nil
+                ? nil
+                : GroupRules.normalized(try c.decodeIfPresent(String.self, forKey: .rulesText))
         }
 
         private static func validate(

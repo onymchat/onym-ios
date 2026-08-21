@@ -48,10 +48,18 @@ public actor JoinRequestApprover: JoinRequestApproving {
         case notRequired
         /// Verified against the rules this group holds right now.
         case agreed
-        /// A valid signature, over a different text than the group's
-        /// current rules — the joiner accepted an earlier version, or
-        /// a link that carried something else.
-        case agreedToOtherRules
+        /// A signature this device cannot check, because the hash it
+        /// carries is not the hash of any rules we hold.
+        ///
+        /// Named for what is known rather than for what it suggests.
+        /// The earlier name — "agreed to other rules" — asserted an
+        /// agreement nothing here verified: the only evidence is the
+        /// joiner's *own* hash differing from ours, which they choose.
+        /// Sixty-four random bytes and a random hash landed in this
+        /// case, and it was the reassuring one, so a forgery could pick
+        /// its own verdict by not echoing our hash. It reads as
+        /// "can't be checked" now, and is coloured accordingly.
+        case unknownRules
         /// A signature that doesn't verify. Not an old client: an old
         /// client sends none at all.
         case invalid
@@ -117,9 +125,12 @@ public actor JoinRequestApprover: JoinRequestApproving {
             joinerDisplayLabel: String,
             groupId: Data,
             groupName: String?,
-            rulesAgreement: RulesAgreement = .notRequired,
-            rulesSignature: Data? = nil,
-            rulesHash: Data? = nil
+            // No defaults: forgetting the verdict would read as "this
+            // group has no rules", which is a claim, and the compiler
+            // is the cheapest place to catch it.
+            rulesAgreement: RulesAgreement,
+            rulesSignature: Data?,
+            rulesHash: Data?
         ) {
             self.id = id
             self.joinerInboxPublicKey = joinerInboxPublicKey
@@ -469,7 +480,13 @@ public actor JoinRequestApprover: JoinRequestApproving {
                 joinerBlsPub: blsPub,
                 joinerInboxPub: req.joinerInboxPublicKey,
                 joinerSendingPub: req.joinerSendingPublicKey,
-                joinerAlias: req.joinerDisplayLabel
+                joinerAlias: req.joinerDisplayLabel,
+                // Fanned out with the rest of the profile: every
+                // member holds `sendingPub`, so every member can check
+                // this. Kept to the founder, the evidence would reach
+                // nobody who joined earlier.
+                rulesHash: req.rulesHash,
+                rulesSignature: req.rulesSignature
             )
             // The admin's own "X joined" row. Everyone else derives
             // theirs from the announcement fanned out just above,
@@ -683,7 +700,13 @@ public actor JoinRequestApprover: JoinRequestApproving {
             inboxPublicKey: inboxPub,
             sendingPubkey: sendingPub,
             rulesHash: rulesHash,
-            rulesSignature: rulesSignature
+            rulesSignature: rulesSignature,
+            // This device's own copy, as of the approval — the text the
+            // verdict above was reached against. Kept whatever that
+            // verdict was: it is what the founder decided in front of,
+            // and re-reading the decision later needs the words, not a
+            // pointer to whatever the group says by then.
+            rulesText: group.invitationMessage
         )
         await groupRepository.insert(updated)
     }
@@ -705,7 +728,9 @@ public actor JoinRequestApprover: JoinRequestApproving {
         joinerBlsPub: Data,
         joinerInboxPub: Data,
         joinerSendingPub: Data,
-        joinerAlias: String
+        joinerAlias: String,
+        rulesHash: Data?,
+        rulesSignature: Data?
     ) async {
         let adminAlias = await identity.currentIdentityName() ?? ""
         let announced: MemberAnnouncementPayload.AnnouncedMember
@@ -714,7 +739,10 @@ public actor JoinRequestApprover: JoinRequestApproving {
                 blsPub: joinerBlsPub,
                 inboxPub: joinerInboxPub,
                 alias: joinerAlias,
-                sendingPub: joinerSendingPub
+                sendingPub: joinerSendingPub,
+                rulesHash: rulesHash,
+                rulesSignature: rulesSignature,
+                rulesText: group.invitationMessage
             )
         } catch {
             // Wrong-sized BLS pubkey shouldn't happen — we already
@@ -1001,6 +1029,10 @@ public actor JoinRequestApprover: JoinRequestApproving {
         ) {
             return .agreed
         }
-        return signedHash == GroupRules.hash(rules) ? .invalid : .agreedToOtherRules
+        // Claimed our exact rules and failed against them: not an old
+        // client, not another version, and nothing else this can be.
+        // Claimed some other text, and we have no copy of it to check
+        // against — so we say that, rather than calling it agreement.
+        return signedHash == GroupRules.hash(rules) ? .invalid : .unknownRules
     }
 }
