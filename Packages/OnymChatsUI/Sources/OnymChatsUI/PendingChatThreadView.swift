@@ -31,6 +31,13 @@ struct PendingChatThreadView: View {
     /// the other one. Standing on a screen whose subject no longer
     /// exists is not a state worth rendering.
     @Environment(\.dismiss) private var dismiss
+    /// Accept opens the confirmation screen rather than sending: the
+    /// same review, and the same chance to choose a name, whichever door
+    /// the invitation came through.
+    @State private var confirmation: PendingChatsFlow.JoinConfirmation?
+    /// A Send that never became a request. The confirmation sheet
+    /// dismisses on tap, so this is the only surface left to say so on.
+    @State private var confirmError: String?
 
     var body: some View {
         Group {
@@ -67,6 +74,28 @@ struct PendingChatThreadView: View {
             guard gone, flow.materializedGroupID(for: rowID) == nil else { return }
             dismiss()
         }
+        .sheet(item: $confirmation) { pending in
+            JoinConfirmView(
+                confirmation: pending,
+                onSend: { label in
+                    let flow = flow
+                    confirmation = nil
+                    Task { @MainActor in
+                        // The sheet is already gone by the time this
+                        // answers, so a failure has nowhere to show
+                        // itself but here — and unshown, it reads as a
+                        // request that went out.
+                        if case .failed(let reason) = await flow.confirmJoin(
+                            pending, label: label
+                        ) {
+                            confirmError = reason
+                        }
+                    }
+                },
+                onCancel: { confirmation = nil }
+            )
+        }
+        .reasonAlert("Couldn\u{2019}t use that invite", reason: $confirmError)
         .accessibilityIdentifier("pending_chat.thread")
     }
 
@@ -149,7 +178,11 @@ struct PendingChatThreadView: View {
                     identifier: "pending_chat.accept",
                     disabled: row.isSending
                 ) {
-                    flow.accept(row.id)
+                    let flow = flow
+                    let rowID = row.id
+                    Task { @MainActor in
+                        confirmation = await flow.prepareAccept(rowID: rowID)
+                    }
                 }
             case .waiting:
                 waiting(

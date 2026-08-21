@@ -166,6 +166,23 @@
         }
       }
     },
+    "Ask to join as": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ask to join as"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Попросить впустить как"
+          }
+        }
+      }
+    },
     "Back": {
       "localizations": {
         "en": {
@@ -457,6 +474,40 @@
         }
       }
     },
+    "group": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "group"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "группа"
+          }
+        }
+      }
+    },
+    "invite key": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "invite key"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ключ приглашения"
+          }
+        }
+      }
+    },
     "Its catalogs are being fetched and verified now — the next steps can offer what it lists.": {
       "localizations": {
         "en": {
@@ -469,6 +520,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Его каталоги уже загружаются и проверяются — следующие шаги смогут предложить то, что он публикует."
+          }
+        }
+      }
+    },
+    "Join this chat": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Join this chat"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Присоединиться к чату"
           }
         }
       }
@@ -665,6 +733,23 @@
         }
       }
     },
+    "Only this chat sees this name. It doesn’t rename your identity.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only this chat sees this name. It doesn’t rename your identity."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Это имя видит только этот чат. Оно не переименовывает вашу личность."
+          }
+        }
+      }
+    },
     "Pin Key & Confirm": {
       "localizations": {
         "en": {
@@ -806,6 +891,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Запускает первичную настройку заново: доставка сообщений, хранилище файлов, нотариус и модерация. Ваша идентичность, чаты и сообщения сохраняются, а текущий выбор остаётся в силе, пока вы его не измените."
+          }
+        }
+      }
+    },
+    "Sending shares your name and this identity’s public keys with whoever holds this invite.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sending shares your name and this identity’s public keys with whoever holds this invite."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "При отправке ваше имя и открытые ключи этой личности получит тот, у кого есть это приглашение."
           }
         }
       }
@@ -1194,6 +1296,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ваши ключи — ваши сервисы. Выберите, кто доставляет ваши сообщения, хранит ваши файлы и заверяет вашу историю. Каждый выбор — ваш, и любой можно изменить позже в настройках."
+          }
+        }
+      }
+    },
+    "Your name in this chat": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your name in this chat"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ваше имя в этом чате"
           }
         }
       }

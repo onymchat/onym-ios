@@ -75,6 +75,9 @@ struct OnymIOSApp: App {
     /// can come back to. Rare, and silent failure here would leave
     /// someone waiting on a request that was never recorded.
     @State private var joinLinkError: String?
+    /// The confirmation a tapped link resolved to, if any. Nothing has
+    /// been recorded or sent while this is set — that is the point.
+    @State private var joinConfirmation: PendingChatsFlow.JoinConfirmation?
 
     init() {
         let args = ProcessInfo.processInfo.arguments
@@ -791,16 +794,27 @@ struct OnymIOSApp: App {
             displayLabel: { [repository] in
                 // Repository, not `identitiesFlow` — the same cold-start
                 // reason as `currentIdentityID` below. A link that
-                // launches the app sends before any tab has populated
-                // the flow, and an empty name is what the founder would
-                // have been asked to let in.
-                await repository.currentIdentityName() ?? ""
+                // launches the app resolves before any tab has populated
+                // the flow.
+                //
+                // `currentIdentityName()` is a cache read that answers
+                // nil until the keychain has been walked, and on the
+                // cold-start link it hadn't been: the confirmation
+                // screen opened with an empty name field, and joining a
+                // chat meant typing your own name first. `ensureLoaded`
+                // is what `currentIdentities()` is for.
+                _ = try? await repository.currentIdentities()
+                return await repository.currentIdentityName() ?? ""
             },
             retryVerification: { [groupStateVerifier] groupIDHex in
                 await groupStateVerifier.retry(groupIDHex: groupIDHex)
             },
             currentIdentityID: { [repository] in
-                await repository.currentSelectedID()
+                // Same cold start, same cache: the selection is restored
+                // during the load, so asking before it answers "sign in
+                // first" for a link that launched the app.
+                _ = try? await repository.currentIdentities()
+                return await repository.currentSelectedID()
             }
         )
 
@@ -1961,39 +1975,73 @@ struct OnymIOSApp: App {
                         pendingCapability = cap
                     }
                 }
-                // A tapped link no longer opens anything of its own. It
-                // sends the request and lands the user in the chat it
-                // created — pending until the founder lets them in.
+                // A tapped link resolves to a screen — the chat if
+                // this identity is already in, the wait if it has
+                // already asked, otherwise the confirmation sheet
+                // below. Nothing is sent from here.
                 // Deliberately not `.task(id:)`: clearing the capture
                 // would change the id and cancel the very task doing the
-                // work, mid-send. This one outlives the view's task
-                // lifetime, which is right — the request has to go out
-                // whether or not the user stays on this screen.
+                // work, mid-resolve. This one outlives the view's task
+                // lifetime, which is right — the link has to reach its
+                // screen whether or not this view stays mounted.
                 .onChange(of: pendingCapability) { _, captured in
                     guard let captured else { return }
                     pendingCapability = nil
                     Task { await handleCapability(captured) }
                 }
+                .sheet(item: $joinConfirmation) { confirmation in
+                    JoinConfirmView(
+                        confirmation: confirmation,
+                        onSend: { label in
+                            Task { await sendConfirmedJoin(confirmation, label: label) }
+                        },
+                        onCancel: { joinConfirmation = nil }
+                    )
+                }
                 .reasonAlert("Couldn\u{2019}t use that invite", reason: $joinLinkError)
         }
     }
 
-    /// Ship the join request for a tapped link and open what it made.
+    /// Resolve a tapped link into the next screen — and nothing else.
     ///
-    /// Both outcomes are a navigation: a link the user is already inside
-    /// opens that chat rather than starting a second wait, and a fresh
-    /// one opens the pending chat the request created. The alert is for
-    /// the case where neither exists — without it a failed link is
-    /// indistinguishable from a link that worked.
+    /// The URL types this app registers are open to anything on the
+    /// device that can form a link, so arrival cannot be treated as
+    /// permission to introduce this identity to a stranger. A link the
+    /// user is already inside opens that chat; one they have already
+    /// asked about opens the wait; anything else opens the confirmation
+    /// screen, which is the only place a request is sent from. The alert
+    /// is for the case where none of those exist — without it a failed
+    /// link is indistinguishable from a link that worked.
     @MainActor
     private func handleCapability(_ capability: IntroCapability) async {
-        switch await dependencies.pendingChatsFlow.join(capability: capability) {
+        switch await dependencies.pendingChatsFlow.prepareJoin(capability: capability) {
         case .alreadyJoined(let groupIDHex):
             dependencies.chatsNavigation.openChat(groupID: groupIDHex)
         case .waiting(let rowID):
             dependencies.chatsNavigation.openPending(rowID: rowID)
+        case .confirm(let confirmation):
+            joinConfirmation = confirmation
         case .failed(let reason):
             joinLinkError = reason
+        }
+    }
+
+    /// Send what the person confirmed, then open the wait it started.
+    @MainActor
+    private func sendConfirmedJoin(
+        _ confirmation: PendingChatsFlow.JoinConfirmation,
+        label: String
+    ) async {
+        joinConfirmation = nil
+        switch await dependencies.pendingChatsFlow.confirmJoin(confirmation, label: label) {
+        case .waiting(let rowID):
+            dependencies.chatsNavigation.openPending(rowID: rowID)
+        case .alreadyJoined(let groupIDHex):
+            dependencies.chatsNavigation.openChat(groupID: groupIDHex)
+        case .failed(let reason):
+            joinLinkError = reason
+        case .confirm:
+            break
         }
     }
 }

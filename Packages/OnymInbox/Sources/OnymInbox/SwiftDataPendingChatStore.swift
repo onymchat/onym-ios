@@ -125,6 +125,17 @@ public actor SwiftDataPendingChatStore: PendingChatStore {
         try? context.save()
     }
 
+    public func setJoinerLabel(id: String, label: String) async {
+        let descriptor = FetchDescriptor<PersistedPendingChat>(
+            predicate: #Predicate { $0.id == id }
+        )
+        guard let row = (try? context.fetch(descriptor))?.first,
+              let encrypted = try? StorageEncryption.encrypt(label)
+        else { return }
+        row.encryptedJoinerLabel = encrypted
+        try? context.save()
+    }
+
     public func delete(id: String) async {
         let descriptor = FetchDescriptor<PersistedPendingChat>(
             predicate: #Predicate { $0.id == id }
@@ -204,7 +215,8 @@ public actor SwiftDataPendingChatStore: PendingChatStore {
             encryptedIntroPublicKey: try StorageEncryption.encrypt(chat.introPublicKey),
             encryptedGroupName: try chat.groupName.map(StorageEncryption.encrypt),
             encryptedInviterAlias: try StorageEncryption.encrypt(chat.inviterAlias),
-            encryptedInvitationMessage: try chat.invitationMessage.map(StorageEncryption.encrypt)
+            encryptedInvitationMessage: try chat.invitationMessage.map(StorageEncryption.encrypt),
+            encryptedJoinerLabel: try chat.joinerLabel.map(StorageEncryption.encrypt)
         )
     }
 
@@ -230,7 +242,9 @@ public actor SwiftDataPendingChatStore: PendingChatStore {
             invitationMessage: row.encryptedInvitationMessage
                 .flatMap { try? StorageEncryption.decryptString($0) },
             receivedAt: row.receivedAt,
-            status: status(raw: row.statusRaw, failure: row.failureRaw)
+            status: status(raw: row.statusRaw, failure: row.failureRaw),
+            joinerLabel: row.encryptedJoinerLabel
+                .flatMap { try? StorageEncryption.decryptString($0) }
         )
     }
 }

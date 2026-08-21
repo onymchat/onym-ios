@@ -50,6 +50,10 @@ final class PersistedPendingChat {
     var encryptedGroupName: Data?
     var encryptedInviterAlias: Data
     var encryptedInvitationMessage: Data?
+    /// The name typed on the confirmation screen. Encrypted with the
+    /// rest of the person-supplied text; `nil` means nothing has been
+    /// sent for this row yet.
+    var encryptedJoinerLabel: Data?
 
     init(
         id: String,
@@ -61,7 +65,8 @@ final class PersistedPendingChat {
         encryptedIntroPublicKey: Data,
         encryptedGroupName: Data?,
         encryptedInviterAlias: Data,
-        encryptedInvitationMessage: Data?
+        encryptedInvitationMessage: Data?,
+        encryptedJoinerLabel: Data? = nil
     ) {
         self.id = id
         self.ownerIdentityIDString = ownerIdentityIDString
@@ -73,5 +78,6 @@ final class PersistedPendingChat {
         self.encryptedGroupName = encryptedGroupName
         self.encryptedInviterAlias = encryptedInviterAlias
         self.encryptedInvitationMessage = encryptedInvitationMessage
+        self.encryptedJoinerLabel = encryptedJoinerLabel
     }
 }

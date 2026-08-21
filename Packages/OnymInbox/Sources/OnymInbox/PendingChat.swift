@@ -69,6 +69,17 @@ public struct PendingChat: Identifiable, Equatable, Sendable {
     public let inviterAlias: String
     /// The founder's free-text invitation, when the offer carried one.
     public let invitationMessage: String?
+    /// The name this device asked to be let in under, as typed on the
+    /// confirmation screen.
+    ///
+    /// Kept because a re-send has to introduce the same person. Falling
+    /// back to the identity's current alias would quietly change the
+    /// name the founder is looking at between the first request and the
+    /// second — and they are deciding partly on that name.
+    ///
+    /// `nil` until the person has confirmed a join, which is also the
+    /// marker that nothing has been sent for this row yet.
+    public var joinerLabel: String?
     /// When this device first saw the offer or tapped the link — the
     /// row's sort key in the chats list.
     public let receivedAt: Date
@@ -96,7 +107,8 @@ public struct PendingChat: Identifiable, Equatable, Sendable {
         inviterAlias: String,
         invitationMessage: String?,
         receivedAt: Date,
-        status: Status
+        status: Status,
+        joinerLabel: String? = nil
     ) {
         self.groupID = groupID
         self.groupIDHex = groupID.map { String(format: "%02x", $0) }.joined()
@@ -107,6 +119,7 @@ public struct PendingChat: Identifiable, Equatable, Sendable {
         self.invitationMessage = invitationMessage
         self.receivedAt = receivedAt
         self.status = status
+        self.joinerLabel = joinerLabel
     }
 }
 

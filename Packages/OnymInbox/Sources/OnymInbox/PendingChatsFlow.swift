@@ -222,35 +222,63 @@ public final class PendingChatsFlow {
         materialized[rowID]
     }
 
-    /// Where a tapped invite link (or scanned QR) leaves the user.
-    public enum JoinOutcome: Equatable, Sendable {
+    /// What a tapped invite link (or scanned QR) resolves to.
+    ///
+    /// Note what is *not* here: sending. A link arrives through an
+    /// exported entry point — any app on the device can open it, and so
+    /// can a page in a browser — so the arrival is a request to show
+    /// something, never permission to speak. Every case below is
+    /// therefore a screen; the request goes out from
+    /// `confirmJoin(_:label:)`, which only a person can reach.
+    public enum JoinDestination: Equatable, Sendable {
         /// Already a member — the link was an old one, or a second tap.
         /// Carries the hex group id so the caller can just open the chat.
         case alreadyJoined(groupIDHex: String)
-        /// A pending row exists and the wait is under way. The request
-        /// is either on its way or already out — an unanswered offer for
-        /// the same group is sent here, one already asked for is not
-        /// asked twice.
+        /// This device has already asked. Nothing more to send, and
+        /// nothing more to disclose: open the wait.
         case waiting(rowID: String)
-        /// Nothing could be recorded, so there is nothing to show and
-        /// nothing to come back to. The caller has to say so out loud.
+        /// Show the confirmation screen.
+        case confirm(JoinConfirmation)
+        /// Nothing could be resolved, and the caller has to say so.
         case failed(reason: String)
     }
 
-    /// Take a capability from a tapped link or a scanned QR and turn it
-    /// into a chat that is on its way.
+    /// Everything the confirmation screen shows, and everything
+    /// `confirmJoin` needs to act on it.
     ///
-    /// This is what replaced the join sheet. The sheet asked for a
-    /// display name and a Send tap before anything happened, and held
-    /// the entire wait in memory behind a modal the user was told to
-    /// keep open. Tapping the link *is* the intent, so the request goes
-    /// out with the active identity's name and the wait becomes a row —
-    /// which survives a force-quit, unlike the sheet.
-    ///
-    /// Re-tapping a link the user already acted on is deliberately not a
-    /// second request: an existing row is returned as-is, and a Retry
-    /// inside it is the way to send again.
-    public func join(capability: IntroCapability) async -> JoinOutcome {
+    /// It exists so the screen can name *who* is about to learn *what*
+    /// before anything leaves the device: the group, the person who
+    /// invited (when one did), and the invite key the request would be
+    /// sealed to.
+    public struct JoinConfirmation: Identifiable, Equatable, Sendable {
+        /// Where the confirmation came from — a link this device just
+        /// received, or an offer already sitting in the list.
+        public enum Origin: Equatable, Sendable {
+            case link(IntroCapability)
+            case offer(rowID: String)
+        }
+
+        public var id: String { rowID }
+        /// The row this will create or act on — `<group hex>:<owner>`.
+        public let rowID: String
+        public let groupIDHex: String
+        public let groupName: String?
+        /// Empty for a link: nobody introduced themselves.
+        public let inviterAlias: String
+        public let invitationMessage: String?
+        /// The invite key the request is sealed to, for display. Whoever
+        /// holds its private half is who this discloses to, and that is
+        /// worth showing rather than describing.
+        public let introPublicKey: Data
+        /// Pre-filled into the name field: the identity's own alias, or
+        /// the name a previous attempt on this row used.
+        public let suggestedLabel: String
+        let origin: Origin
+    }
+
+    /// Resolve a capability into the next screen. Records nothing, sends
+    /// nothing — see `JoinDestination`.
+    public func prepareJoin(capability: IntroCapability) async -> JoinDestination {
         guard let owner = await currentIdentityID() else {
             return .failed(reason: String(localized: "Sign in first."))
         }
@@ -261,47 +289,125 @@ public final class PendingChatsFlow {
         if groups.contains(where: { $0.id == groupIDHex && $0.ownerIdentityID == owner }) {
             return .alreadyJoined(groupIDHex: groupIDHex)
         }
-        let chat = PendingChat(
-            groupID: capability.groupId,
-            ownerIdentityID: owner,
-            introPublicKey: capability.introPublicKey,
-            groupName: capability.groupName,
-            // Nobody introduced themselves over a link — the row shows
-            // the group, not a person who never said their name.
-            inviterAlias: "",
-            invitationMessage: nil,
-            receivedAt: Date(),
-            status: .offered
-        )
-        switch await repository.record(chat) {
-        case .inserted:
-            send(chat)
-            return .waiting(rowID: chat.id)
-        case .alreadyPresent:
-            // A pushed offer for this group arrived first and is still
-            // unanswered. Tapping the link *is* the answer — leaving the
-            // row at `.offered` would land the user on a screen asking
-            // for the intent they just expressed, which is the whole
-            // thing this change removes. An already-`.requested` row is
-            // left alone: one link tap, one request.
-            let existing = await repository.currentChats().first { $0.id == chat.id }
-            if let existing, existing.status == .offered {
-                send(existing)
-            }
-            return .waiting(rowID: chat.id)
-        case .failed, .notRecorded:
-            return .failed(reason: String(localized: "Couldn\u{2019}t save this invite on your device."))
+        let rowID = "\(groupIDHex):\(owner.rawValue.uuidString)"
+        let existing = await repository.currentChats().first { $0.id == rowID }
+        // Already asked, on this link or a pushed offer for the same
+        // group: one tap, one request. The wait is the whole answer.
+        if let existing, existing.status != .offered {
+            return .waiting(rowID: rowID)
         }
+        // `??` takes an autoclosure, which can't await — and the name
+        // this row asked under, when it has one, is the one to offer
+        // back.
+        let suggested: String
+        if let asked = existing?.joinerLabel {
+            suggested = asked
+        } else {
+            suggested = await displayLabel()
+        }
+        return .confirm(
+            JoinConfirmation(
+                rowID: rowID,
+                groupIDHex: groupIDHex,
+                groupName: capability.groupName ?? existing?.groupName,
+                inviterAlias: existing?.inviterAlias ?? "",
+                invitationMessage: existing?.invitationMessage,
+                introPublicKey: capability.introPublicKey,
+                suggestedLabel: suggested,
+                origin: .link(capability)
+            )
+        )
     }
 
-    /// Explicit Accept on a pushed offer: ship a join request to the
-    /// offer's intro key. No-op once something is in flight, or once the
-    /// row has moved past `.offered`.
-    public func accept(_ id: String) {
-        guard let chat = pending.first(where: { $0.id == id }), chat.status == .offered else {
-            return
+    /// The same screen, reached from the Accept on a pushed offer.
+    ///
+    /// One path for both, so what a person is shown before their name
+    /// and keys leave the device does not depend on which door the
+    /// invitation came through.
+    public func prepareAccept(rowID: String) async -> JoinConfirmation? {
+        guard let chat = pending.first(where: { $0.id == rowID }), chat.status == .offered
+        else { return nil }
+        let suggested: String
+        if let asked = chat.joinerLabel {
+            suggested = asked
+        } else {
+            suggested = await displayLabel()
         }
-        send(chat)
+        return JoinConfirmation(
+            rowID: chat.id,
+            groupIDHex: chat.groupIDHex,
+            groupName: chat.groupName,
+            inviterAlias: chat.inviterAlias,
+            invitationMessage: chat.invitationMessage,
+            introPublicKey: chat.introPublicKey,
+            suggestedLabel: suggested,
+            origin: .offer(rowID: chat.id)
+        )
+    }
+
+    /// The one place a join request is sent, and the only one a person
+    /// can reach: the Send on the confirmation screen.
+    ///
+    /// `label` is what they typed. It rides with this join and does not
+    /// touch the identity — one identity can introduce itself
+    /// differently to different rooms — and it is stored on the row so a
+    /// later re-send says the same thing.
+    @discardableResult
+    public func confirmJoin(
+        _ confirmation: JoinConfirmation,
+        label: String
+    ) async -> JoinDestination {
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch confirmation.origin {
+        case .offer(let rowID):
+            guard let chat = pending.first(where: { $0.id == rowID }) else {
+                return .failed(reason: String(localized: "Couldn\u{2019}t save this invite on your device."))
+            }
+            // The same `.offered` check `prepareAccept` made, re-made
+            // here: an open screen can outlive the state it was opened
+            // on, and a row that has already asked has nothing left to
+            // send — the wait is the whole answer. `send`'s debounce
+            // catches the double tap; this catches the row that moved
+            // on underneath.
+            guard chat.status == .offered else { return .waiting(rowID: rowID) }
+            await repository.attachJoinerLabel(id: rowID, label: trimmed)
+            send(chat, label: trimmed)
+            return .waiting(rowID: rowID)
+        case .link(let capability):
+            guard let owner = await currentIdentityID() else {
+                return .failed(reason: String(localized: "Sign in first."))
+            }
+            let chat = PendingChat(
+                groupID: capability.groupId,
+                ownerIdentityID: owner,
+                introPublicKey: capability.introPublicKey,
+                groupName: capability.groupName,
+                // Nobody introduced themselves over a link — the row
+                // shows the group, not a person who never said their
+                // name.
+                inviterAlias: "",
+                invitationMessage: nil,
+                receivedAt: Date(),
+                status: .offered,
+                joinerLabel: trimmed
+            )
+            switch await repository.record(chat) {
+            case .inserted:
+                send(chat, label: trimmed)
+                return .waiting(rowID: chat.id)
+            case .alreadyPresent:
+                // A pushed offer for this group arrived first and is
+                // still unanswered — this Send is the answer to it.
+                await repository.attachJoinerLabel(id: chat.id, label: trimmed)
+                let existing = await repository.currentChats().first { $0.id == chat.id }
+                if let existing, existing.status == .offered {
+                    send(existing, label: trimmed)
+                }
+                return .waiting(rowID: chat.id)
+            case .failed, .notRecorded:
+                return .failed(reason: String(localized: "Couldn\u{2019}t save this invite on your device."))
+            }
+        }
     }
 
     /// Act on whatever this row is stuck on: re-drive a stalled
@@ -328,15 +434,39 @@ public final class PendingChatsFlow {
                 return
             }
             guard let chat = pending.first(where: { $0.id == id }) else { return }
-            send(chat)
+            // Under the name this row already asked under — a re-send
+            // that renamed the asker would arrive from a stranger.
+            //
+            // A row can have no label and still have asked: every row
+            // written before the confirmation screen existed sent under
+            // the identity's own name, and those are the rows most
+            // likely to need this, having waited through an update. So
+            // the fallback is that name, attached on the way out so the
+            // one after this repeats it rather than re-deriving it from
+            // an identity that may since have been renamed.
+            if let label = chat.joinerLabel {
+                send(chat, label: label)
+                return
+            }
+            let repository = self.repository
+            let displayLabel = self.displayLabel
+            Task { @MainActor [weak self] in
+                let label = await displayLabel()
+                await repository.attachJoinerLabel(id: id, label: label)
+                self?.send(chat, label: label)
+            }
         case .offered, .chainSettling:
             break
         }
     }
 
-    /// The one send path, shared by Accept and by Retry-after-failure.
-    /// Debounced on `sendingIDs` so a double tap ships one request.
-    private func send(_ chat: PendingChat) {
+    /// The one send path, shared by the confirmation screen's Send and
+    /// by a re-send. Debounced on `sendingIDs` so a double tap ships one
+    /// request.
+    ///
+    /// `label` is always supplied by a caller a person reached: there is
+    /// no path from an inbound link or event to here.
+    private func send(_ chat: PendingChat, label: String) {
         let id = chat.id
         guard !sendingIDs.contains(id) else { return }
         let capability: IntroCapability
@@ -353,11 +483,10 @@ public final class PendingChatsFlow {
         sendingIDs.insert(id)
         lastError = nil
         rebuild()
-        let displayLabel = self.displayLabel
         let submitJoin = self.submitJoin
         let repository = self.repository
         Task { @MainActor [weak self] in
-            let outcome = await submitJoin(capability, await displayLabel())
+            let outcome = await submitJoin(capability, label)
             switch outcome {
             case .sent:
                 await repository.markRequested(id: id)

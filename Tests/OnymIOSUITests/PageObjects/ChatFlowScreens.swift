@@ -107,20 +107,62 @@ struct ShareInviteScreen {
     }
 }
 
+// MARK: - Join confirmation
+
+/// The screen between an invitation and a request. A link resolves here
+/// and nothing is sent until Send is tapped — the app's URL types are
+/// exported, so delivery cannot be treated as consent.
+struct JoinConfirmScreen {
+    let app: XCUIApplication
+
+    var nameField: XCUIElement { app.textFields["join_confirm.name_field"] }
+    var sendButton: XCUIElement { app.buttons["join_confirm.send"] }
+
+    @discardableResult
+    func waitReady(timeout: TimeInterval = 20) -> Bool {
+        sendButton.waitForExistence(timeout: timeout)
+    }
+
+    /// The name the field arrives pre-filled with — the active
+    /// identity's own alias.
+    var prefilledName: String? {
+        guard nameField.waitForExistence(timeout: 5) else { return nil }
+        return nameField.value as? String
+    }
+
+    /// Replaces the pre-filled alias with a name chosen for this chat
+    /// alone. Not used by the happy path, which is Send and nothing
+    /// else.
+    func typeName(_ name: String) {
+        guard nameField.waitForExistence(timeout: 5) else { return }
+        nameField.tap()
+        if let current = nameField.value as? String, !current.isEmpty {
+            nameField.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count))
+        }
+        nameField.typeText(name)
+    }
+
+    func send() {
+        XCTAssertTrue(sendButton.waitForExistence(timeout: 5), "Send join request button missing")
+        sendButton.tap()
+    }
+}
+
 // MARK: - Join (pending chat)
 
-/// A tapped invite link no longer opens a screen of its own: the request
-/// goes out on the tap and the app pushes the chat it created, pending
-/// until the founder lets the joiner in. So this page object waits on
-/// that thread rather than driving a form.
+/// Where a confirmed join lands: the chat it created, pending until the
+/// founder lets the joiner in. So this page object waits on that thread
+/// rather than driving a form — the one form in this flow is the
+/// confirmation screen above, and it is already behind us.
 struct PendingChatScreen {
     let app: XCUIApplication
 
     var waiting: XCUIElement { app.staticTexts["pending_chat.waiting"] }
     var stuck: XCUIElement { app.staticTexts["pending_chat.stuck"] }
 
-    /// The request ships without a tap, so "ready" is the waiting state
-    /// itself — reaching it is proof the join left the device.
+    /// "Ready" is the waiting state itself — reaching it is proof the
+    /// join left the device, which by now means someone tapped Send on
+    /// the confirmation screen.
     @discardableResult
     func waitReady(timeout: TimeInterval = 20) -> Bool {
         waiting.waitForExistence(timeout: timeout)

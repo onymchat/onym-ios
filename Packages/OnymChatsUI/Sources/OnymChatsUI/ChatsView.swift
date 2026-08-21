@@ -84,6 +84,10 @@ public struct ChatsView: View {
     /// inside the pending thread, which is precisely the screen a failed
     /// join never reaches.
     @State private var scanJoinError: String?
+    /// A scanned invite awaiting confirmation. A scan is a deliberate
+    /// act, but what it discloses is the same, so it gets the same
+    /// review as a link before anything is sent.
+    @State private var scanConfirmation: PendingChatsFlow.JoinConfirmation?
     /// The chat awaiting a swipe-to-delete confirmation, if any.
     @State private var pendingDelete: ChatListItem?
 
@@ -182,8 +186,10 @@ public struct ChatsView: View {
             QRCodeScannerView(
                 onScanned: { raw in
                     // Same allowlist + decode the deeplink path uses, so
-                    // a scanned link and a tapped link reach `join`
-                    // identically. A non-invite QR yields nil → reject.
+                    // a scanned link and a tapped link resolve through
+                    // `prepareJoin` identically — a scan is deliberate,
+                    // but it discloses the same things, so it gets the
+                    // same review. A non-invite QR yields nil → reject.
                     if let cap = DeeplinkCapture.introCapability(fromString: raw) {
                         scannedCapability = cap
                     } else {
@@ -192,6 +198,33 @@ public struct ChatsView: View {
                     showScanner = false
                 },
                 onCancel: { showScanner = false }
+            )
+        }
+        .sheet(item: $scanConfirmation) { confirmation in
+            JoinConfirmView(
+                confirmation: confirmation,
+                onSend: { label in
+                    let flow = pendingChatsFlow
+                    let navigation = navigation
+                    scanConfirmation = nil
+                    Task { @MainActor in
+                        // Every outcome, not just the happy one: the
+                        // sheet closes either way, so a row that
+                        // couldn't be written would otherwise look
+                        // exactly like a request that went out.
+                        switch await flow.confirmJoin(confirmation, label: label) {
+                        case .waiting(let rowID):
+                            navigation.openPending(rowID: rowID)
+                        case .alreadyJoined(let groupIDHex):
+                            navigation.openChat(groupID: groupIDHex)
+                        case .failed(let reason):
+                            scanJoinError = reason
+                        case .confirm:
+                            break
+                        }
+                    }
+                },
+                onCancel: { scanConfirmation = nil }
             )
         }
         .reasonAlert("Couldn\u{2019}t use that invite", reason: $scanJoinError)
@@ -206,19 +239,22 @@ public struct ChatsView: View {
     /// dismissed — see the `scannedCapability` note above.
     ///
     /// A scan used to open the join sheet. It now does exactly what a
-    /// tapped link does: sends the request and opens the chat that is on
-    /// its way, so the two entry points can't drift apart.
+    /// tapped link does — resolves to a screen, and sends nothing until
+    /// someone taps Send on it — so the two entry points can't drift
+    /// apart.
     private func handleScannerDismiss() {
         if let cap = scannedCapability {
             scannedCapability = nil
             let flow = pendingChatsFlow
             let navigation = navigation
             Task { @MainActor in
-                switch await flow.join(capability: cap) {
+                switch await flow.prepareJoin(capability: cap) {
                 case .alreadyJoined(let groupIDHex):
                     navigation.openChat(groupID: groupIDHex)
                 case .waiting(let rowID):
                     navigation.openPending(rowID: rowID)
+                case .confirm(let confirmation):
+                    scanConfirmation = confirmation
                 case .failed(let reason):
                     scanJoinError = reason
                 }
