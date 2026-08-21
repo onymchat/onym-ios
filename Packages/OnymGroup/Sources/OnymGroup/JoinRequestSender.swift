@@ -38,9 +38,19 @@ public actor JoinRequestSender {
     ///     prompt. Joiner-controlled untrusted text — keep short
     ///     (Nostr relays typically cap event size at ~64KB and we
     ///     don't want to bloat the request envelope).
+    ///   - agreedRules: the rules text the joiner was shown and
+    ///     accepted, or nil when the invitation carried none.
+    ///
+    ///     Passed in rather than read off `capability`, because the
+    ///     signature has to cover what a person actually saw. The two
+    ///     are the same for a link, but an invitation pushed to this
+    ///     device carries its rules on the stored offer instead, and a
+    ///     sender that reached for the capability's copy would sign
+    ///     text that was never on screen in that case.
     public func send(
         capability: IntroCapability,
-        joinerDisplayLabel: String
+        joinerDisplayLabel: String,
+        agreedRules: String? = nil
     ) async -> Outcome {
         guard let active = await identity.currentIdentity() else {
             return .noIdentityLoaded
@@ -61,6 +71,33 @@ public actor JoinRequestSender {
         } catch {
             return .transportFailed("leaf_hash: \(error)")
         }
+        // The agreement, when there is one to make. Signed with the
+        // same long-term key the request already announces as
+        // `joinerSendingPublicKey`, so every member who is later told
+        // about this joiner can check it — not just the founder who
+        // admitted them.
+        var rulesHash: Data?
+        var rulesSignature: Data?
+        if let rules = GroupRules.normalized(agreedRules) {
+            let hash = GroupRules.hash(rules)
+            do {
+                rulesSignature = try await identity.signWithStellarKey(
+                    GroupRules.statement(
+                        groupID: capability.groupId,
+                        rulesHash: hash,
+                        joinerSendingPublicKey: active.stellarPublicKey
+                    )
+                )
+                rulesHash = hash
+            } catch {
+                // Nothing is sent unsigned behind the person's back:
+                // they were shown rules and told that Send agrees to
+                // them, and a request that arrives without the
+                // signature reads to the founder as someone who
+                // declined to agree.
+                return .transportFailed("rules signature: \(error)")
+            }
+        }
         let payload: JoinRequestPayload
         do {
             payload = try JoinRequestPayload(
@@ -69,7 +106,9 @@ public actor JoinRequestSender {
                 joinerLeafHash: leafHash,
                 joinerSendingPublicKey: active.stellarPublicKey,
                 joinerDisplayLabel: joinerDisplayLabel,
-                groupId: capability.groupId
+                groupId: capability.groupId,
+                rulesHash: rulesHash,
+                rulesSignature: rulesSignature
             )
         } catch {
             return .transportFailed("payload: \(error)")
