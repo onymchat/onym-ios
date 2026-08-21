@@ -17,7 +17,7 @@ public struct ChatsView: View {
     let flow: ChatsFlow
     let identitiesFlow: IdentitiesFlow
     let approveRequestsFlow: ApproveRequestsFlow
-    let pendingInvitesFlow: PendingInvitesFlow
+    let pendingChatsFlow: PendingChatsFlow
     let messageRepository: MessageRepository
     let imageLoader: ChatImageLoader
     let videoLoader: ChatVideoLoader
@@ -35,7 +35,7 @@ public struct ChatsView: View {
         flow: ChatsFlow,
         identitiesFlow: IdentitiesFlow,
         approveRequestsFlow: ApproveRequestsFlow,
-        pendingInvitesFlow: PendingInvitesFlow,
+        pendingChatsFlow: PendingChatsFlow,
         messageRepository: MessageRepository,
         imageLoader: ChatImageLoader,
         videoLoader: ChatVideoLoader,
@@ -52,7 +52,7 @@ public struct ChatsView: View {
         self.flow = flow
         self.identitiesFlow = identitiesFlow
         self.approveRequestsFlow = approveRequestsFlow
-        self.pendingInvitesFlow = pendingInvitesFlow
+        self.pendingChatsFlow = pendingChatsFlow
         self.messageRepository = messageRepository
         self.imageLoader = imageLoader
         self.videoLoader = videoLoader
@@ -82,11 +82,51 @@ public struct ChatsView: View {
 
     public var body: some View {
         Group {
-            if flow.groups.isEmpty {
+            // The pitch only stands in for an empty list. A chat the
+            // user is waiting to be let into is not an empty list — it
+            // is the first chat, mid-arrival — so a pending row keeps
+            // the pitch away.
+            if !hasAnyChats {
                 emptyState
             } else {
                 groupList
             }
+        }
+        // Both destinations hang off the outer view rather than off the
+        // populated list: a push can now arrive from outside this view
+        // (a tapped invite link), and a first-ever user with no chats is
+        // rendering `emptyState` at that moment. Registered on the list,
+        // the route would be appended to a stack with no destination for
+        // it, surviving only if the row insert and the append happen to
+        // land in the same render pass.
+        .navigationDestination(for: String.self) { groupID in
+            // PR 5 of the chat stack: tapping a group opens the
+            // UIKit chat thread instead of the members roster. The
+            // thread's info button pushes `ChatMembersView` from
+            // there, so the existing surface is still reachable —
+            // just one tap deeper.
+            ChatThreadView(
+                groupID: groupID,
+                chatsFlow: flow,
+                identitiesFlow: identitiesFlow,
+                messageRepository: messageRepository,
+                sendMessageInteractor: sendMessageInteractor,
+                chatReceiptSender: chatReceiptSender,
+                makeShareInviteFlow: makeShareInviteFlow,
+                setGroupAvatar: setGroupAvatar,
+                setGroupName: setGroupName,
+                imageLoader: imageLoader,
+                videoLoader: videoLoader,
+                voiceLoader: voiceLoader,
+                makeModerationReportView: makeModerationReportView,
+                approveRequestsFlow: approveRequestsFlow
+            )
+        }
+        // A distinct route type rather than another `String`: a pending
+        // chat's id and a group id would otherwise be the same value
+        // space, and a stale one would open the wrong screen.
+        .navigationDestination(for: PendingChatRoute.self) { route in
+            PendingChatThreadView(flow: pendingChatsFlow, rowID: route.id)
         }
         .navigationTitle(currentIdentityName)
         .toolbar {
@@ -104,11 +144,10 @@ public struct ChatsView: View {
             // `approveRequestsFlow` is still started below: it collects
             // the requests both of those read.
 
-            // Invitations received by this identity (push offers).
-            // Always-rendered + badge-on-nonempty.
-            ToolbarItem(placement: .topBarTrailing) {
-                PendingInvitesToolbarButton(flow: pendingInvitesFlow)
-            }
+            // Invitations used to live behind a badged envelope here,
+            // opening a modal list of offers. There is no such surface
+            // any more: an offer, and a join we have asked for, are rows
+            // in the list below like any other chat — see `rows`.
             // Scan-to-join — the joiner-side counterpart to the host's
             // invite QR (shown from Group Settings). Always available so
             // a brand-new user can scan their way into a first group
@@ -125,7 +164,7 @@ public struct ChatsView: View {
             // Plus button mirrors iOS Mail / Messages — useful once
             // the user already has at least one chat. Hidden in the
             // empty state because the central CTA already covers it.
-            if !flow.groups.isEmpty {
+            if hasAnyChats {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         showCreateGroup = true
@@ -139,7 +178,7 @@ public struct ChatsView: View {
         .task { flow.start() }
         .task { await identitiesFlow.start() }
         .task { await approveRequestsFlow.start() }
-        .task { await pendingInvitesFlow.start() }
+        .task { await pendingChatsFlow.start() }
         .fullScreenCover(isPresented: $showCreateGroup) {
             CreateGroupViewHost(
                 makeFlow: makeCreateGroupFlow,
@@ -342,30 +381,97 @@ public struct ChatsView: View {
         return group.isAdmin(blsPublicKey: activeSummary.blsPublicKey)
     }
 
+    /// The two kinds of row this list holds, merged and ordered
+    /// together. Merging here rather than inside `ChatsFlow` keeps the
+    /// two facts with their owners: `ChatsFlow` knows about groups and
+    /// messages, `PendingChatsFlow` knows about waits, and neither has
+    /// to learn the other's vocabulary to be sorted next to it.
+    private enum Row: Identifiable {
+        case chat(ChatListItem)
+        case pending(PendingChatsFlow.Row)
+
+        var id: String {
+            switch self {
+            case .chat(let item): "chat:\(item.id)"
+            case .pending(let row): "pending:\(row.id)"
+            }
+        }
+
+        /// A pending chat sorts by when the wait started, exactly as a
+        /// real chat sorts by its newest message — so a join that is
+        /// happening right now lands at the top, which is where the
+        /// person who just tapped the link will look for it.
+        var sortKey: Date {
+            switch self {
+            case .chat(let item): item.sortKey
+            case .pending(let row): row.receivedAt
+            }
+        }
+    }
+
+    /// Whether this identity has anything at all in its list — a chat,
+    /// or one on its way in.
+    ///
+    /// Reads `flow.groups` rather than `rows`, because `items` is
+    /// rebuilt behind an await per group: gating on it showed the
+    /// "start your first chat" pitch for a frame or two *after* the
+    /// first group landed, and hid the compose button for the same
+    /// beat.
+    private var hasAnyChats: Bool {
+        !(flow.groups.isEmpty && pendingChatsFlow.rows.isEmpty)
+    }
+
+    private var rows: [Row] {
+        let merged = flow.items.map(Row.chat) + pendingChatsFlow.rows.map(Row.pending)
+        return merged.sorted { $0.sortKey > $1.sortKey }
+    }
+
     private var groupList: some View {
         // Built once per render rather than per row: as a computed
         // property read inside the row builder it rebuilt the whole
         // dictionary — and re-ran the admin derivation for every pending
         // request — once for each group in the list.
         let joinRequestCounts = pendingJoinRequestCounts
-        return List(flow.items) { item in
-            NavigationLink(value: item.group.id) {
-                ChatsRow(
-                    item: item,
-                    joinRequestCount: joinRequestCounts[item.group.id] ?? 0
-                )
-            }
-            .listRowSeparator(.visible)
-            // Swipe-to-delete with confirmation. Full-swipe is disabled so
-            // a stray swipe can't wipe a chat + its messages without the
-            // user confirming in the dialog below.
-            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                Button(role: .destructive) {
-                    pendingDelete = item
-                } label: {
-                    Label("Delete", systemImage: "trash")
+        return List(rows) { row in
+            switch row {
+            case .chat(let item):
+                NavigationLink(value: item.group.id) {
+                    ChatsRow(
+                        item: item,
+                        joinRequestCount: joinRequestCounts[item.group.id] ?? 0
+                    )
                 }
-                .accessibilityIdentifier("chats.row.delete.\(item.group.id)")
+                .listRowSeparator(.visible)
+                // Swipe-to-delete with confirmation. Full-swipe is disabled so
+                // a stray swipe can't wipe a chat + its messages without the
+                // user confirming in the dialog below.
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    Button(role: .destructive) {
+                        pendingDelete = item
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                    .accessibilityIdentifier("chats.row.delete.\(item.group.id)")
+                }
+            case .pending(let pending):
+                NavigationLink(value: PendingChatRoute(id: pending.id)) {
+                    PendingChatsRow(row: pending)
+                }
+                .listRowSeparator(.visible)
+                // No confirmation dialog: nothing is being destroyed.
+                // This is the old Dismiss — it drops a local offer and
+                // sends nothing to the founder, whose outstanding intro
+                // key simply goes unused.
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    if pending.isDismissable {
+                        Button(role: .destructive) {
+                            pendingChatsFlow.dismiss(pending.id)
+                        } label: {
+                            Label("Dismiss", systemImage: "xmark.bin")
+                        }
+                        .accessibilityIdentifier("chats.pending.dismiss.\(pending.id)")
+                    }
+                }
             }
         }
         .listStyle(.plain)
@@ -386,31 +492,94 @@ public struct ChatsView: View {
             .accessibilityIdentifier("chats.delete.confirm")
             Button("Cancel", role: .cancel) {}
         } message: { item in
-            let name = item.group.name.isEmpty ? "this chat" : "“\(item.group.name)”"
+            let name = item.group.name.isEmpty ? "this chat" : "\u{201C}\(item.group.name)\u{201D}"
             Text("This removes \(name) and every message in it from this device. It can't be undone.")
         }
-        .navigationDestination(for: String.self) { groupID in
-            // PR 5 of the chat stack: tapping a group opens the
-            // UIKit chat thread instead of the members roster. The
-            // thread's info button pushes `ChatMembersView` from
-            // there, so the existing surface is still reachable —
-            // just one tap deeper.
-            ChatThreadView(
-                groupID: groupID,
-                chatsFlow: flow,
-                identitiesFlow: identitiesFlow,
-                messageRepository: messageRepository,
-                sendMessageInteractor: sendMessageInteractor,
-                chatReceiptSender: chatReceiptSender,
-                makeShareInviteFlow: makeShareInviteFlow,
-                setGroupAvatar: setGroupAvatar,
-                setGroupName: setGroupName,
-                imageLoader: imageLoader,
-                videoLoader: videoLoader,
-                voiceLoader: voiceLoader,
-                makeModerationReportView: makeModerationReportView,
-                approveRequestsFlow: approveRequestsFlow
+    }
+}
+
+/// Navigation value for a chat that hasn't opened yet.
+struct PendingChatRoute: Hashable {
+    let id: String
+}
+
+/// Chat-list row for a chat the user is waiting to be let into. Reads as
+/// a chat, muted: the same avatar and title layout, no unread badge (no
+/// messages exist), and a subtitle that says what is being waited on.
+private struct PendingChatsRow: View {
+    let row: PendingChatsFlow.Row
+
+    var body: some View {
+        HStack(spacing: 12) {
+            OnymGroupAvatar(
+                size: 44,
+                accent: OnymAccent.blue.color,
+                ringPulse: false,
+                spinning: false,
+                brand: false,
+                imageData: nil
             )
+            .opacity(0.6)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.name?.isEmpty == false ? row.name! : String(localized: "(Unnamed)"))
+                    .font(.system(size: 16, weight: .semibold))
+                    .lineLimit(1)
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    Image(systemName: icon)
+                        .font(.caption2)
+                        .foregroundStyle(iconTint)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .accessibilityIdentifier("chats.pending.subtitle.\(row.id)")
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 4)
+        .accessibilityIdentifier("chats.pending.\(row.id)")
+    }
+
+    private var icon: String {
+        switch row.state {
+        case .offered: "envelope"
+        case .waiting, .chainSettling: "hourglass"
+        case .founderUnreachable, .chainUnreachable, .chainNotConfigured, .sendFailed:
+            "exclamationmark.triangle"
+        }
+    }
+
+    private var iconTint: Color {
+        switch row.state {
+        case .offered: OnymAccent.blue.color
+        case .waiting, .chainSettling: .secondary
+        case .founderUnreachable, .chainUnreachable, .chainNotConfigured, .sendFailed:
+            OnymTokens.red
+        }
+    }
+
+    /// One line, and it has to answer "why isn't this a chat yet?" from
+    /// the list alone — a person scanning past it should not have to open
+    /// the row to learn that it is stuck rather than merely slow.
+    private var subtitle: String {
+        switch row.state {
+        case .offered:
+            let alias = row.inviterAlias.trimmingCharacters(in: .whitespacesAndNewlines)
+            return alias.isEmpty
+                ? String(localized: "You\u{2019}ve been invited")
+                : String(localized: "\(alias) invited you")
+        case .waiting:
+            return String(localized: "Waiting until you\u{2019}re in")
+        case .chainSettling:
+            return String(localized: "Almost in")
+        case .founderUnreachable, .chainUnreachable, .chainNotConfigured:
+            return String(localized: "Couldn\u{2019}t verify \u{2014} tap to retry")
+        case .sendFailed:
+            return String(localized: "Request didn\u{2019}t send \u{2014} tap to retry")
         }
     }
 }

@@ -310,7 +310,7 @@ struct RootView: View {
                         flow: dependencies.chatsFlow,
                         identitiesFlow: dependencies.identitiesFlow,
                         approveRequestsFlow: dependencies.approveRequestsFlow,
-                        pendingInvitesFlow: dependencies.pendingInvitesFlow,
+                        pendingChatsFlow: dependencies.pendingChatsFlow,
                         messageRepository: dependencies.messageRepository,
                         imageLoader: dependencies.imageLoader,
                         videoLoader: dependencies.videoLoader,

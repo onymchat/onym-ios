@@ -9,6 +9,7 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../OnymChatsCore"),
+        .package(path: "../OnymFoundation"),
         .package(path: "../OnymGroup"),
         .package(path: "../OnymIdentity"),
         .package(path: "../OnymChain"),
@@ -21,6 +22,7 @@ let package = Package(
             name: "OnymInbox",
             dependencies: [
                 "OnymChatsCore",
+                "OnymFoundation",
                 "OnymGroup",
                 "OnymIdentity",
                 "OnymChain",

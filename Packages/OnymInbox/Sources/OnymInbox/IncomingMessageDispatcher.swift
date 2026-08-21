@@ -56,7 +56,7 @@ public struct IncomingMessageDispatcher: Sendable {
     let messageRepository: MessageRepository
     /// Receive-side sink for decoded `GroupInviteOfferPayload`s — the
     /// push counterpart to the deeplink join flow. An offer lands here
-    /// as a `PendingInvite` awaiting the user's explicit Accept (which
+    /// as a `PendingChat` awaiting the user's explicit Accept (which
     /// ships a `JoinRequestPayload`) or dismiss. It grants nothing and
     /// never materializes a group: membership only follows the
     /// invitee's accept + the admin's explicit on-chain approve.
@@ -64,12 +64,12 @@ public struct IncomingMessageDispatcher: Sendable {
     /// Defaulted (in `init`) to a fresh store so the many existing test
     /// constructions don't have to thread a spy they don't exercise;
     /// production (`OnymIOSApp`) passes the shared store explicitly.
-    let pendingInvites: any PendingInvitesRecording
+    let pendingChats: any PendingChatRecording
     /// Seam for the verify-at-current state machine (Option 2). A stale
     /// Tyranny snapshot (chain advanced past its epoch) is deferred here
     /// on the invitee side; inbound `GroupStateRefreshRequest`s are
     /// answered here on the admin side. Defaulted to a no-op for the
-    /// same reason as `pendingInvites`.
+    /// same reason as `pendingChats`.
     let groupStateRefresher: any GroupStateRefreshing
     /// Ships a delivered receipt back to a chat message's sender the
     /// moment we persist it. Defaulted to a no-op so the many existing
@@ -104,7 +104,7 @@ public struct IncomingMessageDispatcher: Sendable {
         invitationsRepository: IncomingInvitationsRepository,
         chainState: any ChainStateReading,
         messageRepository: MessageRepository,
-        pendingInvites: any PendingInvitesRecording = PendingInvitesStore(),
+        pendingChats: any PendingChatRecording = NoopPendingChatRecorder(),
         groupStateRefresher: any GroupStateRefreshing = NoopGroupStateRefresher(),
         receiptSender: any ChatReceiptSending = NoopChatReceiptSender(),
         readReceiptsEnabled: @escaping @Sendable () -> Bool = { true },
@@ -116,7 +116,7 @@ public struct IncomingMessageDispatcher: Sendable {
         self.invitationsRepository = invitationsRepository
         self.chainState = chainState
         self.messageRepository = messageRepository
-        self.pendingInvites = pendingInvites
+        self.pendingChats = pendingChats
         self.groupStateRefresher = groupStateRefresher
         self.receiptSender = receiptSender
         self.readReceiptsEnabled = readReceiptsEnabled
@@ -159,7 +159,6 @@ public struct IncomingMessageDispatcher: Sendable {
         ) {
             await recordOffer(
                 offer,
-                messageID: messageID,
                 ownerIdentityID: ownerIdentityID,
                 receivedAt: receivedAt
             )
@@ -276,25 +275,45 @@ public struct IncomingMessageDispatcher: Sendable {
         )
     }
 
-    /// Queue a decoded push offer for the user's explicit Accept.
-    /// Keyed by the inbound Nostr event id so a re-delivered offer
-    /// (replaceable events are re-fetched on every relaunch) is
-    /// idempotent in the store.
+    /// Record a decoded push offer as a chat the user has been offered
+    /// a seat in — a row in their chats list, awaiting the explicit
+    /// Accept that ships the join request.
+    ///
+    /// Keyed by `(group, owner)` rather than by the inbound event id: a
+    /// replaceable offer is re-fetched on every relaunch, and a row that
+    /// the user has already accepted must not come back asking to be
+    /// accepted again. The store's dedup handles that; nothing here has
+    /// to remember which deliveries it has seen.
+    ///
+    /// The store's dedup cannot cover the replay that arrives *after*
+    /// the group materialized, though — by then there is no row left to
+    /// collapse onto, and the sweep that would clear a fresh one only
+    /// runs on a `GroupRepository` emission. That row is durable now and
+    /// renders in the chats list beside the real chat, offering to send
+    /// a join request for a group the user is already in. So the check
+    /// is here, at the only point that knows the offer is new.
     private func recordOffer(
         _ offer: GroupInviteOfferPayload,
-        messageID: String,
         ownerIdentityID: IdentityID,
         receivedAt: Date
     ) async {
-        await pendingInvites.record(PendingInvite(
-            id: messageID,
+        let groupIDHex = offer.groupID.map { String(format: "%02x", $0) }.joined()
+        let alreadyJoined = await groupRepository.currentGroups().contains {
+            $0.id == groupIDHex && $0.ownerIdentityID == ownerIdentityID
+        }
+        // Scoped to the invited identity: another identity on this
+        // device being in the group says nothing about whether this one
+        // was invited to it.
+        guard !alreadyJoined else { return }
+        await pendingChats.record(PendingChat(
+            groupID: offer.groupID,
             ownerIdentityID: ownerIdentityID,
             introPublicKey: offer.introPublicKey,
-            groupID: offer.groupID,
             groupName: offer.groupName,
             inviterAlias: offer.inviterAlias,
             invitationMessage: offer.invitationMessage,
-            receivedAt: receivedAt
+            receivedAt: receivedAt,
+            status: .offered
         ))
     }
 

@@ -34,6 +34,40 @@
         }
       }
     },
+    "%@ invited you": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ invited you"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Приглашение от %@"
+          }
+        }
+      }
+    },
+    "Accepting sends a request. The founder decides who comes in, so you'll be in once they approve.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Accepting sends a request. The founder decides who comes in, so you'll be in once they approve."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Принятие отправит запрос. Основатель решает, кого впускать, — вы войдёте, как только он одобрит."
+          }
+        }
+      }
+    },
     "ADD CUSTOM URL": {
       "localizations": {
         "en": {
@@ -82,6 +116,23 @@
         }
       }
     },
+    "Almost in": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Almost in"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Почти внутри"
+          }
+        }
+      }
+    },
     "Already confirmed — its key is pinned.": {
       "localizations": {
         "en": {
@@ -94,6 +145,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Уже подтверждён — его ключ закреплён."
+          }
+        }
+      }
+    },
+    "Ask again": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ask again"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Спросить ещё раз"
           }
         }
       }
@@ -238,6 +306,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Продолжить"
+          }
+        }
+      }
+    },
+    "Couldn’t verify — tap to retry": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t verify — tap to retry"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не удалось проверить — нажмите, чтобы повторить"
           }
         }
       }
@@ -594,6 +679,23 @@
         }
       }
     },
+    "Request didn’t send — tap to retry": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Request didn’t send — tap to retry"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Запрос не отправлен — нажмите, чтобы повторить"
+          }
+        }
+      }
+    },
     "Restart Onboarding": {
       "localizations": {
         "en": {
@@ -670,6 +772,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Запускает первичную настройку заново: доставка сообщений, хранилище файлов, нотариус и модерация. Ваша идентичность, чаты и сообщения сохраняются, а текущий выбор остаётся в силе, пока вы его не измените."
+          }
+        }
+      }
+    },
+    "Sending…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sending…"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Отправка…"
           }
         }
       }
@@ -786,6 +905,23 @@
         }
       }
     },
+    "The founder has to let you in before this chat opens. It appears here the moment they do — you don’t have to keep this screen open.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The founder has to let you in before this chat opens. It appears here the moment they do — you don’t have to keep this screen open."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Чат откроется, когда основатель впустит вас. Он появится здесь сразу — держать этот экран открытым не нужно."
+          }
+        }
+      }
+    },
     "The next few screens set up the services this app runs on. Each one shows exactly what you're agreeing to before anything is turned on.": {
       "localizations": {
         "en": {
@@ -850,6 +986,23 @@
         }
       }
     },
+    "This invite is malformed and can't be accepted.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This invite is malformed and can't be accepted."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Это приглашение повреждено и не может быть принято."
+          }
+        }
+      }
+    },
     "Unavailable": {
       "localizations": {
         "en": {
@@ -878,6 +1031,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Проверить и подтвердить"
+          }
+        }
+      }
+    },
+    "Waiting until you’re in": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting until you’re in"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ждём, когда вас впустят"
           }
         }
       }
@@ -1006,6 +1176,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "СВОЙ ПРОВАЙДЕР"
+          }
+        }
+      }
+    },
+    "Your request didn’t go out. Tap Retry to send it again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your request didn’t go out. Tap Retry to send it again."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ваш запрос не ушёл. Нажмите «Повторить», чтобы отправить снова."
+          }
+        }
+      }
+    },
+    "You’ve been invited": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You’ve been invited"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Вас пригласили"
           }
         }
       }
@@ -2774,22 +2978,6 @@
         }
       }
     },
-    "Group invites you receive show up here for you to accept.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Group invites you receive show up here for you to accept."
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Приглашения в группы, которые вы получаете, появляются здесь для принятия."
-          }
-        }
-      }
-    },
     "Group membership is anchored on Stellar, not owned by us.": {
       "extractionState": "stale",
       "localizations": {
@@ -2969,23 +3157,6 @@
         }
       }
     },
-    "Invitations": {
-      "extractionState": "stale",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Invitations"
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Приглашения"
-          }
-        }
-      }
-    },
     "Invite": {
       "localizations": {
         "en": {
@@ -3047,22 +3218,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Пригласите людей в чат — они появятся здесь."
-          }
-        }
-      }
-    },
-    "invited you to “%@”": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "invited you to “%@”"
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "пригласил вас в «%@»"
           }
         }
       }
@@ -3313,22 +3468,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Контрактов пока нет"
-          }
-        }
-      }
-    },
-    "No invitations": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No invitations"
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Нет приглашений"
           }
         }
       }

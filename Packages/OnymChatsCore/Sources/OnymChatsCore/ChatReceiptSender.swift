@@ -22,7 +22,7 @@ public protocol ChatReceiptSending: Sendable {
 
 /// Default no-op so the dispatcher's many test constructions don't have
 /// to thread a receipt sender they don't exercise (same posture as
-/// `pendingInvites` / `groupStateRefresher`). Reports `false` — nothing
+/// `pendingChats` / `groupStateRefresher`). Reports `false` — nothing
 /// was sent, so nothing should be latched as acked.
 public struct NoopChatReceiptSender: ChatReceiptSending {
     public init() {}
