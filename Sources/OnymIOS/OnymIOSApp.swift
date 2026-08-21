@@ -75,6 +75,9 @@ struct OnymIOSApp: App {
     /// can come back to. Rare, and silent failure here would leave
     /// someone waiting on a request that was never recorded.
     @State private var joinLinkError: String?
+    /// The confirmation a tapped link resolved to, if any. Nothing has
+    /// been recorded or sent while this is set — that is the point.
+    @State private var joinConfirmation: PendingChatsFlow.JoinConfirmation?
 
     init() {
         let args = ProcessInfo.processInfo.arguments
@@ -1974,26 +1977,59 @@ struct OnymIOSApp: App {
                     pendingCapability = nil
                     Task { await handleCapability(captured) }
                 }
+                .sheet(item: $joinConfirmation) { confirmation in
+                    JoinConfirmView(
+                        confirmation: confirmation,
+                        onSend: { label in
+                            Task { await sendConfirmedJoin(confirmation, label: label) }
+                        },
+                        onCancel: { joinConfirmation = nil }
+                    )
+                }
                 .reasonAlert("Couldn\u{2019}t use that invite", reason: $joinLinkError)
         }
     }
 
-    /// Ship the join request for a tapped link and open what it made.
+    /// Resolve a tapped link into the next screen — and nothing else.
     ///
-    /// Both outcomes are a navigation: a link the user is already inside
-    /// opens that chat rather than starting a second wait, and a fresh
-    /// one opens the pending chat the request created. The alert is for
-    /// the case where neither exists — without it a failed link is
-    /// indistinguishable from a link that worked.
+    /// The URL types this app registers are open to anything on the
+    /// device that can form a link, so arrival cannot be treated as
+    /// permission to introduce this identity to a stranger. A link the
+    /// user is already inside opens that chat; one they have already
+    /// asked about opens the wait; anything else opens the confirmation
+    /// screen, which is the only place a request is sent from. The alert
+    /// is for the case where none of those exist — without it a failed
+    /// link is indistinguishable from a link that worked.
     @MainActor
     private func handleCapability(_ capability: IntroCapability) async {
-        switch await dependencies.pendingChatsFlow.join(capability: capability) {
+        switch await dependencies.pendingChatsFlow.prepareJoin(capability: capability) {
         case .alreadyJoined(let groupIDHex):
             dependencies.chatsNavigation.openChat(groupID: groupIDHex)
         case .waiting(let rowID):
             dependencies.chatsNavigation.openPending(rowID: rowID)
+        case .confirm(let confirmation):
+            joinConfirmation = confirmation
         case .failed(let reason):
             joinLinkError = reason
+        }
+    }
+
+    /// Send what the person confirmed, then open the wait it started.
+    @MainActor
+    private func sendConfirmedJoin(
+        _ confirmation: PendingChatsFlow.JoinConfirmation,
+        label: String
+    ) async {
+        joinConfirmation = nil
+        switch await dependencies.pendingChatsFlow.confirmJoin(confirmation, label: label) {
+        case .waiting(let rowID):
+            dependencies.chatsNavigation.openPending(rowID: rowID)
+        case .alreadyJoined(let groupIDHex):
+            dependencies.chatsNavigation.openChat(groupID: groupIDHex)
+        case .failed(let reason):
+            joinLinkError = reason
+        case .confirm:
+            break
         }
     }
 }

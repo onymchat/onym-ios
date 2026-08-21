@@ -84,6 +84,10 @@ public struct ChatsView: View {
     /// inside the pending thread, which is precisely the screen a failed
     /// join never reaches.
     @State private var scanJoinError: String?
+    /// A scanned invite awaiting confirmation. A scan is a deliberate
+    /// act, but what it discloses is the same, so it gets the same
+    /// review as a link before anything is sent.
+    @State private var scanConfirmation: PendingChatsFlow.JoinConfirmation?
     /// The chat awaiting a swipe-to-delete confirmation, if any.
     @State private var pendingDelete: ChatListItem?
 
@@ -194,6 +198,24 @@ public struct ChatsView: View {
                 onCancel: { showScanner = false }
             )
         }
+        .sheet(item: $scanConfirmation) { confirmation in
+            JoinConfirmView(
+                confirmation: confirmation,
+                onSend: { label in
+                    let flow = pendingChatsFlow
+                    let navigation = navigation
+                    scanConfirmation = nil
+                    Task { @MainActor in
+                        if case .waiting(let rowID) = await flow.confirmJoin(
+                            confirmation, label: label
+                        ) {
+                            navigation.openPending(rowID: rowID)
+                        }
+                    }
+                },
+                onCancel: { scanConfirmation = nil }
+            )
+        }
         .reasonAlert("Couldn\u{2019}t use that invite", reason: $scanJoinError)
         .alert("Not an Onym invite", isPresented: $scanRejected) {
             Button("OK", role: .cancel) {}
@@ -214,11 +236,13 @@ public struct ChatsView: View {
             let flow = pendingChatsFlow
             let navigation = navigation
             Task { @MainActor in
-                switch await flow.join(capability: cap) {
+                switch await flow.prepareJoin(capability: cap) {
                 case .alreadyJoined(let groupIDHex):
                     navigation.openChat(groupID: groupIDHex)
                 case .waiting(let rowID):
                     navigation.openPending(rowID: rowID)
+                case .confirm(let confirmation):
+                    scanConfirmation = confirmation
                 case .failed(let reason):
                     scanJoinError = reason
                 }

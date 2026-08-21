@@ -31,6 +31,10 @@ struct PendingChatThreadView: View {
     /// the other one. Standing on a screen whose subject no longer
     /// exists is not a state worth rendering.
     @Environment(\.dismiss) private var dismiss
+    /// Accept opens the confirmation screen rather than sending: the
+    /// same review, and the same chance to choose a name, whichever door
+    /// the invitation came through.
+    @State private var confirmation: PendingChatsFlow.JoinConfirmation?
 
     var body: some View {
         Group {
@@ -63,6 +67,19 @@ struct PendingChatThreadView: View {
         // The other way a row ends: dismissed from the list, or
         // consumed with no mapping recorded. Nothing to swap to, so
         // leave rather than stand on a screen whose subject is gone.
+        .sheet(item: $confirmation) { pending in
+            JoinConfirmView(
+                confirmation: pending,
+                onSend: { label in
+                    let flow = flow
+                    confirmation = nil
+                    Task { @MainActor in
+                        await flow.confirmJoin(pending, label: label)
+                    }
+                },
+                onCancel: { confirmation = nil }
+            )
+        }
         .onChange(of: flow.row(id: rowID) == nil) { _, gone in
             guard gone, flow.materializedGroupID(for: rowID) == nil else { return }
             dismiss()
@@ -149,7 +166,11 @@ struct PendingChatThreadView: View {
                     identifier: "pending_chat.accept",
                     disabled: row.isSending
                 ) {
-                    flow.accept(row.id)
+                    let flow = flow
+                    let rowID = row.id
+                    Task { @MainActor in
+                        confirmation = await flow.prepareAccept(rowID: rowID)
+                    }
                 }
             case .waiting:
                 waiting(
