@@ -107,41 +107,30 @@ struct ShareInviteScreen {
     }
 }
 
-// MARK: - Join
+// MARK: - Join (pending chat)
 
-struct JoinScreen {
+/// A tapped invite link no longer opens a screen of its own: the request
+/// goes out on the tap and the app pushes the chat it created, pending
+/// until the founder lets the joiner in. So this page object waits on
+/// that thread rather than driving a form.
+struct PendingChatScreen {
     let app: XCUIApplication
 
-    var labelField: XCUIElement { app.textFields["join.display_label_field"] }
-    var sendButton: XCUIElement { app.buttons["join.send_button"] }
-    var cancelButton: XCUIElement { app.buttons["join.cancel_button"] }
+    var waiting: XCUIElement { app.staticTexts["pending_chat.waiting"] }
+    var stuck: XCUIElement { app.staticTexts["pending_chat.stuck"] }
 
+    /// The request ships without a tap, so "ready" is the waiting state
+    /// itself — reaching it is proof the join left the device.
     @discardableResult
     func waitReady(timeout: TimeInterval = 20) -> Bool {
-        sendButton.waitForExistence(timeout: timeout)
+        waiting.waitForExistence(timeout: timeout)
     }
 
-    func typeLabel(_ label: String) {
-        if labelField.waitForExistence(timeout: 5) {
-            labelField.tap()
-            labelField.typeText(label)
-        }
-    }
-
-    func send() {
-        XCTAssertTrue(sendButton.waitForExistence(timeout: 5), "Join Send button missing")
-        sendButton.tap()
-    }
-
-    /// The request ships the moment Send is tapped; the flow then shows
-    /// an "awaiting approval" state. We don't need to keep it open —
-    /// the sealed invitation lands via the inbox pump regardless — so
-    /// cancel to free the modal and switch identities.
-    func dismissAfterSend() {
-        // Give the send task a beat to actually ship before we tear the
-        // modal down.
-        _ = app.otherElements["join.awaiting_approval"].waitForExistence(timeout: 8)
-        if cancelButton.exists { cancelButton.tap() }
+    /// Nothing has to stay open — the sealed invitation lands via the
+    /// inbox pump regardless, and the row survives a relaunch.
+    func back() {
+        let backButton = app.navigationBars.buttons.element(boundBy: 0)
+        if backButton.exists { backButton.tap() }
     }
 }
 

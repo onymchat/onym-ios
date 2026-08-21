@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import OnymIdentity
 import OnymGroup
 
 /// `@Observable @MainActor` driver for the chats a person is waiting to
@@ -111,6 +112,14 @@ public final class PendingChatsFlow {
     private let displayLabel: @MainActor () -> String
     /// Re-drive a stuck verification (`GroupStateVerifier.retry`).
     private let retryVerification: @Sendable (String) async -> Void
+    /// The identity a link tapped right now would join as.
+    ///
+    /// Asked of the identity repository rather than of the identities
+    /// *flow*: a cold-start deeplink is handled before any tab's `.task`
+    /// has populated the flow, so reading the UI's copy answered "no
+    /// identity" for the one case that matters most — the link that
+    /// launched the app.
+    private let currentIdentityID: @Sendable () async -> IdentityID?
 
     private var pending: [PendingChat] = []
     private var verifying: [PendingGroupVerification] = []
@@ -126,7 +135,8 @@ public final class PendingChatsFlow {
         groupRepository: GroupRepository,
         submitJoin: @escaping @Sendable (IntroCapability, String) async -> JoinRequestSender.Outcome,
         displayLabel: @escaping @MainActor () -> String,
-        retryVerification: @escaping @Sendable (String) async -> Void
+        retryVerification: @escaping @Sendable (String) async -> Void,
+        currentIdentityID: @escaping @Sendable () async -> IdentityID?
     ) {
         self.repository = repository
         self.verificationStore = verificationStore
@@ -134,6 +144,7 @@ public final class PendingChatsFlow {
         self.submitJoin = submitJoin
         self.displayLabel = displayLabel
         self.retryVerification = retryVerification
+        self.currentIdentityID = currentIdentityID
     }
 
     /// Drain all three streams. Idempotent.
@@ -177,6 +188,72 @@ public final class PendingChatsFlow {
     }
 
     public func row(id: String) -> Row? { rows.first { $0.id == id } }
+
+    /// The group a pending row turned into, once it has. `nil` while the
+    /// wait is still on.
+    public func materializedGroupID(for rowID: String) -> String? {
+        materialized[rowID]
+    }
+
+    /// Where a tapped invite link (or scanned QR) leaves the user.
+    public enum JoinOutcome: Equatable, Sendable {
+        /// Already a member — the link was an old one, or a second tap.
+        /// Carries the hex group id so the caller can just open the chat.
+        case alreadyJoined(groupIDHex: String)
+        /// A pending row exists and the request is on its way. Carries
+        /// the row id to open.
+        case waiting(rowID: String)
+        /// Nothing could be recorded, so there is nothing to show and
+        /// nothing to come back to. The caller has to say so out loud.
+        case failed(reason: String)
+    }
+
+    /// Take a capability from a tapped link or a scanned QR and turn it
+    /// into a chat that is on its way.
+    ///
+    /// This is what replaced the join sheet. The sheet asked for a
+    /// display name and a Send tap before anything happened, and held
+    /// the entire wait in memory behind a modal the user was told to
+    /// keep open. Tapping the link *is* the intent, so the request goes
+    /// out with the active identity's name and the wait becomes a row —
+    /// which survives a force-quit, unlike the sheet.
+    ///
+    /// Re-tapping a link the user already acted on is deliberately not a
+    /// second request: an existing row is returned as-is, and a Retry
+    /// inside it is the way to send again.
+    public func join(capability: IntroCapability) async -> JoinOutcome {
+        guard let owner = await currentIdentityID() else {
+            return .failed(reason: String(localized: "Sign in first."))
+        }
+        let groupIDHex = capability.groupId.map { String(format: "%02x", $0) }.joined()
+        // Already in? Then the link is stale or double-tapped, and the
+        // honest answer is the chat itself rather than a second wait.
+        let groups = await groupRepository.currentGroups()
+        if groups.contains(where: { $0.id == groupIDHex && $0.ownerIdentityID == owner }) {
+            return .alreadyJoined(groupIDHex: groupIDHex)
+        }
+        let chat = PendingChat(
+            groupID: capability.groupId,
+            ownerIdentityID: owner,
+            introPublicKey: capability.introPublicKey,
+            groupName: capability.groupName,
+            // Nobody introduced themselves over a link — the row shows
+            // the group, not a person who never said their name.
+            inviterAlias: "",
+            invitationMessage: nil,
+            receivedAt: Date(),
+            status: .offered
+        )
+        switch await repository.record(chat) {
+        case .inserted:
+            send(chat)
+            return .waiting(rowID: chat.id)
+        case .alreadyPresent:
+            return .waiting(rowID: chat.id)
+        case .failed:
+            return .failed(reason: String(localized: "Couldn\u{2019}t save this invite on your device."))
+        }
+    }
 
     /// Explicit Accept on a pushed offer: ship a join request to the
     /// offer's intro key. No-op once something is in flight, or once the

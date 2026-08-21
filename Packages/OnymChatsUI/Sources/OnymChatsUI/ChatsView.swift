@@ -18,6 +18,9 @@ public struct ChatsView: View {
     let identitiesFlow: IdentitiesFlow
     let approveRequestsFlow: ApproveRequestsFlow
     let pendingChatsFlow: PendingChatsFlow
+    /// The tab's navigation path. Shared rather than owned by this view
+    /// because a scanned QR — like a tapped link — pushes onto it.
+    let navigation: ChatsNavigation
     let messageRepository: MessageRepository
     let imageLoader: ChatImageLoader
     let videoLoader: ChatVideoLoader
@@ -26,7 +29,6 @@ public struct ChatsView: View {
     let chatReceiptSender: any ChatReceiptSending
     let makeCreateGroupFlow: @MainActor () -> CreateGroupFlow
     let makeShareInviteFlow: @MainActor () -> ShareInviteFlow
-    let makeJoinFlow: @MainActor (IntroCapability) -> JoinFlow
     let setGroupAvatar: @MainActor (String, Data?) async -> Void
     let setGroupName: @MainActor (String, String) async -> Void
     let makeModerationReportView: @MainActor (ReportableMessage) -> AnyView
@@ -36,6 +38,7 @@ public struct ChatsView: View {
         identitiesFlow: IdentitiesFlow,
         approveRequestsFlow: ApproveRequestsFlow,
         pendingChatsFlow: PendingChatsFlow,
+        navigation: ChatsNavigation,
         messageRepository: MessageRepository,
         imageLoader: ChatImageLoader,
         videoLoader: ChatVideoLoader,
@@ -44,7 +47,6 @@ public struct ChatsView: View {
         chatReceiptSender: any ChatReceiptSending,
         makeCreateGroupFlow: @escaping @MainActor () -> CreateGroupFlow,
         makeShareInviteFlow: @escaping @MainActor () -> ShareInviteFlow,
-        makeJoinFlow: @escaping @MainActor (IntroCapability) -> JoinFlow,
         setGroupAvatar: @escaping @MainActor (String, Data?) async -> Void,
         setGroupName: @escaping @MainActor (String, String) async -> Void,
         makeModerationReportView: @escaping @MainActor (ReportableMessage) -> AnyView
@@ -53,6 +55,7 @@ public struct ChatsView: View {
         self.identitiesFlow = identitiesFlow
         self.approveRequestsFlow = approveRequestsFlow
         self.pendingChatsFlow = pendingChatsFlow
+        self.navigation = navigation
         self.messageRepository = messageRepository
         self.imageLoader = imageLoader
         self.videoLoader = videoLoader
@@ -61,7 +64,6 @@ public struct ChatsView: View {
         self.chatReceiptSender = chatReceiptSender
         self.makeCreateGroupFlow = makeCreateGroupFlow
         self.makeShareInviteFlow = makeShareInviteFlow
-        self.makeJoinFlow = makeJoinFlow
         self.setGroupAvatar = setGroupAvatar
         self.setGroupName = setGroupName
         self.makeModerationReportView = makeModerationReportView
@@ -69,14 +71,13 @@ public struct ChatsView: View {
 
     @State private var showCreateGroup = false
     @State private var showScanner = false
-    // Stashed across the scanner's dismissal — presenting the join
-    // sheet while the full-screen scanner is still tearing down races
-    // SwiftUI's presentation machinery, so we hand off in the cover's
-    // `onDismiss` instead. Exactly one is non-nil at a time.
+    // Stashed across the scanner's dismissal — acting on the scan while
+    // the full-screen scanner is still tearing down races SwiftUI's
+    // presentation machinery, so we hand off in the cover's `onDismiss`
+    // instead. Exactly one is set at a time.
     @State private var scannedCapability: IntroCapability?
     @State private var scannedInvalid = false
     @State private var scanRejected = false
-    @State private var joinCapability: IntroCapability?
     /// The chat awaiting a swipe-to-delete confirmation, if any.
     @State private var pendingDelete: ChatListItem?
 
@@ -202,12 +203,6 @@ public struct ChatsView: View {
                 onCancel: { showScanner = false }
             )
         }
-        .sheet(item: $joinCapability) { cap in
-            JoinView(
-                flow: makeJoinFlow(cap),
-                onClose: { joinCapability = nil }
-            )
-        }
         .alert("Not an Onym invite", isPresented: $scanRejected) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -216,11 +211,26 @@ public struct ChatsView: View {
     }
 
     /// Hands off the scan result once the full-screen scanner has fully
-    /// dismissed — see the `joinCapability`/`scannedCapability` note above.
+    /// dismissed — see the `scannedCapability` note above.
+    ///
+    /// A scan used to open the join sheet. It now does exactly what a
+    /// tapped link does: sends the request and opens the chat that is on
+    /// its way, so the two entry points can't drift apart.
     private func handleScannerDismiss() {
         if let cap = scannedCapability {
             scannedCapability = nil
-            joinCapability = cap
+            let flow = pendingChatsFlow
+            let navigation = navigation
+            Task { @MainActor in
+                switch await flow.join(capability: cap) {
+                case .alreadyJoined(let groupIDHex):
+                    navigation.openChat(groupID: groupIDHex)
+                case .waiting(let rowID):
+                    navigation.openPending(rowID: rowID)
+                case .failed(let reason):
+                    flow.lastError = reason
+                }
+            }
         } else if scannedInvalid {
             scannedInvalid = false
             scanRejected = true
@@ -496,11 +506,6 @@ public struct ChatsView: View {
             Text("This removes \(name) and every message in it from this device. It can't be undone.")
         }
     }
-}
-
-/// Navigation value for a chat that hasn't opened yet.
-struct PendingChatRoute: Hashable {
-    let id: String
 }
 
 /// Chat-list row for a chat the user is waiting to be let into. Reads as

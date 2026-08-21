@@ -159,7 +159,6 @@ struct PendingChatThreadView: View {
             }
         }
         .padding(.top, 4)
-        .accessibilityIdentifier("pending_chat.state")
     }
 
     private func waiting(title: String, detail: String) -> some View {
@@ -168,6 +167,11 @@ struct PendingChatThreadView: View {
             Text(title)
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(OnymTokens.text)
+                // On the headline, and nothing above it carries an
+                // identifier: SwiftUI pushes a container's identifier
+                // down onto its descendants, so an id on the enclosing
+                // stack silently renames every leaf inside it.
+                .accessibilityIdentifier("pending_chat.waiting")
             Text(detail)
                 .font(.system(size: 13))
                 .foregroundStyle(OnymTokens.text2)
@@ -175,7 +179,6 @@ struct PendingChatThreadView: View {
                 .padding(.horizontal, 16)
         }
         .padding(.top, 16)
-        .accessibilityIdentifier("pending_chat.waiting")
     }
 
     /// One sentence per reason, because the reasons need different
@@ -192,6 +195,7 @@ struct PendingChatThreadView: View {
                 .foregroundStyle(OnymTokens.text2)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 16)
+                .accessibilityIdentifier("pending_chat.stuck")
             if row.state.isRetryable {
                 primaryButton(
                     title: row.isSending
@@ -206,7 +210,6 @@ struct PendingChatThreadView: View {
             }
         }
         .padding(.top, 16)
-        .accessibilityIdentifier("pending_chat.stuck")
     }
 
     private func stuckMessage(_ state: PendingChatsFlow.State) -> String {

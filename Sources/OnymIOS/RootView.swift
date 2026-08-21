@@ -305,12 +305,16 @@ struct RootView: View {
     private var tabs: some View {
         TabView(selection: $selectedTab) {
             Tab("Chats", systemImage: "bubble.left.and.bubble.right.fill", value: .chats) {
-                NavigationStack {
+                // Path hoisted into `dependencies` so a tapped invite
+                // link — handled above the tab bar — can push the chat
+                // it just created.
+                NavigationStack(path: Bindable(dependencies.chatsNavigation).path) {
                     ChatsView(
                         flow: dependencies.chatsFlow,
                         identitiesFlow: dependencies.identitiesFlow,
                         approveRequestsFlow: dependencies.approveRequestsFlow,
                         pendingChatsFlow: dependencies.pendingChatsFlow,
+                        navigation: dependencies.chatsNavigation,
                         messageRepository: dependencies.messageRepository,
                         imageLoader: dependencies.imageLoader,
                         videoLoader: dependencies.videoLoader,
@@ -319,7 +323,6 @@ struct RootView: View {
                         chatReceiptSender: dependencies.chatReceiptSender,
                         makeCreateGroupFlow: dependencies.makeCreateGroupFlow,
                         makeShareInviteFlow: dependencies.makeShareInviteFlow,
-                        makeJoinFlow: dependencies.makeJoinFlow,
                         setGroupAvatar: dependencies.setGroupAvatar,
                         setGroupName: dependencies.setGroupName,
                         makeModerationReportView: dependencies.makeModerationReportView
