@@ -16,7 +16,9 @@ public protocol PendingChatStore: Sendable {
     /// while a join request is still in flight.
     func setStatus(id: String, status: PendingChat.Status) async
     /// Take the reply channel and the descriptive fields from a newer
-    /// offer for a row that already exists, leaving its status alone.
+    /// offer for a row that already exists, leaving its status and its
+    /// `joinerLabel` alone — the offer describes the invitation, not the
+    /// name this device chose to ask under.
     ///
     /// A re-invite mints a *fresh* intro key and "Generate new link"
     /// revokes the old one (`IntroKeyStore.revoke`), so a row that kept
@@ -85,7 +87,13 @@ public actor InMemoryPendingChatStore: PendingChatStore {
             inviterAlias: inviterAlias,
             invitationMessage: invitationMessage,
             receivedAt: existing.receivedAt,
-            status: existing.status
+            status: existing.status,
+            // Carried, the way the SwiftData store carries it: the name
+            // this device asked under is not the offer's to replace,
+            // and the confirmation screen now refreshes a row it has
+            // just labelled — dropping it here made the next "Ask
+            // again" arrive from a stranger.
+            joinerLabel: existing.joinerLabel
         )
     }
 

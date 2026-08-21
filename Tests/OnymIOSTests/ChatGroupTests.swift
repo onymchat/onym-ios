@@ -23,7 +23,47 @@ final class ChatGroupTests: XCTestCase {
         XCTAssertEqual(group.groupIDData, Data([0xAB, 0xCD]))
     }
 
-    private func makeGroup(id: String) -> ChatGroup {
+    // MARK: - linkableRules
+
+    func test_linkableRules_areTheCanonicalTextAJoinerWillSign() {
+        let group = makeGroup(id: "abcd", invitationMessage: "  Be kind.\n")
+        XCTAssertEqual(
+            group.linkableRules, "Be kind.",
+            "the link carries the same form the signature covers"
+        )
+    }
+
+    func test_linkableRules_areNilForAGroupThatAsksNothing() {
+        XCTAssertNil(makeGroup(id: "abcd", invitationMessage: nil).linkableRules)
+        XCTAssertNil(
+            makeGroup(id: "abcd", invitationMessage: "   ").linkableRules,
+            "blank rules are no rules, not an empty thing to agree to"
+        )
+    }
+
+    func test_linkableRules_omitTextTooLongForALink_ratherThanBlockingTheShare() {
+        // The field was documented as "any length" before the cap, so a
+        // group created by an earlier build can hold more than an
+        // invite accepts. Omitted rather than truncated: an abridged
+        // text is the one option that produces a wrong answer instead
+        // of a missing one, since joiners would sign it and every
+        // signature would then fail against the founder's full copy.
+        let long = String(repeating: "a", count: GroupRules.maxBytes + 1)
+        let group = makeGroup(id: "abcd", invitationMessage: long)
+
+        XCTAssertNil(group.linkableRules)
+        XCTAssertNoThrow(
+            try IntroCapability(
+                introPublicKey: Data(repeating: 0x44, count: 32),
+                groupId: Data(repeating: 0x11, count: 32),
+                groupName: group.name,
+                rules: group.linkableRules
+            ),
+            "a legacy group must still be shareable"
+        )
+    }
+
+    private func makeGroup(id: String, invitationMessage: String? = nil) -> ChatGroup {
         ChatGroup(
             id: id,
             ownerIdentityID: IdentityID(),
@@ -39,7 +79,8 @@ final class ChatGroupTests: XCTestCase {
             groupType: .tyranny,
             adminPubkeyHex: nil,
             adminEd25519PubkeyHex: nil,
-            isPublishedOnChain: false
+            isPublishedOnChain: false,
+            invitationMessage: invitationMessage
         )
     }
 }

@@ -536,6 +536,77 @@ final class PendingChatsFlowTests: XCTestCase {
         XCTAssertEqual(harness.flow.rows.count, 1, "one waiting room, not two")
     }
 
+    // MARK: - What gets signed
+
+    func test_theRulesSigned_areTheOnesTheScreenShowed() async throws {
+        let harness = await Harness.make(owner: owner)
+        await harness.flow.start()
+        guard case .confirm(let confirmation) =
+                await harness.flow.prepareJoin(capability: harness.capability(rules: "Be kind."))
+        else { return XCTFail("expected a confirmation") }
+        XCTAssertEqual(confirmation.rules, "Be kind.")
+
+        await harness.flow.confirmJoin(confirmation, label: "Bobby")
+
+        try await waitForAsync { await harness.sender.calls.count == 1 }
+        let calls = await harness.sender.calls
+        XCTAssertEqual(calls.first?.rules, "Be kind.")
+        // Kept on the row, because "Ask again" months later has to
+        // re-sign the same words and the capability is gone by then.
+        let stored = await harness.repository.currentChats()
+        XCTAssertEqual(stored.first?.invitationMessage, "Be kind.")
+    }
+
+    func test_aLinkOnAnUnansweredOffer_signsTheTextThatWasRead_andKeepsIt() async throws {
+        // The screen resolves a link's rules ahead of a stored offer's,
+        // so a row whose words differ must be brought up to what was
+        // actually read — otherwise this send, and every "Ask again"
+        // after it, attests to text nobody saw.
+        let harness = await Harness.make(owner: owner)
+        await harness.flow.start()
+        await harness.repository.record(harness.makeChat(invitationMessage: "an older draft"))
+        try await waitFor { harness.flow.rows.first?.state == .offered }
+
+        guard case .confirm(let confirmation) = await harness.flow.prepareJoin(
+            capability: harness.capability(rules: "the rules as shown")
+        ) else { return XCTFail("an unanswered offer must still be confirmable") }
+        XCTAssertEqual(confirmation.rules, "the rules as shown")
+        await harness.flow.confirmJoin(confirmation, label: "Bobby")
+        try await waitForAsync { await harness.sender.calls.count == 1 }
+        try await waitFor { harness.flow.rows.first?.state == .waiting }
+
+        harness.flow.retry(harness.makeChat().id)
+
+        try await waitForAsync { await harness.sender.calls.count == 2 }
+        let calls = await harness.sender.calls
+        XCTAssertEqual(calls.map(\.rules), ["the rules as shown", "the rules as shown"])
+        XCTAssertEqual(
+            calls.map(\.label), ["Bobby", "Bobby"],
+            "re-asking introduces the same person the first ask did"
+        )
+    }
+
+    func test_rulesThatAreOnlyWhitespace_askNothingAndSignNothing() async throws {
+        // `"   "` is non-nil, and left alone it drew an empty rules
+        // card and a mandatory tick — then signed nothing, because the
+        // sender normalizes before signing.
+        let harness = await Harness.make(owner: owner)
+        await harness.flow.start()
+        let chat = harness.makeChat(invitationMessage: "   ")
+        await harness.repository.record(chat)
+        try await waitFor { harness.flow.rows.first?.state == .offered }
+
+        guard let confirmation = await harness.flow.prepareAccept(rowID: chat.id)
+        else { return XCTFail("expected a confirmation") }
+        XCTAssertNil(confirmation.rules)
+
+        await harness.flow.confirmJoin(confirmation, label: "Bobby")
+
+        try await waitForAsync { await harness.sender.calls.count == 1 }
+        let calls = await harness.sender.calls
+        XCTAssertNil(calls.first?.rules)
+    }
+
     func test_aLinkIntoAChatYouAreIn_opensItWithoutDisclosingAnything() async throws {
         let harness = await Harness.make(owner: owner)
         let capability = harness.capability()
@@ -616,22 +687,26 @@ final class PendingChatsFlowTests: XCTestCase {
             await flow.confirmJoin(confirmation, label: label)
         }
 
-        func capability() -> IntroCapability {
+        func capability(rules: String? = nil) -> IntroCapability {
             try! IntroCapability(
                 introPublicKey: Data(repeating: 0x44, count: 32),
                 groupId: Data(repeating: 0x11, count: 32),
-                groupName: "Maple Garden"
+                groupName: "Maple Garden",
+                rules: rules
             )
         }
 
-        func makeChat(introPublicKey: Data = Data(repeating: 0x44, count: 32)) -> PendingChat {
+        func makeChat(
+            introPublicKey: Data = Data(repeating: 0x44, count: 32),
+            invitationMessage: String? = "come in"
+        ) -> PendingChat {
             PendingChat(
                 groupID: Data(repeating: 0x11, count: 32),
                 ownerIdentityID: owner ?? IdentityID(),
                 introPublicKey: introPublicKey,
                 groupName: "Maple Garden",
                 inviterAlias: "Alice",
-                invitationMessage: "come in",
+                invitationMessage: invitationMessage,
                 receivedAt: Date(),
                 status: .offered
             )

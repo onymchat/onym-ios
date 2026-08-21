@@ -222,6 +222,7 @@ final class PendingChatStoreTests: XCTestCase {
         let afterStatus = await store.list().first { $0.id == old.id }
         XCTAssertEqual(afterStatus?.status, .failed(.transport), file: file, line: line)
 
+        await store.setJoinerLabel(id: new.id, label: "Bobby")
         await store.refreshOffer(
             id: new.id,
             introPublicKey: Data(repeating: 0x99, count: 32),
@@ -232,6 +233,11 @@ final class PendingChatStoreTests: XCTestCase {
         let refreshed = await store.list().first { $0.id == new.id }
         XCTAssertEqual(refreshed?.introPublicKey, Data(repeating: 0x99, count: 32), file: file, line: line)
         XCTAssertEqual(refreshed?.groupName, "renamed", file: file, line: line)
+        // A newer offer describes the invitation, not the name this
+        // device asked under. The confirmation screen refreshes a row it
+        // has just labelled, so a conformer that dropped the label here
+        // would make the next "Ask again" arrive from a stranger.
+        XCTAssertEqual(refreshed?.joinerLabel, "Bobby", file: file, line: line)
         // A row that isn't there absorbs the write rather than creating one.
         await store.setStatus(id: "nobody:home", status: .requested)
         let afterGhost = await store.list()
