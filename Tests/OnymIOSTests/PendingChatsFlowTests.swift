@@ -15,7 +15,7 @@ final class PendingChatsFlowTests: XCTestCase {
     // MARK: - Offers
 
     func test_offer_becomesAnAcceptableRow() async throws {
-        let harness = Harness(owner: owner)
+        let harness = await Harness.make(owner: owner)
         await harness.flow.start()
         await harness.repository.record(harness.makeChat())
 
@@ -28,7 +28,7 @@ final class PendingChatsFlowTests: XCTestCase {
     }
 
     func test_accept_shipsTheRequestAndTheRowStartsWaiting() async throws {
-        let harness = Harness(owner: owner)
+        let harness = await Harness.make(owner: owner)
         await harness.flow.start()
         let chat = harness.makeChat()
         await harness.repository.record(chat)
@@ -45,7 +45,7 @@ final class PendingChatsFlowTests: XCTestCase {
     }
 
     func test_accept_isDebouncedWhileTheSendIsInFlight() async throws {
-        let harness = Harness(owner: owner)
+        let harness = await Harness.make(owner: owner)
         await harness.sender.hold()
         await harness.flow.start()
         let chat = harness.makeChat()
@@ -61,7 +61,7 @@ final class PendingChatsFlowTests: XCTestCase {
     }
 
     func test_failedSend_showsTheReasonAndRetryResends() async throws {
-        let harness = Harness(owner: owner)
+        let harness = await Harness.make(owner: owner)
         await harness.sender.setOutcome(.transportFailed("relay rejected"))
         await harness.flow.start()
         let chat = harness.makeChat()
@@ -91,7 +91,7 @@ final class PendingChatsFlowTests: XCTestCase {
         // Past the founder's approval, what the person is waiting on has
         // moved on from them — showing "waiting on the founder" then
         // would name someone who has already done their part.
-        let harness = Harness(owner: owner)
+        let harness = await Harness.make(owner: owner)
         await harness.flow.start()
         let chat = harness.makeChat()
         await harness.repository.record(chat)
@@ -107,7 +107,7 @@ final class PendingChatsFlowTests: XCTestCase {
     }
 
     func test_retry_onAStuckVerification_redrivesTheVerifier() async throws {
-        let harness = Harness(owner: owner)
+        let harness = await Harness.make(owner: owner)
         await harness.flow.start()
         let chat = harness.makeChat()
         await harness.repository.record(chat)
@@ -126,7 +126,7 @@ final class PendingChatsFlowTests: XCTestCase {
     func test_chainSettling_offersNoRetry() async throws {
         // It clears itself. Offering an action implies the user is
         // holding it up.
-        let harness = Harness(owner: owner)
+        let harness = await Harness.make(owner: owner)
         await harness.flow.start()
         let chat = harness.makeChat()
         await harness.repository.record(chat)
@@ -142,7 +142,7 @@ final class PendingChatsFlowTests: XCTestCase {
         // A stale invitation replayed onto a device that never asked in
         // this install. Without a row the group is stuck forever, hidden
         // from the list by design, with no screen left to surface it.
-        let harness = Harness(owner: owner)
+        let harness = await Harness.make(owner: owner)
         await harness.flow.start()
         await harness.verifications.record(makeVerification(
             groupIDHex: String(repeating: "ab", count: 32),
@@ -158,8 +158,24 @@ final class PendingChatsFlowTests: XCTestCase {
 
     // MARK: - End of the wait
 
+    func test_theGroupThatEndedTheWaitIsRememberedAfterTheRowIsGone() async throws {
+        // The pending thread reads this to know where to go. Recorded
+        // before the row is consumed, and kept after — the row vanishing
+        // is exactly the moment the screen needs the answer.
+        let harness = await Harness.make(owner: owner)
+        await harness.flow.start()
+        let chat = harness.makeChat()
+        await harness.repository.record(chat)
+        try await waitFor { harness.flow.rows.count == 1 }
+
+        await harness.groups.insert(harness.makeGroup(id: chat.groupIDHex))
+
+        try await waitFor { harness.flow.materializedGroupID(for: chat.id) == chat.groupIDHex }
+        XCTAssertTrue(harness.flow.rows.isEmpty)
+    }
+
     func test_theRowDisappearsWhenTheGroupLands() async throws {
-        let harness = Harness(owner: owner)
+        let harness = await Harness.make(owner: owner)
         await harness.flow.start()
         let chat = harness.makeChat()
         await harness.repository.record(chat)
@@ -173,7 +189,7 @@ final class PendingChatsFlowTests: XCTestCase {
     // MARK: - Joining from a link
 
     func test_join_recordsARowAndSendsWithoutAsking() async throws {
-        let harness = Harness(owner: owner)
+        let harness = await Harness.make(owner: owner)
         await harness.flow.start()
 
         let outcome = await harness.flow.join(capability: harness.capability())
@@ -184,7 +200,7 @@ final class PendingChatsFlowTests: XCTestCase {
     }
 
     func test_join_twiceOnTheSameLink_doesNotAskTwice() async throws {
-        let harness = Harness(owner: owner)
+        let harness = await Harness.make(owner: owner)
         await harness.flow.start()
 
         _ = await harness.flow.join(capability: harness.capability())
@@ -197,7 +213,7 @@ final class PendingChatsFlowTests: XCTestCase {
     }
 
     func test_join_whenAlreadyAMember_opensTheChatInstead() async throws {
-        let harness = Harness(owner: owner)
+        let harness = await Harness.make(owner: owner)
         let capability = harness.capability()
         let hex = capability.groupId.map { String(format: "%02x", $0) }.joined()
         await harness.groups.insert(harness.makeGroup(id: hex))
@@ -211,7 +227,7 @@ final class PendingChatsFlowTests: XCTestCase {
     }
 
     func test_join_withNoIdentity_saysSoRatherThanWaitingSilently() async throws {
-        let harness = Harness(owner: nil)
+        let harness = await Harness.make(owner: nil)
         await harness.flow.start()
 
         let outcome = await harness.flow.join(capability: harness.capability())
@@ -235,7 +251,7 @@ final class PendingChatsFlowTests: XCTestCase {
         let flow: PendingChatsFlow
         let owner: IdentityID?
 
-        init(owner: IdentityID?) {
+        private init(owner: IdentityID?) {
             self.owner = owner
             let repository = PendingChatRepository(store: InMemoryPendingChatStore())
             self.repository = repository
@@ -254,11 +270,20 @@ final class PendingChatsFlowTests: XCTestCase {
                 retryVerification: { hex in await retries.record(hex) },
                 currentIdentityID: { owner }
             )
-            Task { [repository, verifications, groups, owner] in
-                await repository.setCurrentIdentity(owner)
-                await verifications.setCurrentIdentity(owner)
-                await groups.setCurrentIdentity(owner)
-            }
+        }
+
+        /// The only way to build one. The identity filter has to be in
+        /// place before a test reads anything: fired off in an
+        /// un-awaited `Task`, it raced every assertion that didn't
+        /// happen to poll — `currentGroups()` is read synchronously, so
+        /// that one test was deciding on a repository that had not been
+        /// told whose groups it holds.
+        static func make(owner: IdentityID?) async -> Harness {
+            let harness = Harness(owner: owner)
+            await harness.repository.setCurrentIdentity(owner)
+            await harness.verifications.setCurrentIdentity(owner)
+            await harness.groups.setCurrentIdentity(owner)
+            return harness
         }
 
         func capability() -> IntroCapability {

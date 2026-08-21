@@ -106,6 +106,26 @@ final class PendingChatRepositoryTests: XCTestCase {
         XCTAssertEqual(snapshot.count, 1)
     }
 
+    func test_consumeForMaterializedGroups_worksAgainstAColdCache() async throws {
+        // Launch order isn't guaranteed: the group watcher starts from
+        // the flow while the startup `reload()` runs from another task,
+        // so the first emission can arrive before anything has been
+        // read. Deciding "no rows match" from an unread cache leaves the
+        // stale row in the list until some unrelated group mutation.
+        let store = InMemoryPendingChatStore()
+        let chat = makeChat(group: 0x11, owner: alice)
+        await store.insert(chat)
+
+        let repository = PendingChatRepository(store: store)
+        await repository.setCurrentIdentity(alice)
+        await repository.consumeForMaterializedGroups([chat.groupIDHex])
+
+        let snapshot = try await firstSnapshot(from: repository)
+        XCTAssertTrue(snapshot.isEmpty, "the row must go even if the cache was never read")
+        let rows = await store.list()
+        XCTAssertTrue(rows.isEmpty, "and it must go from the store, not just the cache")
+    }
+
     func test_removeForOwner_cascades() async throws {
         let repository = PendingChatRepository(store: InMemoryPendingChatStore())
         await repository.setCurrentIdentity(alice)
