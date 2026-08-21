@@ -29,6 +29,18 @@ public final class ChatsNavigation {
     public func openPending(rowID: String) {
         path.append(PendingChatRoute(id: rowID))
     }
+
+    /// The wait ended while the person was watching it: drop the pending
+    /// screen and put the real thread in its place.
+    ///
+    /// A replacement rather than a push, because the pending screen has
+    /// nothing left to show — its row is gone — and leaving it under the
+    /// thread would put a dead screen behind the Back button of the chat
+    /// the user just got into.
+    public func replaceTopWithChat(groupID: String) {
+        if !path.isEmpty { path.removeLast() }
+        path.append(groupID)
+    }
 }
 
 /// Navigation value for a chat that hasn't opened yet. A distinct type

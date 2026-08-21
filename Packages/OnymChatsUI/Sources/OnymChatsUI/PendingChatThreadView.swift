@@ -19,6 +19,11 @@ import OnymInbox
 struct PendingChatThreadView: View {
     @Bindable var flow: PendingChatsFlow
     let rowID: String
+    /// Called with the hex group id once this wait is over. The screen
+    /// doesn't navigate itself: the path belongs to `ChatsNavigation`,
+    /// and a view that pops the stack it is standing on is a rule this
+    /// codebase already avoids.
+    let onMaterialized: (String) -> Void
 
     /// Leave when the row does. The wait ending is the ordinary case —
     /// the founder let this person in and the real chat is now in the
@@ -32,9 +37,11 @@ struct PendingChatThreadView: View {
             if let row = flow.row(id: rowID) {
                 content(row)
             } else {
-                // The row was consumed while the screen was open — the
-                // group landed, or the user dismissed it from the list.
-                // The chats list behind this is already correct.
+                // The row was consumed while the screen was open. If the
+                // group landed we are one render from being replaced by
+                // its thread (see the `onChange` below); if the user
+                // dismissed the row from the list, the list behind this
+                // is already correct and the spinner is a blink.
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -42,8 +49,20 @@ struct PendingChatThreadView: View {
         .background(OnymTokens.bg.ignoresSafeArea())
         .navigationTitle(displayName)
         .navigationBarTitleDisplayMode(.inline)
+        // The whole point of the flow: the founder approves, the group
+        // materializes, and the person watching the wait is put straight
+        // into the chat — landing on the "You joined X" notice rather
+        // than on a spinner they have to back out of.
+        .onChange(of: flow.materializedGroupID(for: rowID)) { _, groupID in
+            guard let groupID else { return }
+            onMaterialized(groupID)
+        }
+        // The other way a row ends: dismissed from the list, or
+        // consumed with no mapping recorded. Nothing to swap to, so
+        // leave rather than stand on a screen whose subject is gone.
         .onChange(of: flow.row(id: rowID) == nil) { _, gone in
-            if gone { dismiss() }
+            guard gone, flow.materializedGroupID(for: rowID) == nil else { return }
+            dismiss()
         }
         .accessibilityIdentifier("pending_chat.thread")
     }

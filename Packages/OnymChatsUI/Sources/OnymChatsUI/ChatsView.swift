@@ -78,6 +78,12 @@ public struct ChatsView: View {
     @State private var scannedCapability: IntroCapability?
     @State private var scannedInvalid = false
     @State private var scanRejected = false
+    /// A scan that couldn't be turned into a chat to come back to. The
+    /// deeplink path surfaces this at the app root; a scan starts here,
+    /// so it has to be said here — `PendingChatsFlow.lastError` renders
+    /// inside the pending thread, which is precisely the screen a failed
+    /// join never reaches.
+    @State private var scanJoinError: String?
     /// The chat awaiting a swipe-to-delete confirmation, if any.
     @State private var pendingDelete: ChatListItem?
 
@@ -127,7 +133,13 @@ public struct ChatsView: View {
         // chat's id and a group id would otherwise be the same value
         // space, and a stale one would open the wrong screen.
         .navigationDestination(for: PendingChatRoute.self) { route in
-            PendingChatThreadView(flow: pendingChatsFlow, rowID: route.id)
+            PendingChatThreadView(
+                flow: pendingChatsFlow,
+                rowID: route.id,
+                onMaterialized: { groupID in
+                    navigation.replaceTopWithChat(groupID: groupID)
+                }
+            )
         }
         .navigationTitle(currentIdentityName)
         .toolbar {
@@ -203,6 +215,18 @@ public struct ChatsView: View {
                 onCancel: { showScanner = false }
             )
         }
+        .alert(
+            "Couldn't use that invite",
+            isPresented: Binding(
+                get: { scanJoinError != nil },
+                set: { if !$0 { scanJoinError = nil } }
+            ),
+            presenting: scanJoinError
+        ) { _ in
+            Button("OK", role: .cancel) {}
+        } message: { reason in
+            Text(reason)
+        }
         .alert("Not an Onym invite", isPresented: $scanRejected) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -228,7 +252,7 @@ public struct ChatsView: View {
                 case .waiting(let rowID):
                     navigation.openPending(rowID: rowID)
                 case .failed(let reason):
-                    flow.lastError = reason
+                    scanJoinError = reason
                 }
             }
         } else if scannedInvalid {
