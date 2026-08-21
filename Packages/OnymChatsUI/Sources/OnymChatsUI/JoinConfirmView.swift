@@ -33,7 +33,6 @@ public struct JoinConfirmView: View {
 
     @State private var label: String = ""
     @State private var isSending = false
-    @FocusState private var nameFocused: Bool
 
     public var body: some View {
         NavigationStack {
@@ -107,6 +106,10 @@ public struct JoinConfirmView: View {
             .accessibilityIdentifier("join_confirm.invitation_message")
     }
 
+    /// Pre-filled, never blank: the identity's own name is the answer
+    /// almost every time, so joining is Send and nothing else. The field
+    /// is here for the times it isn't — a name you'd rather this room
+    /// used — not as a question to answer first.
     private var nameField: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Ask to join as")
@@ -115,7 +118,6 @@ public struct JoinConfirmView: View {
             TextField("Your name in this chat", text: $label)
                 .textInputAutocapitalization(.words)
                 .autocorrectionDisabled()
-                .focused($nameFocused)
                 .padding(12)
                 .background(OnymTokens.surface2)
                 .overlay(
@@ -176,12 +178,18 @@ public struct JoinConfirmView: View {
     }
 
     /// A name is required: an empty one reaches the founder as a blank
-    /// row they are asked to admit.
+    /// row they are asked to admit. It is pre-filled from the identity,
+    /// so this only bites if someone deliberately clears it.
     private var canSend: Bool {
         !isSending && !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    private func row(_ key: String, value: String) -> some View {
+    /// `LocalizedStringKey`, not `String`: passing a `String` picks
+    /// `Text`'s non-localizing overload, and these two labels rendered
+    /// English under every locale while their catalog entries sat
+    /// unused. `test_localizable_xcstrings_everyKey_hasEnAndRu` can't
+    /// see this — the key is there, the lookup is what was missing.
+    private func row(_ key: LocalizedStringKey, value: String) -> some View {
         HStack {
             Text(key)
                 .font(.system(size: 11, weight: .semibold))

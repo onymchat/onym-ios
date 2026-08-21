@@ -123,13 +123,19 @@ struct JoinConfirmScreen {
         sendButton.waitForExistence(timeout: timeout)
     }
 
-    /// Replaces the pre-filled identity alias with a name chosen for
-    /// this chat alone.
+    /// The name the field arrives pre-filled with — the active
+    /// identity's own alias.
+    var prefilledName: String? {
+        guard nameField.waitForExistence(timeout: 5) else { return nil }
+        return nameField.value as? String
+    }
+
+    /// Replaces the pre-filled alias with a name chosen for this chat
+    /// alone. Not used by the happy path, which is Send and nothing
+    /// else.
     func typeName(_ name: String) {
         guard nameField.waitForExistence(timeout: 5) else { return }
         nameField.tap()
-        // The field arrives pre-filled; clear it before typing so the
-        // assertion is about the typed name and not a concatenation.
         if let current = nameField.value as? String, !current.isEmpty {
             nameField.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count))
         }

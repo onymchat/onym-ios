@@ -794,16 +794,27 @@ struct OnymIOSApp: App {
             displayLabel: { [repository] in
                 // Repository, not `identitiesFlow` — the same cold-start
                 // reason as `currentIdentityID` below. A link that
-                // launches the app sends before any tab has populated
-                // the flow, and an empty name is what the founder would
-                // have been asked to let in.
-                await repository.currentIdentityName() ?? ""
+                // launches the app resolves before any tab has populated
+                // the flow.
+                //
+                // `currentIdentityName()` is a cache read that answers
+                // nil until the keychain has been walked, and on the
+                // cold-start link it hadn't been: the confirmation
+                // screen opened with an empty name field, and joining a
+                // chat meant typing your own name first. `ensureLoaded`
+                // is what `currentIdentities()` is for.
+                _ = try? await repository.currentIdentities()
+                return await repository.currentIdentityName() ?? ""
             },
             retryVerification: { [groupStateVerifier] groupIDHex in
                 await groupStateVerifier.retry(groupIDHex: groupIDHex)
             },
             currentIdentityID: { [repository] in
-                await repository.currentSelectedID()
+                // Same cold start, same cache: the selection is restored
+                // during the load, so asking before it answers "sign in
+                // first" for a link that launched the app.
+                _ = try? await repository.currentIdentities()
+                return await repository.currentSelectedID()
             }
         )
 
@@ -1964,14 +1975,15 @@ struct OnymIOSApp: App {
                         pendingCapability = cap
                     }
                 }
-                // A tapped link no longer opens anything of its own. It
-                // sends the request and lands the user in the chat it
-                // created — pending until the founder lets them in.
+                // A tapped link resolves to a screen — the chat if
+                // this identity is already in, the wait if it has
+                // already asked, otherwise the confirmation sheet
+                // below. Nothing is sent from here.
                 // Deliberately not `.task(id:)`: clearing the capture
                 // would change the id and cancel the very task doing the
-                // work, mid-send. This one outlives the view's task
-                // lifetime, which is right — the request has to go out
-                // whether or not the user stays on this screen.
+                // work, mid-resolve. This one outlives the view's task
+                // lifetime, which is right — the link has to reach its
+                // screen whether or not this view stays mounted.
                 .onChange(of: pendingCapability) { _, captured in
                     guard let captured else { return }
                     pendingCapability = nil

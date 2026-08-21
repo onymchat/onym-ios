@@ -84,7 +84,13 @@ final class MultiIdentityChatUITests: XCTestCase {
         let confirm = JoinConfirmScreen(app: app)
         XCTAssertTrue(confirm.waitReady(),
                       "join confirmation never appeared from the --open-url deeplink")
-        confirm.typeName("Bob")
+        // Joining is one tap: the name field arrives holding the active
+        // identity's own alias, so nobody has to type their own name to
+        // get into a chat. Asserting it here is what keeps that true —
+        // the cold-start link is exactly the moment the identity cache
+        // is unread, and an empty field would make Send unavailable.
+        XCTAssertEqual(confirm.prefilledName, "Bob",
+                       "the confirmation must arrive pre-filled with the identity's name")
         confirm.send()
 
         let pending = PendingChatScreen(app: app)

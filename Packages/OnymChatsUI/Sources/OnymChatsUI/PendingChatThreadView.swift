@@ -35,6 +35,9 @@ struct PendingChatThreadView: View {
     /// same review, and the same chance to choose a name, whichever door
     /// the invitation came through.
     @State private var confirmation: PendingChatsFlow.JoinConfirmation?
+    /// A Send that never became a request. The confirmation sheet
+    /// dismisses on tap, so this is the only surface left to say so on.
+    @State private var confirmError: String?
 
     var body: some View {
         Group {
@@ -67,6 +70,10 @@ struct PendingChatThreadView: View {
         // The other way a row ends: dismissed from the list, or
         // consumed with no mapping recorded. Nothing to swap to, so
         // leave rather than stand on a screen whose subject is gone.
+        .onChange(of: flow.row(id: rowID) == nil) { _, gone in
+            guard gone, flow.materializedGroupID(for: rowID) == nil else { return }
+            dismiss()
+        }
         .sheet(item: $confirmation) { pending in
             JoinConfirmView(
                 confirmation: pending,
@@ -74,16 +81,21 @@ struct PendingChatThreadView: View {
                     let flow = flow
                     confirmation = nil
                     Task { @MainActor in
-                        await flow.confirmJoin(pending, label: label)
+                        // The sheet is already gone by the time this
+                        // answers, so a failure has nowhere to show
+                        // itself but here — and unshown, it reads as a
+                        // request that went out.
+                        if case .failed(let reason) = await flow.confirmJoin(
+                            pending, label: label
+                        ) {
+                            confirmError = reason
+                        }
                     }
                 },
                 onCancel: { confirmation = nil }
             )
         }
-        .onChange(of: flow.row(id: rowID) == nil) { _, gone in
-            guard gone, flow.materializedGroupID(for: rowID) == nil else { return }
-            dismiss()
-        }
+        .reasonAlert("Couldn\u{2019}t use that invite", reason: $confirmError)
         .accessibilityIdentifier("pending_chat.thread")
     }
 

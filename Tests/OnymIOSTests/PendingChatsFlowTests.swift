@@ -315,6 +315,35 @@ final class PendingChatsFlowTests: XCTestCase {
         XCTAssertTrue(retries.isEmpty, "the founder is who this wait belongs to")
     }
 
+    func test_askAgain_onARowFromBeforeTheScreen_asksUnderTheIdentityName() async throws {
+        // Every row already on disk when this version installs has no
+        // stored label: the field is new. Those rows asked under the
+        // identity's own name, and they are the ones most likely to
+        // need asking again, having sat through an update. A retry that
+        // bailed on the missing label made "Ask again" a button that
+        // did nothing for exactly them.
+        //
+        // Seeded the pre-#299 way — recorded and marked requested, with
+        // no trip through the confirmation screen.
+        let harness = await Harness.make(owner: owner)
+        await harness.flow.start()
+        let chat = harness.makeChat()
+        await harness.repository.record(chat)
+        await harness.repository.markRequested(id: chat.id)
+        try await waitFor { harness.flow.rows.first?.state == .waiting }
+
+        harness.flow.retry(chat.id)
+
+        try await waitForAsync { await harness.sender.calls.count == 1 }
+        let label = await harness.sender.calls.first?.label
+        XCTAssertEqual(label, "Bob", "the name it asked under the first time")
+        // And attached, so the next repeat says the same thing even if
+        // the identity is renamed in between.
+        try await waitForAsync {
+            await harness.repository.currentChats().first?.joinerLabel == "Bob"
+        }
+    }
+
     func test_askAgain_whileVerifying_redrivesTheVerifierInstead() async throws {
         // Past the approval the wait has changed hands: asking the
         // founder again would achieve nothing, because they already
@@ -322,12 +351,21 @@ final class PendingChatsFlowTests: XCTestCase {
         let harness = await Harness.make(owner: owner)
         await harness.flow.start()
         let chat = harness.makeChat()
-        await harness.repository.record(chat)
-        await harness.repository.markRequested(id: chat.id)
+        // The verification first, and waited for by the row it
+        // synthesises on its own: `.requested` and "verifying" both
+        // read as `.waiting`, so waiting on the state can't tell
+        // whether the flow has seen the verification yet — and a retry
+        // that ran before it had would ask the founder again, which is
+        // the exact thing this test says doesn't happen.
         await harness.verifications.record(makeVerification(
             groupIDHex: chat.groupIDHex, owner: owner, status: .verifying
         ))
-        try await waitFor { harness.flow.rows.first?.state == .waiting }
+        try await waitFor { harness.flow.rows.first?.id == chat.groupIDHex }
+        await harness.repository.record(chat)
+        await harness.repository.markRequested(id: chat.id)
+        try await waitFor {
+            harness.flow.rows.count == 1 && harness.flow.rows.first?.state == .waiting
+        }
 
         harness.flow.retry(chat.id)
 
@@ -407,6 +445,21 @@ final class PendingChatsFlowTests: XCTestCase {
         let stored = await harness.repository.currentChats()
         XCTAssertTrue(stored.isEmpty, "nothing may be persisted before a person says so")
         XCTAssertTrue(harness.flow.rows.isEmpty)
+    }
+
+    func test_theConfirmationArrivesPreFilledWithTheIdentitysName() async throws {
+        // Joining is one tap. The name a person asks under is almost
+        // always their own, so the field carries it already and Send is
+        // the only thing left to do — typing your own name to get into a
+        // chat is a question with a known answer.
+        let harness = await Harness.make(owner: owner)
+        await harness.flow.start()
+
+        guard case .confirm(let confirmation) =
+                await harness.flow.prepareJoin(capability: harness.capability())
+        else { return XCTFail("expected a confirmation") }
+
+        XCTAssertEqual(confirmation.suggestedLabel, "Bob")
     }
 
     func test_confirmingALink_recordsTheRowAndSendsUnderTheTypedName() async throws {

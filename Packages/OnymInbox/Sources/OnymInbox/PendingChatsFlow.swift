@@ -363,6 +363,13 @@ public final class PendingChatsFlow {
             guard let chat = pending.first(where: { $0.id == rowID }) else {
                 return .failed(reason: String(localized: "Couldn\u{2019}t save this invite on your device."))
             }
+            // The same `.offered` check `prepareAccept` made, re-made
+            // here: an open screen can outlive the state it was opened
+            // on, and a row that has already asked has nothing left to
+            // send — the wait is the whole answer. `send`'s debounce
+            // catches the double tap; this catches the row that moved
+            // on underneath.
+            guard chat.status == .offered else { return .waiting(rowID: rowID) }
             await repository.attachJoinerLabel(id: rowID, label: trimmed)
             send(chat, label: trimmed)
             return .waiting(rowID: rowID)
@@ -403,8 +410,6 @@ public final class PendingChatsFlow {
         }
     }
 
-
-
     /// Act on whatever this row is stuck on: re-drive a stalled
     /// verification, or ask again — a request that never left, or one
     /// that left and was never answered.
@@ -430,11 +435,26 @@ public final class PendingChatsFlow {
             }
             guard let chat = pending.first(where: { $0.id == id }) else { return }
             // Under the name this row already asked under — a re-send
-            // that renamed the asker would arrive from a stranger. A row
-            // with no label has sent nothing yet, and there is nothing
-            // for a retry to repeat.
-            guard let label = chat.joinerLabel else { return }
-            send(chat, label: label)
+            // that renamed the asker would arrive from a stranger.
+            //
+            // A row can have no label and still have asked: every row
+            // written before the confirmation screen existed sent under
+            // the identity's own name, and those are the rows most
+            // likely to need this, having waited through an update. So
+            // the fallback is that name, attached on the way out so the
+            // one after this repeats it rather than re-deriving it from
+            // an identity that may since have been renamed.
+            if let label = chat.joinerLabel {
+                send(chat, label: label)
+                return
+            }
+            let repository = self.repository
+            let displayLabel = self.displayLabel
+            Task { @MainActor [weak self] in
+                let label = await displayLabel()
+                await repository.attachJoinerLabel(id: id, label: label)
+                self?.send(chat, label: label)
+            }
         case .offered, .chainSettling:
             break
         }

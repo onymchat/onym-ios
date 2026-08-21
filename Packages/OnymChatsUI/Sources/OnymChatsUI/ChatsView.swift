@@ -186,8 +186,10 @@ public struct ChatsView: View {
             QRCodeScannerView(
                 onScanned: { raw in
                     // Same allowlist + decode the deeplink path uses, so
-                    // a scanned link and a tapped link reach `join`
-                    // identically. A non-invite QR yields nil → reject.
+                    // a scanned link and a tapped link resolve through
+                    // `prepareJoin` identically — a scan is deliberate,
+                    // but it discloses the same things, so it gets the
+                    // same review. A non-invite QR yields nil → reject.
                     if let cap = DeeplinkCapture.introCapability(fromString: raw) {
                         scannedCapability = cap
                     } else {
@@ -206,10 +208,19 @@ public struct ChatsView: View {
                     let navigation = navigation
                     scanConfirmation = nil
                     Task { @MainActor in
-                        if case .waiting(let rowID) = await flow.confirmJoin(
-                            confirmation, label: label
-                        ) {
+                        // Every outcome, not just the happy one: the
+                        // sheet closes either way, so a row that
+                        // couldn't be written would otherwise look
+                        // exactly like a request that went out.
+                        switch await flow.confirmJoin(confirmation, label: label) {
+                        case .waiting(let rowID):
                             navigation.openPending(rowID: rowID)
+                        case .alreadyJoined(let groupIDHex):
+                            navigation.openChat(groupID: groupIDHex)
+                        case .failed(let reason):
+                            scanJoinError = reason
+                        case .confirm:
+                            break
                         }
                     }
                 },
@@ -228,8 +239,9 @@ public struct ChatsView: View {
     /// dismissed — see the `scannedCapability` note above.
     ///
     /// A scan used to open the join sheet. It now does exactly what a
-    /// tapped link does: sends the request and opens the chat that is on
-    /// its way, so the two entry points can't drift apart.
+    /// tapped link does — resolves to a screen, and sends nothing until
+    /// someone taps Send on it — so the two entry points can't drift
+    /// apart.
     private func handleScannerDismiss() {
         if let cap = scannedCapability {
             scannedCapability = nil
