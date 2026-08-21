@@ -33,6 +33,32 @@ public protocol JoinRequestApproving: Sendable {
 ///  4. On Decline → drop that one request; the link stays live.
 public actor JoinRequestApprover: JoinRequestApproving {
 
+    /// Whether the joiner agreed to the group's rules, decided once
+    /// when the request is decrypted and against the group's own copy
+    /// of the text.
+    ///
+    /// Five outcomes rather than a `Bool`, because a founder deciding
+    /// on a stranger needs to tell apart the cases a `Bool` collapses:
+    /// someone who signed nothing (an older build) is not someone whose
+    /// signature failed to verify (forged or corrupt), and neither is
+    /// someone who agreed to a previous wording. Only one of the three
+    /// is worth asking the joiner to redo.
+    public enum RulesAgreement: Equatable, Sendable {
+        /// The group has no rules, so there was nothing to agree to.
+        case notRequired
+        /// Verified against the rules this group holds right now.
+        case agreed
+        /// A valid signature, over a different text than the group's
+        /// current rules — the joiner accepted an earlier version, or
+        /// a link that carried something else.
+        case agreedToOtherRules
+        /// A signature that doesn't verify. Not an old client: an old
+        /// client sends none at all.
+        case invalid
+        /// The group has rules and the request carried no agreement.
+        case notSigned
+    }
+
     /// UI-renderable view of one decrypted, awaiting-action request.
     public struct PendingRequest: Equatable, Sendable, Identifiable {
         /// Stable id == `IntroRequest.id`. Approve / Decline use it
@@ -66,6 +92,21 @@ public actor JoinRequestApprover: JoinRequestApproving {
         /// "this invite isn't for any group on this device" error
         /// in the UI rather than approving.
         public let groupName: String?
+        /// What the joiner agreed to, checked against the group's rules
+        /// at decrypt time. Never blocks approval on its own — the
+        /// founder is shown it and decides, because rejecting outright
+        /// would silently exclude every joiner on a build that predates
+        /// rules, including the whole of the other platform until it
+        /// ships.
+        public let rulesAgreement: RulesAgreement
+        /// The signature itself, kept so approval can record it on the
+        /// member. Retained rather than re-derived: this is the
+        /// evidence.
+        public let rulesSignature: Data?
+        /// The hash the joiner signed over — which is not necessarily
+        /// the hash of this group's current rules; see
+        /// `agreedToOtherRules`.
+        public let rulesHash: Data?
 
         public init(
             id: String,
@@ -75,7 +116,10 @@ public actor JoinRequestApprover: JoinRequestApproving {
             joinerSendingPublicKey: Data,
             joinerDisplayLabel: String,
             groupId: Data,
-            groupName: String?
+            groupName: String?,
+            rulesAgreement: RulesAgreement = .notRequired,
+            rulesSignature: Data? = nil,
+            rulesHash: Data? = nil
         ) {
             self.id = id
             self.joinerInboxPublicKey = joinerInboxPublicKey
@@ -85,6 +129,9 @@ public actor JoinRequestApprover: JoinRequestApproving {
             self.joinerDisplayLabel = joinerDisplayLabel
             self.groupId = groupId
             self.groupName = groupName
+            self.rulesAgreement = rulesAgreement
+            self.rulesSignature = rulesSignature
+            self.rulesHash = rulesHash
         }
     }
 
@@ -389,12 +436,21 @@ public actor JoinRequestApprover: JoinRequestApproving {
         if let blsPub = req.joinerBlsPublicKey {
             // Idempotent, and the point of the re-join path: a
             // reinstalled joiner has a new inbox pubkey.
+            // The agreement is recorded whatever it said, including
+            // when it didn't verify. The founder saw the verdict and
+            // approved anyway; keeping the bytes is what lets that
+            // decision be re-examined later, and dropping them would
+            // make "approved someone who signed nothing" and "approved
+            // someone whose signature was wrong" indistinguishable
+            // after the fact.
             await recordJoiner(
                 in: anchored,
                 blsPub: blsPub,
                 inboxPub: req.joinerInboxPublicKey,
                 sendingPub: req.joinerSendingPublicKey,
-                alias: req.joinerDisplayLabel
+                alias: req.joinerDisplayLabel,
+                rulesHash: req.rulesHash,
+                rulesSignature: req.rulesSignature
             )
             // Deliberately NOT gated on `alreadyInRoster`. That flag
             // reads `members` (the crypto roster, advanced by the
@@ -616,14 +672,18 @@ public actor JoinRequestApprover: JoinRequestApproving {
         blsPub: Data,
         inboxPub: Data,
         sendingPub: Data,
-        alias: String
+        alias: String,
+        rulesHash: Data?,
+        rulesSignature: Data?
     ) async {
         let key = blsPub.map { String(format: "%02x", $0) }.joined()
         var updated = group
         updated.memberProfiles[key] = MemberProfile(
             alias: alias,
             inboxPublicKey: inboxPub,
-            sendingPubkey: sendingPub
+            sendingPubkey: sendingPub,
+            rulesHash: rulesHash,
+            rulesSignature: rulesSignature
         )
         await groupRepository.insert(updated)
     }
@@ -899,7 +959,7 @@ public actor JoinRequestApprover: JoinRequestApproving {
             return nil
         }
         let groups = await groupRepository.currentGroups()
-        let groupName = groups.first(where: { $0.groupIDData == payload.groupId })?.name
+        let group = groups.first(where: { $0.groupIDData == payload.groupId })
         return PendingRequest(
             id: raw.id,
             joinerInboxPublicKey: payload.joinerInboxPublicKey,
@@ -908,7 +968,39 @@ public actor JoinRequestApprover: JoinRequestApproving {
             joinerSendingPublicKey: payload.joinerSendingPublicKey,
             joinerDisplayLabel: payload.joinerDisplayLabel,
             groupId: payload.groupId,
-            groupName: groupName
+            groupName: group?.name,
+            rulesAgreement: Self.agreement(
+                for: payload,
+                rules: group?.invitationMessage
+            ),
+            rulesSignature: payload.rulesSignature,
+            rulesHash: payload.rulesHash
         )
+    }
+
+    /// Decide the agreement once, here, where the group's own rules are
+    /// in hand — rather than handing a signature to a view and asking
+    /// it to work out what to make of it.
+    static func agreement(
+        for payload: JoinRequestPayload,
+        rules: String?
+    ) -> RulesAgreement {
+        guard let rules = GroupRules.normalized(rules) else { return .notRequired }
+        guard let signature = payload.rulesSignature,
+              let signedHash = payload.rulesHash
+        else { return .notSigned }
+        // Checked against the group's text before the hash is compared,
+        // so a joiner can't pass by echoing back the right hash with a
+        // signature over something else: verification uses *our* rules,
+        // and the hash they sent only ever explains a failure.
+        if GroupRules.isAgreement(
+            signature: signature,
+            rules: rules,
+            groupID: payload.groupId,
+            joinerSendingPublicKey: payload.joinerSendingPublicKey
+        ) {
+            return .agreed
+        }
+        return signedHash == GroupRules.hash(rules) ? .invalid : .agreedToOtherRules
     }
 }

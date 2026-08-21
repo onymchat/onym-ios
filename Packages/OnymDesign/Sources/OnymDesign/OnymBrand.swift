@@ -22,6 +22,9 @@ public enum OnymTokens {
     public static let hairlineStrong  = Color.dynamic(light: .black.opacity(0.12), dark: .white.opacity(0.12))
     public static let green           = Color.dynamic(light: hex(0x1FA84A),  dark: hex(0x34C759))
     public static let red             = Color.dynamic(light: hex(0xE5392E),  dark: hex(0xFF453A))
+    /// Caution, not failure: something a person should read before
+    /// deciding, where `red` would say the decision is already wrong.
+    public static let amber           = Color.dynamic(light: hex(0xFF9500),  dark: hex(0xFF9F0A))
 
     /// Reads on accent fills (button labels, governance card check
     /// glyphs, success seal). Light → white text on saturated accent;

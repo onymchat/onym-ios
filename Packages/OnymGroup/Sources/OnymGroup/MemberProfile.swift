@@ -30,17 +30,45 @@ public struct MemberProfile: Codable, Equatable, Hashable, Sendable {
     /// against this so an insider can't forge another member's
     /// `senderBlsPubkeyHex` claim.
     public let sendingPubkey: Data
+    /// 32-byte `SHA256` of the rules this member agreed to when they
+    /// asked to join, and their 64-byte Ed25519 signature over
+    /// `GroupRules.statement(...)`. Both nil for a member who joined
+    /// before the group had rules, or from a build that predates them.
+    ///
+    /// Kept on the member rather than on the request, because the
+    /// request is consumed at approval and the question ("did they
+    /// agree?") outlives it by the whole life of the membership.
+    ///
+    /// Announced alongside the rest of the profile, so any member can
+    /// check any other member's agreement against `sendingPubkey` —
+    /// the founder who admitted them is not a required witness. The
+    /// text those bytes cover is the group's own
+    /// `ChatGroup.invitationMessage`; keeping the hash is what would
+    /// expose a later divergence between the two rather than quietly
+    /// failing to verify.
+    public let rulesHash: Data?
+    public let rulesSignature: Data?
 
     enum CodingKeys: String, CodingKey {
         case alias
         case inboxPublicKey = "inbox_public_key"
         case sendingPubkey = "sending_pubkey"
+        case rulesHash = "rules_hash"
+        case rulesSignature = "rules_signature"
     }
 
-    public init(alias: String, inboxPublicKey: Data, sendingPubkey: Data) {
+    public init(
+        alias: String,
+        inboxPublicKey: Data,
+        sendingPubkey: Data,
+        rulesHash: Data? = nil,
+        rulesSignature: Data? = nil
+    ) {
         self.alias = alias
         self.inboxPublicKey = inboxPublicKey
         self.sendingPubkey = sendingPubkey
+        self.rulesHash = rulesHash
+        self.rulesSignature = rulesSignature
     }
 
     /// The wire-side decode boundary. `MemberProfile` ships inside
@@ -64,9 +92,21 @@ public struct MemberProfile: Codable, Equatable, Hashable, Sendable {
                 "sendingPubkey: expected 32 bytes, got \(sending.count)"
             )
         }
+        let rulesHash = try c.decodeIfPresent(Data.self, forKey: .rulesHash)
+        let rulesSignature = try c.decodeIfPresent(Data.self, forKey: .rulesSignature)
+        // Wrong-sized agreement bytes are dropped, not thrown on. A
+        // malformed signature means "we can't show this member agreed",
+        // which is already what nil means — and rejecting the whole
+        // profile over it would take a member's inbox and verification
+        // keys down with it, breaking the chat for a field that only
+        // ever adds evidence.
+        let sizedHash = rulesHash?.count == 32 ? rulesHash : nil
+        let sizedSignature = rulesSignature?.count == 64 ? rulesSignature : nil
         self.alias = alias
         self.inboxPublicKey = inbox
         self.sendingPubkey = sending
+        self.rulesHash = sizedSignature == nil ? nil : sizedHash
+        self.rulesSignature = sizedHash == nil ? nil : sizedSignature
     }
 }
 
