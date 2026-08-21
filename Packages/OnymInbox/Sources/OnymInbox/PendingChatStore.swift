@@ -31,6 +31,10 @@ public protocol PendingChatStore: Sendable {
         inviterAlias: String,
         invitationMessage: String?
     ) async
+    /// Remember the name this device asked to be let in under, so a
+    /// re-send introduces the same person — see
+    /// `PendingChat.joinerLabel`.
+    func setJoinerLabel(id: String, label: String) async
     func delete(id: String) async
     /// Drop rows by id — `<group id hex>:<owner uuid>`, the same key
     /// `insert` dedupes on. Ids rather than group hexes because two
@@ -83,6 +87,11 @@ public actor InMemoryPendingChatStore: PendingChatStore {
             receivedAt: existing.receivedAt,
             status: existing.status
         )
+    }
+
+    public func setJoinerLabel(id: String, label: String) async {
+        guard let index = rows.firstIndex(where: { $0.id == id }) else { return }
+        rows[index].joinerLabel = label
     }
 
     public func delete(id: String) async {

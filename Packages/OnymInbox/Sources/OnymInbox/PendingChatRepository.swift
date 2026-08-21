@@ -68,6 +68,13 @@ public actor PendingChatRepository: PendingChatRecording {
         await refreshFromStore()
     }
 
+    /// Remember the name this device asked under, so a re-send
+    /// introduces the same person.
+    public func attachJoinerLabel(id: String, label: String) async {
+        await store.setJoinerLabel(id: id, label: label)
+        await refreshFromStore()
+    }
+
     /// Drop a row the user swiped away. Local only — no NACK to the
     /// founder, whose outstanding intro key simply goes unused.
     public func remove(id: String) async {
