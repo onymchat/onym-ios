@@ -51,6 +51,18 @@ public actor SwiftDataPendingChatStore: PendingChatStore {
         return SwiftDataPendingChatStore(container: container)
     }
 
+    /// A second store over the same container, reading through a fresh
+    /// `ModelContext`.
+    ///
+    /// Not a relaunch: the container here is the same object and, for
+    /// `inMemory()`, never touches disk. What it does show is that a
+    /// write reached the container's store rather than sitting in the
+    /// context that made it — the half of durability a test can check
+    /// without a device.
+    func reopened() -> SwiftDataPendingChatStore {
+        SwiftDataPendingChatStore(container: container)
+    }
+
     private init(container: ModelContainer) {
         self.container = container
         self.context = ModelContext(container)
