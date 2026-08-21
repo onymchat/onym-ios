@@ -76,12 +76,9 @@ final class PendingChatsFlowTests: XCTestCase {
         try await waitFor { harness.flow.rows.count == 1 }
 
         harness.flow.accept(chat.id)
-        try await waitFor {
-            if case .sendFailed(let reason)? = harness.flow.rows.first?.state {
-                return reason.contains("relay rejected")
-            }
-            return false
-        }
+        // The transport's own words are deliberately not kept: the row
+        // is on disk and outlives the language it was written in.
+        try await waitFor { harness.flow.rows.first?.state == .sendFailed(.transport) }
         XCTAssertTrue(harness.flow.rows.first?.state.isRetryable == true)
 
         await harness.sender.setOutcome(.sent)
@@ -102,9 +99,7 @@ final class PendingChatsFlowTests: XCTestCase {
 
         harness.flow.accept(chat.id)
 
-        try await waitFor {
-            harness.flow.rows.first?.state == .sendFailed(reason: String(localized: "Sign in first."))
-        }
+        try await waitFor { harness.flow.rows.first?.state == .sendFailed(.noIdentity) }
         XCTAssertTrue(harness.flow.rows.first?.state.isRetryable == true)
     }
 
@@ -167,6 +162,9 @@ final class PendingChatsFlowTests: XCTestCase {
         await harness.flow.start()
         let chat = harness.makeChat()
         await harness.repository.record(chat)
+        // Requested first, because that is the only way a verification
+        // for this row can exist: it follows the founder's approval.
+        await harness.repository.markRequested(id: chat.id)
         await harness.verifications.record(makeVerification(
             groupIDHex: chat.groupIDHex, owner: owner, status: .chainUnreachable
         ))
@@ -186,6 +184,9 @@ final class PendingChatsFlowTests: XCTestCase {
         await harness.flow.start()
         let chat = harness.makeChat()
         await harness.repository.record(chat)
+        // Requested first, because that is the only way a verification
+        // for this row can exist: it follows the founder's approval.
+        await harness.repository.markRequested(id: chat.id)
         await harness.verifications.record(makeVerification(
             groupIDHex: chat.groupIDHex, owner: owner, status: .chainSettling
         ))
@@ -209,6 +210,9 @@ final class PendingChatsFlowTests: XCTestCase {
         await harness.flow.start()
         let chat = harness.makeChat()
         await harness.repository.record(chat)
+        // Requested first, because that is the only way a verification
+        // for this row can exist: it follows the founder's approval.
+        await harness.repository.markRequested(id: chat.id)
         await harness.verifications.record(makeVerification(
             groupIDHex: chat.groupIDHex, owner: owner, status: .verifying
         ))
@@ -224,6 +228,9 @@ final class PendingChatsFlowTests: XCTestCase {
         await harness.flow.start()
         let chat = harness.makeChat()
         await harness.repository.record(chat)
+        // Requested first, because that is the only way a verification
+        // for this row can exist: it follows the founder's approval.
+        await harness.repository.markRequested(id: chat.id)
         await harness.verifications.record(makeVerification(
             groupIDHex: chat.groupIDHex, owner: owner, status: .chainNotConfigured
         ))
@@ -252,12 +259,70 @@ final class PendingChatsFlowTests: XCTestCase {
         XCTAssertFalse(row.isDismissable, "there is no stored offer under it to drop")
     }
 
+    func test_askAgain_onAWaitingRow_resendsToTheFounder() async throws {
+        // A request can be sent and never answered — a revoked link, or
+        // one that died in a relay. Before this there was no way out but
+        // swiping the row away.
+        let harness = await Harness.make(owner: owner)
+        await harness.flow.start()
+        let chat = harness.makeChat()
+        await harness.repository.record(chat)
+        await harness.repository.markRequested(id: chat.id)
+        try await waitFor { harness.flow.rows.first?.state == .waiting }
+        XCTAssertTrue(harness.flow.rows.first?.state.isRetryable == true)
+
+        harness.flow.retry(chat.id)
+
+        try await waitForAsync { await harness.sender.calls.count == 1 }
+        let retries = await harness.verifierRetries.values
+        XCTAssertTrue(retries.isEmpty, "the founder is who this wait belongs to")
+    }
+
+    func test_askAgain_whileVerifying_redrivesTheVerifierInstead() async throws {
+        // Past the approval the wait has changed hands: asking the
+        // founder again would achieve nothing, because they already
+        // said yes.
+        let harness = await Harness.make(owner: owner)
+        await harness.flow.start()
+        let chat = harness.makeChat()
+        await harness.repository.record(chat)
+        await harness.repository.markRequested(id: chat.id)
+        await harness.verifications.record(makeVerification(
+            groupIDHex: chat.groupIDHex, owner: owner, status: .verifying
+        ))
+        try await waitFor { harness.flow.rows.first?.state == .waiting }
+
+        harness.flow.retry(chat.id)
+
+        try await waitForAsync { await harness.verifierRetries.values == [chat.groupIDHex] }
+        let sends = await harness.sender.calls.count
+        XCTAssertEqual(sends, 0)
+    }
+
+    func test_anUnansweredOffer_keepsItsAcceptEvenWhileVerifying() async throws {
+        // A verification describes a join that was asked for. An offer
+        // has asked for nothing, and letting the overlay win there took
+        // the Accept button away with no way to say yes.
+        let harness = await Harness.make(owner: owner)
+        await harness.flow.start()
+        let chat = harness.makeChat()
+        await harness.repository.record(chat)
+        // Deliberately left unanswered: a stale verification arriving
+        // over an offer must not decide what this row can do.
+        await harness.verifications.record(makeVerification(
+            groupIDHex: chat.groupIDHex, owner: owner, status: .unreachable
+        ))
+        try await waitFor { harness.flow.rows.count == 1 }
+
+        XCTAssertEqual(harness.flow.rows.first?.state, .offered)
+    }
+
     // MARK: - End of the wait
 
     func test_theGroupThatEndedTheWaitIsRememberedAfterTheRowIsGone() async throws {
-        // The pending thread reads this to know where to go. Recorded
-        // before the row is consumed, and kept after — the row vanishing
-        // is exactly the moment the screen needs the answer.
+        // The pending thread reads this to know where to go, and it is
+        // derived from the group snapshot rather than from `rows` —
+        // which may not have arrived when the first emission lands.
         let harness = await Harness.make(owner: owner)
         await harness.flow.start()
         let chat = harness.makeChat()

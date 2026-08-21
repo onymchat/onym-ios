@@ -58,15 +58,36 @@ final class PendingChatStoreTests: XCTestCase {
 
     // MARK: - Status
 
-    func test_setStatus_carriesTheFailureReason() async {
+    func test_setStatus_carriesTheFailureCode() async {
         let store = SwiftDataPendingChatStore.inMemory()
         let chat = makeChat(group: 0x11, owner: owner)
         await store.insert(chat)
 
-        await store.setStatus(id: chat.id, status: .failed(reason: "relay rejected"))
+        await store.setStatus(id: chat.id, status: .failed(.noIdentity))
 
         let rows = await store.list()
-        XCTAssertEqual(rows.first?.status, .failed(reason: "relay rejected"))
+        XCTAssertEqual(rows.first?.status, .failed(.noIdentity))
+    }
+
+    func test_refreshOffer_replacesTheReplyChannelButNotTheStatus() async {
+        let store = SwiftDataPendingChatStore.inMemory()
+        let chat = makeChat(group: 0x11, owner: owner)
+        await store.insert(chat)
+        await store.setStatus(id: chat.id, status: .requested)
+
+        await store.refreshOffer(
+            id: chat.id,
+            introPublicKey: Data(repeating: 0x99, count: 32),
+            groupName: "Maple Garden (renamed)",
+            inviterAlias: "Alice",
+            invitationMessage: nil
+        )
+
+        let rows = await store.list()
+        XCTAssertEqual(rows.first?.introPublicKey, Data(repeating: 0x99, count: 32))
+        XCTAssertEqual(rows.first?.groupName, "Maple Garden (renamed)")
+        XCTAssertNil(rows.first?.invitationMessage)
+        XCTAssertEqual(rows.first?.status, .requested)
     }
 
     func test_setStatus_onAMissingRowIsANoOp() async {
@@ -197,9 +218,20 @@ final class PendingChatStoreTests: XCTestCase {
             file: file, line: line
         )
 
-        await store.setStatus(id: old.id, status: .failed(reason: "relay rejected"))
+        await store.setStatus(id: old.id, status: .failed(.transport))
         let afterStatus = await store.list().first { $0.id == old.id }
-        XCTAssertEqual(afterStatus?.status, .failed(reason: "relay rejected"), file: file, line: line)
+        XCTAssertEqual(afterStatus?.status, .failed(.transport), file: file, line: line)
+
+        await store.refreshOffer(
+            id: new.id,
+            introPublicKey: Data(repeating: 0x99, count: 32),
+            groupName: "renamed",
+            inviterAlias: "Alice",
+            invitationMessage: nil
+        )
+        let refreshed = await store.list().first { $0.id == new.id }
+        XCTAssertEqual(refreshed?.introPublicKey, Data(repeating: 0x99, count: 32), file: file, line: line)
+        XCTAssertEqual(refreshed?.groupName, "renamed", file: file, line: line)
         // A row that isn't there absorbs the write rather than creating one.
         await store.setStatus(id: "nobody:home", status: .requested)
         let afterGhost = await store.list()

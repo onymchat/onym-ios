@@ -65,16 +65,16 @@ final class PendingChatRepositoryTests: XCTestCase {
         XCTAssertEqual(snapshot.first?.status, .requested)
     }
 
-    func test_markFailed_carriesTheReasonTheThreadShows() async throws {
+    func test_markFailed_carriesACodeTheThreadCanRenderInAnyLanguage() async throws {
         let repository = PendingChatRepository(store: InMemoryPendingChatStore())
         await repository.setCurrentIdentity(alice)
         let chat = makeChat(group: 0x11, owner: alice)
         await repository.record(chat)
 
-        await repository.markFailed(id: chat.id, reason: "no relay connection")
+        await repository.markFailed(id: chat.id, failure: .transport)
 
         let snapshot = try await firstSnapshot(from: repository)
-        XCTAssertEqual(snapshot.first?.status, .failed(reason: "no relay connection"))
+        XCTAssertEqual(snapshot.first?.status, .failed(.transport))
     }
 
     func test_consumeForMaterialized_dropsTheWaitThatIsOver() async throws {
@@ -160,6 +160,39 @@ final class PendingChatRepositoryTests: XCTestCase {
 
         let snapshot = try await firstSnapshot(from: repository)
         XCTAssertTrue(snapshot.isEmpty)
+    }
+
+    func test_record_onARepeatOffer_takesTheNewerReplyChannel() async throws {
+        // A re-invite mints a fresh intro key and revokes the old one.
+        // Keeping the first would seal Accept to a dead address — sent,
+        // never heard, waiting forever.
+        let repository = PendingChatRepository(store: InMemoryPendingChatStore())
+        await repository.setCurrentIdentity(alice)
+        let first = makeChat(group: 0x11, owner: alice)
+        await repository.record(first)
+        await repository.markRequested(id: first.id)
+
+        var reinvite = makeChat(group: 0x11, owner: alice)
+        reinvite = PendingChat(
+            groupID: reinvite.groupID,
+            ownerIdentityID: alice,
+            introPublicKey: Data(repeating: 0x99, count: 32),
+            groupName: "Maple Garden (renamed)",
+            inviterAlias: "Alice",
+            invitationMessage: nil,
+            receivedAt: Date(),
+            status: .offered
+        )
+        let outcome = await repository.record(reinvite)
+
+        XCTAssertEqual(outcome, .alreadyPresent)
+        let snapshot = try await firstSnapshot(from: repository)
+        XCTAssertEqual(snapshot.first?.introPublicKey, Data(repeating: 0x99, count: 32))
+        XCTAssertEqual(snapshot.first?.groupName, "Maple Garden (renamed)")
+        XCTAssertEqual(
+            snapshot.first?.status, .requested,
+            "the newer key changes where to ask, not what was asked"
+        )
     }
 
     func test_remove_dropsTheRowTheUserSwipedAway() async throws {
@@ -255,6 +288,27 @@ final class PendingChatRepositoryTests: XCTestCase {
         func setStatus(id: String, status: PendingChat.Status) async {
             guard let index = rows.firstIndex(where: { $0.id == id }) else { return }
             rows[index].status = status
+        }
+
+        func refreshOffer(
+            id: String,
+            introPublicKey: Data,
+            groupName: String?,
+            inviterAlias: String,
+            invitationMessage: String?
+        ) async {
+            guard let index = rows.firstIndex(where: { $0.id == id }) else { return }
+            let existing = rows[index]
+            rows[index] = PendingChat(
+                groupID: existing.groupID,
+                ownerIdentityID: existing.ownerIdentityID,
+                introPublicKey: introPublicKey,
+                groupName: groupName,
+                inviterAlias: inviterAlias,
+                invitationMessage: invitationMessage,
+                receivedAt: existing.receivedAt,
+                status: existing.status
+            )
         }
 
         func delete(id: String) async {
