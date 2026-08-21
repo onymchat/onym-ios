@@ -86,14 +86,6 @@ public final class PendingChatsFlow {
 
     /// Pending rows for the current identity, newest first.
     public private(set) var rows: [Row] = []
-    /// Rows whose wait ended, mapped to the group that replaced them
-    /// (`row id → group id hex`).
-    ///
-    /// Kept after the row itself is gone, because the row disappearing
-    /// is exactly the moment a screen showing it needs to know where to
-    /// go instead. Bounded by the number of chats this device has ever
-    /// joined, which is the same order as the chats list itself.
-    public private(set) var materialized: [String: String] = [:]
     public var lastError: String?
 
     private let repository: PendingChatRepository
@@ -154,19 +146,11 @@ public final class PendingChatsFlow {
         }
         let groups = groupRepository.snapshots
         let repository = self.repository
-        groupWatchTask = Task { @MainActor [weak self] in
+        groupWatchTask = Task {
             for await groups in groups {
-                let landed = Set(groups.map(\.id))
-                // Recorded *before* the rows are consumed: afterwards
-                // there is nothing left to say which wait this group
-                // ended, and a pending thread on screen would have no
-                // way to find the chat it just became.
-                if let self {
-                    for row in self.rows where landed.contains(row.groupIDHex) {
-                        self.materialized[row.id] = row.groupIDHex
-                    }
-                }
-                await repository.consumeForMaterializedGroups(landed)
+                await repository.consumeForMaterialized(
+                    groups.map { (groupIDHex: $0.id, owner: $0.ownerIdentityID) }
+                )
             }
         }
     }
@@ -181,12 +165,6 @@ public final class PendingChatsFlow {
     }
 
     public func row(id: String) -> Row? { rows.first { $0.id == id } }
-
-    /// The group a pending row turned into, once it has. `nil` while the
-    /// wait is still on.
-    public func materializedGroupID(for rowID: String) -> String? {
-        materialized[rowID]
-    }
 
     /// Explicit Accept on a pushed offer: ship a join request to the
     /// offer's intro key. No-op once something is in flight, or once the

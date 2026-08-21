@@ -16,10 +16,12 @@ public protocol PendingChatStore: Sendable {
     /// while a join request is still in flight.
     func setStatus(id: String, status: PendingChat.Status) async
     func delete(id: String) async
-    /// Drop the rows whose group now exists locally. Matched on hex so
-    /// the caller can pass what `GroupRepository` gave it without
-    /// decrypting a single row.
-    func deleteForGroups(hexes: Set<String>) async
+    /// Drop rows by id — `<group id hex>:<owner uuid>`, the same key
+    /// `insert` dedupes on. Ids rather than group hexes because two
+    /// identities on one device can each be waiting on the same group,
+    /// and matching on the group alone would delete the other one's row
+    /// when this one got in.
+    func deleteForIDs(_ ids: Set<String>) async
     func deleteOwner(_ ownerIDString: String) async
     /// Every row on the device, newest first.
     func list() async -> [PendingChat]
@@ -50,9 +52,9 @@ public actor InMemoryPendingChatStore: PendingChatStore {
         rows.removeAll { $0.id == id }
     }
 
-    public func deleteForGroups(hexes: Set<String>) async {
-        guard !hexes.isEmpty else { return }
-        rows.removeAll { hexes.contains($0.groupIDHex) }
+    public func deleteForIDs(_ ids: Set<String>) async {
+        guard !ids.isEmpty else { return }
+        rows.removeAll { ids.contains($0.id) }
     }
 
     public func deleteOwner(_ ownerIDString: String) async {

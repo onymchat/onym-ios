@@ -92,10 +92,20 @@ public protocol PendingChatRecording: Sendable {
     func record(_ chat: PendingChat) async -> PendingChatWriteOutcome
 }
 
-/// What a write actually did. Three cases rather than a `Bool` for the
-/// reason `GroupStore.insertOrUpdate` grew the same shape: "already
-/// there" and "refused to write" are opposite facts, and a caller that
-/// reads one `false` for both eventually treats a dedup hit as a failure.
+/// What a write actually did.
+///
+/// Three cases rather than a `Bool` because the deeplink caller acts
+/// differently on each: a fresh row is asked for on the user's behalf,
+/// an existing one is picked up where it stands, and a write that never
+/// landed has to be said out loud rather than leaving someone waiting on
+/// a request their device has no record of.
+///
+/// The dispatcher's offer path ignores it on purpose — see `recordOffer`.
+/// A pushed offer is a retained event the relays replay on every
+/// reconnect, so the next delivery re-attempts the write; there is
+/// nothing for that caller to do with a failure that waiting doesn't
+/// already do, and there is nothing it may log (an invitation is exactly
+/// the kind of activity this app does not record).
 public enum PendingChatWriteOutcome: Equatable, Sendable {
     /// A new waiting room appeared.
     case inserted
@@ -105,6 +115,10 @@ public enum PendingChatWriteOutcome: Equatable, Sendable {
     /// The row could not be written (encryption or store failure). The
     /// user is waiting on something this device has no record of.
     case failed
+    /// Nobody was listening — the recorder is a no-op. Distinct from
+    /// `.failed` so a test double is never mistaken for a disk that
+    /// gave out.
+    case notRecorded
 }
 
 /// Default `PendingChatRecording` for the many test constructions of
@@ -117,6 +131,9 @@ public enum PendingChatWriteOutcome: Equatable, Sendable {
 public struct NoopPendingChatRecorder: PendingChatRecording {
     public init() {}
 
+    /// `.notRecorded`, not `.failed`: nothing here ever tries, so
+    /// reporting a failure would make a wiring choice look like a disk
+    /// that gave out.
     @discardableResult
-    public func record(_ chat: PendingChat) async -> PendingChatWriteOutcome { .failed }
+    public func record(_ chat: PendingChat) async -> PendingChatWriteOutcome { .notRecorded }
 }

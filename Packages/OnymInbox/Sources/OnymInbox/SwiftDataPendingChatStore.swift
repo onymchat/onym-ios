@@ -100,13 +100,13 @@ public actor SwiftDataPendingChatStore: PendingChatStore {
         try? context.save()
     }
 
-    public func deleteForGroups(hexes: Set<String>) async {
-        guard !hexes.isEmpty else { return }
+    public func deleteForIDs(_ ids: Set<String>) async {
+        guard !ids.isEmpty else { return }
         // Fetched unfiltered and matched in Swift: `#Predicate` can't
         // close over a Set, and the table holds a handful of rows.
         guard let rows = try? context.fetch(FetchDescriptor<PersistedPendingChat>())
         else { return }
-        let stale = rows.filter { hexes.contains($0.groupIDHex) }
+        let stale = rows.filter { ids.contains($0.id) }
         guard !stale.isEmpty else { return }
         for row in stale { context.delete(row) }
         try? context.save()

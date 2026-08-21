@@ -58,8 +58,14 @@ public actor PendingChatRepository: PendingChatRecording {
     /// Drop every pending row whose group now exists locally: the
     /// founder approved, the invitation materialized the group, and the
     /// waiting room has become the chat itself.
-    public func consumeForMaterializedGroups(_ groupIDHexes: Set<String>) async {
-        guard !groupIDHexes.isEmpty else { return }
+    ///
+    /// Takes `(group, owner)` pairs, not group ids. Two identities on
+    /// one device can be waiting on the same group, and the snapshot
+    /// that triggers this is filtered to whichever one is selected — so
+    /// matching on the group alone deleted the other identity's row the
+    /// moment this one got in.
+    public func consumeForMaterialized(_ groups: [(groupIDHex: String, owner: IdentityID)]) async {
+        guard !groups.isEmpty else { return }
         // An empty cache at launch is ambiguous — no pending chats, or
         // no read yet — and the group watcher can emit before the
         // startup `reload()` lands. Reading through settles it: without
@@ -67,10 +73,10 @@ public actor PendingChatRepository: PendingChatRecording {
         // survives the one emission that would have swept it and then
         // sits in the list until some unrelated group mutation.
         if cached.isEmpty { await refreshFromStore() }
-        let live = Set(cached.map(\.groupIDHex))
-        let matched = groupIDHexes.intersection(live)
+        let landed = Set(groups.map { "\($0.groupIDHex):\($0.owner.rawValue.uuidString)" })
+        let matched = Set(cached.map(\.id)).intersection(landed)
         guard !matched.isEmpty else { return }
-        await store.deleteForGroups(hexes: matched)
+        await store.deleteForIDs(matched)
         await refreshFromStore()
     }
 

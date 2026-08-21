@@ -284,11 +284,27 @@ public struct IncomingMessageDispatcher: Sendable {
     /// the user has already accepted must not come back asking to be
     /// accepted again. The store's dedup handles that; nothing here has
     /// to remember which deliveries it has seen.
+    ///
+    /// The store's dedup cannot cover the replay that arrives *after*
+    /// the group materialized, though — by then there is no row left to
+    /// collapse onto, and the sweep that would clear a fresh one only
+    /// runs on a `GroupRepository` emission. That row is durable now and
+    /// renders in the chats list beside the real chat, offering to send
+    /// a join request for a group the user is already in. So the check
+    /// is here, at the only point that knows the offer is new.
     private func recordOffer(
         _ offer: GroupInviteOfferPayload,
         ownerIdentityID: IdentityID,
         receivedAt: Date
     ) async {
+        let groupIDHex = offer.groupID.map { String(format: "%02x", $0) }.joined()
+        let alreadyJoined = await groupRepository.currentGroups().contains {
+            $0.id == groupIDHex && $0.ownerIdentityID == ownerIdentityID
+        }
+        // Scoped to the invited identity: another identity on this
+        // device being in the group says nothing about whether this one
+        // was invited to it.
+        guard !alreadyJoined else { return }
         await pendingChats.record(PendingChat(
             groupID: offer.groupID,
             ownerIdentityID: ownerIdentityID,

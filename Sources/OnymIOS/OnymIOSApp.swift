@@ -728,8 +728,8 @@ struct OnymIOSApp: App {
         let approveRequestsFlow = ApproveRequestsFlow(approver: joinRequestApprover)
 
         // Invitee-side push invitations. The dispatcher records decoded
-        // `GroupInviteOfferPayload`s here; the flow drives the Chats
-        // "Invitations" surface and, on explicit Accept, ships a
+        // `GroupInviteOfferPayload`s here; the flow renders them as rows
+        // in the chats list and, on explicit Accept, ships a
         // `JoinRequestPayload` to the offer's intro key via a sender
         // identical to the deeplink join path.
         // Durable, unlike the in-memory store it replaces. A pushed
