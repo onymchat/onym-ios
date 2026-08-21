@@ -311,6 +311,11 @@ final class PendingChatRepositoryTests: XCTestCase {
             )
         }
 
+        func setJoinerLabel(id: String, label: String) async {
+            guard let index = rows.firstIndex(where: { $0.id == id }) else { return }
+            rows[index].joinerLabel = label
+        }
+
         func delete(id: String) async {
             rows.removeAll { $0.id == id }
         }

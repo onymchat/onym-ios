@@ -27,21 +27,51 @@ final class PendingChatsFlowTests: XCTestCase {
         XCTAssertTrue(row.isDismissable)
     }
 
-    func test_accept_shipsTheRequestAndTheRowStartsWaiting() async throws {
+    func test_acceptingAnOffer_sendsOnlyOnceConfirmed() async throws {
         let harness = await Harness.make(owner: owner)
         await harness.flow.start()
         let chat = harness.makeChat()
         await harness.repository.record(chat)
         try await waitFor { harness.flow.rows.count == 1 }
 
-        harness.flow.accept(chat.id)
+        // Preparing the screen is not sending. Accept is a tap on a row
+        // that only a real inbound offer can create, and it still shows
+        // what is about to be disclosed before anything leaves.
+        let prepared = await harness.flow.prepareAccept(rowID: chat.id)
+        let confirmation = try XCTUnwrap(prepared)
+        XCTAssertEqual(confirmation.groupName, "Maple Garden")
+        XCTAssertEqual(confirmation.inviterAlias, "Alice")
+        XCTAssertEqual(confirmation.introPublicKey, chat.introPublicKey)
+        XCTAssertEqual(
+            confirmation.suggestedLabel, "Bob",
+            "pre-filled with the identity's own alias"
+        )
+        var sent = await harness.sender.calls.count
+        XCTAssertEqual(sent, 0)
+
+        await harness.flow.confirmJoin(confirmation, label: "Bobby")
 
         try await waitForAsync { await harness.sender.calls.count == 1 }
+        sent = await harness.sender.calls.count
+        XCTAssertEqual(sent, 1)
         let calls = await harness.sender.calls
         let call = try XCTUnwrap(calls.first)
         XCTAssertEqual(call.capability.groupId, chat.groupID)
-        XCTAssertEqual(call.label, "Bob", "the joiner is introduced by the active identity's name")
+        XCTAssertEqual(call.label, "Bobby", "the name they typed, not the identity's")
         try await waitFor { harness.flow.rows.first?.state == .waiting }
+    }
+
+    func test_prepareAccept_onARowThatAlreadyAsked_offersNothing() async throws {
+        let harness = await Harness.make(owner: owner)
+        await harness.flow.start()
+        let chat = harness.makeChat()
+        await harness.repository.record(chat)
+        await harness.repository.markRequested(id: chat.id)
+        try await waitFor { harness.flow.rows.first?.state == .waiting }
+
+        let confirmation = await harness.flow.prepareAccept(rowID: chat.id)
+
+        XCTAssertNil(confirmation, "one tap, one request")
     }
 
     func test_accept_isDebouncedWhileTheSendIsInFlight() async throws {
@@ -52,8 +82,10 @@ final class PendingChatsFlowTests: XCTestCase {
         await harness.repository.record(chat)
         try await waitFor { harness.flow.rows.count == 1 }
 
-        harness.flow.accept(chat.id)
-        harness.flow.accept(chat.id)
+        let prepared = await harness.flow.prepareAccept(rowID: chat.id)
+        let confirmation = try XCTUnwrap(prepared)
+        await harness.flow.confirmJoin(confirmation, label: "Bob")
+        await harness.flow.confirmJoin(confirmation, label: "Bob")
 
         // Wait on the *spy* being entered, not on `isSending`: that flag
         // is set synchronously inside `send` before `submitJoin` is ever
@@ -75,7 +107,7 @@ final class PendingChatsFlowTests: XCTestCase {
         await harness.repository.record(chat)
         try await waitFor { harness.flow.rows.count == 1 }
 
-        harness.flow.accept(chat.id)
+        await harness.acceptThroughTheScreen(chat.id)
         // The transport's own words are deliberately not kept: the row
         // is on disk and outlives the language it was written in.
         try await waitFor { harness.flow.rows.first?.state == .sendFailed(.transport) }
@@ -97,7 +129,7 @@ final class PendingChatsFlowTests: XCTestCase {
         await harness.repository.record(chat)
         try await waitFor { harness.flow.rows.count == 1 }
 
-        harness.flow.accept(chat.id)
+        await harness.acceptThroughTheScreen(chat.id)
 
         try await waitFor { harness.flow.rows.first?.state == .sendFailed(.noIdentity) }
         XCTAssertTrue(harness.flow.rows.first?.state.isRetryable == true)
@@ -113,7 +145,7 @@ final class PendingChatsFlowTests: XCTestCase {
         await harness.repository.record(malformed)
         try await waitFor { harness.flow.rows.count == 1 }
 
-        harness.flow.accept(malformed.id)
+        await harness.acceptThroughTheScreen(malformed.id)
 
         XCTAssertNotNil(harness.flow.lastError)
         let sends = await harness.sender.calls.count
@@ -263,17 +295,22 @@ final class PendingChatsFlowTests: XCTestCase {
         // A request can be sent and never answered — a revoked link, or
         // one that died in a relay. Before this there was no way out but
         // swiping the row away.
+        //
+        // Seeded through the screen, because that is the only way a row
+        // reaches `.requested` — and the name it asked under comes with
+        // it.
         let harness = await Harness.make(owner: owner)
         await harness.flow.start()
         let chat = harness.makeChat()
         await harness.repository.record(chat)
-        await harness.repository.markRequested(id: chat.id)
+        try await waitFor { harness.flow.rows.count == 1 }
+        await harness.acceptThroughTheScreen(chat.id)
         try await waitFor { harness.flow.rows.first?.state == .waiting }
         XCTAssertTrue(harness.flow.rows.first?.state.isRetryable == true)
 
         harness.flow.retry(chat.id)
 
-        try await waitForAsync { await harness.sender.calls.count == 1 }
+        try await waitForAsync { await harness.sender.calls.count == 2 }
         let retries = await harness.verifierRetries.values
         XCTAssertTrue(retries.isEmpty, "the founder is who this wait belongs to")
     }
@@ -349,70 +386,122 @@ final class PendingChatsFlowTests: XCTestCase {
 
     // MARK: - Joining from a link
 
-    func test_join_recordsARowAndSendsWithoutAsking() async throws {
+    func test_aTappedLink_recordsNothingAndSendsNothing() async throws {
+        // The security rule this screen exists for: the URL types are
+        // exported, so anything on the device — or a page in a browser —
+        // can deliver a capability. Delivery must not disclose this
+        // identity's name or keys, and must not leave a row behind
+        // either.
         let harness = await Harness.make(owner: owner)
         await harness.flow.start()
 
-        let outcome = await harness.flow.join(capability: harness.capability())
+        let destination = await harness.flow.prepareJoin(capability: harness.capability())
+
+        guard case .confirm(let confirmation) = destination else {
+            return XCTFail("a link must resolve to a screen, got \(destination)")
+        }
+        XCTAssertEqual(confirmation.groupName, "Maple Garden")
+        XCTAssertEqual(confirmation.introPublicKey, harness.capability().introPublicKey)
+        let sent = await harness.sender.calls.count
+        XCTAssertEqual(sent, 0)
+        let stored = await harness.repository.currentChats()
+        XCTAssertTrue(stored.isEmpty, "nothing may be persisted before a person says so")
+        XCTAssertTrue(harness.flow.rows.isEmpty)
+    }
+
+    func test_confirmingALink_recordsTheRowAndSendsUnderTheTypedName() async throws {
+        let harness = await Harness.make(owner: owner)
+        await harness.flow.start()
+        guard case .confirm(let confirmation) =
+                await harness.flow.prepareJoin(capability: harness.capability())
+        else { return XCTFail("expected a confirmation") }
+
+        let outcome = await harness.flow.confirmJoin(confirmation, label: "Bobby")
 
         XCTAssertEqual(outcome, .waiting(rowID: harness.makeChat().id))
+        // The row is written before `confirmJoin` returns; the send runs
+        // on its own task, so it is waited on rather than read.
         try await waitForAsync { await harness.sender.calls.count == 1 }
+        let calls = await harness.sender.calls
+        XCTAssertEqual(calls.map(\.label), ["Bobby"])
         try await waitFor { harness.flow.rows.first?.state == .waiting }
     }
 
-    func test_join_twiceOnTheSameLink_doesNotAskTwice() async throws {
+    func test_theNameAskedUnderIsRememberedForTheNextAsk() async throws {
+        // A re-send that fell back to the identity's alias would arrive
+        // from a stranger — the founder is deciding partly on the name.
         let harness = await Harness.make(owner: owner)
         await harness.flow.start()
-
-        _ = await harness.flow.join(capability: harness.capability())
-        // Wait for the row to actually reach `.requested`: on `.offered`
-        // a second tap now (correctly) sends, so asserting before the
-        // status lands would be testing the race, not the rule.
+        guard case .confirm(let confirmation) =
+                await harness.flow.prepareJoin(capability: harness.capability())
+        else { return XCTFail("expected a confirmation") }
+        await harness.flow.confirmJoin(confirmation, label: "Bobby")
         try await waitFor { harness.flow.rows.first?.state == .waiting }
-        let second = await harness.flow.join(capability: harness.capability())
 
-        XCTAssertEqual(second, .waiting(rowID: harness.makeChat().id))
-        let sent1 = await harness.sender.calls.count
-        XCTAssertEqual(sent1, 1, "a second tap is not a second request")
+        harness.flow.retry(harness.makeChat().id)
+
+        try await waitForAsync { await harness.sender.calls.count == 2 }
+        let calls = await harness.sender.calls
+        XCTAssertEqual(calls.map(\.label), ["Bobby", "Bobby"])
     }
 
-    func test_join_onAnUnansweredOffer_sendsInsteadOfAskingAgain() async throws {
-        // The dispatcher got there first. Tapping the link *is* the
-        // answer, so the row must not be left sitting at `.offered`
-        // asking for it a second time.
+    func test_aSecondLinkAfterAsking_opensTheWaitWithoutAskingAgain() async throws {
+        let harness = await Harness.make(owner: owner)
+        await harness.flow.start()
+        guard case .confirm(let confirmation) =
+                await harness.flow.prepareJoin(capability: harness.capability())
+        else { return XCTFail("expected a confirmation") }
+        await harness.flow.confirmJoin(confirmation, label: "Bobby")
+        try await waitFor { harness.flow.rows.first?.state == .waiting }
+
+        let second = await harness.flow.prepareJoin(capability: harness.capability())
+
+        XCTAssertEqual(second, .waiting(rowID: harness.makeChat().id))
+        let sent = await harness.sender.calls.count
+        XCTAssertEqual(sent, 1, "a second delivery is not a second request")
+    }
+
+    func test_aLinkOnAnUnansweredOffer_confirmsAgainstTheOffersDetails() async throws {
+        // The dispatcher got there first, so the screen can name who
+        // invited and what they wrote — and confirming answers that
+        // offer rather than starting a second one.
         let harness = await Harness.make(owner: owner)
         await harness.flow.start()
         let offered = harness.makeChat()
         await harness.repository.record(offered)
         try await waitFor { harness.flow.rows.first?.state == .offered }
 
-        let outcome = await harness.flow.join(capability: harness.capability())
+        guard case .confirm(let confirmation) =
+                await harness.flow.prepareJoin(capability: harness.capability())
+        else { return XCTFail("an unanswered offer must still be confirmable") }
+        XCTAssertEqual(confirmation.inviterAlias, "Alice")
+        await harness.flow.confirmJoin(confirmation, label: "Bobby")
 
-        XCTAssertEqual(outcome, .waiting(rowID: offered.id))
         try await waitFor { harness.flow.rows.first?.state == .waiting }
         let sends = await harness.sender.calls.count
         XCTAssertEqual(sends, 1)
+        XCTAssertEqual(harness.flow.rows.count, 1, "one waiting room, not two")
     }
 
-    func test_join_whenAlreadyAMember_opensTheChatInstead() async throws {
+    func test_aLinkIntoAChatYouAreIn_opensItWithoutDisclosingAnything() async throws {
         let harness = await Harness.make(owner: owner)
         let capability = harness.capability()
         let hex = capability.groupId.map { String(format: "%02x", $0) }.joined()
         await harness.groups.insert(harness.makeGroup(id: hex))
         await harness.flow.start()
 
-        let outcome = await harness.flow.join(capability: capability)
+        let outcome = await harness.flow.prepareJoin(capability: capability)
 
         XCTAssertEqual(outcome, .alreadyJoined(groupIDHex: hex))
-        let sent0 = await harness.sender.calls.count
-        XCTAssertEqual(sent0, 0)
+        let sent = await harness.sender.calls.count
+        XCTAssertEqual(sent, 0)
     }
 
-    func test_join_withNoIdentity_saysSoRatherThanWaitingSilently() async throws {
+    func test_aLinkWithNoIdentity_saysSoRatherThanWaitingSilently() async throws {
         let harness = await Harness.make(owner: nil)
         await harness.flow.start()
 
-        let outcome = await harness.flow.join(capability: harness.capability())
+        let outcome = await harness.flow.prepareJoin(capability: harness.capability())
 
         guard case .failed = outcome else {
             return XCTFail("expected a failure the caller can surface, got \(outcome)")
@@ -466,6 +555,12 @@ final class PendingChatsFlowTests: XCTestCase {
             await harness.verifications.setCurrentIdentity(owner)
             await harness.groups.setCurrentIdentity(owner)
             return harness
+        }
+
+        /// Accept as a person performs it: open the screen, then Send.
+        func acceptThroughTheScreen(_ rowID: String, label: String = "Bob") async {
+            guard let confirmation = await flow.prepareAccept(rowID: rowID) else { return }
+            await flow.confirmJoin(confirmation, label: label)
         }
 
         func capability() -> IntroCapability {

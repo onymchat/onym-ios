@@ -77,12 +77,19 @@ final class MultiIdentityChatUITests: XCTestCase {
         app.launchArguments = baseArgs + ["--open-url", inviteLink]
         app.launch()
 
-        // Identity 2 (Bob) joins from the deeplink. There is nothing to
-        // fill in: the tap sends the request and opens the chat it
-        // created, waiting until Alice lets him in.
+        // Identity 2 (Bob) joins from the deeplink. The link opens a
+        // confirmation screen — delivery is not consent, since anything
+        // on the device can open the app's URL types — and the request
+        // goes out only on Send, under the name typed there.
+        let confirm = JoinConfirmScreen(app: app)
+        XCTAssertTrue(confirm.waitReady(),
+                      "join confirmation never appeared from the --open-url deeplink")
+        confirm.typeName("Bob")
+        confirm.send()
+
         let pending = PendingChatScreen(app: app)
         XCTAssertTrue(pending.waitReady(),
-                      "pending chat never appeared from the --open-url deeplink")
+                      "pending chat never appeared after confirming the join")
         pending.back()
 
         // Identity 1 (Alice) approves the join request — from inside the

@@ -107,6 +107,41 @@ struct ShareInviteScreen {
     }
 }
 
+// MARK: - Join confirmation
+
+/// The screen between an invitation and a request. A link resolves here
+/// and nothing is sent until Send is tapped — the app's URL types are
+/// exported, so delivery cannot be treated as consent.
+struct JoinConfirmScreen {
+    let app: XCUIApplication
+
+    var nameField: XCUIElement { app.textFields["join_confirm.name_field"] }
+    var sendButton: XCUIElement { app.buttons["join_confirm.send"] }
+
+    @discardableResult
+    func waitReady(timeout: TimeInterval = 20) -> Bool {
+        sendButton.waitForExistence(timeout: timeout)
+    }
+
+    /// Replaces the pre-filled identity alias with a name chosen for
+    /// this chat alone.
+    func typeName(_ name: String) {
+        guard nameField.waitForExistence(timeout: 5) else { return }
+        nameField.tap()
+        // The field arrives pre-filled; clear it before typing so the
+        // assertion is about the typed name and not a concatenation.
+        if let current = nameField.value as? String, !current.isEmpty {
+            nameField.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count))
+        }
+        nameField.typeText(name)
+    }
+
+    func send() {
+        XCTAssertTrue(sendButton.waitForExistence(timeout: 5), "Send join request button missing")
+        sendButton.tap()
+    }
+}
+
 // MARK: - Join (pending chat)
 
 /// A tapped invite link no longer opens a screen of its own: the request
