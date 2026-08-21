@@ -587,8 +587,8 @@ final class PendingChatsFlowTests: XCTestCase {
                 repository: repository,
                 verificationStore: verifications,
                 groupRepository: groups,
-                submitJoin: { capability, label in
-                    await sender.send(capability: capability, label: label)
+                submitJoin: { capability, label, rules in
+                    await sender.send(capability: capability, label: label, rules: rules)
                 },
                 displayLabel: { "Bob" },
                 retryVerification: { hex in await retries.record(hex) },
@@ -713,6 +713,9 @@ private actor SpyJoinSender {
     struct Call: Sendable {
         let capability: IntroCapability
         let label: String
+        /// The rules text the send signed, so a test can assert that a
+        /// request agreed to what the screen displayed.
+        let rules: String?
     }
 
     private(set) var calls: [Call] = []
@@ -730,8 +733,12 @@ private actor SpyJoinSender {
         gate = nil
     }
 
-    func send(capability: IntroCapability, label: String) async -> JoinRequestSender.Outcome {
-        calls.append(Call(capability: capability, label: label))
+    func send(
+        capability: IntroCapability,
+        label: String,
+        rules: String?
+    ) async -> JoinRequestSender.Outcome {
+        calls.append(Call(capability: capability, label: label, rules: rules))
         if held {
             await withCheckedContinuation { continuation in
                 if held { gate = continuation } else { continuation.resume() }

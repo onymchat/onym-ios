@@ -114,7 +114,13 @@ public final class PendingChatsFlow {
     private let groupRepository: GroupRepository
     /// Seals + sends a `JoinRequestPayload` for the given capability —
     /// the same `JoinRequestSender` the deeplink path uses.
-    private let submitJoin: @Sendable (IntroCapability, String) async -> JoinRequestSender.Outcome
+    ///
+    /// The third argument is the rules text that was on screen when the
+    /// person agreed, which is what their signature ends up covering.
+    /// It travels from the screen rather than being read back off the
+    /// capability, so a request can never claim agreement to words
+    /// nobody was shown.
+    private let submitJoin: @Sendable (IntroCapability, String, String?) async -> JoinRequestSender.Outcome
     /// The joiner's display label, read lazily at accept time so an
     /// identity rename is picked up without re-wiring.
     ///
@@ -147,7 +153,7 @@ public final class PendingChatsFlow {
         repository: PendingChatRepository,
         verificationStore: PendingVerificationStore,
         groupRepository: GroupRepository,
-        submitJoin: @escaping @Sendable (IntroCapability, String) async -> JoinRequestSender.Outcome,
+        submitJoin: @escaping @Sendable (IntroCapability, String, String?) async -> JoinRequestSender.Outcome,
         displayLabel: @escaping @Sendable () async -> String,
         retryVerification: @escaping @Sendable (String) async -> Void,
         currentIdentityID: @escaping @Sendable () async -> IdentityID?
@@ -270,6 +276,11 @@ public final class PendingChatsFlow {
         /// holds its private half is who this discloses to, and that is
         /// worth showing rather than describing.
         public let introPublicKey: Data
+        /// The group's rules, when it has any. Shown on the screen and
+        /// signed by Send — the same string for both, because a
+        /// signature over anything other than what was read is not an
+        /// agreement.
+        public let rules: String?
         /// Pre-filled into the name field: the identity's own alias, or
         /// the name a previous attempt on this row used.
         public let suggestedLabel: String
@@ -305,6 +316,11 @@ public final class PendingChatsFlow {
         } else {
             suggested = await displayLabel()
         }
+        // The link's own copy wins over a stored offer's. Both should
+        // say the same thing, and when they don't, the rules the person
+        // is about to read have to be the ones that came with the
+        // invitation they actually opened.
+        let rules = capability.rules ?? existing?.invitationMessage
         return .confirm(
             JoinConfirmation(
                 rowID: rowID,
@@ -313,6 +329,7 @@ public final class PendingChatsFlow {
                 inviterAlias: existing?.inviterAlias ?? "",
                 invitationMessage: existing?.invitationMessage,
                 introPublicKey: capability.introPublicKey,
+                rules: rules,
                 suggestedLabel: suggested,
                 origin: .link(capability)
             )
@@ -340,6 +357,9 @@ public final class PendingChatsFlow {
             inviterAlias: chat.inviterAlias,
             invitationMessage: chat.invitationMessage,
             introPublicKey: chat.introPublicKey,
+            // A pushed invitation carries its rules on the stored offer
+            // — there is no capability to read them from.
+            rules: chat.invitationMessage,
             suggestedLabel: suggested,
             origin: .offer(rowID: chat.id)
         )
@@ -386,7 +406,10 @@ public final class PendingChatsFlow {
                 // shows the group, not a person who never said their
                 // name.
                 inviterAlias: "",
-                invitationMessage: nil,
+                // The link's rules, kept on the row: "Ask again" has to
+                // re-sign the same text, and the row is the only place
+                // it survives once the capability is gone.
+                invitationMessage: capability.rules,
                 receivedAt: Date(),
                 status: .offered,
                 joinerLabel: trimmed
@@ -466,6 +489,10 @@ public final class PendingChatsFlow {
     ///
     /// `label` is always supplied by a caller a person reached: there is
     /// no path from an inbound link or event to here.
+    ///
+    /// The rules signed are the row's own — the same text the screen
+    /// showed, kept there for exactly this reason, so a re-send months
+    /// later still says what the first one said.
     private func send(_ chat: PendingChat, label: String) {
         let id = chat.id
         guard !sendingIDs.contains(id) else { return }
@@ -485,8 +512,9 @@ public final class PendingChatsFlow {
         rebuild()
         let submitJoin = self.submitJoin
         let repository = self.repository
+        let rules = chat.invitationMessage
         Task { @MainActor [weak self] in
-            let outcome = await submitJoin(capability, label)
+            let outcome = await submitJoin(capability, label, rules)
             switch outcome {
             case .sent:
                 await repository.markRequested(id: id)

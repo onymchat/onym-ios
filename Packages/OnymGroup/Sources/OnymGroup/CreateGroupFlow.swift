@@ -35,12 +35,31 @@ public final class CreateGroupFlow {
     // MARK: - Form state
 
     public var name: String
-    /// Optional free-text invitation the creator writes — a greeting,
-    /// group policy, or articles of association. Travels in the sealed
-    /// invite payloads (never the QR/link, never on-chain) so invitees
-    /// read it before accepting and it persists as the group's intro.
-    /// Any length; empty means "no invitation".
-    var invitationMessage: String = ""
+    /// The group's rules: what everyone joining agrees to. Travels in
+    /// the sealed invite payloads *and*, since joiners must be able to
+    /// read them before agreeing, in the invite link itself — which is
+    /// where the length cap comes from. Persists as the group's intro,
+    /// and is the text a joiner's signature covers. Empty means the
+    /// group asks nothing, and no agreement is collected.
+    ///
+    /// Clamped rather than validated at submit: a founder who has
+    /// typed past the limit is told by the counter, and letting them
+    /// keep typing into a field that will refuse to mint a link at the
+    /// end is the worse failure. See `GroupRules.maxLength`.
+    var invitationMessage: String = "" {
+        didSet {
+            if invitationMessage.count > GroupRules.maxLength {
+                invitationMessage = String(
+                    invitationMessage.prefix(GroupRules.maxLength)
+                )
+            }
+        }
+    }
+
+    /// How much room is left in the rules, for the field's counter.
+    public var rulesRemaining: Int {
+        GroupRules.maxLength - invitationMessage.count
+    }
     /// Always `.tyranny` in PR-C — the picker disables the others.
     public var governance: OnymUIGovernance = .tyranny
     public internal(set) var invitees: [OnymInvitee] = []

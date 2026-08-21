@@ -7615,6 +7615,198 @@
           }
         }
       }
+    },
+    "Group rules": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Group rules"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Правила группы"
+          }
+        }
+      }
+    },
+    "I agree to these rules": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I agree to these rules"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Я согласен с этими правилами"
+          }
+        }
+      }
+    },
+    "Your agreement is signed with this identity’s key and sent with your request.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your agreement is signed with this identity’s key and sent with your request."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ваше согласие подписывается ключом этой личности и отправляется вместе с запросом."
+          }
+        }
+      }
+    },
+    "Agree and send request": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agree and send request"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Согласиться и отправить запрос"
+          }
+        }
+      }
+    },
+    "Your signed agreement to the rules goes with it.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your signed agreement to the rules goes with it."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Вместе с ним отправляется ваше подписанное согласие с правилами."
+          }
+        }
+      }
+    },
+    "What everyone here agrees to. Optional.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What everyone here agrees to. Optional."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "То, с чем соглашаются все участники. Необязательно."
+          }
+        }
+      }
+    },
+    "Anyone joining reads these and signs that they agree, so you can show later what they agreed to.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anyone joining reads these and signs that they agree, so you can show later what they agreed to."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Каждый, кто вступает, читает их и подписывает согласие — потом вы сможете показать, с чем именно он согласился."
+          }
+        }
+      }
+    },
+    "%lld characters left": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld characters left"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Осталось символов: %lld"
+          }
+        }
+      }
+    },
+    "Signed the group rules": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signed the group rules"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Подписал правила группы"
+          }
+        }
+      }
+    },
+    "Signed a different version of the rules": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signed a different version of the rules"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Подписал другую версию правил"
+          }
+        }
+      }
+    },
+    "Didn’t sign the group rules": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Didn’t sign the group rules"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не подписал правила группы"
+          }
+        }
+      }
+    },
+    "Their signature on the rules doesn’t check out": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Their signature on the rules doesn’t check out"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Его подпись под правилами не проходит проверку"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

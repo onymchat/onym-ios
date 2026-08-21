@@ -743,7 +743,12 @@ public struct CreateGroupInteractor: Sendable {
                     ownerIdentityID: ownerIdentityID,
                     groupId: groupID,
                     groupName: groupName,
-                    label: IntroKeyEntry.fingerprint(of: inboxKey)
+                    label: IntroKeyEntry.fingerprint(of: inboxKey),
+                    // The offer carries the rules too, but a create-time
+                    // invitee can also be reached by the link this
+                    // capability encodes — and the two must ask them to
+                    // agree to the same words.
+                    rules: invitationMessage
                 )
             } catch {
                 throw CreateGroupError.invitationSendFailed(

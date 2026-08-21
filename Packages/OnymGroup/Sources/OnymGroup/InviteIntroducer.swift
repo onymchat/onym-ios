@@ -44,11 +44,15 @@ public actor InviteIntroducer {
     ///     is sensitive (deeplink transits cleartext channels).
     ///   - label: nil for the shared link; the invitee's fingerprint
     ///     for a create-time offer, so the invite list can name it.
+    ///   - rules: the group's rules, carried in the link so whoever
+    ///     opens it can read them before agreeing. Public, like
+    ///     `groupName`, and capped — see `GroupRules.maxLength`.
     public func mint(
         ownerIdentityID: IdentityID,
         groupId: Data,
         groupName: String? = nil,
-        label: String? = nil
+        label: String? = nil,
+        rules: String? = nil
     ) async throws -> IntroCapability {
         guard groupId.count == 32 else {
             throw IntroducerError.invalidGroupID(actualSize: groupId.count)
@@ -73,7 +77,8 @@ public actor InviteIntroducer {
         return try IntroCapability(
             introPublicKey: pubBytes,
             groupId: groupId,
-            groupName: groupName
+            groupName: groupName,
+            rules: rules
         )
     }
 
@@ -82,7 +87,8 @@ public actor InviteIntroducer {
     public func currentOrMint(
         ownerIdentityID: IdentityID,
         groupId: Data,
-        groupName: String? = nil
+        groupName: String? = nil,
+        rules: String? = nil
     ) async throws -> IntroCapability {
         // Ahead of the store read so the throw is the same whichever
         // branch would have run.
@@ -99,16 +105,23 @@ public actor InviteIntroducer {
                 $0.groupId == groupId && $0.label == nil && !$0.isLegacy
             }
             if let live {
+                // The rules come from the caller's current group, not
+                // from whenever this key was minted: the link is a
+                // pointer to the group, and a live key handed out with
+                // stale rules would have joiners signing text the
+                // founder had already replaced.
                 return try IntroCapability(
                     introPublicKey: live.introPublicKey,
                     groupId: groupId,
-                    groupName: groupName
+                    groupName: groupName,
+                    rules: rules
                 )
             }
             return try await self.mint(
                 ownerIdentityID: ownerIdentityID,
                 groupId: groupId,
-                groupName: groupName
+                groupName: groupName,
+                rules: rules
             )
         }
     }
