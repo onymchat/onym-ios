@@ -18,6 +18,9 @@ public struct ChatsView: View {
     let identitiesFlow: IdentitiesFlow
     let approveRequestsFlow: ApproveRequestsFlow
     let pendingChatsFlow: PendingChatsFlow
+    /// The tab's navigation path. Shared rather than owned by this view
+    /// because a scanned QR — like a tapped link — pushes onto it.
+    let navigation: ChatsNavigation
     let messageRepository: MessageRepository
     let imageLoader: ChatImageLoader
     let videoLoader: ChatVideoLoader
@@ -26,7 +29,6 @@ public struct ChatsView: View {
     let chatReceiptSender: any ChatReceiptSending
     let makeCreateGroupFlow: @MainActor () -> CreateGroupFlow
     let makeShareInviteFlow: @MainActor () -> ShareInviteFlow
-    let makeJoinFlow: @MainActor (IntroCapability) -> JoinFlow
     let setGroupAvatar: @MainActor (String, Data?) async -> Void
     let setGroupName: @MainActor (String, String) async -> Void
     let makeModerationReportView: @MainActor (ReportableMessage) -> AnyView
@@ -36,6 +38,7 @@ public struct ChatsView: View {
         identitiesFlow: IdentitiesFlow,
         approveRequestsFlow: ApproveRequestsFlow,
         pendingChatsFlow: PendingChatsFlow,
+        navigation: ChatsNavigation,
         messageRepository: MessageRepository,
         imageLoader: ChatImageLoader,
         videoLoader: ChatVideoLoader,
@@ -44,7 +47,6 @@ public struct ChatsView: View {
         chatReceiptSender: any ChatReceiptSending,
         makeCreateGroupFlow: @escaping @MainActor () -> CreateGroupFlow,
         makeShareInviteFlow: @escaping @MainActor () -> ShareInviteFlow,
-        makeJoinFlow: @escaping @MainActor (IntroCapability) -> JoinFlow,
         setGroupAvatar: @escaping @MainActor (String, Data?) async -> Void,
         setGroupName: @escaping @MainActor (String, String) async -> Void,
         makeModerationReportView: @escaping @MainActor (ReportableMessage) -> AnyView
@@ -53,6 +55,7 @@ public struct ChatsView: View {
         self.identitiesFlow = identitiesFlow
         self.approveRequestsFlow = approveRequestsFlow
         self.pendingChatsFlow = pendingChatsFlow
+        self.navigation = navigation
         self.messageRepository = messageRepository
         self.imageLoader = imageLoader
         self.videoLoader = videoLoader
@@ -61,7 +64,6 @@ public struct ChatsView: View {
         self.chatReceiptSender = chatReceiptSender
         self.makeCreateGroupFlow = makeCreateGroupFlow
         self.makeShareInviteFlow = makeShareInviteFlow
-        self.makeJoinFlow = makeJoinFlow
         self.setGroupAvatar = setGroupAvatar
         self.setGroupName = setGroupName
         self.makeModerationReportView = makeModerationReportView
@@ -69,14 +71,19 @@ public struct ChatsView: View {
 
     @State private var showCreateGroup = false
     @State private var showScanner = false
-    // Stashed across the scanner's dismissal — presenting the join
-    // sheet while the full-screen scanner is still tearing down races
-    // SwiftUI's presentation machinery, so we hand off in the cover's
-    // `onDismiss` instead. Exactly one is non-nil at a time.
+    // Stashed across the scanner's dismissal — acting on the scan while
+    // the full-screen scanner is still tearing down races SwiftUI's
+    // presentation machinery, so we hand off in the cover's `onDismiss`
+    // instead. Exactly one is set at a time.
     @State private var scannedCapability: IntroCapability?
     @State private var scannedInvalid = false
     @State private var scanRejected = false
-    @State private var joinCapability: IntroCapability?
+    /// A scan that couldn't be turned into a chat to come back to. The
+    /// deeplink path surfaces this at the app root; a scan starts here,
+    /// so it has to be said here — `PendingChatsFlow.lastError` renders
+    /// inside the pending thread, which is precisely the screen a failed
+    /// join never reaches.
+    @State private var scanJoinError: String?
     /// The chat awaiting a swipe-to-delete confirmation, if any.
     @State private var pendingDelete: ChatListItem?
 
@@ -92,41 +99,26 @@ public struct ChatsView: View {
                 groupList
             }
         }
-        // Both destinations hang off the outer view rather than off the
-        // populated list: a push can now arrive from outside this view
-        // (a tapped invite link), and a first-ever user with no chats is
-        // rendering `emptyState` at that moment. Registered on the list,
-        // the route would be appended to a stack with no destination for
-        // it, surviving only if the row insert and the append happen to
-        // land in the same render pass.
-        .navigationDestination(for: String.self) { groupID in
-            // PR 5 of the chat stack: tapping a group opens the
-            // UIKit chat thread instead of the members roster. The
-            // thread's info button pushes `ChatMembersView` from
-            // there, so the existing surface is still reachable —
-            // just one tap deeper.
-            ChatThreadView(
-                groupID: groupID,
-                chatsFlow: flow,
-                identitiesFlow: identitiesFlow,
-                messageRepository: messageRepository,
-                sendMessageInteractor: sendMessageInteractor,
-                chatReceiptSender: chatReceiptSender,
-                makeShareInviteFlow: makeShareInviteFlow,
-                setGroupAvatar: setGroupAvatar,
-                setGroupName: setGroupName,
-                imageLoader: imageLoader,
-                videoLoader: videoLoader,
-                voiceLoader: voiceLoader,
-                makeModerationReportView: makeModerationReportView,
-                approveRequestsFlow: approveRequestsFlow
-            )
-        }
-        // A distinct route type rather than another `String`: a pending
-        // chat's id and a group id would otherwise be the same value
-        // space, and a stale one would open the wrong screen.
-        .navigationDestination(for: PendingChatRoute.self) { route in
-            PendingChatThreadView(flow: pendingChatsFlow, rowID: route.id)
+        // Hangs off the outer view rather than off the populated list:
+        // a push can arrive from outside this view (a tapped invite
+        // link), and a first-ever user with no chats is rendering
+        // `emptyState` at that moment. Registered on the list, the route
+        // would be appended to a stack with no destination for it,
+        // surviving only if the row insert and the append happen to land
+        // in the same render pass.
+        .navigationDestination(for: ChatsRoute.self) { route in
+            switch route {
+            case .chat(let groupID):
+                chatThread(groupID: groupID)
+            case .pending(let rowID):
+                PendingChatThreadView(
+                    flow: pendingChatsFlow,
+                    rowID: rowID,
+                    onMaterialized: { groupID in
+                        navigation.replaceTopWithChat(rowID: rowID, groupID: groupID)
+                    }
+                )
+            }
         }
         .navigationTitle(currentIdentityName)
         .toolbar {
@@ -190,7 +182,7 @@ public struct ChatsView: View {
             QRCodeScannerView(
                 onScanned: { raw in
                     // Same allowlist + decode the deeplink path uses, so
-                    // a scanned link and a tapped link reach JoinView
+                    // a scanned link and a tapped link reach `join`
                     // identically. A non-invite QR yields nil → reject.
                     if let cap = DeeplinkCapture.introCapability(fromString: raw) {
                         scannedCapability = cap
@@ -202,12 +194,7 @@ public struct ChatsView: View {
                 onCancel: { showScanner = false }
             )
         }
-        .sheet(item: $joinCapability) { cap in
-            JoinView(
-                flow: makeJoinFlow(cap),
-                onClose: { joinCapability = nil }
-            )
-        }
+        .reasonAlert("Couldn\u{2019}t use that invite", reason: $scanJoinError)
         .alert("Not an Onym invite", isPresented: $scanRejected) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -216,11 +203,26 @@ public struct ChatsView: View {
     }
 
     /// Hands off the scan result once the full-screen scanner has fully
-    /// dismissed — see the `joinCapability`/`scannedCapability` note above.
+    /// dismissed — see the `scannedCapability` note above.
+    ///
+    /// A scan used to open the join sheet. It now does exactly what a
+    /// tapped link does: sends the request and opens the chat that is on
+    /// its way, so the two entry points can't drift apart.
     private func handleScannerDismiss() {
         if let cap = scannedCapability {
             scannedCapability = nil
-            joinCapability = cap
+            let flow = pendingChatsFlow
+            let navigation = navigation
+            Task { @MainActor in
+                switch await flow.join(capability: cap) {
+                case .alreadyJoined(let groupIDHex):
+                    navigation.openChat(groupID: groupIDHex)
+                case .waiting(let rowID):
+                    navigation.openPending(rowID: rowID)
+                case .failed(let reason):
+                    scanJoinError = reason
+                }
+            }
         } else if scannedInvalid {
             scannedInvalid = false
             scanRejected = true
@@ -409,6 +411,32 @@ public struct ChatsView: View {
         }
     }
 
+    /// The real chat thread. Extracted so the route switch above stays
+    /// readable — it is the same view the list rows have always pushed.
+    ///
+    /// PR 5 of the chat stack: tapping a group opens the UIKit chat
+    /// thread instead of the members roster. The thread's info button
+    /// pushes `ChatMembersView` from there, so the existing surface is
+    /// still reachable — just one tap deeper.
+    private func chatThread(groupID: String) -> some View {
+        ChatThreadView(
+            groupID: groupID,
+            chatsFlow: flow,
+            identitiesFlow: identitiesFlow,
+            messageRepository: messageRepository,
+            sendMessageInteractor: sendMessageInteractor,
+            chatReceiptSender: chatReceiptSender,
+            makeShareInviteFlow: makeShareInviteFlow,
+            setGroupAvatar: setGroupAvatar,
+            setGroupName: setGroupName,
+            imageLoader: imageLoader,
+            videoLoader: videoLoader,
+            voiceLoader: voiceLoader,
+            makeModerationReportView: makeModerationReportView,
+            approveRequestsFlow: approveRequestsFlow
+        )
+    }
+
     /// Whether this identity has anything at all in its list — a chat,
     /// or one on its way in.
     ///
@@ -435,7 +463,7 @@ public struct ChatsView: View {
         return List(rows) { row in
             switch row {
             case .chat(let item):
-                NavigationLink(value: item.group.id) {
+                NavigationLink(value: ChatsRoute.chat(groupID: item.group.id)) {
                     ChatsRow(
                         item: item,
                         joinRequestCount: joinRequestCounts[item.group.id] ?? 0
@@ -454,7 +482,7 @@ public struct ChatsView: View {
                     .accessibilityIdentifier("chats.row.delete.\(item.group.id)")
                 }
             case .pending(let pending):
-                NavigationLink(value: PendingChatRoute(id: pending.id)) {
+                NavigationLink(value: ChatsRoute.pending(rowID: pending.id)) {
                     PendingChatsRow(row: pending)
                 }
                 .listRowSeparator(.visible)
@@ -496,11 +524,6 @@ public struct ChatsView: View {
             Text("This removes \(name) and every message in it from this device. It can't be undone.")
         }
     }
-}
-
-/// Navigation value for a chat that hasn't opened yet.
-struct PendingChatRoute: Hashable {
-    let id: String
 }
 
 /// Chat-list row for a chat the user is waiting to be let into. Reads as

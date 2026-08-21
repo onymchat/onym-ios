@@ -59,15 +59,22 @@ struct OnymIOSApp: App {
     private let contractTransportFactory: @Sendable (URL) -> any SEPContractTransport
     /// DEBUG-only: a deeplink URL passed via `--open-url <url>` (with
     /// `--ui-testing`). Surfaced as `pendingCapability` at launch so a
-    /// UI test can drive the Join flow without Safari.
+    /// UI test can drive a link join without Safari.
     private let initialDeeplinkURL: URL?
 
     /// Captured intro capability from a Universal Link or custom-
     /// scheme deeplink (`https://onym.app/join?c=…` /
-    /// `onym://join?c=…`). Drives a `.sheet(item:)` over RootView —
-    /// PR-6 surfaces a placeholder; PR-7 will replace it with the
-    /// real `JoinView` + `JoinFlow`.
+    /// `onym://join?c=…`).
+    ///
+    /// It used to drive a `.sheet(item:)` asking for a display name and
+    /// a Send tap. Tapping the link is the intent, so it now ships the
+    /// join request and opens the chat that is on its way — see
+    /// `handleCapability`.
     @State private var pendingCapability: IntroCapability?
+    /// Set when a tapped link couldn't be turned into anything the user
+    /// can come back to. Rare, and silent failure here would leave
+    /// someone waiting on a request that was never recorded.
+    @State private var joinLinkError: String?
 
     init() {
         let args = ProcessInfo.processInfo.arguments
@@ -781,13 +788,19 @@ struct OnymIOSApp: App {
                     joinerDisplayLabel: label
                 )
             },
-            displayLabel: { @MainActor [identitiesFlow] in
-                identitiesFlow.identities
-                    .first { $0.id == identitiesFlow.currentID }?
-                    .name ?? ""
+            displayLabel: { [repository] in
+                // Repository, not `identitiesFlow` — the same cold-start
+                // reason as `currentIdentityID` below. A link that
+                // launches the app sends before any tab has populated
+                // the flow, and an empty name is what the founder would
+                // have been asked to let in.
+                await repository.currentIdentityName() ?? ""
             },
             retryVerification: { [groupStateVerifier] groupIDHex in
                 await groupStateVerifier.retry(groupIDHex: groupIDHex)
+            },
+            currentIdentityID: { [repository] in
+                await repository.currentSelectedID()
             }
         )
 
@@ -1382,36 +1395,11 @@ struct OnymIOSApp: App {
                     groupRepository: groupRepository
                 )
             },
-            makeJoinFlow: { @MainActor [identitiesFlow] capability in
-                let sender = JoinRequestSender(
-                    identity: repository,
-                    inboxTransport: inboxTransport
-                )
-                // Pre-fill with the active identity's alias so the
-                // joiner sees a sensible default. Empty string when
-                // `identitiesFlow` hasn't populated yet (cold-start
-                // race) — JoinView's TextField placeholder + the
-                // disabled Send button prompt the user to type
-                // something in.
-                let activeName = identitiesFlow.identities
-                    .first { $0.id == identitiesFlow.currentID }?
-                    .name ?? ""
-                return JoinFlow(
-                    capability: capability,
-                    suggestedDisplayLabel: activeName,
-                    submitRequest: { cap, label in
-                        await sender.send(
-                            capability: cap,
-                            joinerDisplayLabel: label
-                        )
-                    },
-                    groupRepository: groupRepository
-                )
-            },
             chatsFlow: ChatsFlow(repository: groupRepository, messages: messageRepository),
             identitiesFlow: identitiesFlow,
             approveRequestsFlow: approveRequestsFlow,
             pendingChatsFlow: pendingChatsFlow,
+            chatsNavigation: ChatsNavigation(),
             messageRepository: messageRepository,
             imageLoader: imageLoader,
             videoLoader: videoLoader,
@@ -1637,9 +1625,9 @@ struct OnymIOSApp: App {
                     // error to the user.
                     _ = try? await identityRepository.bootstrap()
                     // Eagerly populate the shared identities flow so a
-                    // cold-start deeplink (which constructs JoinFlow
-                    // before any tab's `.task` has fired) can read the
-                    // active identity's alias for `suggestedDisplayLabel`.
+                    // cold-start deeplink — which sends the join request
+                    // before any tab's `.task` has fired — can read the
+                    // active identity's alias to introduce the joiner by.
                     // Idempotent — Chats / Settings tabs call this too.
                     await dependencies.identitiesFlow.start()
                     // Start the approver collector eagerly so the
@@ -1952,7 +1940,7 @@ struct OnymIOSApp: App {
                 }
                 .task {
                     // DEBUG-only: deliver a `--open-url` deeplink at
-                    // launch so a UI test can drive the Join flow
+                    // launch so a UI test can drive a link join
                     // without Safari. No-op in Release.
                     #if DEBUG
                     if pendingCapability == nil,
@@ -1973,16 +1961,39 @@ struct OnymIOSApp: App {
                         pendingCapability = cap
                     }
                 }
-                .sheet(item: $pendingCapability) { cap in
-                    // PR-7: replace PR-6's placeholder with the real
-                    // join flow. Construct the JoinFlow lazily per
-                    // sheet entry — re-tapping a fresh link should
-                    // start a clean state machine.
-                    JoinView(
-                        flow: dependencies.makeJoinFlow(cap),
-                        onClose: { pendingCapability = nil }
-                    )
+                // A tapped link no longer opens anything of its own. It
+                // sends the request and lands the user in the chat it
+                // created — pending until the founder lets them in.
+                // Deliberately not `.task(id:)`: clearing the capture
+                // would change the id and cancel the very task doing the
+                // work, mid-send. This one outlives the view's task
+                // lifetime, which is right — the request has to go out
+                // whether or not the user stays on this screen.
+                .onChange(of: pendingCapability) { _, captured in
+                    guard let captured else { return }
+                    pendingCapability = nil
+                    Task { await handleCapability(captured) }
                 }
+                .reasonAlert("Couldn\u{2019}t use that invite", reason: $joinLinkError)
+        }
+    }
+
+    /// Ship the join request for a tapped link and open what it made.
+    ///
+    /// Both outcomes are a navigation: a link the user is already inside
+    /// opens that chat rather than starting a second wait, and a fresh
+    /// one opens the pending chat the request created. The alert is for
+    /// the case where neither exists — without it a failed link is
+    /// indistinguishable from a link that worked.
+    @MainActor
+    private func handleCapability(_ capability: IntroCapability) async {
+        switch await dependencies.pendingChatsFlow.join(capability: capability) {
+        case .alreadyJoined(let groupIDHex):
+            dependencies.chatsNavigation.openChat(groupID: groupIDHex)
+        case .waiting(let rowID):
+            dependencies.chatsNavigation.openPending(rowID: rowID)
+        case .failed(let reason):
+            joinLinkError = reason
         }
     }
 }

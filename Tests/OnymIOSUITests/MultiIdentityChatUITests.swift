@@ -77,13 +77,13 @@ final class MultiIdentityChatUITests: XCTestCase {
         app.launchArguments = baseArgs + ["--open-url", inviteLink]
         app.launch()
 
-        // Identity 2 (Bob) accepts the invitation (deeplink → Join).
-        let join = JoinScreen(app: app)
-        XCTAssertTrue(join.waitReady(),
-                      "Join sheet never appeared from the --open-url deeplink")
-        join.typeLabel("Bob")
-        join.send()
-        join.dismissAfterSend()
+        // Identity 2 (Bob) joins from the deeplink. There is nothing to
+        // fill in: the tap sends the request and opens the chat it
+        // created, waiting until Alice lets him in.
+        let pending = PendingChatScreen(app: app)
+        XCTAssertTrue(pending.waitReady(),
+                      "pending chat never appeared from the --open-url deeplink")
+        pending.back()
 
         // Identity 1 (Alice) approves the join request — from inside the
         // group's chat thread, which is the whole point of the surface:

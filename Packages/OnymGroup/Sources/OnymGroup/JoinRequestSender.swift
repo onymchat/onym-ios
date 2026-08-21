@@ -15,7 +15,8 @@ import OnymIdentity
 ///  3. POST the sealed bytes to the Nostr inbox tag derived from
 ///     intro_pub (same `sep-inbox-v1` derivation the identity inbox
 ///     uses).
-///  4. Surface success/failure to the JoinScreen UI (PR-7).
+///  4. Report the outcome to the caller, which records it on the
+///     pending chat row — the screen that used to ask for this is gone.
 public actor JoinRequestSender {
     private let identity: IdentityRepository
     private let inboxTransport: any InboxTransport

@@ -27,7 +27,6 @@ struct AppDependencies {
     let makeAnchorsPickerFlow: @MainActor () -> AnchorsPickerFlow
     let makeCreateGroupFlow: @MainActor () -> CreateGroupFlow
     let makeShareInviteFlow: @MainActor () -> ShareInviteFlow
-    let makeJoinFlow: @MainActor (IntroCapability) -> JoinFlow
     /// Single shared instance — the Chats tab, search destination, and
     /// thread screens must observe the same list state. Recreating this
     /// flow during a RootView redraw can leave its startup task attached
@@ -49,6 +48,10 @@ struct AppDependencies {
     /// `approveRequestsFlow`, so a chat approved while the app was
     /// closed is in the list on the first render.
     let pendingChatsFlow: PendingChatsFlow
+    /// The Chats tab's navigation path. Lives here because a tapped
+    /// invite link is handled at the app root, above the tab that has to
+    /// show its result.
+    let chatsNavigation: ChatsNavigation
     /// Single shared instance — the chat-thread screen subscribes to
     /// per-group message snapshots, and the receive-side dispatcher
     /// writes into the same actor. Constructed once in
