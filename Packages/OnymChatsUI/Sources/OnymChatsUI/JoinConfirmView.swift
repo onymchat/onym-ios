@@ -42,8 +42,15 @@ public struct JoinConfirmView: View {
             ScrollView {
                 VStack(spacing: 18) {
                     header
+                    // Same field, two names: since the rename, a
+                    // group's invitation message *is* its rules, so an
+                    // offer whose text became the rules card must not
+                    // also draw it as a greeting. Only a message that
+                    // says something different earns its own card.
                     if let message = confirmation.invitationMessage,
-                       !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                       !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                       message.trimmingCharacters(in: .whitespacesAndNewlines)
+                           != confirmation.rules {
                         invitationCard(message)
                     }
                     if let rules = confirmation.rules {

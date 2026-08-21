@@ -748,7 +748,15 @@ public struct CreateGroupInteractor: Sendable {
                     // invitee can also be reached by the link this
                     // capability encodes — and the two must ask them to
                     // agree to the same words.
-                    rules: invitationMessage
+                    //
+                    // Dropped from the link if it won't fit, for the
+                    // reason `ChatGroup.linkableRules` gives: a group
+                    // that can't mint an invite at all is the worse
+                    // failure, and truncating would have joiners sign
+                    // an abridged text that then fails to verify.
+                    rules: GroupRules.normalized(invitationMessage).flatMap {
+                        GroupRules.fits($0) ? $0 : nil
+                    }
                 )
             } catch {
                 throw CreateGroupError.invitationSendFailed(

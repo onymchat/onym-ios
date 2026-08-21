@@ -320,7 +320,7 @@ public final class PendingChatsFlow {
         // say the same thing, and when they don't, the rules the person
         // is about to read have to be the ones that came with the
         // invitation they actually opened.
-        let rules = capability.rules ?? existing?.invitationMessage
+        let rules = GroupRules.normalized(capability.rules ?? existing?.invitationMessage)
         return .confirm(
             JoinConfirmation(
                 rowID: rowID,
@@ -359,7 +359,13 @@ public final class PendingChatsFlow {
             introPublicKey: chat.introPublicKey,
             // A pushed invitation carries its rules on the stored offer
             // — there is no capability to read them from.
-            rules: chat.invitationMessage,
+            //
+            // Normalized here rather than trusted: a group whose rules
+            // are whitespace has none, and passing `"   "` through
+            // would draw an empty rules card, demand a tick for it, and
+            // then send no signature at all, because the sender
+            // normalizes before signing.
+            rules: GroupRules.normalized(chat.invitationMessage),
             suggestedLabel: suggested,
             origin: .offer(rowID: chat.id)
         )
@@ -391,7 +397,7 @@ public final class PendingChatsFlow {
             // on underneath.
             guard chat.status == .offered else { return .waiting(rowID: rowID) }
             await repository.attachJoinerLabel(id: rowID, label: trimmed)
-            send(chat, label: trimmed)
+            send(chat, label: trimmed, rules: confirmation.rules)
             return .waiting(rowID: rowID)
         case .link(let capability):
             guard let owner = await currentIdentityID() else {
@@ -406,17 +412,19 @@ public final class PendingChatsFlow {
                 // shows the group, not a person who never said their
                 // name.
                 inviterAlias: "",
-                // The link's rules, kept on the row: "Ask again" has to
-                // re-sign the same text, and the row is the only place
-                // it survives once the capability is gone.
-                invitationMessage: capability.rules,
+                // The rules the screen showed, kept on the row: "Ask
+                // again" has to re-sign the same text, and the row is
+                // the only place it survives once the capability is
+                // gone. The screen's copy, not the capability's, so the
+                // two can't drift.
+                invitationMessage: confirmation.rules,
                 receivedAt: Date(),
                 status: .offered,
                 joinerLabel: trimmed
             )
             switch await repository.record(chat) {
             case .inserted:
-                send(chat, label: trimmed)
+                send(chat, label: trimmed, rules: confirmation.rules)
                 return .waiting(rowID: chat.id)
             case .alreadyPresent:
                 // A pushed offer for this group arrived first and is
@@ -424,7 +432,25 @@ public final class PendingChatsFlow {
                 await repository.attachJoinerLabel(id: chat.id, label: trimmed)
                 let existing = await repository.currentChats().first { $0.id == chat.id }
                 if let existing, existing.status == .offered {
-                    send(existing, label: trimmed)
+                    // The stored offer's text may differ from the
+                    // link's, and the screen resolved the link's ahead
+                    // of it. So the row is brought up to what was
+                    // actually read before anything is signed —
+                    // otherwise this send, and every "Ask again" after
+                    // it, would attest to words nobody saw.
+                    let shown = PendingChat(
+                        groupID: existing.groupID,
+                        ownerIdentityID: existing.ownerIdentityID,
+                        introPublicKey: existing.introPublicKey,
+                        groupName: existing.groupName,
+                        inviterAlias: existing.inviterAlias,
+                        invitationMessage: confirmation.rules,
+                        receivedAt: existing.receivedAt,
+                        status: existing.status,
+                        joinerLabel: trimmed
+                    )
+                    await repository.refreshOffer(shown)
+                    send(shown, label: trimmed, rules: confirmation.rules)
                 }
                 return .waiting(rowID: chat.id)
             case .failed, .notRecorded:
@@ -468,7 +494,7 @@ public final class PendingChatsFlow {
             // one after this repeats it rather than re-deriving it from
             // an identity that may since have been renamed.
             if let label = chat.joinerLabel {
-                send(chat, label: label)
+                send(chat, label: label, rules: GroupRules.normalized(chat.invitationMessage))
                 return
             }
             let repository = self.repository
@@ -476,7 +502,11 @@ public final class PendingChatsFlow {
             Task { @MainActor [weak self] in
                 let label = await displayLabel()
                 await repository.attachJoinerLabel(id: id, label: label)
-                self?.send(chat, label: label)
+                self?.send(
+                    chat,
+                    label: label,
+                    rules: GroupRules.normalized(chat.invitationMessage)
+                )
             }
         case .offered, .chainSettling:
             break
@@ -490,10 +520,13 @@ public final class PendingChatsFlow {
     /// `label` is always supplied by a caller a person reached: there is
     /// no path from an inbound link or event to here.
     ///
-    /// The rules signed are the row's own — the same text the screen
-    /// showed, kept there for exactly this reason, so a re-send months
-    /// later still says what the first one said.
-    private func send(_ chat: PendingChat, label: String) {
+    /// `rules` is passed rather than read off `chat`, because the two
+    /// can disagree and only one of them is the agreement: the screen
+    /// resolves a link's rules ahead of a stored offer's, so a row
+    /// whose text differs would otherwise be signed instead of the
+    /// words that were on screen. A re-send passes the row's own copy,
+    /// which is the same text, kept for exactly that.
+    private func send(_ chat: PendingChat, label: String, rules: String?) {
         let id = chat.id
         guard !sendingIDs.contains(id) else { return }
         let capability: IntroCapability
@@ -512,7 +545,6 @@ public final class PendingChatsFlow {
         rebuild()
         let submitJoin = self.submitJoin
         let repository = self.repository
-        let rules = chat.invitationMessage
         Task { @MainActor [weak self] in
             let outcome = await submitJoin(capability, label, rules)
             switch outcome {

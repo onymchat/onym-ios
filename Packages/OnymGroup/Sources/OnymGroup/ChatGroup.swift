@@ -132,6 +132,25 @@ public struct ChatGroup: Identifiable, Equatable, Sendable {
         self.invitationMessage = invitationMessage
     }
 
+    /// The group's rules if a link can carry them, else nil.
+    ///
+    /// Groups created before the cap existed can hold a message longer
+    /// than an invite link accepts — the field was documented as "any
+    /// length" — and `IntroCapability` rejects those, which turned
+    /// "Share invite" into a permanent failure for exactly those
+    /// groups. Losing the rules from the link is bad; losing the
+    /// ability to invite anyone is worse.
+    ///
+    /// Omitted rather than truncated, because truncation is the one
+    /// option that produces a wrong answer instead of a missing one:
+    /// joiners would sign an abridged text and every one of those
+    /// signatures would then fail against the founder's full copy,
+    /// reaching them as signatures that don't check out.
+    public var linkableRules: String? {
+        guard let rules = GroupRules.normalized(invitationMessage) else { return nil }
+        return GroupRules.fits(rules) ? rules : nil
+    }
+
     /// Group ID as the raw 32-byte payload (parsed back from `id`).
     /// Used directly when building chain payloads + invitations.
     public var groupIDData: Data {

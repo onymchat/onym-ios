@@ -174,7 +174,8 @@ public actor InviteIntroducer {
     public func rotate(
         ownerIdentityID: IdentityID,
         groupId: Data,
-        groupName: String? = nil
+        groupName: String? = nil,
+        rules: String? = nil
     ) async throws -> IntroCapability {
         guard groupId.count == 32 else {
             throw IntroducerError.invalidGroupID(actualSize: groupId.count)
@@ -192,7 +193,12 @@ public actor InviteIntroducer {
             let fresh = try await self.mint(
                 ownerIdentityID: ownerIdentityID,
                 groupId: groupId,
-                groupName: groupName
+                groupName: groupName,
+                // A rotated link is the same invitation to the same
+                // group. Minting it without rules would hand every
+                // joiner on it the one-tap join and land them on the
+                // founder's screen as having declined to agree.
+                rules: rules
             )
 
             for pub in superseded where pub != fresh.introPublicKey {

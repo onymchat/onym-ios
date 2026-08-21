@@ -262,6 +262,12 @@ private struct CreateGroupStep1View: View {
         .lineLimit(3...12)
         .textInputAutocapitalization(.sentences)
         .accessibilityIdentifier("create_group.step1.invitation_field")
+        // Clamped here, the way the name field above is, so a paste
+        // that overshoots is cut as it lands rather than at submit.
+        .onChange(of: flow.invitationMessage) { _, new in
+            let clamped = CreateGroupFlow.clampedRules(new)
+            if clamped != new { flow.invitationMessage = clamped }
+        }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .background(OnymTokens.surface2)
@@ -282,7 +288,7 @@ private struct CreateGroupStep1View: View {
             if flow.rulesRemaining <= 100 {
                 Text("\(flow.rulesRemaining)")
                     .monospacedDigit()
-                    .foregroundStyle(flow.rulesRemaining == 0 ? OnymTokens.amber : OnymTokens.text3)
+                    .foregroundStyle(flow.rulesRemaining <= 0 ? OnymTokens.amber : OnymTokens.text3)
                     .accessibilityLabel("\(flow.rulesRemaining) characters left")
             }
         }
