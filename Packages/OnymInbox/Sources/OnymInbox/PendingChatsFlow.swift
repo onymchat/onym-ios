@@ -99,6 +99,14 @@ public final class PendingChatsFlow {
 
     /// Pending rows for the current identity, newest first.
     public private(set) var rows: [Row] = []
+    /// Rows whose wait ended, mapped to the group that replaced them
+    /// (`row id → group id hex`).
+    ///
+    /// Kept after the row itself is gone, because the row disappearing
+    /// is exactly the moment a screen showing it needs to know where to
+    /// go instead. Bounded by the number of chats this device has ever
+    /// joined — the same order as the chats list.
+    public private(set) var materialized: [String: String] = [:]
     public var lastError: String?
 
     private let repository: PendingChatRepository
@@ -109,7 +117,13 @@ public final class PendingChatsFlow {
     private let submitJoin: @Sendable (IntroCapability, String) async -> JoinRequestSender.Outcome
     /// The joiner's display label, read lazily at accept time so an
     /// identity rename is picked up without re-wiring.
-    private let displayLabel: @MainActor () -> String
+    ///
+    /// Asked of the identity repository, for the same reason
+    /// `currentIdentityID` is: a link that launches the app sends its
+    /// request before any tab's `.task` has populated the identities
+    /// flow, and reading the UI's copy shipped the request with an empty
+    /// name — the founder seeing an unnamed stranger asking to come in.
+    private let displayLabel: @Sendable () async -> String
     /// Re-drive a stuck verification (`GroupStateVerifier.retry`).
     private let retryVerification: @Sendable (String) async -> Void
     /// The identity a link tapped right now would join as.
@@ -134,7 +148,7 @@ public final class PendingChatsFlow {
         verificationStore: PendingVerificationStore,
         groupRepository: GroupRepository,
         submitJoin: @escaping @Sendable (IntroCapability, String) async -> JoinRequestSender.Outcome,
-        displayLabel: @escaping @MainActor () -> String,
+        displayLabel: @escaping @Sendable () async -> String,
         retryVerification: @escaping @Sendable (String) async -> Void,
         currentIdentityID: @escaping @Sendable () async -> IdentityID?
     ) {
@@ -169,8 +183,18 @@ public final class PendingChatsFlow {
         }
         let groups = groupRepository.snapshots
         let repository = self.repository
-        groupWatchTask = Task {
+        groupWatchTask = Task { @MainActor [weak self] in
             for await groups in groups {
+                // Recorded *before* the rows are consumed: afterwards
+                // there is nothing left to say which wait this group
+                // ended, and the pending thread on screen would have no
+                // way to find the chat it just became.
+                if let self {
+                    let landed = Set(groups.map(\.id))
+                    for row in self.rows where landed.contains(row.groupIDHex) {
+                        self.materialized[row.id] = row.groupIDHex
+                    }
+                }
                 await repository.consumeForMaterialized(
                     groups.map { (groupIDHex: $0.id, owner: $0.ownerIdentityID) }
                 )
@@ -200,8 +224,10 @@ public final class PendingChatsFlow {
         /// Already a member — the link was an old one, or a second tap.
         /// Carries the hex group id so the caller can just open the chat.
         case alreadyJoined(groupIDHex: String)
-        /// A pending row exists and the request is on its way. Carries
-        /// the row id to open.
+        /// A pending row exists and the wait is under way. The request
+        /// is either on its way or already out — an unanswered offer for
+        /// the same group is sent here, one already asked for is not
+        /// asked twice.
         case waiting(rowID: String)
         /// Nothing could be recorded, so there is nothing to show and
         /// nothing to come back to. The caller has to say so out loud.
@@ -249,8 +275,18 @@ public final class PendingChatsFlow {
             send(chat)
             return .waiting(rowID: chat.id)
         case .alreadyPresent:
+            // A pushed offer for this group arrived first and is still
+            // unanswered. Tapping the link *is* the answer — leaving the
+            // row at `.offered` would land the user on a screen asking
+            // for the intent they just expressed, which is the whole
+            // thing this change removes. An already-`.requested` row is
+            // left alone: one link tap, one request.
+            let existing = await repository.currentChats().first { $0.id == chat.id }
+            if let existing, existing.status == .offered {
+                send(existing)
+            }
             return .waiting(rowID: chat.id)
-        case .failed:
+        case .failed, .notRecorded:
             return .failed(reason: String(localized: "Couldn\u{2019}t save this invite on your device."))
         }
     }
@@ -314,11 +350,11 @@ public final class PendingChatsFlow {
         sendingIDs.insert(id)
         lastError = nil
         rebuild()
-        let label = displayLabel()
+        let displayLabel = self.displayLabel
         let submitJoin = self.submitJoin
         let repository = self.repository
         Task { @MainActor [weak self] in
-            let outcome = await submitJoin(capability, label)
+            let outcome = await submitJoin(capability, await displayLabel())
             switch outcome {
             case .sent:
                 await repository.markRequested(id: id)

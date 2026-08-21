@@ -215,18 +215,7 @@ public struct ChatsView: View {
                 onCancel: { showScanner = false }
             )
         }
-        .alert(
-            "Couldn't use that invite",
-            isPresented: Binding(
-                get: { scanJoinError != nil },
-                set: { if !$0 { scanJoinError = nil } }
-            ),
-            presenting: scanJoinError
-        ) { _ in
-            Button("OK", role: .cancel) {}
-        } message: { reason in
-            Text(reason)
-        }
+        .reasonAlert("Couldn\u{2019}t use that invite", reason: $scanJoinError)
         .alert("Not an Onym invite", isPresented: $scanRejected) {
             Button("OK", role: .cancel) {}
         } message: {

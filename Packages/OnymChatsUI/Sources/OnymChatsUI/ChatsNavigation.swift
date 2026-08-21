@@ -17,17 +17,31 @@ import Observation
 @Observable
 public final class ChatsNavigation {
     public var path = NavigationPath()
+    /// Bumped every time something outside the tab pushes onto `path`.
+    ///
+    /// A push alone isn't enough to be seen: the tab bar is a level
+    /// above the stack, so a link tapped while the app was last on
+    /// Settings put the chat on an off-screen stack and the user came
+    /// back to Settings — "nothing visibly happened", which is the exact
+    /// failure hoisting the path was meant to prevent. `RootView`
+    /// watches this and selects the Chats tab.
+    ///
+    /// A counter rather than a flag, so two links in a row are two
+    /// requests and neither has to be cleared by whoever handled it.
+    public private(set) var focusRequests = 0
 
     public init() {}
 
     /// Open a chat this device is already a member of.
     public func openChat(groupID: String) {
         path.append(groupID)
+        focusRequests += 1
     }
 
     /// Open a chat that is still on its way in.
     public func openPending(rowID: String) {
         path.append(PendingChatRoute(id: rowID))
+        focusRequests += 1
     }
 
     /// The wait ended while the person was watching it: drop the pending
@@ -40,6 +54,8 @@ public final class ChatsNavigation {
     public func replaceTopWithChat(groupID: String) {
         if !path.isEmpty { path.removeLast() }
         path.append(groupID)
+        // No focus bump: this one only happens while the person is
+        // already looking at the screen being replaced.
     }
 }
 

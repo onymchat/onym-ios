@@ -134,6 +134,12 @@ struct RootView: View {
             )
             await resolveDeviceBackupView()
         }
+        // A push from outside the tab — a tapped invite link — has to
+        // bring the tab with it, or the chat it created lands on a stack
+        // nobody is looking at.
+        .onChange(of: dependencies.chatsNavigation.focusRequests) { _, _ in
+            selectedTab = .chats
+        }
         .onChange(of: selectedTab) { _, tab in
             // Re-resolved when Settings is opened, not only at launch.
             // Consenting to a backup operator mid-session otherwise left

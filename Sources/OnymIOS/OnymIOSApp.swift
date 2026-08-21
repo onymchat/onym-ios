@@ -788,10 +788,13 @@ struct OnymIOSApp: App {
                     joinerDisplayLabel: label
                 )
             },
-            displayLabel: { @MainActor [identitiesFlow] in
-                identitiesFlow.identities
-                    .first { $0.id == identitiesFlow.currentID }?
-                    .name ?? ""
+            displayLabel: { [repository] in
+                // Repository, not `identitiesFlow` — the same cold-start
+                // reason as `currentIdentityID` below. A link that
+                // launches the app sends before any tab has populated
+                // the flow, and an empty name is what the founder would
+                // have been asked to let in.
+                await repository.currentIdentityName() ?? ""
             },
             retryVerification: { [groupStateVerifier] groupIDHex in
                 await groupStateVerifier.retry(groupIDHex: groupIDHex)
@@ -1971,18 +1974,7 @@ struct OnymIOSApp: App {
                     pendingCapability = nil
                     Task { await handleCapability(captured) }
                 }
-                .alert(
-                    "Couldn't use that invite",
-                    isPresented: Binding(
-                        get: { joinLinkError != nil },
-                        set: { if !$0 { joinLinkError = nil } }
-                    ),
-                    presenting: joinLinkError
-                ) { _ in
-                    Button("OK", role: .cancel) {}
-                } message: { reason in
-                    Text(reason)
-                }
+                .reasonAlert("Couldn\u{2019}t use that invite", reason: $joinLinkError)
         }
     }
 

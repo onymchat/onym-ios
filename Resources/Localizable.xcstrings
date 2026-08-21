@@ -310,13 +310,13 @@
         }
       }
     },
-    "Couldn't use that invite": {
+    "Couldn’t use that invite": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Couldn't use that invite"
+            "value": "Couldn’t use that invite"
           }
         },
         "ru": {

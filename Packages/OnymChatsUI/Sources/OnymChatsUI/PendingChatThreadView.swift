@@ -53,7 +53,10 @@ struct PendingChatThreadView: View {
         // materializes, and the person watching the wait is put straight
         // into the chat — landing on the "You joined X" notice rather
         // than on a spinner they have to back out of.
-        .onChange(of: flow.materializedGroupID(for: rowID)) { _, groupID in
+        // `initial: true` because the route can be pushed *after* the
+        // group landed — a stale row id from a link tapped twice — and
+        // without it that opens a spinner whose only exit is Back.
+        .onChange(of: flow.materializedGroupID(for: rowID), initial: true) { _, groupID in
             guard let groupID else { return }
             onMaterialized(groupID)
         }
