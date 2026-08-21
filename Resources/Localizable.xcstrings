@@ -310,6 +310,40 @@
         }
       }
     },
+    "Couldn't use that invite": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't use that invite"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не удалось использовать это приглашение"
+          }
+        }
+      }
+    },
+    "Couldn’t save this invite on your device.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t save this invite on your device."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не удалось сохранить это приглашение на устройстве."
+          }
+        }
+      }
+    },
     "Couldn’t verify — tap to retry": {
       "extractionState": "manual",
       "localizations": {

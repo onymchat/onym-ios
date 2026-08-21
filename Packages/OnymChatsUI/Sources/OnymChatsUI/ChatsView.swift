@@ -191,7 +191,7 @@ public struct ChatsView: View {
             QRCodeScannerView(
                 onScanned: { raw in
                     // Same allowlist + decode the deeplink path uses, so
-                    // a scanned link and a tapped link reach JoinView
+                    // a scanned link and a tapped link reach `join`
                     // identically. A non-invite QR yields nil → reject.
                     if let cap = DeeplinkCapture.introCapability(fromString: raw) {
                         scannedCapability = cap
