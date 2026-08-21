@@ -59,6 +59,14 @@ public actor PendingChatRepository: PendingChatRecording {
     /// founder approved, the invitation materialized the group, and the
     /// waiting room has become the chat itself.
     public func consumeForMaterializedGroups(_ groupIDHexes: Set<String>) async {
+        guard !groupIDHexes.isEmpty else { return }
+        // An empty cache at launch is ambiguous — no pending chats, or
+        // no read yet — and the group watcher can emit before the
+        // startup `reload()` lands. Reading through settles it: without
+        // this, a row whose group materialized while the app was closed
+        // survives the one emission that would have swept it and then
+        // sits in the list until some unrelated group mutation.
+        if cached.isEmpty { await refreshFromStore() }
         let live = Set(cached.map(\.groupIDHex))
         let matched = groupIDHexes.intersection(live)
         guard !matched.isEmpty else { return }

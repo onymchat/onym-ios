@@ -92,6 +92,42 @@ public struct ChatsView: View {
                 groupList
             }
         }
+        // Both destinations hang off the outer view rather than off the
+        // populated list: a push can now arrive from outside this view
+        // (a tapped invite link), and a first-ever user with no chats is
+        // rendering `emptyState` at that moment. Registered on the list,
+        // the route would be appended to a stack with no destination for
+        // it, surviving only if the row insert and the append happen to
+        // land in the same render pass.
+        .navigationDestination(for: String.self) { groupID in
+            // PR 5 of the chat stack: tapping a group opens the
+            // UIKit chat thread instead of the members roster. The
+            // thread's info button pushes `ChatMembersView` from
+            // there, so the existing surface is still reachable —
+            // just one tap deeper.
+            ChatThreadView(
+                groupID: groupID,
+                chatsFlow: flow,
+                identitiesFlow: identitiesFlow,
+                messageRepository: messageRepository,
+                sendMessageInteractor: sendMessageInteractor,
+                chatReceiptSender: chatReceiptSender,
+                makeShareInviteFlow: makeShareInviteFlow,
+                setGroupAvatar: setGroupAvatar,
+                setGroupName: setGroupName,
+                imageLoader: imageLoader,
+                videoLoader: videoLoader,
+                voiceLoader: voiceLoader,
+                makeModerationReportView: makeModerationReportView,
+                approveRequestsFlow: approveRequestsFlow
+            )
+        }
+        // A distinct route type rather than another `String`: a pending
+        // chat's id and a group id would otherwise be the same value
+        // space, and a stale one would open the wrong screen.
+        .navigationDestination(for: PendingChatRoute.self) { route in
+            PendingChatThreadView(flow: pendingChatsFlow, rowID: route.id)
+        }
         .navigationTitle(currentIdentityName)
         .toolbar {
             // Identity picker — top-bar leading slot. Always shown so
@@ -446,35 +482,6 @@ public struct ChatsView: View {
         } message: { item in
             let name = item.group.name.isEmpty ? "this chat" : "\u{201C}\(item.group.name)\u{201D}"
             Text("This removes \(name) and every message in it from this device. It can't be undone.")
-        }
-        .navigationDestination(for: String.self) { groupID in
-            // PR 5 of the chat stack: tapping a group opens the
-            // UIKit chat thread instead of the members roster. The
-            // thread's info button pushes `ChatMembersView` from
-            // there, so the existing surface is still reachable —
-            // just one tap deeper.
-            ChatThreadView(
-                groupID: groupID,
-                chatsFlow: flow,
-                identitiesFlow: identitiesFlow,
-                messageRepository: messageRepository,
-                sendMessageInteractor: sendMessageInteractor,
-                chatReceiptSender: chatReceiptSender,
-                makeShareInviteFlow: makeShareInviteFlow,
-                setGroupAvatar: setGroupAvatar,
-                setGroupName: setGroupName,
-                imageLoader: imageLoader,
-                videoLoader: videoLoader,
-                voiceLoader: voiceLoader,
-                makeModerationReportView: makeModerationReportView,
-                approveRequestsFlow: approveRequestsFlow
-            )
-        }
-        // A distinct route type rather than another `String`: a pending
-        // chat's id and a group id would otherwise be the same value
-        // space, and a stale one would open the wrong screen.
-        .navigationDestination(for: PendingChatRoute.self) { route in
-            PendingChatThreadView(flow: pendingChatsFlow, rowID: route.id)
         }
     }
 }
