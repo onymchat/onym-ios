@@ -51,6 +51,14 @@ public actor SwiftDataPendingChatStore: PendingChatStore {
         return SwiftDataPendingChatStore(container: container)
     }
 
+    /// A second store over the same container — a relaunch, modelled.
+    /// Durability is the reason this store exists at all, so a test has
+    /// to be able to close the context and read the rows back through a
+    /// fresh one rather than trust the cache it just wrote.
+    public func reopened() -> SwiftDataPendingChatStore {
+        SwiftDataPendingChatStore(container: container)
+    }
+
     private init(container: ModelContainer) {
         self.container = container
         self.context = ModelContext(container)
