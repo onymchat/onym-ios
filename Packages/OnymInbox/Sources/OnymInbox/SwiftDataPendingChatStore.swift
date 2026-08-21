@@ -51,11 +51,15 @@ public actor SwiftDataPendingChatStore: PendingChatStore {
         return SwiftDataPendingChatStore(container: container)
     }
 
-    /// A second store over the same container — a relaunch, modelled.
-    /// Durability is the reason this store exists at all, so a test has
-    /// to be able to close the context and read the rows back through a
-    /// fresh one rather than trust the cache it just wrote.
-    public func reopened() -> SwiftDataPendingChatStore {
+    /// A second store over the same container, reading through a fresh
+    /// `ModelContext`.
+    ///
+    /// Not a relaunch: the container here is the same object and, for
+    /// `inMemory()`, never touches disk. What it does show is that a
+    /// write reached the container's store rather than sitting in the
+    /// context that made it — the half of durability a test can check
+    /// without a device.
+    func reopened() -> SwiftDataPendingChatStore {
         SwiftDataPendingChatStore(container: container)
     }
 

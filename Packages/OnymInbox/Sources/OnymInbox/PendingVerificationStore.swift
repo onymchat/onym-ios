@@ -64,10 +64,7 @@ public actor PendingVerificationStore {
 
     /// Idempotent on `groupIDHex`. A re-deferred snapshot (re-delivery)
     /// keeps the existing entry/status rather than resetting it.
-    /// Public because the state it holds is rendered a module away, by
-    /// `PendingChatsFlow` — a test of that overlay has to be able to put
-    /// a verification in without standing up the whole verifier.
-    public func record(_ entry: PendingGroupVerification) {
+    func record(_ entry: PendingGroupVerification) {
         guard !all.contains(where: { $0.groupIDHex == entry.groupIDHex }) else { return }
         all.append(entry)
         publish()

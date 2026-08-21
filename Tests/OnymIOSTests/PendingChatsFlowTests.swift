@@ -55,9 +55,16 @@ final class PendingChatsFlowTests: XCTestCase {
         harness.flow.accept(chat.id)
         harness.flow.accept(chat.id)
 
-        try await waitFor { harness.flow.rows.first?.isSending == true }
-        await harness.sender.release()
+        // Wait on the *spy* being entered, not on `isSending`: that flag
+        // is set synchronously inside `send` before `submitJoin` is ever
+        // awaited, so releasing on it could unblock a gate nobody had
+        // reached yet and prove nothing about the second tap.
         try await waitForAsync { await harness.sender.calls.count == 1 }
+        XCTAssertTrue(harness.flow.rows.first?.isSending == true)
+        await harness.sender.release()
+        try await waitFor { harness.flow.rows.first?.state == .waiting }
+        let sent = await harness.sender.calls.count
+        XCTAssertEqual(sent, 1, "the second tap must not ship a second request")
     }
 
     func test_failedSend_showsTheReasonAndRetryResends() async throws {
@@ -83,6 +90,55 @@ final class PendingChatsFlowTests: XCTestCase {
         try await waitFor { harness.flow.rows.first?.state == .waiting }
         let sent2 = await harness.sender.calls.count
         XCTAssertEqual(sent2, 2)
+    }
+
+    func test_noIdentityLoaded_leavesTheRowRetryableWithSomethingToRead() async throws {
+        let harness = await Harness.make(owner: owner)
+        await harness.sender.setOutcome(.noIdentityLoaded)
+        await harness.flow.start()
+        let chat = harness.makeChat()
+        await harness.repository.record(chat)
+        try await waitFor { harness.flow.rows.count == 1 }
+
+        harness.flow.accept(chat.id)
+
+        try await waitFor {
+            harness.flow.rows.first?.state == .sendFailed(reason: String(localized: "Sign in first."))
+        }
+        XCTAssertTrue(harness.flow.rows.first?.state.isRetryable == true)
+    }
+
+    func test_malformedInvite_saysSoWithoutTouchingTheSender() async throws {
+        // A capability that can't be rebuilt from the stored row: there
+        // is nothing to send and nothing a Retry could fix, so the row
+        // keeps its state and the error is the whole message.
+        let harness = await Harness.make(owner: owner)
+        await harness.flow.start()
+        let malformed = harness.makeChat(introPublicKey: Data([0x01]))
+        await harness.repository.record(malformed)
+        try await waitFor { harness.flow.rows.count == 1 }
+
+        harness.flow.accept(malformed.id)
+
+        XCTAssertNotNil(harness.flow.lastError)
+        let sends = await harness.sender.calls.count
+        XCTAssertEqual(sends, 0)
+        XCTAssertEqual(harness.flow.rows.first?.state, .offered)
+
+        harness.flow.dismissError()
+        XCTAssertNil(harness.flow.lastError)
+    }
+
+    func test_dismiss_dropsTheRow() async throws {
+        let harness = await Harness.make(owner: owner)
+        await harness.flow.start()
+        let chat = harness.makeChat()
+        await harness.repository.record(chat)
+        try await waitFor { harness.flow.rows.count == 1 }
+
+        harness.flow.dismiss(chat.id)
+
+        try await waitFor { harness.flow.rows.isEmpty }
     }
 
     // MARK: - Verification overlay
@@ -135,7 +191,47 @@ final class PendingChatsFlowTests: XCTestCase {
         ))
 
         try await waitFor { harness.flow.rows.first?.state == .chainSettling }
-        XCTAssertFalse(harness.flow.rows.first?.state.isRetryable == true)
+
+        // Not just "the enum says so": a Retry tapped here must reach
+        // neither the verifier nor the sender.
+        harness.flow.retry(chat.id)
+
+        let retries = await harness.verifierRetries.values
+        let sends = await harness.sender.calls.count
+        XCTAssertTrue(retries.isEmpty)
+        XCTAssertEqual(sends, 0)
+    }
+
+    func test_verifyingStatus_readsAsTheSameWaitAsAskingDoes() async throws {
+        // Before and after the founder's approval are one wait to the
+        // person doing the waiting, so they must not render differently.
+        let harness = await Harness.make(owner: owner)
+        await harness.flow.start()
+        let chat = harness.makeChat()
+        await harness.repository.record(chat)
+        await harness.verifications.record(makeVerification(
+            groupIDHex: chat.groupIDHex, owner: owner, status: .verifying
+        ))
+
+        try await waitFor { harness.flow.rows.first?.state == .waiting }
+    }
+
+    func test_chainNotConfigured_isRetryableAndSaysSoOnItsOwn() async throws {
+        // Split from `chainUnreachable` because the remedy differs: this
+        // one is usually a cold-launch race, and its Retry re-fetches
+        // the lists rather than asking the founder for anything.
+        let harness = await Harness.make(owner: owner)
+        await harness.flow.start()
+        let chat = harness.makeChat()
+        await harness.repository.record(chat)
+        await harness.verifications.record(makeVerification(
+            groupIDHex: chat.groupIDHex, owner: owner, status: .chainNotConfigured
+        ))
+        try await waitFor { harness.flow.rows.first?.state == .chainNotConfigured }
+
+        harness.flow.retry(chat.id)
+
+        try await waitForAsync { await harness.verifierRetries.values == [chat.groupIDHex] }
     }
 
     func test_verificationWithNoOffer_stillGetsARow() async throws {
@@ -204,12 +300,33 @@ final class PendingChatsFlowTests: XCTestCase {
         await harness.flow.start()
 
         _ = await harness.flow.join(capability: harness.capability())
-        try await waitForAsync { await harness.sender.calls.count == 1 }
+        // Wait for the row to actually reach `.requested`: on `.offered`
+        // a second tap now (correctly) sends, so asserting before the
+        // status lands would be testing the race, not the rule.
+        try await waitFor { harness.flow.rows.first?.state == .waiting }
         let second = await harness.flow.join(capability: harness.capability())
 
         XCTAssertEqual(second, .waiting(rowID: harness.makeChat().id))
         let sent1 = await harness.sender.calls.count
         XCTAssertEqual(sent1, 1, "a second tap is not a second request")
+    }
+
+    func test_join_onAnUnansweredOffer_sendsInsteadOfAskingAgain() async throws {
+        // The dispatcher got there first. Tapping the link *is* the
+        // answer, so the row must not be left sitting at `.offered`
+        // asking for it a second time.
+        let harness = await Harness.make(owner: owner)
+        await harness.flow.start()
+        let offered = harness.makeChat()
+        await harness.repository.record(offered)
+        try await waitFor { harness.flow.rows.first?.state == .offered }
+
+        let outcome = await harness.flow.join(capability: harness.capability())
+
+        XCTAssertEqual(outcome, .waiting(rowID: offered.id))
+        try await waitFor { harness.flow.rows.first?.state == .waiting }
+        let sends = await harness.sender.calls.count
+        XCTAssertEqual(sends, 1)
     }
 
     func test_join_whenAlreadyAMember_opensTheChatInstead() async throws {
@@ -294,11 +411,11 @@ final class PendingChatsFlowTests: XCTestCase {
             )
         }
 
-        func makeChat() -> PendingChat {
+        func makeChat(introPublicKey: Data = Data(repeating: 0x44, count: 32)) -> PendingChat {
             PendingChat(
                 groupID: Data(repeating: 0x11, count: 32),
                 ownerIdentityID: owner ?? IdentityID(),
-                introPublicKey: Data(repeating: 0x44, count: 32),
+                introPublicKey: introPublicKey,
                 groupName: "Maple Garden",
                 inviterAlias: "Alice",
                 invitationMessage: "come in",

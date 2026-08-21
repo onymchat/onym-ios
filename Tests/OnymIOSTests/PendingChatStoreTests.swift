@@ -81,17 +81,33 @@ final class PendingChatStoreTests: XCTestCase {
 
     // MARK: - Removal
 
-    func test_deleteForGroups_dropsOnlyTheMaterializedOnes() async {
+    func test_deleteForIDs_dropsOnlyTheMaterializedOnes() async {
         let store = SwiftDataPendingChatStore.inMemory()
         let landed = makeChat(group: 0x11, owner: owner)
         let waiting = makeChat(group: 0x22, owner: owner)
         await store.insert(landed)
         await store.insert(waiting)
 
-        await store.deleteForGroups(hexes: [landed.groupIDHex])
+        await store.deleteForIDs([landed.id])
 
         let rows = await store.list()
         XCTAssertEqual(rows.map(\.groupIDHex), [waiting.groupIDHex])
+    }
+
+    func test_deleteForIDs_leavesTheOtherIdentitysRowForTheSameGroup() async {
+        // Deleting by group alone took the other identity's waiting room
+        // with it the moment this one got in — the same composite-key
+        // mistake `PersistedGroup` documents one layer down.
+        let store = SwiftDataPendingChatStore.inMemory()
+        let mine = makeChat(group: 0x11, owner: owner)
+        let theirs = makeChat(group: 0x11, owner: other)
+        await store.insert(mine)
+        await store.insert(theirs)
+
+        await store.deleteForIDs([mine.id])
+
+        let rows = await store.list()
+        XCTAssertEqual(rows.map(\.ownerIdentityID), [other])
     }
 
     func test_deleteOwner_cascadesForARemovedIdentity() async {
@@ -107,10 +123,15 @@ final class PendingChatStoreTests: XCTestCase {
 
     // MARK: - Durability + ordering
 
-    func test_rowsSurviveAReopen() async {
-        // The whole reason this store is on disk: a link join is
-        // replayed by nothing, so a force-quit would otherwise leave
-        // someone waiting on a request their device has no record of.
+    func test_rowsSurviveAFreshContext() async {
+        // Not a relaunch — `inMemory()` never touches disk and the
+        // container outlives both stores. What this shows is that the
+        // write reached the container's store rather than sitting in the
+        // context that made it, which is the half of durability a test
+        // can check here. The other half is why the production store is
+        // SQLite: a link join is replayed by nothing, so a force-quit
+        // would otherwise leave someone waiting on a request their
+        // device has no record of.
         let store = SwiftDataPendingChatStore.inMemory()
         let chat = makeChat(group: 0x11, owner: owner)
         await store.insert(chat)
@@ -136,24 +157,65 @@ final class PendingChatStoreTests: XCTestCase {
         XCTAssertEqual(rows.map(\.groupIDHex), [new.groupIDHex, old.groupIDHex])
     }
 
-    func test_inMemoryStore_matchesTheOnDiskContract() async {
+    // MARK: - Both conformers, one contract
+
+    func test_swiftDataStore_honoursTheContract() async throws {
+        try await assertHonoursContract(SwiftDataPendingChatStore.inMemory())
+    }
+
+    func test_inMemoryStore_honoursTheContract() async throws {
         // The fallback for a device whose store won't open has to behave
         // the same, or a failed open changes what the app does rather
-        // than only where it keeps it.
-        let store = InMemoryPendingChatStore()
-        let chat = makeChat(group: 0x11, owner: owner)
-        let first = await store.insert(chat)
-        let second = await store.insert(chat)
-        XCTAssertEqual(first, .inserted)
-        XCTAssertEqual(second, .alreadyPresent)
+        // than only where it keeps its rows. Hand-checking three of the
+        // six methods let `delete`, `deleteOwner` and ordering diverge in
+        // silence, so both conformers run the same exercise.
+        try await assertHonoursContract(InMemoryPendingChatStore())
+    }
 
-        await store.setStatus(id: chat.id, status: .requested)
-        let requested = await store.list()
-        XCTAssertEqual(requested.first?.status, .requested)
+    /// Every method on `PendingChatStore`, in one pass.
+    private func assertHonoursContract(
+        _ store: any PendingChatStore,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async throws {
+        let old = makeChat(group: 0x11, owner: owner, receivedAt: Date(timeIntervalSince1970: 100))
+        let new = makeChat(group: 0x22, owner: owner, receivedAt: Date(timeIntervalSince1970: 200))
+        let theirs = makeChat(group: 0x33, owner: other)
 
-        await store.deleteForGroups(hexes: [chat.groupIDHex])
-        let emptied = await store.list()
-        XCTAssertTrue(emptied.isEmpty)
+        let inserted = await store.insert(old)
+        let duplicate = await store.insert(old)
+        XCTAssertEqual(inserted, .inserted, file: file, line: line)
+        XCTAssertEqual(duplicate, .alreadyPresent, file: file, line: line)
+        await store.insert(new)
+        await store.insert(theirs)
+
+        // Newest first.
+        let listed = await store.list()
+        XCTAssertEqual(
+            listed.map(\.id),
+            [theirs, new, old].sorted { $0.receivedAt > $1.receivedAt }.map(\.id),
+            file: file, line: line
+        )
+
+        await store.setStatus(id: old.id, status: .failed(reason: "relay rejected"))
+        let afterStatus = await store.list().first { $0.id == old.id }
+        XCTAssertEqual(afterStatus?.status, .failed(reason: "relay rejected"), file: file, line: line)
+        // A row that isn't there absorbs the write rather than creating one.
+        await store.setStatus(id: "nobody:home", status: .requested)
+        let afterGhost = await store.list()
+        XCTAssertEqual(afterGhost.count, 3, file: file, line: line)
+
+        await store.delete(id: old.id)
+        let afterDelete = await store.list()
+        XCTAssertEqual(Set(afterDelete.map(\.id)), [new.id, theirs.id], file: file, line: line)
+
+        await store.deleteForIDs([new.id])
+        let afterSweep = await store.list()
+        XCTAssertEqual(afterSweep.map(\.id), [theirs.id], file: file, line: line)
+
+        await store.deleteOwner(other.rawValue.uuidString)
+        let afterCascade = await store.list()
+        XCTAssertTrue(afterCascade.isEmpty, file: file, line: line)
     }
 
     // MARK: - Helpers

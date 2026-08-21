@@ -77,7 +77,7 @@ final class PendingChatRepositoryTests: XCTestCase {
         XCTAssertEqual(snapshot.first?.status, .failed(reason: "no relay connection"))
     }
 
-    func test_consumeForMaterializedGroups_dropsTheWaitThatIsOver() async throws {
+    func test_consumeForMaterialized_dropsTheWaitThatIsOver() async throws {
         let repository = PendingChatRepository(store: InMemoryPendingChatStore())
         await repository.setCurrentIdentity(alice)
         let landed = makeChat(group: 0x11, owner: alice)
@@ -85,28 +85,53 @@ final class PendingChatRepositoryTests: XCTestCase {
         await repository.record(landed)
         await repository.record(waiting)
 
-        await repository.consumeForMaterializedGroups([landed.groupIDHex])
+        await repository.consumeForMaterialized([(landed.groupIDHex, alice)])
 
         let snapshot = try await firstSnapshot(from: repository)
         XCTAssertEqual(snapshot.map(\.groupIDHex), [waiting.groupIDHex])
     }
 
-    func test_consumeForMaterializedGroups_ignoresGroupsWithNoPendingRow() async throws {
+    func test_consumeForMaterialized_touchesNothingWhenNoRowMatches() async throws {
         // Every group snapshot flows through here on every emission, and
-        // almost none of them match. Touching the store for those would
-        // re-yield the whole list to every subscriber on each repaint.
-        let repository = PendingChatRepository(store: InMemoryPendingChatStore())
+        // almost none of them match. Counting the writes rather than the
+        // surviving rows is the point: a row count of 1 also passes for
+        // an implementation that deleted nothing but re-yielded the whole
+        // list to every subscriber on each repaint.
+        let store = CountingPendingChatStore()
+        let repository = PendingChatRepository(store: store)
         await repository.setCurrentIdentity(alice)
-        let chat = makeChat(group: 0x11, owner: alice)
-        await repository.record(chat)
+        await repository.record(makeChat(group: 0x11, owner: alice))
+        await store.resetCounts()
 
-        await repository.consumeForMaterializedGroups(["ffff"])
+        await repository.consumeForMaterialized([("ffff", alice)])
 
+        let deletes = await store.deleteForIDsCalls
+        let lists = await store.listCalls
+        XCTAssertEqual(deletes, 0, "no row matched, so nothing may be written")
+        XCTAssertEqual(lists, 0, "and the list must not be re-read to say so")
         let snapshot = try await firstSnapshot(from: repository)
         XCTAssertEqual(snapshot.count, 1)
     }
 
-    func test_consumeForMaterializedGroups_worksAgainstAColdCache() async throws {
+    func test_consumeForMaterialized_leavesTheOtherIdentitysRowAlone() async throws {
+        // The group stream is filtered to the selected identity, so the
+        // pairs arriving here name one owner. Matching on the group
+        // alone deleted the other identity's row for the same chat.
+        let store = InMemoryPendingChatStore()
+        let repository = PendingChatRepository(store: store)
+        let mine = makeChat(group: 0x11, owner: alice)
+        let theirs = makeChat(group: 0x11, owner: bob)
+        await repository.setCurrentIdentity(alice)
+        await repository.record(mine)
+        await repository.record(theirs)
+
+        await repository.consumeForMaterialized([(mine.groupIDHex, alice)])
+
+        let rows = await store.list()
+        XCTAssertEqual(rows.map(\.ownerIdentityID), [bob])
+    }
+
+    func test_consumeForMaterialized_worksAgainstAColdCache() async throws {
         // Launch order isn't guaranteed: the group watcher starts from
         // the flow while the startup `reload()` runs from another task,
         // so the first emission can arrive before anything has been
@@ -118,7 +143,7 @@ final class PendingChatRepositoryTests: XCTestCase {
 
         let repository = PendingChatRepository(store: store)
         await repository.setCurrentIdentity(alice)
-        await repository.consumeForMaterializedGroups([chat.groupIDHex])
+        await repository.consumeForMaterialized([(chat.groupIDHex, alice)])
 
         let snapshot = try await firstSnapshot(from: repository)
         XCTAssertTrue(snapshot.isEmpty, "the row must go even if the cache was never read")
@@ -135,6 +160,38 @@ final class PendingChatRepositoryTests: XCTestCase {
 
         let snapshot = try await firstSnapshot(from: repository)
         XCTAssertTrue(snapshot.isEmpty)
+    }
+
+    func test_remove_dropsTheRowTheUserSwipedAway() async throws {
+        // The only user-initiated delete in the feature, and the one the
+        // row's swipe action is gated on.
+        let store = InMemoryPendingChatStore()
+        let repository = PendingChatRepository(store: store)
+        await repository.setCurrentIdentity(alice)
+        let chat = makeChat(group: 0x11, owner: alice)
+        await repository.record(chat)
+
+        await repository.remove(id: chat.id)
+
+        let snapshot = try await firstSnapshot(from: repository)
+        XCTAssertTrue(snapshot.isEmpty)
+        let rows = await store.list()
+        XCTAssertTrue(rows.isEmpty, "local-only, but it does have to be local")
+    }
+
+    func test_currentChats_readsThroughAColdCache() async {
+        // The deeplink path's first question on a cold start, before
+        // anything has read the store: without the read-through it
+        // answers "no rows" and a second waiting room is created beside
+        // the one already on disk.
+        let store = InMemoryPendingChatStore()
+        let chat = makeChat(group: 0x11, owner: alice)
+        await store.insert(chat)
+
+        let repository = PendingChatRepository(store: store)
+        let all = await repository.currentChats()
+
+        XCTAssertEqual(all.map(\.id), [chat.id])
     }
 
     func test_currentChats_readsAcrossIdentities() async {
@@ -172,5 +229,50 @@ final class PendingChatRepositoryTests: XCTestCase {
             receivedAt: Date(),
             status: .offered
         )
+    }
+
+    // MARK: - Spy
+
+    /// Counts what actually reached the store. Used where the claim is
+    /// "this did no work" — a claim the surviving rows cannot make.
+    private actor CountingPendingChatStore: PendingChatStore {
+        private var rows: [PendingChat] = []
+        private(set) var deleteForIDsCalls = 0
+        private(set) var listCalls = 0
+
+        func resetCounts() {
+            deleteForIDsCalls = 0
+            listCalls = 0
+        }
+
+        @discardableResult
+        func insert(_ chat: PendingChat) async -> PendingChatWriteOutcome {
+            guard !rows.contains(where: { $0.id == chat.id }) else { return .alreadyPresent }
+            rows.append(chat)
+            return .inserted
+        }
+
+        func setStatus(id: String, status: PendingChat.Status) async {
+            guard let index = rows.firstIndex(where: { $0.id == id }) else { return }
+            rows[index].status = status
+        }
+
+        func delete(id: String) async {
+            rows.removeAll { $0.id == id }
+        }
+
+        func deleteForIDs(_ ids: Set<String>) async {
+            deleteForIDsCalls += 1
+            rows.removeAll { ids.contains($0.id) }
+        }
+
+        func deleteOwner(_ ownerIDString: String) async {
+            rows.removeAll { $0.ownerIdentityID.rawValue.uuidString == ownerIDString }
+        }
+
+        func list() async -> [PendingChat] {
+            listCalls += 1
+            return rows.sorted { $0.receivedAt > $1.receivedAt }
+        }
     }
 }
