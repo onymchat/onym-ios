@@ -1264,9 +1264,9 @@ final class IncomingMessageDispatcherTests: XCTestCase {
 
     func test_offer_isQueuedForAcceptAndDoesNotMaterializeGroup() async throws {
         // A push offer must NOT materialize a group or land in the
-        // opaque invitations queue — it's queued as a structured
-        // PendingInvite for the user's explicit Accept. Membership only
-        // follows accept + the admin's explicit approve.
+        // opaque invitations queue — it becomes a structured
+        // `PendingChat` row awaiting the user's explicit Accept.
+        // Membership only follows accept + the admin's explicit approve.
         let offer = try GroupInviteOfferPayload(
             introPublicKey: Data(repeating: 0x44, count: 32),
             groupID: Data(repeating: 0x42, count: 32),
@@ -1275,7 +1275,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
         )
         let plaintext = try JSONEncoder().encode(offer)
         let decrypter = FakeInvitationEnvelopeDecrypter(mode: .fixed(plaintext))
-        let spy = SpyPendingInvites()
+        let spy = SpyPendingChats()
         let dispatcher = IncomingMessageDispatcher(
             envelopeDecrypter: decrypter,
             identities: StubIdentities(summaries: []),
@@ -1283,7 +1283,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             invitationsRepository: invitations,
             chainState: chainState,
             messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory()),
-            pendingInvites: spy
+            pendingChats: spy
         )
 
         await dispatcher.dispatch(
@@ -1299,7 +1299,13 @@ final class IncomingMessageDispatcherTests: XCTestCase {
         XCTAssertEqual(storedCount, 0, "an offer is not an opaque invitation")
         let recorded = await spy.all()
         XCTAssertEqual(recorded.count, 1)
-        XCTAssertEqual(recorded.first?.id, "msg-offer")
+        // Keyed by (group, owner) rather than by the delivery: the same
+        // offer replayed on the next reconnect is the same waiting room.
+        XCTAssertEqual(
+            recorded.first?.id,
+            "\(String(repeating: "42", count: 32)):\(owner.rawValue.uuidString)"
+        )
+        XCTAssertEqual(recorded.first?.status, .offered)
         XCTAssertEqual(recorded.first?.introPublicKey, Data(repeating: 0x44, count: 32))
         XCTAssertEqual(recorded.first?.inviterAlias, "Alice")
         XCTAssertEqual(recorded.first?.groupName, "Maple Garden")
@@ -1807,12 +1813,18 @@ private actor StubIdentities: IdentitiesProviding {
     func currentIdentities() -> [IdentitySummary] { summaries }
 }
 
-// MARK: - Pending-invites spy
+// MARK: - Pending-chats spy
 
-private actor SpyPendingInvites: PendingInvitesRecording {
-    private(set) var recorded: [PendingInvite] = []
-    func record(_ invite: PendingInvite) async { recorded.append(invite) }
-    func all() -> [PendingInvite] { recorded }
+private actor SpyPendingChats: PendingChatRecording {
+    private(set) var recorded: [PendingChat] = []
+
+    @discardableResult
+    func record(_ chat: PendingChat) async -> PendingChatWriteOutcome {
+        recorded.append(chat)
+        return .inserted
+    }
+
+    func all() -> [PendingChat] { recorded }
 }
 
 // MARK: - Group-state refresher spy

@@ -52,7 +52,9 @@ public struct PendingGroupVerification: Identifiable, Equatable, Sendable {
 /// In-memory, per-identity-filtered store of groups awaiting
 /// verification. In-memory by design: the stale invitation is a retained
 /// Nostr event re-delivered on every launch, so the verifier re-defers
-/// and re-requests on relaunch — same model as `PendingInvitesStore`.
+/// and re-requests on relaunch. `PendingChatsFlow` overlays these
+/// statuses onto the matching pending chat row, so the wait has one
+/// place to show even though its state has two owners.
 public actor PendingVerificationStore {
     private var all: [PendingGroupVerification] = []
     private var currentIdentity: IdentityID?

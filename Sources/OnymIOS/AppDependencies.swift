@@ -47,7 +47,7 @@ struct AppDependencies {
     /// surface. Backs the Chats toolbar "Invitations" badge + modal,
     /// and its store watcher runs for the app's lifetime like
     /// `approveRequestsFlow`.
-    let pendingInvitesFlow: PendingInvitesFlow
+    let pendingChatsFlow: PendingChatsFlow
     /// Single shared instance — the chat-thread screen subscribes to
     /// per-group message snapshots, and the receive-side dispatcher
     /// writes into the same actor. Constructed once in

@@ -37,7 +37,7 @@ struct OnymIOSApp: App {
     private let nostrRelaysRepository: NostrRelaysRepository
     private let blossomServersRepository: BlossomServersRepository
     private let incomingInvitations: IncomingInvitationsRepository
-    private let pendingInvitesStore: PendingInvitesStore
+    private let pendingChatRepository: PendingChatRepository
     private let pendingVerificationStore: PendingVerificationStore
     private let groupStateVerifier: GroupStateVerifier
     private let introKeyStore: any IntroKeyStore
@@ -732,8 +732,21 @@ struct OnymIOSApp: App {
         // "Invitations" surface and, on explicit Accept, ships a
         // `JoinRequestPayload` to the offer's intro key via a sender
         // identical to the deeplink join path.
-        let pendingInvitesStore = PendingInvitesStore()
-        self.pendingInvitesStore = pendingInvitesStore
+        // Durable, unlike the in-memory store it replaces. A pushed
+        // offer is a retained Nostr event the fan-out re-delivers on
+        // every launch, but a join the user asked for through a link is
+        // replayed by nothing — and since it now shows as a row in the
+        // chats list rather than a sheet, that row is the only evidence
+        // they ever asked. An unopenable store falls back to memory
+        // rather than taking the launch down with it.
+        let pendingChatStore: any PendingChatStore
+        do {
+            pendingChatStore = try SwiftDataPendingChatStore()
+        } catch {
+            pendingChatStore = InMemoryPendingChatStore()
+        }
+        let pendingChatRepository = PendingChatRepository(store: pendingChatStore)
+        self.pendingChatRepository = pendingChatRepository
         // Verify-at-current (Option 2): stale snapshots defer here; the
         // verifier asks the admin for current state and surfaces a
         // "couldn't verify" state if the admin is offline.
@@ -746,7 +759,7 @@ struct OnymIOSApp: App {
             store: pendingVerificationStore
         )
         self.groupStateVerifier = groupStateVerifier
-        let pendingInvitesSender = JoinRequestSender(
+        let pendingChatsSender = JoinRequestSender(
             identity: repository,
             inboxTransport: inboxTransport
         )
@@ -758,12 +771,12 @@ struct OnymIOSApp: App {
             inboxTransport: inboxTransport,
             groupRepository: groupRepository
         )
-        let pendingInvitesFlow = PendingInvitesFlow(
-            store: pendingInvitesStore,
+        let pendingChatsFlow = PendingChatsFlow(
+            repository: pendingChatRepository,
             verificationStore: pendingVerificationStore,
             groupRepository: groupRepository,
             submitJoin: { cap, label in
-                await pendingInvitesSender.send(
+                await pendingChatsSender.send(
                     capability: cap,
                     joinerDisplayLabel: label
                 )
@@ -1398,7 +1411,7 @@ struct OnymIOSApp: App {
             chatsFlow: ChatsFlow(repository: groupRepository, messages: messageRepository),
             identitiesFlow: identitiesFlow,
             approveRequestsFlow: approveRequestsFlow,
-            pendingInvitesFlow: pendingInvitesFlow,
+            pendingChatsFlow: pendingChatsFlow,
             messageRepository: messageRepository,
             imageLoader: imageLoader,
             videoLoader: videoLoader,
@@ -1635,10 +1648,11 @@ struct OnymIOSApp: App {
                     // before the user opens the modal request list.
                     // Idempotent — `ChatsView.task` calls it too.
                     await dependencies.approveRequestsFlow.start()
-                    // Start the invitee-side invitations flow eagerly so
-                    // the Chats toolbar badge reflects offers from the
-                    // moment the app is on screen. Idempotent.
-                    await dependencies.pendingInvitesFlow.start()
+                    // Start the pending-chats flow eagerly so a chat the
+                    // user is waiting to be let into is in the list from
+                    // the moment the app is on screen — including one
+                    // approved while the app was closed. Idempotent.
+                    await dependencies.pendingChatsFlow.start()
                     // Start the verifier's group watcher so a pending
                     // verification resolves the moment its fresh snapshot
                     // materializes.
@@ -1689,7 +1703,7 @@ struct OnymIOSApp: App {
                     if let initialID = await identityRepository.currentSelectedID() {
                         await groupRepository.setCurrentIdentity(initialID)
                         await incomingInvitations.setCurrentIdentity(initialID)
-                        await pendingInvitesStore.setCurrentIdentity(initialID)
+                        await pendingChatRepository.setCurrentIdentity(initialID)
                         await pendingVerificationStore.setCurrentIdentity(initialID)
                     }
                     // Replay groups + invitations only after their identity
@@ -1697,6 +1711,7 @@ struct OnymIOSApp: App {
                     // the persisted rows for the active identity.
                     await groupRepository.reload()
                     await incomingInvitations.reload()
+                    await pendingChatRepository.reload()
                 }
                 .task {
                     // Long-lived listener: forward every selection change
@@ -1704,7 +1719,7 @@ struct OnymIOSApp: App {
                     for await id in identityRepository.currentIdentityID {
                         await groupRepository.setCurrentIdentity(id)
                         await incomingInvitations.setCurrentIdentity(id)
-                        await pendingInvitesStore.setCurrentIdentity(id)
+                        await pendingChatRepository.setCurrentIdentity(id)
                         await pendingVerificationStore.setCurrentIdentity(id)
                     }
                 }
@@ -1717,7 +1732,7 @@ struct OnymIOSApp: App {
                     for await removed in identityRepository.identityRemoved {
                         await groupRepository.removeForOwner(removed)
                         await incomingInvitations.removeForOwner(removed)
-                        await pendingInvitesStore.removeForOwner(removed)
+                        await pendingChatRepository.removeForOwner(removed)
                         await pendingVerificationStore.removeForOwner(removed)
                         // Cascade-wipe the removed identity's intro
                         // privkeys so an attacker who restores a
@@ -1790,7 +1805,7 @@ struct OnymIOSApp: App {
                         invitationsRepository: incomingInvitations,
                         chainState: chainStateReader,
                         messageRepository: messageRepository,
-                        pendingInvites: pendingInvitesStore,
+                        pendingChats: pendingChatRepository,
                         groupStateRefresher: groupStateVerifier,
                         receiptSender: ChatReceiptSender(
                             identity: identityRepository,
