@@ -15,6 +15,22 @@ public protocol PendingChatStore: Sendable {
     /// gone, which is the ordinary race: the group can materialize
     /// while a join request is still in flight.
     func setStatus(id: String, status: PendingChat.Status) async
+    /// Take the reply channel and the descriptive fields from a newer
+    /// offer for a row that already exists, leaving its status alone.
+    ///
+    /// A re-invite mints a *fresh* intro key and "Generate new link"
+    /// revokes the old one (`IntroKeyStore.revoke`), so a row that kept
+    /// the first key would seal its request to a dead address — the
+    /// transport reports success, the founder never hears it, and the
+    /// row waits forever with nothing to show for it. Newer offer wins,
+    /// because the newer key is the only one that can be answered.
+    func refreshOffer(
+        id: String,
+        introPublicKey: Data,
+        groupName: String?,
+        inviterAlias: String,
+        invitationMessage: String?
+    ) async
     func delete(id: String) async
     /// Drop rows by id — `<group id hex>:<owner uuid>`, the same key
     /// `insert` dedupes on. Ids rather than group hexes because two
@@ -46,6 +62,27 @@ public actor InMemoryPendingChatStore: PendingChatStore {
     public func setStatus(id: String, status: PendingChat.Status) async {
         guard let index = rows.firstIndex(where: { $0.id == id }) else { return }
         rows[index].status = status
+    }
+
+    public func refreshOffer(
+        id: String,
+        introPublicKey: Data,
+        groupName: String?,
+        inviterAlias: String,
+        invitationMessage: String?
+    ) async {
+        guard let index = rows.firstIndex(where: { $0.id == id }) else { return }
+        let existing = rows[index]
+        rows[index] = PendingChat(
+            groupID: existing.groupID,
+            ownerIdentityID: existing.ownerIdentityID,
+            introPublicKey: introPublicKey,
+            groupName: groupName,
+            inviterAlias: inviterAlias,
+            invitationMessage: invitationMessage,
+            receivedAt: existing.receivedAt,
+            status: existing.status
+        )
     }
 
     public func delete(id: String) async {

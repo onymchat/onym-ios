@@ -20,6 +20,13 @@ struct PendingChatThreadView: View {
     @Bindable var flow: PendingChatsFlow
     let rowID: String
 
+    /// Leave when the row does. The wait ending is the ordinary case —
+    /// the founder let this person in and the real chat is now in the
+    /// list behind this screen — and a swipe-dismiss from the list is
+    /// the other one. Standing on a screen whose subject no longer
+    /// exists is not a state worth rendering.
+    @Environment(\.dismiss) private var dismiss
+
     var body: some View {
         Group {
             if let row = flow.row(id: rowID) {
@@ -35,6 +42,9 @@ struct PendingChatThreadView: View {
         .background(OnymTokens.bg.ignoresSafeArea())
         .navigationTitle(displayName)
         .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: flow.row(id: rowID) == nil) { _, gone in
+            if gone { dismiss() }
+        }
         .accessibilityIdentifier("pending_chat.thread")
     }
 
@@ -124,6 +134,21 @@ struct PendingChatThreadView: View {
                     title: String(localized: "Waiting until you\u{2019}re in"),
                     detail: String(localized: "The founder has to let you in before this chat opens. It appears here the moment they do \u{2014} you don\u{2019}t have to keep this screen open.")
                 )
+                // A request can be sent and never answered: a revoked
+                // link, or one that died in a relay. Without this the
+                // only way out was to swipe the row away and find the
+                // invite again. Asking twice is safe — the founder's
+                // side collapses repeats from the same joiner, and a
+                // decline stays declined.
+                secondaryButton(
+                    title: row.isSending
+                        ? String(localized: "Sending\u{2026}")
+                        : String(localized: "Ask again"),
+                    identifier: "pending_chat.ask_again",
+                    disabled: row.isSending
+                ) {
+                    flow.retry(row.id)
+                }
             case .chainSettling:
                 waiting(
                     title: String(localized: "Almost in"),
@@ -167,15 +192,17 @@ struct PendingChatThreadView: View {
                 .foregroundStyle(OnymTokens.text2)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 16)
-            primaryButton(
-                title: row.isSending
-                    ? String(localized: "Sending\u{2026}")
-                    : String(localized: "Retry"),
-                showsSpinner: row.isSending,
-                identifier: "pending_chat.retry",
-                disabled: row.isSending
-            ) {
-                flow.retry(row.id)
+            if row.state.isRetryable {
+                primaryButton(
+                    title: row.isSending
+                        ? String(localized: "Sending\u{2026}")
+                        : String(localized: "Retry"),
+                    showsSpinner: row.isSending,
+                    identifier: "pending_chat.retry",
+                    disabled: row.isSending
+                ) {
+                    flow.retry(row.id)
+                }
             }
         }
         .padding(.top, 16)
@@ -191,9 +218,9 @@ struct PendingChatThreadView: View {
             String(localized: "Still setting up this device\u{2019}s connection to the chain. Tap Retry in a moment.")
         case .chainUnreachable:
             String(localized: "Couldn\u{2019}t reach the chain to verify this group. Check your connection and try again.")
-        case .sendFailed(let reason) where !reason.isEmpty:
-            reason
-        case .sendFailed:
+        case .sendFailed(.noIdentity):
+            String(localized: "Sign in first.")
+        case .sendFailed(.transport):
             String(localized: "Your request didn\u{2019}t go out. Tap Retry to send it again.")
         default:
             String(localized: "Couldn\u{2019}t verify \u{2014} the admin is offline. The group stays hidden until it can be verified on chain.")
@@ -223,6 +250,27 @@ struct PendingChatThreadView: View {
             .background(OnymAccent.blue.color.opacity(disabled ? 0.7 : 1.0))
             .foregroundStyle(OnymTokens.onAccent)
             .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .disabled(disabled)
+        .accessibilityIdentifier(identifier)
+    }
+
+    /// Quieter than `primaryButton`: on the waiting screen the action
+    /// is a way out, not the thing the screen is for.
+    private func secondaryButton(
+        title: String,
+        identifier: String,
+        disabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 14, weight: .semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(OnymTokens.surface2)
+                .foregroundStyle(OnymTokens.text)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
         }
         .disabled(disabled)
         .accessibilityIdentifier(identifier)

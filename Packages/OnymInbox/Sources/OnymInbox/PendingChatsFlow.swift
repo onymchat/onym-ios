@@ -45,18 +45,30 @@ public final class PendingChatsFlow {
         /// This device has no relayer or contract binding yet — usually
         /// a cold-launch race rather than a wrong setting.
         case chainNotConfigured
-        /// The join request itself couldn't be sent. Carries the
-        /// transport's own wording.
-        case sendFailed(reason: String)
+        /// The join request itself couldn't be sent.
+        case sendFailed(PendingChat.SendFailure)
 
-        /// Whether the state is one a Retry can act on. `chainSettling`
-        /// is excluded on purpose: offering an action for something that
-        /// resolves itself implies the user is holding it up.
+        /// Whether this state has an action behind it — the Retry (or
+        /// "Ask again") the pending thread offers.
+        ///
+        /// `.waiting` is included, and that is the point: a request that
+        /// was sent and never answered had no way out at all. The link
+        /// may have been revoked, or the request may have died in a
+        /// relay, and re-tapping the link is a deliberate no-op for a
+        /// row that already asked. Asking again is cheap and cannot
+        /// spam: `JoinRequestApprover` collapses repeats by
+        /// (joiner, group), and a decline stays declined.
+        ///
+        /// `chainSettling` is excluded on purpose: offering an action
+        /// for something that resolves itself implies the user is
+        /// holding it up. `.offered` is excluded because its action is
+        /// Accept, not a retry.
         public var isRetryable: Bool {
             switch self {
-            case .founderUnreachable, .chainUnreachable, .chainNotConfigured, .sendFailed:
+            case .founderUnreachable, .chainUnreachable, .chainNotConfigured,
+                 .sendFailed, .waiting:
                 true
-            case .offered, .waiting, .chainSettling:
+            case .offered, .chainSettling:
                 false
             }
         }
@@ -176,19 +188,32 @@ public final class PendingChatsFlow {
         send(chat)
     }
 
-    /// Retry whatever this row is stuck on: re-send a join request that
-    /// never left, or re-drive a stalled verification.
+    /// Act on whatever this row is stuck on: re-drive a stalled
+    /// verification, or ask again — a request that never left, or one
+    /// that left and was never answered.
+    ///
+    /// Which of the two depends on who is being waited on. Past the
+    /// founder's approval the wait belongs to the verifier, and asking
+    /// them again would achieve nothing; before it, the founder is the
+    /// only one who can move it.
     public func retry(_ id: String) {
         guard let row = rows.first(where: { $0.id == id }) else { return }
+        let hasVerification = verifying.contains { $0.groupIDHex == row.groupIDHex }
         switch row.state {
-        case .sendFailed:
-            guard let chat = pending.first(where: { $0.id == id }) else { return }
-            send(chat)
         case .founderUnreachable, .chainUnreachable, .chainNotConfigured:
             let retryVerification = self.retryVerification
             let hex = row.groupIDHex
             Task { await retryVerification(hex) }
-        case .offered, .waiting, .chainSettling:
+        case .sendFailed, .waiting:
+            if hasVerification {
+                let retryVerification = self.retryVerification
+                let hex = row.groupIDHex
+                Task { await retryVerification(hex) }
+                return
+            }
+            guard let chat = pending.first(where: { $0.id == id }) else { return }
+            send(chat)
+        case .offered, .chainSettling:
             break
         }
     }
@@ -221,15 +246,13 @@ public final class PendingChatsFlow {
             case .sent:
                 await repository.markRequested(id: id)
             case .noIdentityLoaded:
-                await repository.markFailed(
-                    id: id,
-                    reason: String(localized: "Sign in first.")
-                )
-            case .transportFailed(let reason):
-                await repository.markFailed(
-                    id: id,
-                    reason: String(localized: "Couldn't send request: \(reason)")
-                )
+                await repository.markFailed(id: id, failure: .noIdentity)
+            case .transportFailed:
+                // The transport's own wording doesn't survive a
+                // translation or a re-read six months later, and it
+                // tells the reader nothing they can act on. The code
+                // carries what matters: it didn't go out.
+                await repository.markFailed(id: id, failure: .transport)
             }
             guard let self else { return }
             self.sendingIDs.remove(id)
@@ -251,6 +274,11 @@ public final class PendingChatsFlow {
     /// the stored status when both describe the same group: by then the
     /// founder has approved and what the person is waiting on has moved
     /// on from them.
+    ///
+    /// Except over an offer nobody has answered. A verification says
+    /// something about a join that was asked for, and an `.offered` row
+    /// has asked for nothing — letting it win there took away the Accept
+    /// button and left the person with no way to say yes.
     private func rebuild() {
         let verificationByHex = Dictionary(
             verifying.map { ($0.groupIDHex, $0) },
@@ -264,8 +292,10 @@ public final class PendingChatsFlow {
                 inviterAlias: chat.inviterAlias,
                 invitationMessage: chat.invitationMessage,
                 receivedAt: chat.receivedAt,
-                state: verificationByHex[chat.groupIDHex].map(Self.state(for:))
-                    ?? Self.state(for: chat.status),
+                state: chat.status == .offered
+                    ? .offered
+                    : verificationByHex[chat.groupIDHex].map(Self.state(for:))
+                        ?? Self.state(for: chat.status),
                 isSending: sendingIDs.contains(chat.id),
                 isDismissable: true
             )
@@ -292,9 +322,9 @@ public final class PendingChatsFlow {
 
     private static func state(for status: PendingChat.Status) -> State {
         switch status {
-        case .offered:              .offered
-        case .requested:            .waiting
-        case .failed(let reason):   .sendFailed(reason: reason)
+        case .offered:               .offered
+        case .requested:             .waiting
+        case .failed(let failure):   .sendFailed(failure)
         }
     }
 

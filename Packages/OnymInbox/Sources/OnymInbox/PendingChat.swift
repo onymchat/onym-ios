@@ -27,9 +27,25 @@ public struct PendingChat: Identifiable, Equatable, Sendable {
         case offered
         /// The join request is out. Waiting on the founder.
         case requested
-        /// The request couldn't be sent. Carries the sentence the
-        /// pending thread shows above its Retry.
-        case failed(reason: String)
+        /// The request couldn't be sent. Carries a *code*, not a
+        /// sentence: this row is written to disk and outlives the
+        /// language it was written in, the same rule
+        /// `ChatSystemEvent` follows. The wording is assembled at
+        /// render time, in the view.
+        case failed(SendFailure)
+    }
+
+    /// Why a join request didn't leave the device. Coarse on purpose —
+    /// these are the two things a person can act on differently, and a
+    /// transport's own error text is neither localizable nor useful to
+    /// the reader.
+    ///
+    /// Raw values are a persistence format: stable forever.
+    public enum SendFailure: String, Equatable, Sendable {
+        /// No identity was loaded when the send was attempted.
+        case noIdentity
+        /// The request never reached a relay.
+        case transport
     }
 
     /// `<group id hex>:<owner uuid>` — the dedupe key, and stable across
@@ -57,6 +73,20 @@ public struct PendingChat: Identifiable, Equatable, Sendable {
     /// row's sort key in the chats list.
     public let receivedAt: Date
     public var status: Status
+
+    /// Bytes from the hex the row stores. Same shape as
+    /// `ChatGroup.bytes(fromHex:)`, which reads its own group id back
+    /// the same way.
+    public static func bytes(fromHex hex: String) -> Data {
+        var data = Data(capacity: hex.count / 2)
+        var index = hex.startIndex
+        while index < hex.endIndex {
+            let next = hex.index(index, offsetBy: 2, limitedBy: hex.endIndex) ?? hex.endIndex
+            if let byte = UInt8(hex[index..<next], radix: 16) { data.append(byte) }
+            index = next
+        }
+        return data
+    }
 
     public init(
         groupID: Data,

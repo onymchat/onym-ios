@@ -149,6 +149,23 @@
         }
       }
     },
+    "Ask again": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ask again"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Спросить ещё раз"
+          }
+        }
+      }
+    },
     "Back": {
       "localizations": {
         "en": {
@@ -289,23 +306,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Продолжить"
-          }
-        }
-      }
-    },
-    "Couldn't send request: %@": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Couldn't send request: %@"
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Не удалось отправить запрос: %@"
           }
         }
       }

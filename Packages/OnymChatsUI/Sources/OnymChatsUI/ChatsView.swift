@@ -86,7 +86,7 @@ public struct ChatsView: View {
             // user is waiting to be let into is not an empty list — it
             // is the first chat, mid-arrival — so a pending row keeps
             // the pitch away.
-            if rows.isEmpty {
+            if !hasAnyChats {
                 emptyState
             } else {
                 groupList
@@ -164,7 +164,7 @@ public struct ChatsView: View {
             // Plus button mirrors iOS Mail / Messages — useful once
             // the user already has at least one chat. Hidden in the
             // empty state because the central CTA already covers it.
-            if !rows.isEmpty {
+            if hasAnyChats {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         showCreateGroup = true
@@ -407,6 +407,18 @@ public struct ChatsView: View {
             case .pending(let row): row.receivedAt
             }
         }
+    }
+
+    /// Whether this identity has anything at all in its list — a chat,
+    /// or one on its way in.
+    ///
+    /// Reads `flow.groups` rather than `rows`, because `items` is
+    /// rebuilt behind an await per group: gating on it showed the
+    /// "start your first chat" pitch for a frame or two *after* the
+    /// first group landed, and hid the compose button for the same
+    /// beat.
+    private var hasAnyChats: Bool {
+        !(flow.groups.isEmpty && pendingChatsFlow.rows.isEmpty)
     }
 
     private var rows: [Row] {

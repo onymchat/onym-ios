@@ -87,7 +87,29 @@ public actor SwiftDataPendingChatStore: PendingChatStore {
         )
         guard let row = (try? context.fetch(descriptor))?.first else { return }
         row.statusRaw = Self.raw(status)
-        row.failureReason = Self.reason(status)
+        row.failureRaw = Self.failure(status)?.rawValue
+        try? context.save()
+    }
+
+    public func refreshOffer(
+        id: String,
+        introPublicKey: Data,
+        groupName: String?,
+        inviterAlias: String,
+        invitationMessage: String?
+    ) async {
+        let descriptor = FetchDescriptor<PersistedPendingChat>(
+            predicate: #Predicate { $0.id == id }
+        )
+        guard let row = (try? context.fetch(descriptor))?.first else { return }
+        guard
+            let key = try? StorageEncryption.encrypt(introPublicKey),
+            let alias = try? StorageEncryption.encrypt(inviterAlias)
+        else { return }
+        row.encryptedIntroPublicKey = key
+        row.encryptedInviterAlias = alias
+        row.encryptedGroupName = try? groupName.map(StorageEncryption.encrypt)
+        row.encryptedInvitationMessage = try? invitationMessage.map(StorageEncryption.encrypt)
         try? context.save()
     }
 
@@ -142,17 +164,19 @@ public actor SwiftDataPendingChatStore: PendingChatStore {
         }
     }
 
-    private static func reason(_ status: PendingChat.Status) -> String? {
-        if case .failed(let reason) = status { return reason }
+    private static func failure(_ status: PendingChat.Status) -> PendingChat.SendFailure? {
+        if case .failed(let failure) = status { return failure }
         return nil
     }
 
-    private static func status(raw: String, reason: String?) -> PendingChat.Status {
+    private static func status(raw: String, failure: String?) -> PendingChat.Status {
         switch raw {
         case "requested": .requested
-        // A failure whose sentence didn't survive is still a failure —
-        // the thread shows its generic copy and the Retry that matters.
-        case "failed":    .failed(reason: reason ?? "")
+        // A failure whose code didn't survive is still a failure, and
+        // the transport one is both the likelier and the safer guess:
+        // it says "your request didn't go out", which is true of the
+        // other case too.
+        case "failed":    .failed(failure.flatMap(PendingChat.SendFailure.init(rawValue:)) ?? .transport)
         default:          .offered
         }
     }
@@ -164,8 +188,7 @@ public actor SwiftDataPendingChatStore: PendingChatStore {
             groupIDHex: chat.groupIDHex,
             receivedAt: chat.receivedAt,
             statusRaw: raw(chat.status),
-            failureReason: reason(chat.status),
-            encryptedGroupID: try StorageEncryption.encrypt(chat.groupID),
+            failureRaw: failure(chat.status)?.rawValue,
             encryptedIntroPublicKey: try StorageEncryption.encrypt(chat.introPublicKey),
             encryptedGroupName: try chat.groupName.map(StorageEncryption.encrypt),
             encryptedInviterAlias: try StorageEncryption.encrypt(chat.inviterAlias),
@@ -173,23 +196,29 @@ public actor SwiftDataPendingChatStore: PendingChatStore {
         )
     }
 
+    /// Only two fields can take the row down with them: the intro key,
+    /// without which Accept has nowhere to reply, and the owner, without
+    /// which the row belongs to nobody.
+    ///
+    /// Everything else degrades. The alias and the group name are
+    /// cosmetic, and dropping the row over them would delete from view
+    /// the one piece of evidence that this person ever asked to join —
+    /// which is the whole argument for persisting these rows at all.
     private static func decode(_ row: PersistedPendingChat) -> PendingChat? {
         guard
-            let groupID = try? StorageEncryption.decrypt(row.encryptedGroupID),
             let introPublicKey = try? StorageEncryption.decrypt(row.encryptedIntroPublicKey),
-            let alias = try? StorageEncryption.decryptString(row.encryptedInviterAlias),
             let owner = UUID(uuidString: row.ownerIdentityIDString)
         else { return nil }
         return PendingChat(
-            groupID: groupID,
+            groupID: PendingChat.bytes(fromHex: row.groupIDHex),
             ownerIdentityID: IdentityID(owner),
             introPublicKey: introPublicKey,
             groupName: row.encryptedGroupName.flatMap { try? StorageEncryption.decryptString($0) },
-            inviterAlias: alias,
+            inviterAlias: (try? StorageEncryption.decryptString(row.encryptedInviterAlias)) ?? "",
             invitationMessage: row.encryptedInvitationMessage
                 .flatMap { try? StorageEncryption.decryptString($0) },
             receivedAt: row.receivedAt,
-            status: status(raw: row.statusRaw, reason: row.failureReason)
+            status: status(raw: row.statusRaw, failure: row.failureRaw)
         )
     }
 }

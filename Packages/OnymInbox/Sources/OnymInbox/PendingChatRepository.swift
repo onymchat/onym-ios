@@ -26,6 +26,13 @@ public actor PendingChatRepository: PendingChatRecording {
     @discardableResult
     public func record(_ chat: PendingChat) async -> PendingChatWriteOutcome {
         let outcome = await store.insert(chat)
+        // A second offer for a chat already waiting is a *re-invite*:
+        // the founder minted a fresh intro key, and "Generate new link"
+        // revoked the one this row holds. Keeping the old key would
+        // seal the request to a dead address — reported as sent, never
+        // heard, waiting forever. The status is untouched: what the
+        // person asked for hasn't changed, only where to ask.
+        if outcome == .alreadyPresent { await refreshOffer(chat) }
         // No refresh on `.alreadyPresent`: nothing changed, and a replayed
         // offer arriving on every relay reconnect would otherwise re-yield
         // the whole list to every subscriber for no reason.
@@ -43,8 +50,21 @@ public actor PendingChatRepository: PendingChatRecording {
         await refreshFromStore()
     }
 
-    public func markFailed(id: String, reason: String) async {
-        await store.setStatus(id: id, status: .failed(reason: reason))
+    public func markFailed(id: String, failure: PendingChat.SendFailure) async {
+        await store.setStatus(id: id, status: .failed(failure))
+        await refreshFromStore()
+    }
+
+    /// Point an existing row at a newer offer's reply channel, leaving
+    /// its status alone — see `PendingChatStore.refreshOffer`.
+    public func refreshOffer(_ chat: PendingChat) async {
+        await store.refreshOffer(
+            id: chat.id,
+            introPublicKey: chat.introPublicKey,
+            groupName: chat.groupName,
+            inviterAlias: chat.inviterAlias,
+            invitationMessage: chat.invitationMessage
+        )
         await refreshFromStore()
     }
 
