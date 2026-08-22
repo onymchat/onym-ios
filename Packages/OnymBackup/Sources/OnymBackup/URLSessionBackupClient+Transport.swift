@@ -12,9 +12,104 @@ extension URLSessionBackupClient {
 
     static let decoder: JSONDecoder = {
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        // Through `BackupFormat`, not `.iso8601`, so every timestamp
+        // the operator sends — `retainedAt` in a listing as much as a
+        // receipt's `acknowledgedAt` — is read by the one reader whose
+        // tolerance this module owns and tests. The operator's clock
+        // stamps fractional seconds, and whether `.iso8601` accepts
+        // those is a fact about the Foundation build, not about this
+        // code; the rolling window must not hang on it.
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let value = try container.decode(String.self)
+            guard let date = BackupFormat.date(fromRFC3339: value) else {
+                throw DecodingError.dataCorruptedError(
+                    in: container, debugDescription: "not an RFC 3339 timestamp")
+            }
+            return date
+        }
         return decoder
     }()
+
+    /// Split a top-level JSON array into its elements' *own* byte
+    /// ranges, verbatim.
+    ///
+    /// For a response whose elements are kept as evidence — erasure
+    /// receipts — parsing and re-serializing would substitute this
+    /// client's key order, whitespace, and number formatting for the
+    /// operator's, and a signature over the original bytes could never
+    /// be checked against the substitute. So the array structure is the
+    /// only thing read here; each element's bytes pass through
+    /// untouched, and whether they are a well-formed receipt is the
+    /// element decoder's question.
+    ///
+    /// Returns `nil` when `data` is not a complete top-level array —
+    /// truncated, trailing garbage, or not an array at all.
+    static func topLevelJSONArrayElements(in data: Data) -> [Data]? {
+        let space: Set<UInt8> = [0x20, 0x09, 0x0a, 0x0d]
+        var index = data.startIndex
+        func skipWhitespace() {
+            while index < data.endIndex, space.contains(data[index]) { index += 1 }
+        }
+        func element(endingAt end: Data.Index, from start: Data.Index) -> Data {
+            var trimmed = end
+            while trimmed > start, space.contains(data[data.index(before: trimmed)]) {
+                trimmed = data.index(before: trimmed)
+            }
+            return data.subdata(in: start..<trimmed)
+        }
+
+        skipWhitespace()
+        guard index < data.endIndex, data[index] == UInt8(ascii: "[") else { return nil }
+        index += 1
+        skipWhitespace()
+
+        var elements: [Data] = []
+        var closed = false
+        if index < data.endIndex, data[index] == UInt8(ascii: "]") {
+            index += 1
+            closed = true
+        }
+        var depth = 0
+        var inString = false
+        var escaped = false
+        var start = index
+        while !closed, index < data.endIndex {
+            let byte = data[index]
+            if inString {
+                if escaped { escaped = false }
+                else if byte == UInt8(ascii: #"\"#) { escaped = true }
+                else if byte == UInt8(ascii: "\"") { inString = false }
+            } else {
+                switch byte {
+                case UInt8(ascii: "\""): inString = true
+                case UInt8(ascii: "{"), UInt8(ascii: "["): depth += 1
+                case UInt8(ascii: "]") where depth == 0:
+                    guard index > start || !elements.isEmpty else { return nil }
+                    elements.append(element(endingAt: index, from: start))
+                    index += 1
+                    closed = true
+                    continue
+                case UInt8(ascii: "}"), UInt8(ascii: "]"):
+                    depth -= 1
+                    if depth < 0 { return nil }
+                case UInt8(ascii: ",") where depth == 0:
+                    guard index > start else { return nil }
+                    elements.append(element(endingAt: index, from: start))
+                    index += 1
+                    skipWhitespace()
+                    start = index
+                    continue
+                default: break
+                }
+            }
+            index += 1
+        }
+        guard closed else { return nil }
+        skipWhitespace()
+        guard index == data.endIndex else { return nil }
+        return elements
+    }
 
     func decode<Value: Decodable>(_ data: Data) throws -> Value {
         guard let value = try? Self.decoder.decode(Value.self, from: data) else {

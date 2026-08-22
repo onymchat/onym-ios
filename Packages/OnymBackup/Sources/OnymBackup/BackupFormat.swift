@@ -63,8 +63,20 @@ enum BackupFormat {
         return formatter
     }()
 
+    /// Reading is wider than writing: RFC 3339 allows fractional
+    /// seconds, and the operator's stamps carry them, so a reader
+    /// pinned to the emitting form would refuse every receipt the
+    /// operator actually signs.
+    static let fractionalTimestampFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter
+    }()
+
     static func date(fromRFC3339 value: String) -> Date? {
         timestampFormatter.date(from: value)
+            ?? fractionalTimestampFormatter.date(from: value)
     }
 
     static func string(fromDate date: Date) -> String {

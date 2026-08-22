@@ -354,7 +354,8 @@ public final class DeviceBackupSettingsFlow {
         stopFailure = nil
         if erasingFirst {
             do {
-                state.lastReceipt = try await repository.erase(scope: .all)
+                state.lastReceipt = Self.receiptToShow(
+                    try await repository.erase(scope: .all))
             } catch {
                 // Not stopped, and not erased. Saying so beats reporting
                 // either one as done.
@@ -390,7 +391,7 @@ public final class DeviceBackupSettingsFlow {
     /// may want it later.
     public func erase(scope: ErasureScope) async {
         do {
-            state.lastReceipt = try await repository.erase(scope: scope)
+            state.lastReceipt = Self.receiptToShow(try await repository.erase(scope: scope))
             await loadSnapshots()
         } catch {
             // The previous receipt is left alone. It describes an
@@ -399,6 +400,21 @@ public final class DeviceBackupSettingsFlow {
             // here is not a reason to destroy the record of an earlier
             // success.
             state.status = .failed(message: BackupCopy.describe(error))
+        }
+    }
+
+    /// Which of an erasure's receipts the card shows.
+    ///
+    /// A `scope: "all"` spanning snapshots pinned to different terms is
+    /// several receipts; every one is recorded by the repository, but
+    /// the card shows one. Chosen by the latest `completionCommittedBy`
+    /// — the deadline the person can still hold the operator to — and
+    /// by `receiptId` on a tie, so the choice is a function of the
+    /// receipts' content and never of the order the operator happened
+    /// to list them in.
+    static func receiptToShow(_ receipts: [ErasureReceipt]) -> ErasureReceipt? {
+        receipts.max {
+            ($0.completionCommittedBy, $0.receiptId) < ($1.completionCommittedBy, $1.receiptId)
         }
     }
 }
