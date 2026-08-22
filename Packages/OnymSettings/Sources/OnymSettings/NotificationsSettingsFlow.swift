@@ -26,6 +26,7 @@ public final class NotificationsSettingsFlow {
     private let disable: () async -> Void
     private let isRegistrationPending: () -> Bool
     private let readIsEnabled: (() -> Bool)?
+    private let reconcileWithSystem: (() async -> Void)?
 
     /// - Parameters:
     ///   - isEnabled: the persisted opt-in at presentation time.
@@ -40,18 +41,25 @@ public final class NotificationsSettingsFlow {
     ///     revoked in system Settings, app foregrounded back onto this
     ///     view), so the toggle re-reads rather than trusting its
     ///     presentation-time snapshot.
+    ///   - reconcileWithSystem: the push stack's foreground
+    ///     reconciliation — the step that notices a revoked
+    ///     authorization and disables. Awaited before the re-read on
+    ///     foreground so this screen reads settled state instead of
+    ///     racing the root-level hook that runs the same check.
     public init(
         isEnabled: Bool,
         enable: @escaping () async -> Bool,
         disable: @escaping () async -> Void,
         isRegistrationPending: @escaping () -> Bool = { false },
-        readIsEnabled: (() -> Bool)? = nil
+        readIsEnabled: (() -> Bool)? = nil,
+        reconcileWithSystem: (() async -> Void)? = nil
     ) {
         self.isEnabled = isEnabled
         self.enable = enable
         self.disable = disable
         self.isRegistrationPending = isRegistrationPending
         self.readIsEnabled = readIsEnabled
+        self.reconcileWithSystem = reconcileWithSystem
         registrationPending = isRegistrationPending()
     }
 
@@ -82,5 +90,18 @@ public final class NotificationsSettingsFlow {
             isEnabled = readIsEnabled()
         }
         registrationPending = isRegistrationPending()
+    }
+
+    /// Foreground is when a revoke made in system Settings becomes
+    /// knowable, and `.onAppear` does not fire for a screen that stayed
+    /// mounted across the trip out and back — which is exactly the trip
+    /// the denial note above sends the user on. Reconciling here rather
+    /// than only re-reading is deliberate: the root-level foreground
+    /// hook runs the same check on its own detached task, so a bare
+    /// re-read could win the race and show the pre-revoke answer with
+    /// nothing left to correct it.
+    public func appForegrounded() async {
+        await reconcileWithSystem?()
+        refreshRegistrationState()
     }
 }

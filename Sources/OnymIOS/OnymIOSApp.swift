@@ -1553,7 +1553,8 @@ struct OnymIOSApp: App {
                     enable: { await pushCoordinator.enable() },
                     disable: { await pushCoordinator.disable() },
                     isRegistrationPending: { pushCoordinator.registrationPending },
-                    readIsEnabled: { pushCoordinator.isEnabled }
+                    readIsEnabled: { pushCoordinator.isEnabled },
+                    reconcileWithSystem: { await pushCoordinator.appForegrounded() }
                 )
             },
             pushCoordinator: pushCoordinator,
