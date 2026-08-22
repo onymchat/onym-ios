@@ -42,7 +42,7 @@ public struct NotificationsSettingsView: View {
 
                 if flow.registrationPending {
                     SettingsFootnote(
-                        "Activating\u{2026} the push server has not confirmed this device yet. This finishes on its own; check back if alerts don\u{2019}t arrive."
+                        "Activating\u{2026} the push server has not confirmed this device yet. Onym retries when you return to the app; check back if alerts don\u{2019}t arrive."
                     )
                 }
 
@@ -57,9 +57,13 @@ public struct NotificationsSettingsView: View {
         .navigationTitle("Notifications")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
-            // Registration completes off-screen; re-read so a finished
-            // (or still-pending) activation renders truthfully.
+            // Registration completes off-screen, and the coordinator
+            // can disable off-screen (authorization revoked in system
+            // Settings); re-read so both render truthfully. The
+            // onChange guard keeps this resync from re-driving the
+            // flow.
             flow.refreshRegistrationState()
+            switchState = flow.isEnabled
         }
         .onChange(of: switchState) { _, wanted in
             guard wanted != flow.isEnabled else { return }

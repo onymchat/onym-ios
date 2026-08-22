@@ -10,27 +10,44 @@ import UserNotifications
 final class PushAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     /// Multicast with replay: every subscriber gets its own stream, a
     /// new subscriber immediately receives the latest token when APNs
-    /// already delivered one, and no continuation is ever finished —
-    /// the streams are process-lifetime by design, so a subscriber
-    /// arriving after the token (or a second subscriber, ever) can't
-    /// silently see nothing.
-    private static let lock = NSLock()
+    /// already delivered one, and a consumer that goes away is removed
+    /// on termination (the house pattern — see
+    /// `NostrRelaysRepository.snapshots`) so a cancelled subscriber
+    /// does not leak its continuation for the process's life.
+    private nonisolated static let lock = NSLock()
     // nonisolated(unsafe): every touch is under `lock`.
     private nonisolated(unsafe) static var latestToken: Data?
-    private nonisolated(unsafe) static var continuations: [AsyncStream<Data>.Continuation] = []
+    private nonisolated(unsafe) static var continuations:
+        [UUID: AsyncStream<Data>.Continuation] = [:]
 
     /// Every token APNs hands this process, in order, starting with
     /// the most recent one if it already arrived. The token can rotate
     /// on restore or reinstall, so this is a stream, not a one-shot.
-    static var deviceTokens: AsyncStream<Data> {
+    nonisolated static var deviceTokens: AsyncStream<Data> {
         AsyncStream { continuation in
+            let id = UUID()
             lock.lock()
-            defer { lock.unlock() }
-            continuations.append(continuation)
-            if let latestToken {
-                continuation.yield(latestToken)
+            continuations[id] = continuation
+            let replay = latestToken
+            lock.unlock()
+            continuation.onTermination = { _ in
+                lock.lock()
+                defer { lock.unlock() }
+                continuations.removeValue(forKey: id)
+            }
+            if let replay {
+                continuation.yield(replay)
             }
         }
+    }
+
+    /// Disabling push drops the replayed token: nothing left in the
+    /// app should want it, and a stale secret should not outlive its
+    /// use. APNs re-delivers on the next `registerForRemoteNotifications`.
+    nonisolated static func clearLatestToken() {
+        lock.lock()
+        defer { lock.unlock() }
+        latestToken = nil
     }
 
     func application(
@@ -49,7 +66,7 @@ final class PushAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
     ) {
         Self.lock.lock()
         Self.latestToken = deviceToken
-        let subscribers = Self.continuations
+        let subscribers = Array(Self.continuations.values)
         Self.lock.unlock()
         for continuation in subscribers {
             continuation.yield(deviceToken)
