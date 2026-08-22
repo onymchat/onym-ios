@@ -173,17 +173,18 @@ struct MemberRulesProofView: View {
 
     private var export: some View {
         VStack(spacing: 8) {
+            // The button holds its place while the file is being
+            // written rather than appearing a frame or two later: it is
+            // the primary action, and a thumb is already moving toward
+            // it when the layout would otherwise jump.
             if let file {
                 ShareLink(item: file) {
-                    Text("Export proof")
-                        .font(.system(size: 15, weight: .semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(OnymAccent.blue.color)
-                        .foregroundStyle(OnymTokens.onAccent)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    exportLabel(enabled: true)
                 }
                 .accessibilityIdentifier("rules_proof.export")
+            } else {
+                exportLabel(enabled: false)
+                    .accessibilityIdentifier("rules_proof.export_preparing")
             }
             Text(proof.standing.isProven
                  ? String(localized: "A file anyone can check with any Ed25519 tool \u{2014} it explains how inside.")
@@ -192,6 +193,16 @@ struct MemberRulesProofView: View {
                 .foregroundStyle(OnymTokens.text2)
                 .multilineTextAlignment(.center)
         }
+    }
+
+    private func exportLabel(enabled: Bool) -> some View {
+        Text("Export proof")
+            .font(.system(size: 15, weight: .semibold))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(OnymAccent.blue.color.opacity(enabled ? 1.0 : 0.5))
+            .foregroundStyle(OnymTokens.onAccent)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     private func row(_ key: String, value: String) -> some View {

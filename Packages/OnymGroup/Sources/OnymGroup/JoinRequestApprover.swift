@@ -399,7 +399,17 @@ public actor JoinRequestApprover: JoinRequestApproving {
         // Computed once, and used for the invitation, the local record
         // and the fan-out alike — three copies of one agreement that
         // must not disagree about what it covers.
+        //
+        // Falling back to what is already stored, so approving twice
+        // can't destroy the wording. Reachable: a member admitted under
+        // R1, a founder who then edits the rules to R2, and an "Ask
+        // again" that re-signs R1 from the row — the second approval's
+        // `textCovering` sees hash(R1) against R2 and answers nil, and
+        // a straight overwrite would drop the only copy of R1 this
+        // device has. Same "prefer the record that proves something"
+        // rule the dispatcher's merge follows.
         let agreedText = Self.textCovering(req, rules: anchored.invitationMessage)
+            ?? Self.storedTextStillProving(req, in: anchored)
 
         var invitedProfiles = anchored.memberProfiles
         if let blsPub = req.joinerBlsPublicKey {
@@ -1062,6 +1072,24 @@ public actor JoinRequestApprover: JoinRequestApproving {
               signed == GroupRules.hash(rules)
         else { return nil }
         return rules
+    }
+
+    /// The wording already on file for this joiner, when it still
+    /// verifies against the signature this request carries.
+    ///
+    /// Same request, same signature: if what we stored last time proves
+    /// it, it proves it now, and the group's rules having moved on
+    /// since is not a reason to forget the words that were agreed to.
+    static func storedTextStillProving(
+        _ request: PendingRequest,
+        in group: ChatGroup
+    ) -> String? {
+        guard let blsPub = request.joinerBlsPublicKey,
+              let existing = group.memberProfiles[blsPub.hexString],
+              existing.rulesSignature == request.rulesSignature,
+              existing.agreedToRules(groupID: group.groupIDData)
+        else { return nil }
+        return existing.rulesText
     }
 
     /// Decide the agreement once, here, where the group's own rules are

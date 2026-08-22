@@ -109,6 +109,11 @@ struct ChatMembersView: View {
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
             case .member(let row):
+                // Re-derived rather than memoized, unlike the roster:
+                // one member's verify rather than a hundred, and
+                // re-deriving is how the sheet stays correct against a
+                // group that changes under it.
+                //
                 // Resolved from the live group at present time, not
                 // from the row's captured profile: a roster update
                 // while the sheet is open would otherwise leave a proof
