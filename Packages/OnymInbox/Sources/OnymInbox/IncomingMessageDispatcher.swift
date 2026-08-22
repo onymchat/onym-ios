@@ -486,8 +486,7 @@ public struct IncomingMessageDispatcher: Sendable {
                 }
             }
             // Neither proves anything, and we hold bytes the wire
-            // doesn't. Keep them without the wording, exactly as the
-            // self row does below.
+            // doesn't. Keep them.
             //
             // Skipping this was the same evidence loss one row over: a
             // stored row with a signature and no text reads as "can't
@@ -495,14 +494,33 @@ public struct IncomingMessageDispatcher: Sendable {
             // it wholesale destroyed the bytes and turned that into
             // "didn't sign the group rules" — which is a claim, and a
             // false one.
+            // The wire has bytes of its own that didn't check out
+            // either. Leaving its row alone is the conservative
+            // reading — the admin is announcing this member's current
+            // keys, and a stored agreement that no longer verifies
+            // against them is most likely a rotated key rather than
+            // something worth resurrecting.
             guard wire.rulesSignature == nil else { continue }
+            // The wording is kept when it still belongs to these bytes.
+            //
+            // Dropping it unconditionally was the self row's rule
+            // copied one row over, and the justification didn't come
+            // with it: the self row substitutes *local* keys, so the
+            // stored text may no longer be what the signature covers.
+            // Here the wire's own key is used, so if it matches the one
+            // the text was stored against, the text still corresponds —
+            // and discarding it destroyed the only copy of the signed
+            // wording and quietly turned a truthful "this doesn't check
+            // out" into "can't be checked".
             profiles[key] = MemberProfile(
                 alias: wire.alias,
                 inboxPublicKey: wire.inboxPublicKey,
                 sendingPubkey: wire.sendingPubkey,
                 rulesHash: stored.rulesHash,
                 rulesSignature: stored.rulesSignature,
-                rulesText: nil
+                rulesText: stored.sendingPubkey == wire.sendingPubkey
+                    ? stored.rulesText
+                    : nil
             )
         }
         if let selfEntry {

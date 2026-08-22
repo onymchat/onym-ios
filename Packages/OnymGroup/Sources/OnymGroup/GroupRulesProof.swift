@@ -107,9 +107,19 @@ public struct GroupRulesProof: Equatable, Sendable {
         // renders a row, gets a chevron, and the write lands outside
         // the temporary directory. Verified: three levels is enough to
         // reach the app container.
-        let key = fileSafe(String(memberBlsHex.prefix(12)))
-        return "onym-rules-proof-\(named)-\(key.isEmpty ? "member" : key).json"
+        // Scrubbed first, then taken — and hashed when scrubbing left
+        // too little to tell two members apart. Taking the prefix of a
+        // raw key and scrubbing that could collapse a non-hex key to a
+        // few characters, or to nothing, putting back the collision the
+        // suffix exists to prevent.
+        let scrubbed = fileSafe(memberBlsHex)
+        let key = scrubbed.count >= 12
+            ? String(scrubbed.prefix(12))
+            : Self.hex(Data(SHA256.hash(data: Data(memberBlsHex.utf8))).prefix(6))
+        return "onym-rules-proof-\(named)-\(key).json"
     }
+
+    static func hex(_ data: Data) -> String { Data(data).hexString }
 
     /// Lowercase ASCII alphanumerics, runs of anything else collapsed
     /// to a single dash, ends trimmed.

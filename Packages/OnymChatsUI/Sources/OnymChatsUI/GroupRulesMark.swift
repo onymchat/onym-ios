@@ -80,3 +80,23 @@ struct GroupRulesMark {
         self.color = color
     }
 }
+
+extension JoinRequestApprover.RulesAgreement {
+    /// The same fact, in the vocabulary the member roster uses.
+    ///
+    /// A request's verdict and a member's standing are one thing seen
+    /// at two moments, and the two screens were sharing the *keys* but
+    /// not the literals — two `String(localized:)` sites for one
+    /// sentence, which is one edit away from two catalog entries and a
+    /// translator seeing them drift. The mapping is total and
+    /// behaviour-preserving; the colours were already identical.
+    var standing: GroupRulesStanding {
+        switch self {
+        case .notRequired: .noRules
+        case .agreed: .signed
+        case .unknownRules: .unknownRules
+        case .notSigned: .didNotSign
+        case .invalid: .doesNotVerify
+        }
+    }
+}
