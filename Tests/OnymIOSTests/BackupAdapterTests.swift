@@ -208,14 +208,100 @@ final class BackupAdapterTests: XCTestCase {
         XCTAssertEqual(receipts.map(\.termsId), [termsA, termsB])
     }
 
-    /// An empty receipt array is an operator acknowledging nothing; a
-    /// receipt is the only durable record, so nothing is not a success.
+    /// An empty receipt array is an operator acknowledging nothing —
+    /// this profile answers "nothing in scope" with an error, never an
+    /// empty acknowledgement — and it must be *this* refusal, not an
+    /// unrelated transport failure passing the test by accident.
     func testAnEmptyReceiptArrayIsRefused() async throws {
         respond(200, "[]")
         do {
             _ = try await makeClient().eraseSnapshot(scope: .all)
             XCTFail("an erasure with no receipt was accepted")
-        } catch {}
+        } catch BackupError.rejected(let code, _) {
+            XCTAssertEqual(code, "malformed_receipt")
+        }
+    }
+
+    /// `rawBytes` is the durable record and the bytes a signature would
+    /// be checked against, so each stored receipt must be the
+    /// operator's exact bytes — key order, spacing, escapes and all —
+    /// not a client re-serialization.
+    func testStoredReceiptBytesAreTheOperatorsOwn() async throws {
+        let termsId = "sha256:" + String(repeating: "a", count: 64)
+        // Deliberately hostile to reconstruction: unsorted keys, odd
+        // spacing, an escaped solidus, and a fractional stamp.
+        let first = #"{"receiptId":"r-1", "operator":"onym:key:op","scope":"all",  "acknowledgedAt":"2026-08-22T13:42:25.779692123Z","completionCommittedBy":"2026-08-29T13:42:25+00:00","excludedScope":"copies\/exports","coveredScope":"primary","termsId":"\#(termsId)","receiptVersion":1}"#
+        let second = #"{"receiptVersion":1,"receiptId":"r-2","operator":"onym:key:op","scope":"all","acknowledgedAt":"2026-08-22T13:42:25Z","completionCommittedBy":"2026-08-29T13:42:25Z","coveredScope":"primary","excludedScope":"copies other participants hold","termsId":"\#(termsId)"}"#
+        respond(200, "[ \(first) ,\n\(second) ]")
+
+        let receipts = try await makeClient().eraseSnapshot(scope: .all)
+        XCTAssertEqual(receipts.count, 2)
+        XCTAssertEqual(receipts[0].rawBytes, Data(first.utf8))
+        XCTAssertEqual(receipts[1].rawBytes, Data(second.utf8))
+    }
+
+    /// A receipt whose `scope` is not the one requested is an operator
+    /// answering a different question, and recording it would drop the
+    /// local row for the requested digest on the strength of a receipt
+    /// covering something else.
+    func testAReceiptForADifferentScopeIsRefused() async throws {
+        let termsId = "sha256:" + String(repeating: "a", count: 64)
+        respond(
+            200,
+            #"""
+            [{"receiptVersion":1,"receiptId":"r-1","operator":"onym:key:op",
+              "scope":"sha256:\#(String(repeating: "e", count: 64))",
+              "acknowledgedAt":"2026-08-22T13:42:25Z",
+              "completionCommittedBy":"2026-08-29T13:42:25Z",
+              "coveredScope":"primary and replicas",
+              "excludedScope":"copies other participants hold",
+              "termsId":"\#(termsId)"}]
+            """#
+        )
+        let reference = try SnapshotReference(
+            digest: "sha256:" + String(repeating: "b", count: 64), sealedByteSize: 4)
+        do {
+            _ = try await makeClient().eraseSnapshot(scope: .snapshot(reference))
+            XCTFail("a receipt for a different scope was accepted")
+        } catch BackupError.rejected(let code, _) {
+            XCTAssertEqual(code, "scope_mismatch")
+        }
+    }
+
+    /// The listing feeds the rolling window, and the operator's clock
+    /// stamps fractional seconds — a listing refused for its timestamps
+    /// is `makeRoom` silently never pruning again.
+    func testListedTimestampsWithFractionalSecondsAreAccepted() async throws {
+        let digest = "sha256:" + String(repeating: "d", count: 64)
+        respond(
+            200,
+            #"""
+            [{"snapshotReference":{"referenceVersion":1,
+              "algorithm":"\#(BackupProfile.digestSuite)",
+              "digest":"\#(digest)","sealedByteSize":4},
+              "acceptedTermsId":"sha256:\#(String(repeating: "a", count: 64))",
+              "retainedAt":"2026-08-22T13:42:25.779692123Z",
+              "retainedUntil":null,"supersedes":null,"status":"retained"}]
+            """#
+        )
+        let listed = try await makeClient().listSnapshots()
+        XCTAssertEqual(listed.map(\.snapshotReference.digest), [digest])
+    }
+
+    /// Every stamp shape the operator's clock can emit: bare seconds,
+    /// micro- and nanosecond fractions, and a numeric UTC offset.
+    func testTheTimestampReaderAcceptsTheOperatorsClock() {
+        for stamp in [
+            "2026-08-22T13:42:25Z",
+            "2026-08-22T13:42:25.779Z",
+            "2026-08-22T13:42:25.779692Z",
+            "2026-08-22T13:42:25.779692123Z",
+            "2026-08-22T13:42:25+00:00",
+            "2026-08-22T13:42:25.779692+00:00",
+        ] {
+            XCTAssertNotNil(BackupFormat.date(fromRFC3339: stamp), stamp)
+        }
+        XCTAssertNil(BackupFormat.date(fromRFC3339: "2026-08-22 13:42:25"))
     }
 
     /// Drain an intercepted request's body. `URLProtocol` hands the

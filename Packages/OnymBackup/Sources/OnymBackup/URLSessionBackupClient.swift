@@ -285,17 +285,36 @@ public struct URLSessionBackupClient: BackupPort {
         )
         let data = try await post(path: ["v1", "erasures"], body: body)
         // One receipt per distinct pinned `termsId` in scope — an array
-        // even for a single snapshot, and never empty: an erasure that
-        // committed nothing is an error, not a receipt.
-        guard
-            let elements = try? JSONSerialization.jsonObject(with: data) as? [Any],
-            !elements.isEmpty
+        // even for a single snapshot. Split into the operator's own
+        // byte ranges rather than re-serialized: `rawBytes` is what the
+        // repository keeps as the durable record and what a signature
+        // over the receipt would be checked against, and a client
+        // reconstruction — different key order, whitespace, number
+        // formatting — is neither.
+        //
+        // An empty array is refused deliberately. This profile answers
+        // "nothing in scope" with an error (`not_found`,
+        // `receipt_expired`), never with an empty acknowledgement, so
+        // `[]` can only be an operator claiming to have erased while
+        // committing to nothing — and a receipt is the only durable
+        // record, so nothing is not a success.
+        guard let elements = Self.topLevelJSONArrayElements(in: data), !elements.isEmpty
         else {
             throw BackupError.rejected(code: "malformed_receipt", message: nil)
         }
-        return try elements.map {
-            let raw = try JSONSerialization.data(withJSONObject: $0, options: [.sortedKeys])
-            return try ErasureReceipt.decode(raw: raw)
+        return try elements.map { raw in
+            let receipt = try ErasureReceipt.decode(raw: raw)
+            // An echoed scope that is not the one asked about is an
+            // operator answering a different question. Recording it
+            // would drop the local row for the requested digest on the
+            // strength of a receipt that covers something else.
+            guard receipt.scope == scope.wireValue else {
+                throw BackupError.rejected(
+                    code: "scope_mismatch",
+                    message: "the operator answered about a different scope"
+                )
+            }
+            return receipt
         }
     }
 
