@@ -204,7 +204,7 @@ private struct SilentPort: BackupPort {
     func downloadSnapshot(_ reference: SnapshotReference, to destination: URL) async throws {
         throw BackupError.operatorUnavailable
     }
-    func eraseSnapshot(scope: ErasureScope) async throws -> ErasureReceipt {
+    func eraseSnapshot(scope: ErasureScope) async throws -> [ErasureReceipt] {
         throw BackupError.operatorUnavailable
     }
     func exportSnapshots(to directory: URL) async throws -> BackupExport {

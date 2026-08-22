@@ -354,7 +354,7 @@ public final class DeviceBackupSettingsFlow {
         stopFailure = nil
         if erasingFirst {
             do {
-                state.lastReceipt = try await repository.erase(scope: .all)
+                state.lastReceipt = try await repository.erase(scope: .all).first
             } catch {
                 // Not stopped, and not erased. Saying so beats reporting
                 // either one as done.
@@ -390,7 +390,7 @@ public final class DeviceBackupSettingsFlow {
     /// may want it later.
     public func erase(scope: ErasureScope) async {
         do {
-            state.lastReceipt = try await repository.erase(scope: scope)
+            state.lastReceipt = try await repository.erase(scope: scope).first
             await loadSnapshots()
         } catch {
             // The previous receipt is left alone. It describes an

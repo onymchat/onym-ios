@@ -740,9 +740,9 @@ public actor BackupRepository {
         guard surplus <= erasable.count else { return }
 
         for row in erasable.prefix(surplus) {
-            let receipt: ErasureReceipt
+            let receipts: [ErasureReceipt]
             do {
-                receipt = try await port.eraseSnapshot(scope: .snapshot(row.snapshotReference))
+                receipts = try await port.eraseSnapshot(scope: .snapshot(row.snapshotReference))
             } catch {
                 // Stopped, not thrown. A housekeeping erase that failed
                 // says nothing about whether this snapshot can be
@@ -757,7 +757,7 @@ public actor BackupRepository {
             // durable record that this happened, and a batch written
             // after the last erase is a batch lost by a crash in the
             // middle of the first.
-            record(receipt, scope: .snapshot(row.snapshotReference), in: &state)
+            record(receipts, scope: .snapshot(row.snapshotReference), in: &state)
             try commit(state, expecting: state.componentId)
         }
     }
@@ -909,13 +909,13 @@ public actor BackupRepository {
     /// snapshot it describes: what an erasure did not reach is the part
     /// a person may need to re-read long afterwards.
     @discardableResult
-    public func erase(scope: ErasureScope) async throws -> ErasureReceipt {
-        let receipt = try await port.eraseSnapshot(scope: scope)
+    public func erase(scope: ErasureScope) async throws -> [ErasureReceipt] {
+        let receipts = try await port.eraseSnapshot(scope: scope)
         var state = try stateStore.load()
         let enrolled = state.componentId
-        record(receipt, scope: scope, in: &state)
+        record(receipts, scope: scope, in: &state)
         try commit(state, expecting: enrolled)
-        return receipt
+        return receipts
     }
 
     /// Write down one erasure: keep the receipt, drop the local record of
@@ -927,11 +927,11 @@ public actor BackupRepository {
     /// would have the run's next `commit` write a state with no receipt
     /// in it straight back over the top.
     private func record(
-        _ receipt: ErasureReceipt,
+        _ receipts: [ErasureReceipt],
         scope: ErasureScope,
         in state: inout BackupState
     ) {
-        state.receipts.append(receipt.rawBytes)
+        state.receipts.append(contentsOf: receipts.map(\.rawBytes))
         if case .snapshot(let reference) = scope {
             state.snapshots.removeAll { $0.digest == reference.digest }
         } else {

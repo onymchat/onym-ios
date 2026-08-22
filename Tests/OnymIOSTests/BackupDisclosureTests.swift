@@ -527,7 +527,7 @@ private struct RebindingPort: BackupPort {
     }
     func listSnapshots() async throws -> [RetainedSnapshot] { [] }
     func downloadSnapshot(_ reference: SnapshotReference, to destination: URL) async throws {}
-    func eraseSnapshot(scope: ErasureScope) async throws -> ErasureReceipt {
+    func eraseSnapshot(scope: ErasureScope) async throws -> [ErasureReceipt] {
         throw BackupError.operatorUnavailable
     }
     func exportSnapshots(to directory: URL) async throws -> BackupExport {

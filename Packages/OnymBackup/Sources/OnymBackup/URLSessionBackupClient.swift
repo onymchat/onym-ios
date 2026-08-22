@@ -268,14 +268,35 @@ public struct URLSessionBackupClient: BackupPort {
         )
     }
 
-    public func eraseSnapshot(scope: ErasureScope) async throws -> ErasureReceipt {
+    public func eraseSnapshot(scope: ErasureScope) async throws -> [ErasureReceipt] {
         struct Body: Encodable {
             let version = 1
+            let operationId: String
             let scope: String
         }
-        let body = try Self.encoder.encode(Body(scope: scope.wireValue))
+        // Client-chosen, like every other operation's id (§14.9): a
+        // lost erase response can only be asked about under an id this
+        // side already knows.
+        let body = try Self.encoder.encode(
+            Body(
+                operationId: try BackupComposer.newIdentifier(),
+                scope: scope.wireValue
+            )
+        )
         let data = try await post(path: ["v1", "erasures"], body: body)
-        return try ErasureReceipt.decode(raw: data)
+        // One receipt per distinct pinned `termsId` in scope — an array
+        // even for a single snapshot, and never empty: an erasure that
+        // committed nothing is an error, not a receipt.
+        guard
+            let elements = try? JSONSerialization.jsonObject(with: data) as? [Any],
+            !elements.isEmpty
+        else {
+            throw BackupError.rejected(code: "malformed_receipt", message: nil)
+        }
+        return try elements.map {
+            let raw = try JSONSerialization.data(withJSONObject: $0, options: [.sortedKeys])
+            return try ErasureReceipt.decode(raw: raw)
+        }
     }
 
     public func exportSnapshots(to directory: URL) async throws -> BackupExport {

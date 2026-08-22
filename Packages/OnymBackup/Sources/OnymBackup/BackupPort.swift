@@ -35,10 +35,12 @@ public protocol BackupPort: Sendable {
     /// restore.
     func downloadSnapshot(_ reference: SnapshotReference, to destination: URL) async throws
 
-    /// Request erasure and return the operator's signed receipt.
-    /// An acknowledged-but-incomplete erasure is `erasureUnconfirmed`,
-    /// carrying the receipt — it is not success.
-    func eraseSnapshot(scope: ErasureScope) async throws -> ErasureReceipt
+    /// Request erasure and return the operator's signed receipts — one
+    /// per distinct pinned `termsId` in scope (§11), so a single
+    /// snapshot yields exactly one and `all` may yield several. Never
+    /// empty. An acknowledged-but-incomplete erasure is
+    /// `erasureUnconfirmed`, carrying the receipt — it is not success.
+    func eraseSnapshot(scope: ErasureScope) async throws -> [ErasureReceipt]
 
     /// The portable container for migration to another operator or to the
     /// person's own storage. Never gated on payment

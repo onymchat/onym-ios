@@ -672,7 +672,7 @@ private struct HoldingPort: BackupPort {
         try? FileManager.default.removeItem(at: destination)
         try FileManager.default.copyItem(at: snapshot.sealedBytesURL, to: destination)
     }
-    func eraseSnapshot(scope: ErasureScope) async throws -> ErasureReceipt {
+    func eraseSnapshot(scope: ErasureScope) async throws -> [ErasureReceipt] {
         throw BackupError.operatorUnavailable
     }
     func exportSnapshots(to directory: URL) async throws -> BackupExport {

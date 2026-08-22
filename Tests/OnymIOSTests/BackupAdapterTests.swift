@@ -144,6 +144,98 @@ final class BackupAdapterTests: XCTestCase {
         XCTAssertNotNil(headers["X-Onym-Signature"])
     }
 
+    /// The erase request carries a client-chosen `operationId` — the
+    /// operator refuses the body without one, which silently disabled
+    /// the rolling window: every §11 erase came back 400, `makeRoom`
+    /// swallowed it, and the sixth backup was refused `quota_exceeded`
+    /// instead of evicting the oldest.
+    func testEraseSendsAnOperationIdAndReadsTheReceiptArray() async throws {
+        let seen = SendableBox()
+        // The response shape the operator actually sends: an *array* of
+        // receipts (one per pinned termsId in scope), stamped with
+        // fractional seconds, which RFC 3339 allows and the operator's
+        // clock produces.
+        let termsId = "sha256:" + String(repeating: "a", count: 64)
+        respond(
+            200,
+            #"""
+            [{"receiptVersion":1,"receiptId":"r-1","operator":"onym:key:op",
+              "scope":"sha256:\#(String(repeating: "b", count: 64))",
+              "acknowledgedAt":"2026-08-22T13:42:25.779692Z",
+              "completionCommittedBy":"2026-08-29T13:42:25.779692Z",
+              "coveredScope":"primary and replicas",
+              "excludedScope":"copies other participants hold",
+              "termsId":"\#(termsId)"}]
+            """#
+        ) { seen.value = $0 }
+
+        let reference = try SnapshotReference(
+            digest: "sha256:" + String(repeating: "b", count: 64), sealedByteSize: 4)
+        let receipts = try await makeClient().eraseSnapshot(scope: .snapshot(reference))
+
+        XCTAssertEqual(receipts.count, 1)
+        XCTAssertEqual(receipts[0].receiptId, "r-1")
+        XCTAssertEqual(receipts[0].termsId, termsId)
+
+        let body = Self.body(of: seen.value)
+        let object = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let operationId = try XCTUnwrap(object["operationId"] as? String)
+        XCTAssertFalse(operationId.isEmpty, "the operator refuses an erase without an id")
+        XCTAssertEqual(object["scope"] as? String, reference.digest)
+    }
+
+    /// A `scope: "all"` spanning snapshots pinned to different terms is
+    /// several receipts, and every one of them is evidence to keep.
+    func testEraseAllKeepsEveryReceipt() async throws {
+        let stamp = "2026-08-22T13:42:25.779692Z"
+        let receipt: (String, String) -> String = { id, terms in
+            #"""
+            {"receiptVersion":1,"receiptId":"\#(id)","operator":"onym:key:op",
+             "scope":"all","acknowledgedAt":"\#(stamp)",
+             "completionCommittedBy":"\#(stamp)",
+             "coveredScope":"primary and replicas",
+             "excludedScope":"copies other participants hold",
+             "termsId":"\#(terms)"}
+            """#
+        }
+        let termsA = "sha256:" + String(repeating: "a", count: 64)
+        let termsB = "sha256:" + String(repeating: "c", count: 64)
+        respond(200, "[\(receipt("r-1", termsA)),\(receipt("r-2", termsB))]")
+
+        let receipts = try await makeClient().eraseSnapshot(scope: .all)
+        XCTAssertEqual(receipts.map(\.receiptId), ["r-1", "r-2"])
+        XCTAssertEqual(receipts.map(\.termsId), [termsA, termsB])
+    }
+
+    /// An empty receipt array is an operator acknowledging nothing; a
+    /// receipt is the only durable record, so nothing is not a success.
+    func testAnEmptyReceiptArrayIsRefused() async throws {
+        respond(200, "[]")
+        do {
+            _ = try await makeClient().eraseSnapshot(scope: .all)
+            XCTFail("an erasure with no receipt was accepted")
+        } catch {}
+    }
+
+    /// Drain an intercepted request's body. `URLProtocol` hands the
+    /// body back as a stream, not `httpBody`.
+    private static func body(of request: URLRequest?) -> Data {
+        guard let request else { return Data() }
+        if let body = request.httpBody { return body }
+        guard let stream = request.httpBodyStream else { return Data() }
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while stream.hasBytesAvailable {
+            let read = stream.read(&buffer, maxLength: buffer.count)
+            guard read > 0 else { break }
+            data.append(contentsOf: buffer[0..<read])
+        }
+        return data
+    }
+
     // MARK: - Repository
 
     /// A payment refusal keeps the sealed bytes, and the retry sends the
@@ -1025,14 +1117,14 @@ private actor ScriptedPort: BackupPort {
     /// listed, and a receipt comes back. A stub that only recorded the
     /// call would let a test claim room was made without the list ever
     /// getting shorter.
-    func eraseSnapshot(scope: ErasureScope) async throws -> ErasureReceipt {
+    func eraseSnapshot(scope: ErasureScope) async throws -> [ErasureReceipt] {
         erasedScopes.append(scope.wireValue)
         if case .snapshot(let reference) = scope {
             retained.removeAll { $0.snapshotReference.digest == reference.digest }
         } else {
             retained.removeAll()
         }
-        return ErasureReceipt(
+        return [ErasureReceipt(
             receiptId: "receipt-\(erasedScopes.count)",
             operatorKey: "onym:key:" + String(repeating: "1", count: 64),
             scope: scope.wireValue,
@@ -1042,7 +1134,7 @@ private actor ScriptedPort: BackupPort {
             excludedScope: "copies other participants hold",
             termsId: Self.termsId,
             rawBytes: Data(#"{"receiptId":"\#(erasedScopes.count)"}"#.utf8),
-            signature: nil)
+            signature: nil)]
     }
     func exportSnapshots(to directory: URL) async throws -> BackupExport {
         BackupExport(directory: directory, snapshots: [], receipts: [])
