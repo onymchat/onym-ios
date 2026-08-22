@@ -39,8 +39,6 @@ packages:
   OnymModerationUI: {path: Packages/OnymModerationUI}
   OnymDiscovery: {path: Packages/OnymDiscovery}
   OnymOnboarding: {path: Packages/OnymOnboarding}
-  # No target dependency yet (that lands with the app wiring): listed
-  # so the package resolves with the project and CI compiles it.
   OnymPush: {path: Packages/OnymPush}
 
 targets:
@@ -75,6 +73,7 @@ targets:
       - package: OnymModerationUI
       - package: OnymDiscovery
       - package: OnymOnboarding
+      - package: OnymPush
     # Hand-written Info.plist via xcodegen's `info:` block. We tried
     # the GENERATE_INFOPLIST_FILE + INFOPLIST_KEY_* approach first but
     # `INFOPLIST_KEY_UILaunchScreen_BackgroundColor` / `_ImageName` are
@@ -179,6 +178,13 @@ targets:
         # over once Apple's CDN has fetched + validated the file.
         com.apple.developer.associated-domains:
           - applinks:onym.app
+        # Push notifications. `development` is the source-entitlements
+        # value; automatic signing flips it to `production` on export.
+        # CAVEAT: only *automatic* signing rewrites it — a manually
+        # signed archive ships this development entitlement verbatim,
+        # and the app silently talks to APNs' sandbox in production.
+        # Pushes are content-free alerts, so no UIBackgroundModes.
+        aps-environment: development
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.onym.ios
