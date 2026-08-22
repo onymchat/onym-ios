@@ -47,7 +47,7 @@ struct MemberRulesProofView: View {
                 }
             }
         }
-        .task { await writeFile() }
+        .task(id: proof) { await writeFile() }
         .onDisappear {
             // Actually delivered rather than merely intended: `tmp` is
             // swept at the OS's discretion, which can be days. The copy
@@ -60,7 +60,7 @@ struct MemberRulesProofView: View {
 
     private var verdict: some View {
         VStack(spacing: 8) {
-            if let mark = ChatMembersView.mark(for: proof.standing) {
+            if let mark = GroupRulesMark(proof.standing) {
                 Image(systemName: mark.symbol)
                     .font(.system(size: 34))
                     .foregroundStyle(mark.color)
@@ -84,6 +84,8 @@ struct MemberRulesProofView: View {
         switch proof.standing {
         case .noRules:
             String(localized: "This group has no rules, so nothing was asked of anyone.")
+        case .notCollected:
+            String(localized: "This kind of group has no join approval, so nobody is asked to sign its rules.")
         case .author:
             String(localized: "They set these rules for the group. Founders don\u{2019}t sign their own.")
         case .signed:
@@ -211,9 +213,15 @@ struct MemberRulesProofView: View {
     /// that matters is the one the person sends, and leaving proofs
     /// about other people lying around this device is a disclosure
     /// nobody asked for.
+    /// Re-runs when the proof does — `.task(id: proof)`.
+    ///
+    /// The sheet re-renders from the live group, so a roster or rules
+    /// update while it is open changed what the screen said and left
+    /// the file holding the bytes it was written with. Whoever tapped
+    /// Export would have sent the old ones.
     private func writeFile() async {
-        guard file == nil else { return }
         let proof = proof
+        let previous = file
         // Off the main actor: encode-and-write is small today, but it
         // runs on the sheet's first frame, and "small today" is how a
         // hitch gets built in.
@@ -228,6 +236,13 @@ struct MemberRulesProofView: View {
             }
         }.value
         if let written {
+            // Same name, same place, so the replacement overwrites in
+            // practice — but a proof for a different member has a
+            // different name, and leaving that one behind is the
+            // disclosure `onDisappear` exists to avoid.
+            if let previous, previous != written {
+                try? FileManager.default.removeItem(at: previous)
+            }
             file = written
         } else {
             writeError = String(localized: "This device couldn\u{2019}t write the proof file.")
@@ -259,6 +274,7 @@ struct MemberGoneView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done", action: onClose)
+                        .accessibilityIdentifier("rules_proof.member_gone_done")
                 }
             }
         }

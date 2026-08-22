@@ -435,28 +435,53 @@ public struct IncomingMessageDispatcher: Sendable {
         // alias + inbox pub — the receiver's view of itself wins.
         var profiles = invitation.memberProfiles ?? [:]
         if let selfEntry = await selfMemberProfileEntry(for: ownerIdentityID) {
-            // Identity wins locally; the agreement comes from the wire,
-            // and an absent one from the wire changes nothing.
+            // Identity wins locally; the agreement is whichever record
+            // actually proves something.
             //
             // Our alias and keys are ours to assert, which is what the
             // overwrite is for. Our *agreement* is not: this device
             // signed it and kept no copy, so the admitting device's
-            // record is the only one there is. Taking it on trust costs
-            // nothing — it is checked against our own sending key every
-            // time it is read, so a wrong one simply fails to verify.
+            // record is the only one there is. Trusting it costs
+            // nothing — it is re-checked against our own sending key
+            // every time it is read.
             //
-            // But taking *nil* on trust costs the whole record. This
-            // path re-runs on every relay replay and on any later
-            // invitation for a group already here, and an admin on a
-            // build that predates the self row sends none — so a
-            // straight copy would erase a stored agreement and put the
-            // joiner back to "didn't sign", by version skew rather than
-            // by any code path. The stored profile is the floor.
+            // But trusting it *blindly* costs the record. This path
+            // re-runs on every relay replay and on any later invitation
+            // for a group already here, and an older admin sends no
+            // self row at all — so taking the wire unconditionally
+            // erased a stored agreement and put the joiner back to
+            // "didn't sign", by version skew rather than by any code
+            // path.
+            //
+            // Scoped by owner as well as group, like every other lookup
+            // in this file: two identities on one device hold two rows
+            // for the same group, and the wrong one would stamp
+            // somebody else's agreement onto this profile.
             let stored = await groupRepository.currentGroups()
-                .first { $0.groupIDData == invitation.groupID }?
+                .first {
+                    $0.groupIDData == invitation.groupID
+                        && $0.ownerIdentityID == ownerIdentityID
+                }?
                 .memberProfiles[selfEntry.key]
             let wire = profiles[selfEntry.key]
-            let agreement = wire?.rulesSignature != nil ? wire : stored
+            let agreement: MemberProfile?
+            if wire?.agreedToRules(groupID: invitation.groupID) == true {
+                // The wire proves it. Freshest record that verifies.
+                agreement = wire
+            } else if stored?.agreedToRules(groupID: invitation.groupID) == true {
+                // Only what we already had proves it. "Has 64 bytes in
+                // it" was the wrong test for preferring the wire:
+                // re-approving an old request after a rules edit sends
+                // the signature with no text (see
+                // `JoinRequestApprover.textCovering`), which would
+                // downgrade a verified agreement into an uncheckable
+                // one.
+                agreement = stored
+            } else {
+                // Neither proves anything; keep whichever has bytes at
+                // all, so the evidence survives for a later look.
+                agreement = wire?.rulesSignature != nil ? wire : stored
+            }
             profiles[selfEntry.key] = MemberProfile(
                 alias: selfEntry.value.alias,
                 inboxPublicKey: selfEntry.value.inboxPublicKey,

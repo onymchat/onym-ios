@@ -242,6 +242,9 @@ public struct GroupRulesProof: Equatable, Sendable {
             nil
         case .noRules:
             "This group has no rules, so nothing was asked of anyone."
+        case .notCollected:
+            "This kind of group has no join approval, so no agreement to its rules is "
+            + "collected from anyone."
         case .author:
             "This member wrote the rules; founders do not sign their own."
         case .didNotSign:

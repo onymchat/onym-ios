@@ -51,7 +51,6 @@ struct ChatMembersView: View {
     @State private var showRename = false
     @State private var renameText = ""
 
-
     var body: some View {
         Group {
             if let group = currentGroup {
@@ -334,7 +333,7 @@ struct ChatMembersView: View {
                 Text("BLS \(row.blsPrefix)\u{2026}")
                     .font(.system(size: 12, weight: .regular, design: .monospaced))
                     .foregroundStyle(OnymTokens.text3)
-                if let mark = Self.mark(for: row.standing) {
+                if let mark = GroupRulesMark(row.standing) {
                     HStack(spacing: 4) {
                         Image(systemName: mark.symbol)
                             .font(.system(size: 10, weight: .semibold))
@@ -367,42 +366,6 @@ struct ChatMembersView: View {
             }
         }
         .accessibilityIdentifier("members.row.\(row.id)")
-    }
-
-    /// The mark beside a name. `nil` for a group with no rules, where
-    /// the row keeps the BLS prefix it always showed — there is no
-    /// standing to report, and "not applicable" on every row in every
-    /// group without rules is noise.
-    ///
-    /// These are `ChatJoinRequestCell`'s own strings, not a matching
-    /// set. A member's standing and a request's verdict are the same
-    /// fact at two moments; near-duplicates would have given
-    /// translators two of everything to drift apart.
-    nonisolated static func mark(
-        for standing: GroupRulesStanding
-    ) -> (symbol: String, text: String, color: Color)? {
-        switch standing {
-        case .noRules:
-            nil
-        case .author:
-            ("pencil", String(localized: "Wrote the group rules"), OnymTokens.text2)
-        case .signed:
-            ("checkmark.seal.fill",
-             String(localized: "Signed the group rules"), OnymTokens.green)
-        case .signedEarlierVersion:
-            ("clock.badge.checkmark",
-             String(localized: "Signed an earlier version of the rules"), OnymTokens.text2)
-        case .didNotSign:
-            ("minus.circle",
-             String(localized: "Didn\u{2019}t sign the group rules"), OnymTokens.amber)
-        case .unknownRules:
-            ("questionmark.circle",
-             String(localized: "Signed rules this device doesn\u{2019}t have \u{2014} can\u{2019}t be checked"),
-             OnymTokens.text2)
-        case .doesNotVerify:
-            ("exclamationmark.triangle.fill",
-             String(localized: "Their signature on the rules doesn\u{2019}t check out"), OnymTokens.red)
-        }
     }
 
     private func avatar(for row: MemberRow) -> some View {

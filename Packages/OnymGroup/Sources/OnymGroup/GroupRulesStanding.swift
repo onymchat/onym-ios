@@ -1,4 +1,5 @@
 import Foundation
+import OnymChain
 
 /// Where one member stands on a group's rules, decided from what this
 /// device holds about them.
@@ -17,6 +18,17 @@ import Foundation
 public enum GroupRulesStanding: Equatable, Sendable {
     /// The group asks nothing of anyone.
     case noRules
+    /// The group has rules, and this kind of group has no way to agree
+    /// to them: no join request, no approval, nobody to be the author.
+    ///
+    /// Not reachable today — `.tyranny` is the only governance type
+    /// `CreateGroupFlow` will produce, and the other two cards are
+    /// dimmed with a "Soon" pill — so this case exists to be correct
+    /// when they ship rather than to fix a live bug. Without it,
+    /// `.author` keyed on `adminPubkeyHex` (nil for both) would mark
+    /// every member of an anarchy group, including whoever wrote the
+    /// rules, as having declined to sign them.
+    case notCollected
     /// This member wrote the rules. Founders don't sign their own
     /// terms, and rendering them as "didn't sign" would read as a
     /// failure rather than as the shape of the thing.
@@ -57,7 +69,8 @@ public enum GroupRulesStanding: Equatable, Sendable {
     public var isProven: Bool {
         switch self {
         case .signed, .signedEarlierVersion: true
-        case .noRules, .author, .didNotSign, .unknownRules, .doesNotVerify: false
+        case .noRules, .notCollected, .author, .didNotSign, .unknownRules, .doesNotVerify:
+            false
         }
     }
 }
@@ -102,9 +115,31 @@ public extension ChatGroup {
             return signedText == current ? .signed : .signedEarlierVersion
         }
         guard current != nil else { return .noRules }
+        // Asked after the stored bytes, so a signature made under a
+        // governance type that later changed still reads honestly.
+        guard groupType.collectsRulesAgreements else { return .notCollected }
         if let admin = adminPubkeyHex?.lowercased(), admin == blsHex.lowercased() {
             return .author
         }
         return .didNotSign
+    }
+}
+
+extension SEPGroupType {
+    /// Whether joining this kind of group passes through a request the
+    /// founder approves — which is the only place an agreement to the
+    /// rules is ever collected.
+    ///
+    /// Tyranny alone, and spelled out case by case rather than with a
+    /// `default`: the wire enum carries five types, only one of which
+    /// has an approval step to carry a signature or an admin to name as
+    /// the rules' author. When one of the other four grows a joining
+    /// ceremony, the compiler should make whoever builds it answer this
+    /// question rather than inheriting a silent "no".
+    var collectsRulesAgreements: Bool {
+        switch self {
+        case .tyranny: true
+        case .anarchy, .oneOnOne, .democracy, .oligarchy: false
+        }
     }
 }
