@@ -34,6 +34,11 @@ actor PushCoordinator {
     private let preferences: PushPreferenceStore
     private let identityRepository: IdentityRepository
     private let relaysRepository: NostrRelaysRepository
+    /// Whether the system's notification authorization has been
+    /// revoked. Injected so the privacy-load-bearing "revoked while
+    /// enabled ⇒ full disable" gate is unit-testable; production reads
+    /// `UNUserNotificationCenter`.
+    private let notificationAuthorizationDenied: @Sendable () async -> Bool
 
     /// nil until the first identity read completes — an actually-empty
     /// identity list (loaded, count 0) becomes `[]`, which is
@@ -47,11 +52,16 @@ actor PushCoordinator {
         identityRepository: IdentityRepository,
         relaysRepository: NostrRelaysRepository,
         client: PushBackendClient = URLSessionPushBackendClient(),
-        preferences: PushPreferenceStore = PushPreferenceStore()
+        preferences: PushPreferenceStore = PushPreferenceStore(),
+        notificationAuthorizationDenied: @escaping @Sendable () async -> Bool = {
+            await UNUserNotificationCenter.current()
+                .notificationSettings().authorizationStatus == .denied
+        }
     ) {
         self.identityRepository = identityRepository
         self.relaysRepository = relaysRepository
         self.preferences = preferences
+        self.notificationAuthorizationDenied = notificationAuthorizationDenied
         self.interactor = PushRegistrationInteractor(
             client: client,
             signer: IdentityModerationSigner(repository: identityRepository),
@@ -75,9 +85,20 @@ actor PushCoordinator {
     /// Runs for the scene's life from a `RootView`-level `.task`.
     func run() async {
         if preferences.isEnabled {
-            // A fresh launch with push already enabled re-requests the
-            // token — it can have rotated while the app was gone.
-            await registerWithAPNs()
+            // Cold launch reconciles with system Settings BEFORE
+            // touching APNs: SwiftUI never fires `.onChange(of:
+            // scenePhase)` for the initial `.active`, so without this
+            // check here an authorization revoked while the app was
+            // gone would leave the server registration alive until
+            // some later foreground.
+            if await notificationAuthorizationDenied() {
+                await disable()
+            } else {
+                // A fresh launch with push already enabled re-requests
+                // the token — it can have rotated while the app was
+                // gone.
+                await registerWithAPNs()
+            }
         }
         await withTaskGroup(of: Void.self) { group in
             group.addTask { [interactor] in
@@ -108,6 +129,10 @@ actor PushCoordinator {
         preferences.setEnabled(false)
         await MainActor.run { UIApplication.shared.unregisterForRemoteNotifications() }
         await interactor.pushDisabled()
+        // Nothing left in the app should want the token; drop the
+        // replayed copy rather than holding a secret longer than
+        // needed. APNs re-delivers on the next enable.
+        PushAppDelegate.clearLatestToken()
     }
 
     /// Foreground hook, same shape as the moderation gate's: gives the
@@ -117,12 +142,9 @@ actor PushCoordinator {
     /// says on, the toggle is a lie and the server still holds a
     /// registration, so this runs the full disable path.
     func appForegrounded() async {
-        if preferences.isEnabled {
-            let settings = await UNUserNotificationCenter.current().notificationSettings()
-            if settings.authorizationStatus == .denied {
-                await disable()
-                return
-            }
+        if preferences.isEnabled, await notificationAuthorizationDenied() {
+            await disable()
+            return
         }
         await interactor.appForegrounded()
     }

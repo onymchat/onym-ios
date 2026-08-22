@@ -25,6 +25,7 @@ public final class NotificationsSettingsFlow {
     private let enable: () async -> Bool
     private let disable: () async -> Void
     private let isRegistrationPending: () -> Bool
+    private let readIsEnabled: (() -> Bool)?
 
     /// - Parameters:
     ///   - isEnabled: the persisted opt-in at presentation time.
@@ -34,16 +35,23 @@ public final class NotificationsSettingsFlow {
     ///   - isRegistrationPending: whether the opt-in is on with no
     ///     accepted registration yet — re-read on view appearance and
     ///     after each toggle, since registration completes off-screen.
+    ///   - readIsEnabled: the persisted opt-in *now*. The coordinator
+    ///     can disable underneath a still-mounted screen (authorization
+    ///     revoked in system Settings, app foregrounded back onto this
+    ///     view), so the toggle re-reads rather than trusting its
+    ///     presentation-time snapshot.
     public init(
         isEnabled: Bool,
         enable: @escaping () async -> Bool,
         disable: @escaping () async -> Void,
-        isRegistrationPending: @escaping () -> Bool = { false }
+        isRegistrationPending: @escaping () -> Bool = { false },
+        readIsEnabled: (() -> Bool)? = nil
     ) {
         self.isEnabled = isEnabled
         self.enable = enable
         self.disable = disable
         self.isRegistrationPending = isRegistrationPending
+        self.readIsEnabled = readIsEnabled
         registrationPending = isRegistrationPending()
     }
 
@@ -67,8 +75,12 @@ public final class NotificationsSettingsFlow {
     }
 
     /// Registration completes off-screen (APNs token delivery, then
-    /// the backend call), so the view re-reads on appearance.
+    /// the backend call) and the coordinator can disable off-screen
+    /// too, so the view re-reads both on appearance.
     public func refreshRegistrationState() {
+        if let readIsEnabled {
+            isEnabled = readIsEnabled()
+        }
         registrationPending = isRegistrationPending()
     }
 }
