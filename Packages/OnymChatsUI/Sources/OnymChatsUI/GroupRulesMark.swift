@@ -29,9 +29,11 @@ struct GroupRulesMark {
     /// `GroupRulesStanding.hasSomethingToShow`, which is where that
     /// question lives now.
     init?(_ standing: GroupRulesStanding) {
-        guard standing.hasSomethingToShow else { return nil }
         switch standing {
         case .noRules, .notCollected:
+            // One gate, not two: `hasSomethingToShow` answers exactly
+            // this, and a `guard` above the switch left these cases
+            // unreachable and looking load-bearing.
             return nil
         case .author:
             self.init(

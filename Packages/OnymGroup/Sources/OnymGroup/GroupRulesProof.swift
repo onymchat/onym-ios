@@ -98,7 +98,14 @@ public struct GroupRulesProof: Equatable, Sendable {
     /// second member's proof has overwritten it, and hand out that
     /// member's agreement under the first one's name.
     public var suggestedFileName: String {
-        let stem = fileSafe("\(groupName)-\(memberAlias)")
+        // Clamped, because neither of these is ours. `groupName` and
+        // `memberAlias` arrive off the wire with no length cap of their
+        // own, and a 400-character alias pushes the name past NAME_MAX
+        // — at which point the write throws, `file` stays nil, and that
+        // member's row is stuck on a disabled Export and an error, for
+        // good. The same reason the characters are scrubbed: this
+        // string is a stranger's, and it reaches a filesystem.
+        let stem = String(fileSafe("\(groupName)-\(memberAlias)").prefix(60))
         let named = stem.isEmpty ? "group-rules" : stem
         // The key is scrubbed too, not just the readable part. Roster
         // keys arrive as arbitrary JSON object keys — nothing validates

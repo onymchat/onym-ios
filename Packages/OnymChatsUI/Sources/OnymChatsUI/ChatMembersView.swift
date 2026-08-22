@@ -71,6 +71,14 @@ struct ChatMembersView: View {
             if let group = currentGroup {
                 VStack(spacing: 0) {
                     header(for: group)
+                    // Above the branch, not inside the list: the rules
+                    // are the group's, not the roster's, and a member
+                    // who agreed months ago shouldn't lose their only
+                    // way back to the words they agreed to because the
+                    // directory hasn't filled in.
+                    if let rules = GroupRules.normalized(group.invitationMessage) {
+                        rulesSection(rules)
+                    }
                     if group.memberProfiles.isEmpty {
                         emptyState
                     } else {
@@ -272,9 +280,6 @@ struct ChatMembersView: View {
 
     private func list(for group: ChatGroup) -> some View {
         ScrollView {
-            if let rules = GroupRules.normalized(group.invitationMessage) {
-                rulesSection(rules)
-            }
             let memberRows = rows(for: group)
             VStack(spacing: 0) {
                 ForEach(memberRows) { row in
@@ -389,12 +394,17 @@ struct ChatMembersView: View {
         return Group {
             if !row.standing.hasSomethingToShow {
                 content
+                    .accessibilityIdentifier("members.row.\(row.id)")
             } else {
+                // On the button, not on the `Group` wrapping it: the
+                // button is the accessibility element now that rows are
+                // tappable, and an identifier on the container is one a
+                // UI test may never see.
                 Button { activeSheet = .member(row) } label: { content }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("members.row.\(row.id)")
             }
         }
-        .accessibilityIdentifier("members.row.\(row.id)")
     }
 
     private func avatar(for row: MemberRow) -> some View {

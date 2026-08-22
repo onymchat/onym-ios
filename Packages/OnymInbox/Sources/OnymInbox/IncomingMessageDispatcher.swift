@@ -463,6 +463,16 @@ public struct IncomingMessageDispatcher: Sendable {
             // dropped would make this directory permanently additive —
             // harmless while nothing removes members, and not something
             // to leave for whoever adds that.
+            //
+            // Which also means this closes *rules-less* senders, not
+            // *roster-less* ones: an invitation carrying no
+            // `memberProfiles` at all still replaces the local
+            // directory with whatever it does carry, agreements
+            // included. That predates this change — `profiles` has
+            // always started from the wire — and unwinding it is a
+            // question about roster ownership rather than about
+            // evidence, so it is named here rather than answered in a
+            // diff about rules.
             guard let wire = profiles[key], stored.rulesSignature != nil else { continue }
             guard !wire.agreedToRules(groupID: invitation.groupID) else { continue }
             if stored.agreedToRules(groupID: invitation.groupID) {
