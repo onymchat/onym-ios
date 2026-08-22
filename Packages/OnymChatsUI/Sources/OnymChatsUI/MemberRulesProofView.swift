@@ -47,12 +47,25 @@ struct MemberRulesProofView: View {
             }
         }
         .task(id: proof) { await writeFile() }
-        // Deliberately *not* deleted on dismiss. `ShareLink` hands out
-        // a URL, not a copy, and an AirDrop target or a share extension
-        // that reads it lazily loses the file if this sheet tidies up
-        // first — the export failing at the moment it is used. What is
-        // left behind is one small directory per sheet opened, in a
-        // location the OS sweeps.
+        .task { await sweepEarlierExports() }
+        // One rule for the exported file, because the two this had
+        // grown contradicted each other: **nothing written during this
+        // sheet's life is ever deleted while it lives; everything left
+        // by an earlier sheet is swept when the next one opens.**
+        //
+        // Not on dismiss, and not on replacement: `ShareLink` hands out
+        // a URL, not a copy, so an AirDrop target or a share extension
+        // reading it lazily loses the file if we tidy up underneath it
+        // — the export failing at the moment it is used. Deleting the
+        // *previous* write had the same hazard, since the user may have
+        // handed that one out a second earlier.
+        //
+        // Sweeping on appear is what keeps that from accumulating.
+        // Each directory holds another member's rules text and
+        // signature, `tmp` is only purged under pressure, and a pile of
+        // those is the disclosure this screen is careful about
+        // everywhere else. The sheet that wrote them is gone by then,
+        // and so is any share sheet it presented.
         .reasonAlert("Couldn\u{2019}t prepare the file", reason: $writeError)
     }
 
@@ -89,10 +102,13 @@ struct MemberRulesProofView: View {
     /// to get wrong. Subjectless phrasing reads correctly either way.
     private var explanation: String {
         switch proof.standing {
-        case .noRules:
-            String(localized: "This group has no rules, so nothing was asked of anyone.")
-        case .notCollected:
-            String(localized: "This kind of group has no join approval, so nobody is asked to sign its rules.")
+        case .noRules, .notCollected:
+            // Unreachable, and left unwritten rather than translated:
+            // `GroupRulesMark` is nil for both, so those rows get no
+            // chevron and this sheet has no way to open on them. Two
+            // strings nothing can display would be two strings a
+            // translator has to render.
+            ""
         case .author:
             String(localized: "These rules were set for the group by this member. Founders don\u{2019}t sign their own.")
         case .signed:
@@ -239,7 +255,13 @@ struct MemberRulesProofView: View {
     /// Export would have sent the old ones.
     private func writeFile() async {
         let proof = proof
-        let previous = file
+        // Cleared first. The screen has already re-rendered from the
+        // live group, so between a proof change and its write landing
+        // `ShareLink` was still holding the previous proof's URL — a
+        // tap in that window exported the old bytes, which is what
+        // `.task(id: proof)` exists to prevent. The disabled label
+        // covers the gap.
+        file = nil
         let written: URL? = await Task.detached {
             do {
                 // Its own directory per write, and the readable name
@@ -258,7 +280,7 @@ struct MemberRulesProofView: View {
                 // it.
                 let directory = FileManager.default.temporaryDirectory
                     .appendingPathComponent(
-                        "rules-proof-\(UUID().uuidString)",
+                        "\(Self.exportDirectoryPrefix)\(UUID().uuidString)",
                         isDirectory: true
                     )
                 try FileManager.default.createDirectory(
@@ -279,13 +301,12 @@ struct MemberRulesProofView: View {
         // earlier write finishing last would otherwise publish itself
         // over the newer one.
         guard !Task.isCancelled else {
+            // Only what this write created, which no one has been
+            // handed: it never reached `file`.
             if let written { try? remove(written) }
             return
         }
         if let written {
-            // The write this one replaces, and only that: a different
-            // directory by construction.
-            if let previous { try? remove(previous) }
             file = written
         } else {
             // Cleared, not left pointing at the last successful write.
@@ -301,6 +322,29 @@ struct MemberRulesProofView: View {
     private func remove(_ export: URL) throws {
         try FileManager.default.removeItem(at: export.deletingLastPathComponent())
     }
+
+    /// Deletes export directories left by earlier presentations.
+    ///
+    /// Runs once on appear, before this sheet writes its own — so it
+    /// can only ever remove files whose sheet, and whose share sheet,
+    /// are both long gone.
+    private func sweepEarlierExports() async {
+        await Task.detached {
+            let fileManager = FileManager.default
+            let contents = try? fileManager.contentsOfDirectory(
+                at: fileManager.temporaryDirectory,
+                includingPropertiesForKeys: nil
+            )
+            for url in contents ?? []
+            where url.lastPathComponent.hasPrefix(Self.exportDirectoryPrefix) {
+                try? fileManager.removeItem(at: url)
+            }
+        }.value
+    }
+
+    /// Names the directories this screen owns, so the sweep can tell
+    /// them from everything else sharing `tmp`.
+    static let exportDirectoryPrefix = "rules-proof-"
 }
 
 

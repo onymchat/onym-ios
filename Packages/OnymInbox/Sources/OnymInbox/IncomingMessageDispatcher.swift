@@ -450,29 +450,51 @@ public struct IncomingMessageDispatcher: Sendable {
         // against, one row over, so it gets the same rule: a record
         // that proves something outranks one that doesn't.
         for (key, stored) in storedGroup?.memberProfiles ?? [:] {
-            guard stored.agreedToRules(groupID: invitation.groupID) else { continue }
             // Only rows the admin still lists. Re-inserting one they
             // dropped would make this directory permanently additive —
             // harmless while nothing removes members, and not something
             // to leave for whoever adds that.
-            guard let wire = profiles[key] else { continue }
+            guard let wire = profiles[key], stored.rulesSignature != nil else { continue }
             guard !wire.agreedToRules(groupID: invitation.groupID) else { continue }
-            // Composed and re-verified rather than spliced on trust: if
-            // the wire announces a different sending key for this
-            // member, the stored signature does not cover the row we
-            // would be writing, and keeping it would store a proven
-            // agreement in a form that reads back as forged.
-            let candidate = MemberProfile(
+            if stored.agreedToRules(groupID: invitation.groupID) {
+                // Composed and re-verified rather than spliced on
+                // trust: if the wire announces a different sending key
+                // for this member, the stored signature does not cover
+                // the row we would be writing, and keeping it would
+                // store a proven agreement in a form that reads back as
+                // forged.
+                let candidate = MemberProfile(
+                    alias: wire.alias,
+                    inboxPublicKey: wire.inboxPublicKey,
+                    sendingPubkey: wire.sendingPubkey,
+                    rulesHash: stored.rulesHash,
+                    rulesSignature: stored.rulesSignature,
+                    rulesText: stored.rulesText
+                )
+                if candidate.agreedToRules(groupID: invitation.groupID) {
+                    profiles[key] = candidate
+                    continue
+                }
+            }
+            // Neither proves anything, and we hold bytes the wire
+            // doesn't. Keep them without the wording, exactly as the
+            // self row does below.
+            //
+            // Skipping this was the same evidence loss one row over: a
+            // stored row with a signature and no text reads as "can't
+            // be checked", and letting a pre-rules invitation replace
+            // it wholesale destroyed the bytes and turned that into
+            // "didn't sign the group rules" — which is a claim, and a
+            // false one.
+            guard wire.rulesSignature == nil else { continue }
+            profiles[key] = MemberProfile(
                 alias: wire.alias,
                 inboxPublicKey: wire.inboxPublicKey,
                 sendingPubkey: wire.sendingPubkey,
                 rulesHash: stored.rulesHash,
                 rulesSignature: stored.rulesSignature,
-                rulesText: stored.rulesText
+                rulesText: nil
             )
-            if candidate.agreedToRules(groupID: invitation.groupID) {
-                profiles[key] = candidate
-            }
         }
         if let selfEntry = await selfMemberProfileEntry(for: ownerIdentityID) {
             // Identity wins locally; the agreement is whichever record

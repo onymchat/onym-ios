@@ -7920,22 +7920,6 @@
         }
       }
     },
-    "This group has no rules, so nothing was asked of anyone.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This group has no rules, so nothing was asked of anyone."
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "У этой группы нет правил, поэтому ни от кого ничего не требовалось."
-          }
-        }
-      }
-    },
     "Wrote the group rules": {
       "localizations": {
         "en": {
@@ -8012,22 +7996,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "УСТАНОВЛЕННЫЕ ПРАВИЛА"
-          }
-        }
-      }
-    },
-    "This kind of group has no join approval, so nobody is asked to sign its rules.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This kind of group has no join approval, so nobody is asked to sign its rules."
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "В группах такого типа нет одобрения вступления, поэтому подписывать правила никого не просят."
           }
         }
       }
