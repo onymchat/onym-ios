@@ -19,6 +19,10 @@ import Foundation
 ///    verify out-of-band when the label can't be cross-checked.
 ///  - `groupId` — echoed back so the inviter's approval handler can
 ///    cross-check that the joiner is asking about the right group.
+///  - `rulesHash` / `rulesSignature` — the joiner's agreement to the
+///    group's rules, if the invitation carried any. See `GroupRules`
+///    for the statement these cover and why the envelope's own
+///    signature could not serve.
 ///
 /// The OUTER envelope is the standard `SealedEnvelope` (X25519 +
 /// AES-GCM sealed to the inviter's intro pubkey + Ed25519-signed
@@ -58,6 +62,21 @@ public struct JoinRequestPayload: Codable, Equatable, Sendable {
     public let joinerSendingPublicKey: Data
     public let joinerDisplayLabel: String
     public let groupId: Data
+    /// 32-byte `SHA256` of the canonical rules text the joiner was
+    /// shown. Absent when the invitation carried no rules, and when the
+    /// joiner runs a build that predates them.
+    ///
+    /// Carried even though the inviter knows their own rules, because
+    /// it is what distinguishes "agreed to an older version" from
+    /// "signed nothing that verifies" — without it a stale agreement
+    /// and a forged one look the same, and only one of them is worth
+    /// asking the joiner to redo.
+    public let rulesHash: Data?
+    /// 64-byte Ed25519 signature over
+    /// `GroupRules.statement(groupID:rulesHash:joinerSendingPublicKey:)`,
+    /// made with the joiner's `joinerSendingPublicKey`. Verifiable by
+    /// any member, since that key is announced to all of them.
+    public let rulesSignature: Data?
 
     enum CodingKeys: String, CodingKey {
         case joinerInboxPublicKey = "joiner_inbox_pub"
@@ -66,6 +85,8 @@ public struct JoinRequestPayload: Codable, Equatable, Sendable {
         case joinerSendingPublicKey = "joiner_sending_pub"
         case joinerDisplayLabel = "joiner_display_label"
         case groupId = "group_id"
+        case rulesHash = "rules_hash"
+        case rulesSignature = "rules_signature"
     }
 
     public init(
@@ -74,7 +95,9 @@ public struct JoinRequestPayload: Codable, Equatable, Sendable {
         joinerLeafHash: Data?,
         joinerSendingPublicKey: Data,
         joinerDisplayLabel: String,
-        groupId: Data
+        groupId: Data,
+        rulesHash: Data? = nil,
+        rulesSignature: Data? = nil
     ) throws {
         guard joinerInboxPublicKey.count == 32 else {
             throw JoinRequestPayloadError.shape(
@@ -105,8 +128,39 @@ public struct JoinRequestPayload: Codable, Equatable, Sendable {
         self.joinerBlsPublicKey = joinerBlsPublicKey
         self.joinerLeafHash = joinerLeafHash
         self.joinerSendingPublicKey = joinerSendingPublicKey
+        try Self.validateAgreement(hash: rulesHash, signature: rulesSignature)
         self.joinerDisplayLabel = joinerDisplayLabel
         self.groupId = groupId
+        self.rulesHash = rulesHash
+        self.rulesSignature = rulesSignature
+    }
+
+    /// Shape only — whether the signature *verifies* is
+    /// `GroupRules.isAgreement`, which needs the rules text this type
+    /// deliberately doesn't carry (the inviter has it; sending it back
+    /// would let a joiner choose the text their own signature is
+    /// checked against).
+    private static func validateAgreement(hash: Data?, signature: Data?) throws {
+        if let hash, hash.count != 32 {
+            throw JoinRequestPayloadError.shape(
+                "rulesHash: expected 32 bytes, got \(hash.count)"
+            )
+        }
+        if let signature, signature.count != 64 {
+            throw JoinRequestPayloadError.shape(
+                "rulesSignature: expected 64 bytes, got \(signature.count)"
+            )
+        }
+        // Half an agreement is not one. A signature with nothing naming
+        // what it covers can't be checked, and a hash with no signature
+        // is a claim rather than a proof — either alone would have to
+        // be treated as "didn't sign", so say so at the boundary
+        // instead of leaving every reader to remember it.
+        if (hash == nil) != (signature == nil) {
+            throw JoinRequestPayloadError.shape(
+                "rulesHash and rulesSignature must be present together"
+            )
+        }
     }
 
     public init(from decoder: Decoder) throws {
@@ -146,8 +200,13 @@ public struct JoinRequestPayload: Codable, Equatable, Sendable {
         self.joinerBlsPublicKey = bls
         self.joinerLeafHash = leaf
         self.joinerSendingPublicKey = sending
+        let rulesHash = try c.decodeIfPresent(Data.self, forKey: .rulesHash)
+        let rulesSignature = try c.decodeIfPresent(Data.self, forKey: .rulesSignature)
+        try Self.validateAgreement(hash: rulesHash, signature: rulesSignature)
         self.joinerDisplayLabel = label
         self.groupId = gid
+        self.rulesHash = rulesHash
+        self.rulesSignature = rulesSignature
     }
 }
 

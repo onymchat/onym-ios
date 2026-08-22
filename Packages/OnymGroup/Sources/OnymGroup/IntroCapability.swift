@@ -29,20 +29,29 @@ import Foundation
 /// → the link goes silent. It also means link interception doesn't
 /// leak the inviter's long-term inbox key.
 ///
-/// ## What's safe to ship in `groupName`
+/// ## What's safe to ship in `groupName` and `rules`
 ///
-/// Optional, plaintext, **public**. The link transits cleartext
-/// channels (Telegram, SMS, etc.) — anyone observing the link can
-/// read this string. Useful for the joiner's "join this group?"
-/// preview. For sensitive group names, leave nil and let the inviter
-/// convey context out-of-band.
+/// Optional, plaintext, **public** — both of them. The link transits
+/// cleartext channels (Telegram, SMS, etc.), so anyone observing the
+/// link can read them. `groupName` is the joiner's "join this group?"
+/// preview; `rules` is what they are asked to agree to before their
+/// name and keys leave the device, and it has to travel *with* the
+/// link because there is no other channel to fetch it from before
+/// joining — a joiner asked to agree to a hash they cannot read has
+/// not agreed to anything. For sensitive group names or rules, leave
+/// them nil and let the inviter convey context out-of-band.
+///
+/// `rules` is capped at `GroupRules.maxBytes` — UTF-8 bytes, which is
+/// the only unit Swift and Kotlin compute identically, and the unit the
+/// link actually spends — so the encoded link still fits a scannable QR
+/// code. See that constant for the measurements.
 ///
 /// ## Cross-platform contract
 ///
 /// The wire shape mirrors onym-android's `IntroCapability.kt` byte
 /// for byte:
 ///
-///  - JSON keys: `intro_pub`, `group_id`, `group_name`
+///  - JSON keys: `intro_pub`, `group_id`, `group_name`, `rules`
 ///  - Inner field encoding: standard base64 *with* padding
 ///    (Swift's default `JSONEncoder.dataEncodingStrategy = .base64`,
 ///     matching Android's `Base64.getEncoder()`)
@@ -73,6 +82,17 @@ public struct IntroCapability: Codable, Equatable, Sendable, Identifiable {
     /// Optional display name. Public — see type doc.
     public let groupName: String?
 
+    /// The group's rules, as the founder wrote them. Public — see type
+    /// doc. Canonical (ends-trimmed) and non-empty, or nil.
+    ///
+    /// Carried so the joiner can read them on the confirmation screen
+    /// and sign them: the signature in `JoinRequestPayload` covers
+    /// `SHA256` of exactly this text, which is why it is stored the way
+    /// `GroupRules.canonical` produces rather than however it was
+    /// typed. A link minted by an older build has none, and a joiner
+    /// reaching it is asked to agree to nothing.
+    public let rules: String?
+
     static let appLinkBase = "https://onym.app/join?c="
     static let customSchemeBase = "onym://join?c="
 
@@ -80,9 +100,15 @@ public struct IntroCapability: Codable, Equatable, Sendable, Identifiable {
         case introPublicKey = "intro_pub"
         case groupId = "group_id"
         case groupName = "group_name"
+        case rules = "rules"
     }
 
-    public init(introPublicKey: Data, groupId: Data, groupName: String? = nil) throws {
+    public init(
+        introPublicKey: Data,
+        groupId: Data,
+        groupName: String? = nil,
+        rules: String? = nil
+    ) throws {
         guard introPublicKey.count == 32 else {
             throw InvalidIntroCapability.shape(
                 "introPublicKey: expected 32 bytes, got \(introPublicKey.count)"
@@ -93,9 +119,17 @@ public struct IntroCapability: Codable, Equatable, Sendable, Identifiable {
                 "groupId: expected 32 bytes, got \(groupId.count)"
             )
         }
+        let normalizedRules = GroupRules.normalized(rules)
+        if let normalizedRules, !GroupRules.fits(normalizedRules) {
+            throw InvalidIntroCapability.shape(
+                "rules: expected at most \(GroupRules.maxBytes) UTF-8 bytes, "
+                + "got \(normalizedRules.utf8.count)"
+            )
+        }
         self.introPublicKey = introPublicKey
         self.groupId = groupId
         self.groupName = groupName
+        self.rules = normalizedRules
     }
 
     public init(from decoder: Decoder) throws {
@@ -112,9 +146,26 @@ public struct IntroCapability: Codable, Equatable, Sendable, Identifiable {
                 "groupId: expected 32 bytes, got \(gid.count)"
             )
         }
+        let rules = GroupRules.normalized(
+            try c.decodeIfPresent(String.self, forKey: .rules)
+        )
+        // Rejected, not truncated. Both platforms enforce the cap when
+        // they mint a link, so an over-long one is corruption or
+        // mischief — and the failure modes of the alternatives are
+        // worse than an unusable link: truncating would have the joiner
+        // sign rules that end mid-sentence, and dropping the field
+        // would walk them into a group whose rules they were never
+        // shown while the founder believes otherwise.
+        if let rules, !GroupRules.fits(rules) {
+            throw InvalidIntroCapability.shape(
+                "rules: expected at most \(GroupRules.maxBytes) UTF-8 bytes, "
+                + "got \(rules.utf8.count)"
+            )
+        }
         self.introPublicKey = pub
         self.groupId = gid
         self.groupName = try c.decodeIfPresent(String.self, forKey: .groupName)
+        self.rules = rules
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -122,6 +173,7 @@ public struct IntroCapability: Codable, Equatable, Sendable, Identifiable {
         try c.encode(introPublicKey, forKey: .introPublicKey)
         try c.encode(groupId, forKey: .groupId)
         try c.encodeIfPresent(groupName, forKey: .groupName)
+        try c.encodeIfPresent(rules, forKey: .rules)
     }
 
     /// Encode to the base64-of-JSON payload that lands in the URL
