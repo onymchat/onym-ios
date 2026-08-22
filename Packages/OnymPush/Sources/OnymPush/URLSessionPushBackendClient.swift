@@ -8,6 +8,11 @@ import Foundation
 ///   base64 strings and timestamps as RFC 3339 UTC seconds.
 /// - Errors arrive as `{ "error": <code>, "message": <text> }` and
 ///   surface as `PushClientError.rejected` with the code verbatim.
+/// - A `nil` `deviceToken` omits the JSON key entirely (synthesized
+///   Codable). That missing-key form IS the contract: the backend's
+///   field is `Option<String>` (serde reads an absent key as `None`;
+///   `deny_unknown_fields` guards only the token envelope struct) and
+///   its API tests exercise bodies with no `deviceToken` key.
 /// - Session signatures are single-use server-side.
 public struct URLSessionPushBackendClient: PushBackendClient {
     /// The deployed push backend for this interface.
@@ -126,7 +131,7 @@ public struct URLSessionPushBackendClient: PushBackendClient {
         decoder.dateDecodingStrategy = .custom { decoder in
             let container = try decoder.singleValueContainer()
             let value = try container.decode(String.self)
-            if let date = Self.wholeSeconds.date(from: value) ?? Self.fractional.date(from: value) {
+            if let date = Self.fractional.date(from: value) ?? Self.wholeSeconds.date(from: value) {
                 return date
             }
             throw DecodingError.dataCorruptedError(

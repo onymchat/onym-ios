@@ -21,8 +21,11 @@ public actor PushRegistrationInteractor {
     /// stale-registration sweep (60 days) never reaps a live device.
     private let refreshInterval: TimeInterval
     /// Also re-register when the backend's own `expiresAt` is this
-    /// close, whichever comes first.
-    private let expiryMargin: TimeInterval = 7 * 24 * 3600
+    /// close, whichever comes first. Capped at half the window the
+    /// backend actually granted: a margin as long as the whole window
+    /// would make "far enough from expiry" unsatisfiable and turn
+    /// every foreground into a register (and a spent signature).
+    private static let maxExpiryMargin: TimeInterval = 7 * 24 * 3600
     private let clock: @Sendable () -> Date
 
     private var apnsToken: Data?
@@ -55,9 +58,22 @@ public actor PushRegistrationInteractor {
         self.clock = clock
     }
 
+    /// Test-only observability for errors reconciliation deliberately
+    /// swallows (registration is retried, and per the no-activity-log
+    /// stance nothing is recorded about the failure). `nil` in
+    /// production.
+    private var onReconcileFailure: (@Sendable (Error) -> Void)?
+
+    public func setOnReconcileFailure(_ hook: (@Sendable (Error) -> Void)?) {
+        onReconcileFailure = hook
+    }
+
     // MARK: - Inputs
 
-    /// APNs delivered (or rotated) the device token.
+    /// APNs delivered (or rotated) the device token. On rotation the
+    /// previous token is queued for unregister (see `reconcilePass`):
+    /// the backend keys registrations by token hash, so the old row
+    /// would otherwise stay wake-able until the 60-day sweep.
     public func updateToken(_ token: Data) {
         apnsToken = token
         scheduleReconcile()
@@ -159,13 +175,27 @@ public actor PushRegistrationInteractor {
               let token = apnsToken,
               let subscriptions else { return }
 
+        // APNs rotated the token: the backend keys registrations by
+        // token hash, so the replaced row would stay wake-able until
+        // the 60-day sweep. Queue the old token through the existing
+        // pending-unregister path (persisted, retried) and try to
+        // drain it now, before its replacement registers.
+        if let previous = preferences.lastRegisteredToken,
+           previous != token,
+           preferences.pendingUnregisterToken == nil {
+            preferences.setPendingUnregister(token: previous)
+            await drainPendingUnregister()
+        }
+
         let fingerprint = Self.fingerprint(token: token, subscriptions: subscriptions)
         let now = clock()
         if fingerprint == preferences.lastRegistrationFingerprint,
            let registeredAt = preferences.lastRegisteredAt,
            now.timeIntervalSince(registeredAt) < refreshInterval,
            let expiresAt = preferences.registrationExpiresAt,
-           now < expiresAt.addingTimeInterval(-expiryMargin) {
+           now < expiresAt.addingTimeInterval(
+               -Self.expiryMargin(registeredAt: registeredAt, expiresAt: expiresAt)
+           ) {
             return
         }
 
@@ -199,6 +229,17 @@ public actor PushRegistrationInteractor {
                     subscriptions: subscriptions
                 )
             )
+            // Re-read the opt-in *after* the awaits: a disable that
+            // landed while the register was in flight already cleared
+            // the record and must win. Recording here would leave prefs
+            // claiming "registered" while disabled — and the register
+            // that just reached the backend must be torn down, so the
+            // token goes onto the pending-unregister path instead (the
+            // follow-up pass the disable queued drains it).
+            guard preferences.isEnabled else {
+                preferences.setPendingUnregister(token: token)
+                return
+            }
             preferences.recordRegistration(
                 fingerprint: fingerprint,
                 token: token,
@@ -218,7 +259,16 @@ public actor PushRegistrationInteractor {
             // Deliberately quiet: registration is retried on the next
             // input change or foreground, and per the no-activity-log
             // stance nothing user-linked is recorded about the failure.
+            onReconcileFailure?(error)
         }
+    }
+
+    /// How close to `expiresAt` counts as "expiring": at most
+    /// `maxExpiryMargin`, but never more than half the window the
+    /// backend granted, so a short window still leaves a usable
+    /// "already registered" period.
+    static func expiryMargin(registeredAt: Date, expiresAt: Date) -> TimeInterval {
+        min(maxExpiryMargin, max(0, expiresAt.timeIntervalSince(registeredAt)) / 2)
     }
 
     private func drainPendingUnregister() async {
@@ -231,6 +281,7 @@ public actor PushRegistrationInteractor {
             }
         } catch {
             // Stays pending; retried at the next reconcile opportunity.
+            onReconcileFailure?(error)
         }
     }
 

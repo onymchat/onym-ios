@@ -242,6 +242,7 @@ targets:
       - package: OnymModerationUI
       - package: OnymDiscovery
       - package: OnymOnboarding
+      - package: OnymPush
 
   OnymIOSUITests:
     type: bundle.ui-testing

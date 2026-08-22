@@ -36,7 +36,9 @@ public struct PushTokenEnvelope: Codable, Sendable, Equatable {
     }
 
     public enum SealError: Error, Equatable {
-        /// The fetched registration key is not a 32-byte X25519 key.
+        /// The fetched registration key is not a usable X25519 key —
+        /// wrong length, or a point (e.g. all-zero / low-order) whose
+        /// key agreement CryptoKit rejects.
         case invalidServerKey
     }
 
@@ -50,7 +52,12 @@ public struct PushTokenEnvelope: Codable, Sendable, Equatable {
             throw SealError.invalidServerKey
         }
         let ephemeral = Curve25519.KeyAgreement.PrivateKey()
-        let shared = try ephemeral.sharedSecretFromKeyAgreement(with: serverKey)
+        // Decoding accepts any 32 bytes; the agreement is where a
+        // degenerate point (all-zero, low-order) actually fails. Both
+        // are the same defect from the caller's view: not a server key.
+        guard let shared = try? ephemeral.sharedSecretFromKeyAgreement(with: serverKey) else {
+            throw SealError.invalidServerKey
+        }
         let key = shared.hkdfDerivedSymmetricKey(
             using: SHA256.self,
             salt: hkdfSalt,
