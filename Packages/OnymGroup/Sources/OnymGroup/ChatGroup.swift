@@ -186,7 +186,7 @@ public struct ChatGroup: Identifiable, Equatable, Sendable {
     /// `groupType` themselves.
     public func isAdmin(blsPublicKey: Data) -> Bool {
         guard let storedAdminHex = adminPubkeyHex?.lowercased() else { return false }
-        let candidate = blsPublicKey.map { String(format: "%02x", $0) }.joined().lowercased()
+        let candidate = blsPublicKey.hexString.lowercased()
         return candidate == storedAdminHex
     }
 }
