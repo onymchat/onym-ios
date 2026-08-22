@@ -28,9 +28,11 @@ public actor PushRegistrationInteractor {
     private var apnsToken: Data?
     private var subscriptions: [PushSubscription]?
     private var pendingReconcile: Task<Void, Never>?
-    /// Reconciliation must never overlap itself: two interleaved
-    /// passes would spend two single-use session signatures on the
-    /// same state. One pass runs; passes requested meanwhile coalesce
+    /// Reconciliation must never overlap itself — nor the opt-out
+    /// drain, which takes the same slot: two interleaved passes would
+    /// spend two single-use session signatures on the same state, and
+    /// a register still in flight could land *after* an opt-out's
+    /// unregister. One pass runs; passes requested meanwhile coalesce
     /// into exactly one follow-up.
     private var reconcileInFlight = false
     private var reconcileQueuedWhileInFlight = false
@@ -89,7 +91,15 @@ public actor PushRegistrationInteractor {
         preferences.clearRegistration()
         guard let token else { return }
         preferences.setPendingUnregister(token: token)
+        // The drain takes the same single pass slot reconciliation
+        // uses: running alongside a pass would spend a second
+        // single-use signature, and that pass's register could land
+        // *after* this unregister and leave the device registered. A
+        // pass holding the slot drains this before it releases it.
+        guard claimPass() else { return }
+        defer { reconcileInFlight = false }
         await drainPendingUnregister()
+        await runQueuedPasses()
     }
 
     /// An opportunity moment (app foregrounded): re-run reconciliation
@@ -111,16 +121,33 @@ public actor PushRegistrationInteractor {
     }
 
     private func reconcile() async {
+        guard claimPass() else { return }
+        defer { reconcileInFlight = false }
+        await reconcilePass()
+        await runQueuedPasses()
+    }
+
+    /// Claims the single pass slot. When a pass already holds it, this
+    /// records that another is wanted — the holder runs it before
+    /// releasing — and yields.
+    private func claimPass() -> Bool {
         if reconcileInFlight {
             reconcileQueuedWhileInFlight = true
-            return
+            return false
         }
         reconcileInFlight = true
-        defer { reconcileInFlight = false }
-        repeat {
+        return true
+    }
+
+    /// Whatever was requested during a pass collapses into exactly one
+    /// follow-up, which re-checks the fingerprint. No suspension point
+    /// separates the last check here from releasing the slot, so a
+    /// request can never be queued and then stranded.
+    private func runQueuedPasses() async {
+        while reconcileQueuedWhileInFlight {
             reconcileQueuedWhileInFlight = false
             await reconcilePass()
-        } while reconcileQueuedWhileInFlight
+        }
     }
 
     private func reconcilePass() async {
@@ -141,6 +168,12 @@ public actor PushRegistrationInteractor {
            now < expiresAt.addingTimeInterval(-expiryMargin) {
             return
         }
+
+        // Read before the attempt, deliberately: an unregister still
+        // unhonored *now* is superseded by the registration about to
+        // replace it, but one the user asks for *during* the attempt
+        // is the newer instruction and must survive it.
+        let supersededUnregister = preferences.pendingUnregisterToken
 
         do {
             let serverKey = try await client.registrationKey()
@@ -172,10 +205,13 @@ public actor PushRegistrationInteractor {
                 at: timestamp,
                 expiresAt: response.expiresAt
             )
-            // A registration for this token supersedes any unregister
-            // still pending for it (replace-all upsert): draining it
-            // later would tear down the live registration.
-            if preferences.pendingUnregisterToken == token {
+            // A registration for this token retires an unregister that
+            // was already pending for it (replace-all upsert): draining
+            // it later would tear down the live registration. An
+            // opt-out that arrived mid-attempt is left alone — the
+            // follow-up pass drains it.
+            if supersededUnregister == token,
+               preferences.pendingUnregisterToken == token {
                 preferences.clearPendingUnregister()
             }
         } catch {
