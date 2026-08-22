@@ -47,6 +47,20 @@ struct ChatMembersView: View {
     }
 
     @State private var activeSheet: ActiveSheet?
+    /// Standings, derived once per group snapshot rather than per
+    /// render.
+    ///
+    /// Each one is an Ed25519 verify plus a SHA-256, and this body
+    /// re-renders off the group stream and on every keystroke in the
+    /// rename alert. Measured on the simulator: 1.36 ms for 32 members,
+    /// 9.35 ms for 256 — over half a frame, on the main actor, for an
+    /// answer that cannot have changed in between.
+    ///
+    /// Keyed on the whole `ChatGroup` value, so the cache is correct by
+    /// construction rather than by a list of invalidation triggers
+    /// someone has to keep in step: everything a standing depends on is
+    /// inside the value being compared.
+    @State private var standings: [String: GroupRulesStanding] = [:]
     /// Drives the admin-only rename alert.
     @State private var showRename = false
     @State private var renameText = ""
@@ -90,6 +104,9 @@ struct ChatMembersView: View {
                     .accessibilityIdentifier("members.share_invite_button")
                 }
             }
+        }
+        .onChange(of: currentGroup, initial: true) { _, group in
+            standings = group.map(Self.derivedStandings(in:)) ?? [:]
         }
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
@@ -344,10 +361,12 @@ struct ChatMembersView: View {
                 }
             }
             Spacer(minLength: 0)
-            // Only where there is something to hand someone. A
-            // chevron on a row whose sheet would say "nothing to show"
-            // is an invitation to a dead end.
-            if row.standing != .noRules {
+            // Gated on the mark, not on one standing: `GroupRulesMark`
+            // is nil for `.notCollected` too, and such a row was
+            // getting a chevron onto a sheet with no verdict, no
+            // headline and an Export button for a group that collects
+            // nothing — the dead end this rule was written to avoid.
+            if GroupRulesMark(row.standing) != nil {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(OnymTokens.text3)
@@ -358,7 +377,7 @@ struct ChatMembersView: View {
         .contentShape(Rectangle())
 
         return Group {
-            if row.standing == .noRules {
+            if GroupRulesMark(row.standing) == nil {
                 content
             } else {
                 Button { activeSheet = .member(row) } label: { content }
@@ -417,6 +436,13 @@ struct ChatMembersView: View {
 
     // MARK: - Row construction
 
+    /// Every member's standing for one snapshot of the group.
+    nonisolated static func derivedStandings(in group: ChatGroup) -> [String: GroupRulesStanding] {
+        group.memberProfiles.keys.reduce(into: [:]) { out, key in
+            out[key] = group.rulesStanding(ofMemberWith: key)
+        }
+    }
+
     private func rows(for group: ChatGroup) -> [MemberRow] {
         let activeKey = activeBlsHex
         return group.memberProfiles
@@ -427,7 +453,7 @@ struct ChatMembersView: View {
                     blsPrefix: String(key.prefix(12)),
                     displayAlias: profile.alias.isEmpty ? "(unnamed)" : profile.alias,
                     isSelf: activeKey.map { $0 == key } ?? false,
-                    standing: group.rulesStanding(ofMemberWith: key) ?? .noRules
+                    standing: standings[key] ?? .noRules
                 )
             }
             .sorted { lhs, rhs in

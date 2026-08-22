@@ -68,7 +68,7 @@ struct GroupRulesMark {
         case .doesNotVerify:
             self.init(
                 symbol: "exclamationmark.triangle.fill",
-                text: String(localized: "Their signature on the rules doesn\u{2019}t check out"),
+                text: String(localized: "Signature on the rules doesn\u{2019}t check out"),
                 color: OnymTokens.red
             )
         }

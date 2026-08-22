@@ -453,8 +453,10 @@ public struct IncomingMessageDispatcher: Sendable {
             // "didn't sign", by version skew rather than by any code
             // path.
             //
-            // Scoped by owner as well as group, like every other lookup
-            // in this file: two identities on one device hold two rows
+            // Scoped by owner as well as group — as the materializer
+            // and the join-guard both are (the replay shortcut below
+            // matches on the group alone, which is its own question):
+            // two identities on one device hold two rows
             // for the same group, and the wrong one would stamp
             // somebody else's agreement onto this profile.
             let stored = await groupRepository.currentGroups()

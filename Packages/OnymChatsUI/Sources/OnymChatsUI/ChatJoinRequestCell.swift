@@ -244,7 +244,7 @@ final class ChatJoinRequestCell: UITableViewCell {
         case .notSigned:
             (String(localized: "Didn\u{2019}t sign the group rules"), OnymTokens.amber)
         case .invalid:
-            (String(localized: "Their signature on the rules doesn\u{2019}t check out"), OnymTokens.red)
+            (String(localized: "Signature on the rules doesn\u{2019}t check out"), OnymTokens.red)
         }
     }
 

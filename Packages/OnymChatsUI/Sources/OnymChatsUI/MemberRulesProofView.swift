@@ -48,13 +48,13 @@ struct MemberRulesProofView: View {
             }
         }
         .task(id: proof) { await writeFile() }
-        .onDisappear {
-            // Actually delivered rather than merely intended: `tmp` is
-            // swept at the OS's discretion, which can be days. The copy
-            // that matters is the one already handed to the share
-            // sheet.
-            if let file { try? FileManager.default.removeItem(at: file) }
-        }
+        // Deliberately *not* deleted on dismiss. `ShareLink` hands out
+        // a URL, not a copy, and an AirDrop target or a share extension
+        // that reads it lazily loses the file if this sheet tidies up
+        // first — the export silently fails at the moment it is used.
+        // The replacement-on-write below covers the case that matters
+        // (a proof about a different member left behind), and `tmp` is
+        // the OS's to sweep.
         .reasonAlert("Couldn\u{2019}t prepare the file", reason: $writeError)
     }
 
@@ -78,8 +78,17 @@ struct MemberRulesProofView: View {
         .padding(.top, 8)
     }
 
-    /// Says what the mark means for this member, in the terms someone
-    /// asking about them would use.
+    /// Says what the mark means for this member.
+    ///
+    /// Written without a subject pronoun, rather than in the third
+    /// person it started in. These strings are read on your *own* row
+    /// as often as on anyone else's — the joiner checking their own
+    /// agreement is the case this screen exists for, and it sits next
+    /// to a `(you)` badge — so "they read these rules" and "their
+    /// signature doesn't check out" were about the reader. The
+    /// alternative was a second-person variant of every line behind an
+    /// `isSelf` flag: twice the strings for translators, and a branch
+    /// to get wrong. Subjectless phrasing reads correctly either way.
     private var explanation: String {
         switch proof.standing {
         case .noRules:
@@ -87,17 +96,17 @@ struct MemberRulesProofView: View {
         case .notCollected:
             String(localized: "This kind of group has no join approval, so nobody is asked to sign its rules.")
         case .author:
-            String(localized: "They set these rules for the group. Founders don\u{2019}t sign their own.")
+            String(localized: "These rules were set for the group by this member. Founders don\u{2019}t sign their own.")
         case .signed:
-            String(localized: "They read these rules and signed them with this identity\u{2019}s key before joining.")
+            String(localized: "These rules were read and signed with this identity\u{2019}s key before joining.")
         case .signedEarlierVersion:
-            String(localized: "They signed the rules as they were written when they joined. The group has changed them since.")
+            String(localized: "Signed as the rules were written at the time of joining. The group has changed them since.")
         case .didNotSign:
-            String(localized: "They joined before this group had rules, or from an app version that predates them.")
+            String(localized: "Joined before this group had rules, or from an app version that predates them.")
         case .unknownRules:
-            String(localized: "A signature is stored for them, but the wording it covers isn\u{2019}t on this device, so nothing here can check it.")
+            String(localized: "A signature is stored, but the wording it covers isn\u{2019}t on this device, so nothing here can check it.")
         case .doesNotVerify:
-            String(localized: "A signature is stored for them and it doesn\u{2019}t check out. Nothing here can be shown as their agreement.")
+            String(localized: "A signature is stored and it doesn\u{2019}t check out. Nothing here can be shown as an agreement.")
         }
     }
 
@@ -125,7 +134,7 @@ struct MemberRulesProofView: View {
                 // comparing this against the rules section a tap away
                 // should not have to work out why they differ.
                 Label(
-                    String(localized: "The group\u{2019}s rules have changed since. This is the wording they agreed to."),
+                    String(localized: "The group\u{2019}s rules have changed since. This is the wording that was agreed to."),
                     systemImage: "clock.arrow.circlepath"
                 )
                 .font(.system(size: 12))
