@@ -451,17 +451,21 @@ public struct IncomingMessageDispatcher: Sendable {
         // that proves something outranks one that doesn't.
         for (key, stored) in storedGroup?.memberProfiles ?? [:] {
             guard stored.agreedToRules(groupID: invitation.groupID) else { continue }
-            let wire = profiles[key]
-            guard wire?.agreedToRules(groupID: invitation.groupID) != true else { continue }
+            // Only rows the admin still lists. Re-inserting one they
+            // dropped would make this directory permanently additive —
+            // harmless while nothing removes members, and not something
+            // to leave for whoever adds that.
+            guard let wire = profiles[key] else { continue }
+            guard !wire.agreedToRules(groupID: invitation.groupID) else { continue }
             // Composed and re-verified rather than spliced on trust: if
             // the wire announces a different sending key for this
             // member, the stored signature does not cover the row we
             // would be writing, and keeping it would store a proven
             // agreement in a form that reads back as forged.
             let candidate = MemberProfile(
-                alias: wire?.alias ?? stored.alias,
-                inboxPublicKey: wire?.inboxPublicKey ?? stored.inboxPublicKey,
-                sendingPubkey: wire?.sendingPubkey ?? stored.sendingPubkey,
+                alias: wire.alias,
+                inboxPublicKey: wire.inboxPublicKey,
+                sendingPubkey: wire.sendingPubkey,
                 rulesHash: stored.rulesHash,
                 rulesSignature: stored.rulesSignature,
                 rulesText: stored.rulesText
@@ -601,9 +605,10 @@ public struct IncomingMessageDispatcher: Sendable {
         // Was this thread already on the device? Relays replay the
         // inbox on every reconnect, so a re-delivered invitation is
         // routine — only the first one is a "you joined" moment.
-        let existing = await groupRepository.currentGroups().contains {
-            $0.id == groupIDHex && $0.ownerIdentityID == ownerIdentityID
-        }
+        // Answered by the snapshot already taken for the agreement
+        // merge above, rather than by a second fetch with the same
+        // predicate.
+        let existing = storedGroup != nil
 
         await groupRepository.insert(group)
 

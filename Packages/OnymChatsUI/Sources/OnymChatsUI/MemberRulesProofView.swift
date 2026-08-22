@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 import OnymDesign
 import OnymGroup
 
@@ -52,8 +51,8 @@ struct MemberRulesProofView: View {
         // a URL, not a copy, and an AirDrop target or a share extension
         // that reads it lazily loses the file if this sheet tidies up
         // first — the export failing at the moment it is used. What is
-        // left behind is one small file per member opened, each
-        // overwritten on the next open, in a directory the OS sweeps.
+        // left behind is one small directory per sheet opened, in a
+        // location the OS sweeps.
         .reasonAlert("Couldn\u{2019}t prepare the file", reason: $writeError)
     }
 
@@ -241,38 +240,52 @@ struct MemberRulesProofView: View {
     private func writeFile() async {
         let proof = proof
         let previous = file
-        // Off the main actor: encode-and-write is small today, but it
-        // runs on the sheet's first frame, and "small today" is how a
-        // hitch gets built in.
         let written: URL? = await Task.detached {
             do {
-                let url = FileManager.default.temporaryDirectory
-                    .appendingPathComponent(proof.suggestedFileName)
+                // Its own directory per write, and the readable name
+                // inside it.
+                //
+                // The filename is stable for one member — group, alias,
+                // key prefix — so two writes for the same sheet used to
+                // contend for one path. Nothing there was safe: the
+                // detached writes race on disk whatever the guard below
+                // decides, so a superseded write could leave stale
+                // bytes under a URL the fresh one had published; and
+                // deleting "the previous file" deleted the live one,
+                // handing the share sheet a dead link. A directory per
+                // write makes each one addressable, so cleaning up
+                // after yourself can't take somebody else's file with
+                // it.
+                let directory = FileManager.default.temporaryDirectory
+                    .appendingPathComponent(
+                        "rules-proof-\(UUID().uuidString)",
+                        isDirectory: true
+                    )
+                try FileManager.default.createDirectory(
+                    at: directory,
+                    withIntermediateDirectories: true
+                )
+                let url = directory.appendingPathComponent(proof.suggestedFileName)
                 try proof.jsonData().write(to: url, options: .atomic)
                 return url
             } catch {
                 return nil
             }
         }.value
+
         // A superseded write must not land. `.task(id:)` cancels this
         // task, but cancellation doesn't reach `Task.detached` and
         // awaiting a non-throwing task doesn't throw on cancel — so an
-        // earlier write finishing last would assign its URL and delete
-        // the newer one as `previous`, leaving Export on the old
-        // proof's bytes. Which is what `.task(id:)` was added to stop.
+        // earlier write finishing last would otherwise publish itself
+        // over the newer one.
         guard !Task.isCancelled else {
-            if let written { try? FileManager.default.removeItem(at: written) }
+            if let written { try? remove(written) }
             return
         }
         if let written {
-            // Replaces the previous write from *this* sheet — the proof
-            // changed under it. A proof for a different member was
-            // written by a different presentation and is not reachable
-            // from here; it keeps its own name, is overwritten the next
-            // time that member is opened, and is `tmp`'s to sweep.
-            if let previous, previous != written {
-                try? FileManager.default.removeItem(at: previous)
-            }
+            // The write this one replaces, and only that: a different
+            // directory by construction.
+            if let previous { try? remove(previous) }
             file = written
         } else {
             // Cleared, not left pointing at the last successful write.
@@ -282,6 +295,11 @@ struct MemberRulesProofView: View {
             file = nil
             writeError = String(localized: "This device couldn\u{2019}t write the proof file.")
         }
+    }
+
+    /// Removes a written export and the directory minted for it.
+    private func remove(_ export: URL) throws {
+        try FileManager.default.removeItem(at: export.deletingLastPathComponent())
     }
 }
 
