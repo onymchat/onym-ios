@@ -104,9 +104,36 @@ public struct URLSessionPushBackendClient: PushBackendClient {
         )
     }
 
+    /// RFC 3339 permits fractional seconds; Foundation's built-in
+    /// `.iso8601` strategy accepts only the whole-second form, so both
+    /// shapes are tried — same rationale as the moderation package's
+    /// `ModerationJSON.decoder()` (built once, replicated here rather
+    /// than imported to keep this package dependency-free).
+    private static let fractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    private static let wholeSeconds: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+
     private func decode<Value: Decodable>(_ data: Data) throws -> Value {
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let value = try container.decode(String.self)
+            if let date = Self.wholeSeconds.date(from: value) ?? Self.fractional.date(from: value) {
+                return date
+            }
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "expected an RFC 3339 timestamp"
+            )
+        }
         do {
             return try decoder.decode(Value.self, from: data)
         } catch {

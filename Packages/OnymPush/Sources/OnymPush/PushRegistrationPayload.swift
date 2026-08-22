@@ -29,7 +29,8 @@ public struct PushSubscription: Codable, Sendable, Equatable {
 /// The signature covers the raw APNs token even though it travels
 /// encrypted (see `PushTokenEnvelope`), binding the envelope's content
 /// to the session — and it covers the subscription list **exactly as
-/// transmitted**, in wire order, with no normalization.
+/// transmitted**: wire order, grouping, and relay counts, with no
+/// normalization, so no two distinct transmitted lists share bytes.
 ///
 /// The user key authenticates the session only. The backend verifies
 /// it and discards it; nothing derived from it is stored.
@@ -73,13 +74,23 @@ public enum SignedPushSessionPayload {
         )
     }
 
-    /// SHA-256 over each `(tag, relay)` pair in transmitted order,
-    /// each field length-prefixed. Mirrors `subscriptions_digest`.
+    /// SHA-256 over the subscription list exactly as transmitted,
+    /// grouping included: for each subscription in wire order,
+    /// `len32(tag) || tag || be32(relays.count)` followed by
+    /// `len32(relay) || relay` for each relay. Mirrors
+    /// `subscriptions_digest` in the backend's `payload.rs`.
+    ///
+    /// The bare big-endian relay count binds the *shape* of the list,
+    /// not just its flattened pairs: the same tag→relay pairs split
+    /// into different entries digest differently, and an entry with an
+    /// empty relay list still contributes bytes rather than vanishing.
     static func digest(of subscriptions: [PushSubscription]) -> Data {
         var encoded = Data()
         for subscription in subscriptions {
+            append(&encoded, Data(subscription.tag.utf8))
+            var count = UInt32(subscription.relays.count).bigEndian
+            withUnsafeBytes(of: &count) { encoded.append(contentsOf: $0) }
             for relay in subscription.relays {
-                append(&encoded, Data(subscription.tag.utf8))
                 append(&encoded, Data(relay.utf8))
             }
         }

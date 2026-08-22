@@ -73,6 +73,11 @@ public struct PushRejection: Error, Sendable, Equatable {
     public let rawCode: String
     public let message: String
 
+    /// The typed reading of `rawCode`, for callers that branch —
+    /// `.unknown` retains verbatim what a newer backend said, so no
+    /// vocabulary growth is ever silently collapsed.
+    public var code: PushErrorCode { PushErrorCode(rawCode: rawCode) }
+
     public init(statusCode: Int, rawCode: String, message: String) {
         self.statusCode = statusCode
         self.rawCode = rawCode
@@ -80,7 +85,31 @@ public struct PushRejection: Error, Sendable, Equatable {
     }
 }
 
-public enum PushClientError: Error {
+/// Stable error vocabulary emitted by the push backend — the shape of
+/// the moderation package's `AuthorityErrorCode`, with an explicit
+/// `unknown` arm because `rawCode` must survive codes this build has
+/// never heard of.
+public enum PushErrorCode: Sendable, Equatable {
+    case signatureInvalid
+    case relayInvalid
+    case capacity
+    case badRequest
+    case internalError
+    case unknown(String)
+
+    public init(rawCode: String) {
+        switch rawCode {
+        case "signature_invalid": self = .signatureInvalid
+        case "relay_invalid": self = .relayInvalid
+        case "capacity": self = .capacity
+        case "bad_request": self = .badRequest
+        case "internal_error": self = .internalError
+        default: self = .unknown(rawCode)
+        }
+    }
+}
+
+public enum PushClientError: Error, Sendable, Equatable {
     /// The base URL is not https — never relaxed, in any build.
     case insecureBaseURL(String)
     case invalidResponse

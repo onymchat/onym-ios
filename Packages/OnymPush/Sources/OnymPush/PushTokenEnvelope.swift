@@ -7,6 +7,16 @@ import Foundation
 /// buffer or request body at rest. The Rust counterpart is
 /// `open_token_envelope` in `onym-push/apple/src/crypto.rs`.
 public struct PushTokenEnvelope: Codable, Sendable, Equatable {
+    /// The sealing scheme this envelope implements. Deliberately NOT a
+    /// wire field: the backend's `TokenEnvelope` decoder rejects
+    /// unknown keys (`deny_unknown_fields`), so adding one requires a
+    /// lockstep backend change — and on the wire the scheme is already
+    /// identified by the HKDF salt's domain separation (a ciphertext
+    /// sealed under any other scheme simply fails to open). If a
+    /// second scheme ever ships, versioning moves to the wire in a
+    /// coordinated change on both sides.
+    public static let scheme = "x25519-aes-256-gcm-v1"
+
     public let ephemeralPublicKey: Data
     public let nonce: Data
     public let ciphertext: Data
