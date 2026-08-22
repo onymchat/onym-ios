@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import OnymFoundation
 import OnymTransport
 import OnymIdentity
 
@@ -88,15 +89,8 @@ public struct InboxFanoutInteractor: Sendable {
         return out
     }
 
-    /// Mirror of `IdentityRepository.inboxTag(from:)`. Pure function of
-    /// the inbox pubkey; safe to recompute here without going back
-    /// through the actor.
     private static func inboxTag(from inboxPublicKey: Data) -> String {
-        var hasher = SHA256()
-        hasher.update(data: Data("sep-inbox-v1".utf8))
-        hasher.update(data: inboxPublicKey)
-        let digest = hasher.finalize()
-        return digest.prefix(8).map { String(format: "%02x", $0) }.joined()
+        InboxTag.derive(from: inboxPublicKey)
     }
 }
 

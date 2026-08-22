@@ -22,6 +22,10 @@ import OnymBilling
 
 @main
 struct OnymIOSApp: App {
+    /// APNs device tokens arrive only through `UIApplicationDelegate`;
+    /// the delegate does nothing but relay them (`PushAppDelegate`).
+    @UIApplicationDelegateAdaptor(PushAppDelegate.self) private var pushAppDelegate
+
     private let dependencies: AppDependencies
     private let identityRepository: IdentityRepository
     /// Held so the replay observer outlives `init`.
@@ -1383,6 +1387,14 @@ struct OnymIOSApp: App {
             onboardingRestartController = nil
         }
 
+        // Push notifications. Opt-in lives in PushPreferenceStore
+        // (default off); until the user enables it in Settings the
+        // coordinator's streams run but nothing leaves the device.
+        let pushCoordinator = PushCoordinator(
+            identityRepository: repository,
+            relaysRepository: nostrRelaysRepository
+        )
+
         self.dependencies = AppDependencies(
             makeRecoveryPhraseBackupFlow: { @MainActor in
                 RecoveryPhraseBackupFlow(
@@ -1535,6 +1547,14 @@ struct OnymIOSApp: App {
                 ).makeDeviceBackupView()
             },
             makeBackupOperatorSettingsFlow: makeBackupOperatorSettingsFlow,
+            makeNotificationsSettingsFlow: {
+                NotificationsSettingsFlow(
+                    isEnabled: pushCoordinator.isEnabled,
+                    enable: { await pushCoordinator.enable() },
+                    disable: { await pushCoordinator.disable() }
+                )
+            },
+            pushCoordinator: pushCoordinator,
             backupConsentSignal: backupConsentSignal,
             makeOnboardingFlow: makeOnboardingFlow,
             presentOnboardingAtLaunch: shouldOnboard,
@@ -1852,6 +1872,13 @@ struct OnymIOSApp: App {
                         dispatcher: dispatcher
                     )
                     await fanout.run()
+                }
+                .task {
+                    // Push registration reconciler: consumes the APNs
+                    // token stream, the identity list, and the relay
+                    // configuration. Sends nothing anywhere until the
+                    // user enables notifications in Settings.
+                    await dependencies.pushCoordinator?.run()
                 }
                 .task {
                     // Level-2 deeplink intro pump. Subscribes to one
