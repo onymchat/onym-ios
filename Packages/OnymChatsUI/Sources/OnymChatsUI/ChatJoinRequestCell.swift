@@ -217,35 +217,16 @@ final class ChatJoinRequestCell: UITableViewCell {
         declineButton.accessibilityIdentifier = "chat.join_request.decline.\(display.requestID)"
     }
 
-    /// `nil` when the group has no rules — there is nothing to report
-    /// about an agreement nobody was asked for, and an "n/a" line would
-    /// be noise on every request in every group without rules.
+    /// The verdict as the member roster would put it.
     ///
-    /// The three failing cases read differently because they *are*
-    /// different, and the founder's next move differs with them: an
-    /// unsigned request is usually an older app, and asking again fixes
-    /// it; a signature over rules this device doesn't hold can't be
-    /// checked either way, so it claims nothing and is coloured
-    /// neutrally; a signature that fails against our own rules is
-    /// neither of those, and is the only one that should give a founder
-    /// pause about the request itself.
+    /// Read from `GroupRulesMark` rather than restated here: the two
+    /// screens describe one fact at two moments, and keeping two
+    /// literal sites for each sentence is how a shared vocabulary
+    /// becomes two catalog entries that drift.
     private static func agreementText(
         _ agreement: JoinRequestApprover.RulesAgreement
     ) -> (text: String, color: Color)? {
-        switch agreement {
-        case .notRequired:
-            nil
-        case .agreed:
-            (String(localized: "Signed the group rules"), OnymTokens.green)
-        case .unknownRules:
-            // Neutral, not reassuring: nothing here was verified.
-            (String(localized: "Signed rules this device doesn\u{2019}t have \u{2014} can\u{2019}t be checked"),
-             OnymTokens.text2)
-        case .notSigned:
-            (String(localized: "Didn\u{2019}t sign the group rules"), OnymTokens.amber)
-        case .invalid:
-            (String(localized: "Their signature on the rules doesn\u{2019}t check out"), OnymTokens.red)
-        }
+        GroupRulesMark(agreement.standing).map { ($0.text, $0.color) }
     }
 
     @objc private func tappedAccept() {

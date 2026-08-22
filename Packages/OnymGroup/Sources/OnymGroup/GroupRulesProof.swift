@@ -84,27 +84,76 @@ public struct GroupRulesProof: Equatable, Sendable {
     }
 
     /// A filename someone can find again in a Files app six months
-    /// later: the group and the member, not a hash.
+    /// later — and one no two members of a group can share.
+    ///
+    /// The readable part is the group and the alias, which is what a
+    /// person recognises. The key prefix after it is what keeps two
+    /// members apart, and it is not decoration: aliases are
+    /// self-asserted and explicitly non-unique, and the ASCII-only stem
+    /// collapses entirely for a group named in Cyrillic or CJK — every
+    /// member of a Russian-named group produced
+    /// `onym-rules-proof-group-rules.json`.
+    ///
+    /// It no longer guards against one member's export overwriting
+    /// another's: each write lands in its own directory now, so two of
+    /// them can't contend for a path. What it still does is make the
+    /// file identifiable once it has left this app — in a Files listing,
+    /// an inbox, a folder of evidence — where the name is all the
+    /// context there is.
     public var suggestedFileName: String {
-        // A fixed locale, not the device's: `lowercased()` under a
-        // Turkish locale maps I to a dotless ı, so the same group would
-        // produce different filenames on two phones. And ASCII only —
-        // diacritic folding leaves CJK and Cyrillic untouched, so
-        // testing for "is a letter" would let them through into a name
-        // that is meant to survive being emailed around.
-        let stem = "\(groupName)-\(memberAlias)"
+        // Clamped, because neither of these is ours. `groupName` and
+        // `memberAlias` arrive off the wire with no length cap of their
+        // own, and a 400-character alias pushes the name past NAME_MAX
+        // — at which point the write throws, `file` stays nil, and that
+        // member's row is stuck on a disabled Export and an error, for
+        // good. The same reason the characters are scrubbed: this
+        // string is a stranger's, and it reaches a filesystem.
+        let stem = String(fileSafe("\(groupName)-\(memberAlias)").prefix(60))
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        let named = stem.isEmpty ? "group-rules" : stem
+        // The key is scrubbed too, not just the readable part. Roster
+        // keys arrive as arbitrary JSON object keys — nothing validates
+        // their shape on decode — and this string ends up in a
+        // filesystem path. A member keyed `../../../Documents/x`
+        // renders a row, gets a chevron, and the write lands outside
+        // the temporary directory. Verified: three levels is enough to
+        // reach the app container.
+        // Scrubbed first, then taken — and hashed when scrubbing left
+        // too little to tell two members apart. Taking the prefix of a
+        // raw key and scrubbing that could collapse a non-hex key to a
+        // few characters, or to nothing, putting back the collision the
+        // suffix exists to prevent.
+        let scrubbed = fileSafe(memberBlsHex)
+        let key = scrubbed.count >= 12
+            ? String(scrubbed.prefix(12))
+            : Self.hex(Data(SHA256.hash(data: Data(memberBlsHex.utf8))).prefix(6))
+        return "onym-rules-proof-\(named)-\(key).json"
+    }
+
+    static func hex(_ data: Data) -> String { data.hexString }
+
+    /// Lowercase ASCII alphanumerics, runs of anything else collapsed
+    /// to a single dash, ends trimmed.
+    ///
+    /// One function for every part of the name, so a component added
+    /// later can't reintroduce a separator or a `..` by being appended
+    /// raw — which is how the key got in.
+    private func fileSafe(_ value: String) -> String {
+        value
+            // A fixed locale, not the device's: `lowercased()` under a
+            // Turkish locale maps I to a dotless ı, so the same group
+            // would produce different filenames on two phones. ASCII
+            // only — diacritic folding leaves CJK and Cyrillic
+            // untouched, so "is a letter" would let them through into a
+            // name that is meant to survive being emailed around.
             .folding(options: .diacriticInsensitive, locale: Locale(identifier: "en_US_POSIX"))
             .lowercased(with: Locale(identifier: "en_US_POSIX"))
             .map { $0.isASCII && ($0.isLetter || $0.isNumber) ? $0 : "-" }
             .reduce(into: "") { out, character in
-                // Collapse runs, so "Maple  Garden!" doesn't become
-                // "maple--garden-".
                 if character == "-", out.last == "-" { return }
                 out.append(character)
             }
             .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
-        let named = stem.isEmpty ? "group-rules" : stem
-        return "onym-rules-proof-\(named).json"
     }
 
     /// The file's bytes: pretty-printed, key-ordered JSON, so two
@@ -242,6 +291,9 @@ public struct GroupRulesProof: Equatable, Sendable {
             nil
         case .noRules:
             "This group has no rules, so nothing was asked of anyone."
+        case .notCollected:
+            "This kind of group has no join approval, so no agreement to its rules is "
+            + "collected from anyone."
         case .author:
             "This member wrote the rules; founders do not sign their own."
         case .didNotSign:

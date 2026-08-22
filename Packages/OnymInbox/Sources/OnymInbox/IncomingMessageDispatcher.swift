@@ -433,9 +433,189 @@ public struct IncomingMessageDispatcher: Sendable {
         // ordering means a sender that mistakenly includes us under
         // our own BLS key gets overwritten by our locally-trusted
         // alias + inbox pub — the receiver's view of itself wins.
+        // Scoped by owner as well as group: two identities on one
+        // device hold two rows, and the wrong one would stamp somebody
+        // else's agreements onto this roster.
+        let storedGroup = await groupRepository.currentGroups().first {
+            $0.groupIDData == invitation.groupID && $0.ownerIdentityID == ownerIdentityID
+        }
         var profiles = invitation.memberProfiles ?? [:]
-        if let selfEntry = await selfMemberProfileEntry(for: ownerIdentityID) {
-            profiles[selfEntry.key] = selfEntry.value
+        // Resolved before the loop so the loop can skip it. The self
+        // row has its own, stricter precedence below, and running both
+        // over it made the second read the first's output as though it
+        // had come off the wire: a stored row whose signature fails
+        // against our key was rewritten to signature-without-text, and
+        // the self block then persisted that — destroying the text and
+        // turning `doesNotVerify` into `unknownRules`. Two rules, one
+        // row, and the loser was the evidence.
+        let selfEntry = await selfMemberProfileEntry(for: ownerIdentityID)
+        // Every *other* row.
+        //
+        // The wire's roster is the admin's and wins on identity, but an
+        // invitation from a build that predates rules carries no
+        // agreements for anyone — and replacing the roster wholesale
+        // dropped the whole group to "Didn't sign" on the next replay.
+        // That is the same version-skew shape the self row is guarded
+        // against, one row over, so it gets the same rule: a record
+        // that proves something outranks one that doesn't.
+        for (key, stored) in storedGroup?.memberProfiles ?? [:] where key != selfEntry?.key {
+            // Only rows the admin still lists. Re-inserting one they
+            // dropped would make this directory permanently additive —
+            // harmless while nothing removes members, and not something
+            // to leave for whoever adds that.
+            //
+            // Which also means this closes *rules-less* senders, not
+            // *roster-less* ones: an invitation carrying no
+            // `memberProfiles` at all still replaces the local
+            // directory with whatever it does carry, agreements
+            // included. That predates this change — `profiles` has
+            // always started from the wire — and unwinding it is a
+            // question about roster ownership rather than about
+            // evidence, so it is named here rather than answered in a
+            // diff about rules.
+            guard let wire = profiles[key], stored.rulesSignature != nil else { continue }
+            guard !wire.agreedToRules(groupID: invitation.groupID) else { continue }
+            if stored.agreedToRules(groupID: invitation.groupID) {
+                // Composed and re-verified rather than spliced on
+                // trust: if the wire announces a different sending key
+                // for this member, the stored signature does not cover
+                // the row we would be writing, and keeping it would
+                // store a proven agreement in a form that reads back as
+                // forged.
+                let candidate = MemberProfile(
+                    alias: wire.alias,
+                    inboxPublicKey: wire.inboxPublicKey,
+                    sendingPubkey: wire.sendingPubkey,
+                    rulesHash: stored.rulesHash,
+                    rulesSignature: stored.rulesSignature,
+                    rulesText: stored.rulesText
+                )
+                if candidate.agreedToRules(groupID: invitation.groupID) {
+                    profiles[key] = candidate
+                    continue
+                }
+            }
+            // Neither proves anything, and we hold bytes the wire
+            // doesn't. Keep them.
+            //
+            // Skipping this was the same evidence loss one row over: a
+            // stored row with a signature and no text reads as "can't
+            // be checked", and letting a pre-rules invitation replace
+            // it wholesale destroyed the bytes and turned that into
+            // "didn't sign the group rules" — which is a claim, and a
+            // false one.
+            // The wire has bytes of its own that didn't check out
+            // either. Leaving its row alone is the conservative
+            // reading — the admin is announcing this member's current
+            // keys, and a stored agreement that no longer verifies
+            // against them is most likely a rotated key rather than
+            // something worth resurrecting.
+            guard wire.rulesSignature == nil else { continue }
+            // The wording is kept when it still belongs to these bytes.
+            //
+            // Dropping it unconditionally was the self row's rule
+            // copied one row over, and the justification didn't come
+            // with it: the self row substitutes *local* keys, so the
+            // stored text may no longer be what the signature covers.
+            // Here the wire's own key is used, so if it matches the one
+            // the text was stored against, the text still corresponds —
+            // and discarding it destroyed the only copy of the signed
+            // wording and quietly turned a truthful "this doesn't check
+            // out" into "can't be checked".
+            profiles[key] = MemberProfile(
+                alias: wire.alias,
+                inboxPublicKey: wire.inboxPublicKey,
+                sendingPubkey: wire.sendingPubkey,
+                rulesHash: stored.rulesHash,
+                rulesSignature: stored.rulesSignature,
+                rulesText: stored.sendingPubkey == wire.sendingPubkey
+                    ? stored.rulesText
+                    : nil
+            )
+        }
+        if let selfEntry {
+            // Identity wins locally; the agreement is whichever record
+            // actually proves something.
+            //
+            // Our alias and keys are ours to assert, which is what the
+            // overwrite is for. Our *agreement* is not: this device
+            // signed it and kept no copy, so the admitting device's
+            // record is the only one there is. Trusting it costs
+            // nothing — it is re-checked against our own sending key
+            // every time it is read.
+            //
+            // But trusting it *blindly* costs the record. This path
+            // re-runs on every relay replay and on any later invitation
+            // for a group already here, and an older admin sends no
+            // self row at all — so taking the wire unconditionally
+            // erased a stored agreement and put the joiner back to
+            // "didn't sign", by version skew rather than by any code
+            // path.
+            //
+            let stored = storedGroup?.memberProfiles[selfEntry.key]
+            // Verified as the row that will actually be *stored*, not
+            // as the row that arrived. The local alias and keys win, so
+            // an agreement checked against the wire's `sendingPubkey`
+            // and then persisted beside ours would — if the two ever
+            // differ — be accepted as proven and re-read as
+            // `doesNotVerify`: red, about yourself, which is the class
+            // of bug this whole change exists to remove.
+            let wire = profiles[selfEntry.key].map {
+                MemberProfile(
+                    alias: selfEntry.value.alias,
+                    inboxPublicKey: selfEntry.value.inboxPublicKey,
+                    sendingPubkey: selfEntry.value.sendingPubkey,
+                    rulesHash: $0.rulesHash,
+                    rulesSignature: $0.rulesSignature,
+                    rulesText: $0.rulesText
+                )
+            }
+            let agreement: MemberProfile?
+            if wire?.agreedToRules(groupID: invitation.groupID) == true {
+                // The wire proves it. Freshest record that verifies.
+                agreement = wire
+            } else if stored?.agreedToRules(groupID: invitation.groupID) == true {
+                // Only what we already had proves it. "Has 64 bytes in
+                // it" was the wrong test for preferring the wire:
+                // re-approving an old request after a rules edit sends
+                // the signature with no text (see
+                // `JoinRequestApprover.textCovering`), which would
+                // downgrade a verified agreement into an uncheckable
+                // one.
+                agreement = stored
+            } else if let wire, wire.rulesSignature != nil {
+                // Neither proves anything, and the wire has bytes. Keep
+                // them — evidence survives for a later look — but drop
+                // the wording, which is the same rule
+                // `JoinRequestApprover.textCovering` argues for.
+                //
+                // Signature plus text that fails against our own key
+                // reads as `doesNotVerify`: red, "signature doesn't
+                // check out", on the joiner's own row, which is the
+                // failure this whole change exists to remove. Without
+                // the text it reads as `unknownRules` — can't be
+                // checked — which is what is actually true when an
+                // inviter ships bytes for our row that don't match our
+                // key.
+                agreement = MemberProfile(
+                    alias: wire.alias,
+                    inboxPublicKey: wire.inboxPublicKey,
+                    sendingPubkey: wire.sendingPubkey,
+                    rulesHash: wire.rulesHash,
+                    rulesSignature: wire.rulesSignature,
+                    rulesText: nil
+                )
+            } else {
+                agreement = stored
+            }
+            profiles[selfEntry.key] = MemberProfile(
+                alias: selfEntry.value.alias,
+                inboxPublicKey: selfEntry.value.inboxPublicKey,
+                sendingPubkey: selfEntry.value.sendingPubkey,
+                rulesHash: agreement?.rulesHash,
+                rulesSignature: agreement?.rulesSignature,
+                rulesText: agreement?.rulesText
+            )
         }
 
         // Stamp the inviting envelope's Ed25519 pubkey as the
@@ -478,15 +658,38 @@ public struct IncomingMessageDispatcher: Sendable {
             // can still fill it in.
             avatarJPEG: invitation.avatar,
             // The group's invitation/intro, as the sender wrote it.
-            invitationMessage: invitation.invitationMessage
+            // The stored rules stand when the wire omits them, for the
+            // same reason each member row does.
+            //
+            // The live case is an admin on a build that predates the
+            // fix in `GroupStateVerifier`: their refresh reply carries
+            // no rules at all, and taking that literally set
+            // `invitationMessage` to nil — which flips every verified
+            // agreement on this device from `signed` to
+            // `signedEarlierVersion` (the signed text no longer equals
+            // "no rules"), empties the rules section, and has the proof
+            // sheet announce that the group changed its rules when
+            // nobody did.
+            //
+            // The cost is that rules can't be cleared by omission. No
+            // path clears them today — they are set at creation — and
+            // when one exists the wire needs to say "cleared" rather
+            // than say nothing, because those are the two cases this
+            // cannot currently tell apart.
+            // Normalized, not just nil-checked: a sender spelling "no
+            // rules" as "" would otherwise walk straight past the
+            // fallback and reintroduce the flip it exists to stop.
+            invitationMessage: GroupRules.normalized(invitation.invitationMessage)
+                ?? storedGroup?.invitationMessage
         )
 
         // Was this thread already on the device? Relays replay the
         // inbox on every reconnect, so a re-delivered invitation is
         // routine — only the first one is a "you joined" moment.
-        let existing = await groupRepository.currentGroups().contains {
-            $0.id == groupIDHex && $0.ownerIdentityID == ownerIdentityID
-        }
+        // Answered by the snapshot already taken for the agreement
+        // merge above, rather than by a second fetch with the same
+        // predicate.
+        let existing = storedGroup != nil
 
         await groupRepository.insert(group)
 

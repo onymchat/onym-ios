@@ -337,7 +337,16 @@ public actor GroupStateVerifier: GroupStateRefreshing {
             groupTypeRaw: group.groupType.rawValue,
             adminPubkeyHex: group.adminPubkeyHex,
             memberProfiles: group.memberProfiles.isEmpty ? nil : group.memberProfiles,
-            avatar: group.avatarJPEG
+            avatar: group.avatarJPEG,
+            // The rules, which a refresh reply omitted entirely. A
+            // joiner whose first invitation deferred with
+            // `.staleNeedsRefresh` materializes from *this* payload, so
+            // without them they land in a group that appears to ask
+            // nothing of anyone — no rules to read, every member marked
+            // as having signed nothing, and their own agreement, which
+            // rides in `memberProfiles` right above, rendered as
+            // meaningless.
+            invitationMessage: group.invitationMessage
         )
         guard let bytes = try? JSONEncoder().encode(invite),
               let sealed = try? await identity.sealInvitation(

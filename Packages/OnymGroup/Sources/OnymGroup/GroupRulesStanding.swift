@@ -1,4 +1,5 @@
 import Foundation
+import OnymChain
 
 /// Where one member stands on a group's rules, decided from what this
 /// device holds about them.
@@ -17,6 +18,21 @@ import Foundation
 public enum GroupRulesStanding: Equatable, Sendable {
     /// The group asks nothing of anyone.
     case noRules
+    /// The group has rules, and this kind of group has no way to agree
+    /// to them: no join request, no approval, nobody to be the author.
+    ///
+    /// No group *this app creates* can be in this state today:
+    /// `CreateGroupFlow` only ever produces `.tyranny`, and the other
+    /// cards are dimmed with a "Soon" pill. It is not dead code, and
+    /// shouldn't be deleted as such — `CreateGroupInteractor` can build
+    /// the other types, and the dispatcher materializes whatever
+    /// `groupTypeRaw` arrives on the wire, so the day either changes
+    /// this is what stands between those groups and marking every
+    /// member, author included, as having refused to sign. Without it,
+    /// `.author` keyed on `adminPubkeyHex` (nil for both) would mark
+    /// every member of an anarchy group, including whoever wrote the
+    /// rules, as having declined to sign them.
+    case notCollected
     /// This member wrote the rules. Founders don't sign their own
     /// terms, and rendering them as "didn't sign" would read as a
     /// failure rather than as the shape of the thing.
@@ -51,18 +67,62 @@ public enum GroupRulesStanding: Equatable, Sendable {
     /// about the same member, and only one of them is odd.
     case doesNotVerify
 
+    /// Whether this standing has anything to report about a member.
+    ///
+    /// The question a *screen* asks — whether to draw a mark, offer a
+    /// way in, or write an export — but it belongs to the standing, not
+    /// to the mark that renders it. It was `GroupRulesMark(...) != nil`
+    /// at three call sites, one of which decides whether a member's
+    /// agreement is written to disk in plaintext; a presentation type
+    /// is the wrong thing to be asking about that.
+    public var hasSomethingToShow: Bool {
+        switch self {
+        case .noRules, .notCollected: false
+        case .author, .signed, .signedEarlierVersion, .didNotSign,
+             .unknownRules, .doesNotVerify: true
+        }
+    }
+
     /// True only where a signature was actually checked and passed.
     /// The mark on a row, and the `signed` field in an export, both
     /// come from here rather than from separate readings.
     public var isProven: Bool {
         switch self {
         case .signed, .signedEarlierVersion: true
-        case .noRules, .author, .didNotSign, .unknownRules, .doesNotVerify: false
+        case .noRules, .notCollected, .author, .didNotSign, .unknownRules, .doesNotVerify:
+            false
         }
     }
 }
 
 public extension ChatGroup {
+    /// Everything `rulesStanding` reads, and nothing else.
+    ///
+    /// A cache key for callers deriving standings for a whole roster.
+    /// Living here, beside the function it mirrors, is the point:
+    /// keying on the whole `ChatGroup` was correct but compared and
+    /// retained `avatarJPEG` on every evaluation, and keying on a list
+    /// of fields chosen at the call site would be a list nobody
+    /// remembers to update. Anything added to the derivation below has
+    /// to be added here, one screen away.
+    var rulesStandingInputs: RulesStandingInputs {
+        RulesStandingInputs(
+            id: id,
+            invitationMessage: invitationMessage,
+            memberProfiles: memberProfiles,
+            adminPubkeyHex: adminPubkeyHex,
+            groupType: groupType
+        )
+    }
+
+    struct RulesStandingInputs: Equatable, Sendable {
+        let id: String
+        let invitationMessage: String?
+        let memberProfiles: [String: MemberProfile]
+        let adminPubkeyHex: String?
+        let groupType: SEPGroupType
+    }
+
     /// Where the member stored under `blsHex` stands on this group's
     /// rules.
     ///
@@ -102,9 +162,31 @@ public extension ChatGroup {
             return signedText == current ? .signed : .signedEarlierVersion
         }
         guard current != nil else { return .noRules }
+        // Asked after the stored bytes, so a signature made under a
+        // governance type that later changed still reads honestly.
+        guard groupType.collectsRulesAgreements else { return .notCollected }
         if let admin = adminPubkeyHex?.lowercased(), admin == blsHex.lowercased() {
             return .author
         }
         return .didNotSign
+    }
+}
+
+extension SEPGroupType {
+    /// Whether joining this kind of group passes through a request the
+    /// founder approves — which is the only place an agreement to the
+    /// rules is ever collected.
+    ///
+    /// Tyranny alone, and spelled out case by case rather than with a
+    /// `default`: the wire enum carries five types, only one of which
+    /// has an approval step to carry a signature or an admin to name as
+    /// the rules' author. When one of the other four grows a joining
+    /// ceremony, the compiler should make whoever builds it answer this
+    /// question rather than inheriting a silent "no".
+    var collectsRulesAgreements: Bool {
+        switch self {
+        case .tyranny: true
+        case .anarchy, .oneOnOne, .democracy, .oligarchy: false
+        }
     }
 }

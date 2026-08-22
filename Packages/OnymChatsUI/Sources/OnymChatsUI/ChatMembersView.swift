@@ -28,7 +28,40 @@ struct ChatMembersView: View {
     let setGroupAvatar: @MainActor (String, Data?) async -> Void
     let setGroupName: @MainActor (String, String) async -> Void
 
-    @State private var shareInviteFlow: ShareInviteFlow?
+    /// Both sheets present from this screen through one `sheet(item:)`
+    /// over one enum — the rule `GateCheckRequiredView` already
+    /// established here: two `.sheet` modifiers on the same view and
+    /// SwiftUI has a long history of honouring only one of them. The
+    /// admin's share-invite sheet would have been the silent casualty,
+    /// and the harder one to notice, since only admins reach it.
+    private enum ActiveSheet: Identifiable {
+        case member(MemberRow)
+        case shareInvite(ShareInviteFlow)
+
+        var id: String {
+            switch self {
+            case .member(let row): "member:\(row.id)"
+            case .shareInvite(let flow): "share:\(flow.id)"
+            }
+        }
+    }
+
+    @State private var activeSheet: ActiveSheet?
+    /// Standings, derived once per group snapshot rather than per
+    /// render — and on demand, rather than one frame late.
+    ///
+    /// Each one is an Ed25519 verify plus a SHA-256, and this body
+    /// re-renders off the group stream and on every keystroke in the
+    /// rename alert. Measured on the simulator: 1.36 ms for 32 members,
+    /// 9.35 ms for 256 — over half a frame, on the main actor, for an
+    /// answer that cannot have changed in between.
+    ///
+    /// A memo rather than `onChange(initial: true)`, which fires *after*
+    /// the first body evaluation: the roster's first frame drew every
+    /// row unmarked and unchevroned, then re-rendered. Keyed on
+    /// `ChatGroup.rulesStandingInputs` — everything the derivation
+    /// reads and nothing else, declared next to it.
+    @State private var memo = StandingsMemo()
     /// Drives the admin-only rename alert.
     @State private var showRename = false
     @State private var renameText = ""
@@ -38,10 +71,25 @@ struct ChatMembersView: View {
             if let group = currentGroup {
                 VStack(spacing: 0) {
                     header(for: group)
-                    if group.memberProfiles.isEmpty {
-                        emptyState
-                    } else {
-                        list(for: group)
+                    // One scroll view over both, rather than the rules
+                    // above it. They belong to the group and not to the
+                    // roster — so they show even when the directory
+                    // hasn't filled in — but `GroupRules.maxBytes`
+                    // allows about forty lines, and hoisting them out
+                    // of the scroll view made long rules unscrollable
+                    // *and* squeezed the roster to nothing. Neither
+                    // reachable is worse than the problem it fixed.
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            if let rules = GroupRules.normalized(group.invitationMessage) {
+                                rulesSection(rules)
+                            }
+                            if group.memberProfiles.isEmpty {
+                                emptyState
+                            } else {
+                                roster(for: group)
+                            }
+                        }
                     }
                 }
             } else {
@@ -64,7 +112,7 @@ struct ChatMembersView: View {
             if canShareInvite {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        shareInviteFlow = makeShareInviteFlow()
+                        activeSheet = .shareInvite(makeShareInviteFlow())
                     } label: {
                         Image(systemName: "person.crop.circle.badge.plus")
                     }
@@ -73,12 +121,40 @@ struct ChatMembersView: View {
                 }
             }
         }
-        .sheet(item: $shareInviteFlow) { flow in
-            ShareInviteView(
-                groupID: groupID,
-                flow: flow,
-                onDone: { shareInviteFlow = nil }
-            )
+        // Swept from here too, not only from the proof sheet: a user
+        // who opens exactly one sheet and never another would otherwise
+        // leave that member's rules and signature in plaintext until
+        // the OS felt pressure. Any later visit to any group's member
+        // list clears it.
+        .task { await MemberRulesProofView.sweepStaleExports() }
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .member(let row):
+                // Re-derived rather than memoized, unlike the roster:
+                // one member's verify rather than a hundred, and
+                // re-deriving is how the sheet stays correct against a
+                // group that changes under it.
+                //
+                // Resolved from the live group at present time, not
+                // from the row's captured profile: a roster update
+                // while the sheet is open would otherwise leave a proof
+                // rendered beside a group it no longer describes. The
+                // fallback covers the group being deleted underneath —
+                // an empty sheet is worse than one that says what
+                // happened.
+                if let group = currentGroup,
+                   let proof = GroupRulesProof(group: group, blsHex: row.blsHex) {
+                    MemberRulesProofView(proof: proof, onClose: { activeSheet = nil })
+                } else {
+                    MemberGoneView(onClose: { activeSheet = nil })
+                }
+            case .shareInvite(let flow):
+                ShareInviteView(
+                    groupID: groupID,
+                    flow: flow,
+                    onDone: { activeSheet = nil }
+                )
+            }
         }
         .alert("Rename group", isPresented: $showRename) {
             TextField("Group name", text: $renameText)
@@ -209,16 +285,20 @@ struct ChatMembersView: View {
     /// because only their broadcast passes the receiver's admin check.
     private var canChangeName: Bool { canShareInvite }
 
-    private func list(for group: ChatGroup) -> some View {
-        ScrollView {
-            if let message = group.invitationMessage,
-               !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                invitationSection(message)
-            }
+    /// The roster itself. No `ScrollView` of its own — the caller owns
+    /// the one that has to contain the rules as well.
+    private func roster(for group: ChatGroup) -> some View {
+        Group {
+            let memberRows = rows(for: group)
             VStack(spacing: 0) {
-                ForEach(rows(for: group)) { row in
+                ForEach(memberRows) { row in
                     memberRow(row)
-                    if row.id != rows(for: group).last?.id {
+                    // Computed once above rather than per iteration.
+                    // `rows(for:)` runs an Ed25519 verify per member,
+                    // and re-deriving it inside the loop made that
+                    // quadratic — a hundred-member group meant ten
+                    // thousand verifications per render.
+                    if row.id != memberRows.last?.id {
                         Divider()
                             .background(OnymTokens.hairline)
                             .padding(.leading, 56)
@@ -242,11 +322,15 @@ struct ChatMembersView: View {
         }
     }
 
-    /// The group's invitation message (greeting / policy / articles),
-    /// shown as the group's intro at the top of the info screen.
-    private func invitationSection(_ message: String) -> some View {
+    /// The group's rules, shown to everyone rather than only to the
+    /// people still deciding whether to join.
+    ///
+    /// A member who agreed months ago has no other way back to the
+    /// words they agreed to — the confirmation screen is long gone, and
+    /// until now the text lived only in an invitation nobody keeps.
+    private func rulesSection(_ message: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("INVITATION")
+            Text("GROUP RULES")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(OnymTokens.text3)
                 .padding(.leading, 4)
@@ -261,14 +345,15 @@ struct ChatMembersView: View {
                     RoundedRectangle(cornerRadius: 12).stroke(OnymTokens.hairline, lineWidth: 1)
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 12))
-                .accessibilityIdentifier("members.invitation")
+                .accessibilityIdentifier("members.rules")
         }
         .padding(.horizontal, 16)
         .padding(.top, 12)
     }
 
     private func memberRow(_ row: MemberRow) -> some View {
-        HStack(spacing: 12) {
+        let mark = GroupRulesMark(row.standing)
+        let content = HStack(spacing: 12) {
             avatar(for: row)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
@@ -281,15 +366,54 @@ struct ChatMembersView: View {
                             .foregroundStyle(OnymTokens.text2)
                     }
                 }
+                // The fingerprint stays. It is the load-bearing
+                // identifier — aliases are self-asserted, so two
+                // members calling themselves the same thing are told
+                // apart by this and nothing else — and the standing is
+                // a second line rather than a replacement for it.
                 Text("BLS \(row.blsPrefix)\u{2026}")
                     .font(.system(size: 12, weight: .regular, design: .monospaced))
                     .foregroundStyle(OnymTokens.text3)
+                if let mark {
+                    HStack(spacing: 4) {
+                        Image(systemName: mark.symbol)
+                            .font(.system(size: 10, weight: .semibold))
+                        Text(mark.text)
+                            .font(.system(size: 12))
+                    }
+                    .foregroundStyle(mark.color)
+                }
             }
             Spacer(minLength: 0)
+            // Gated on the mark, not on one standing: `GroupRulesMark`
+            // is nil for `.notCollected` too, and such a row was
+            // getting a chevron onto a sheet with no verdict, no
+            // headline and an Export button for a group that collects
+            // nothing — the dead end this rule was written to avoid.
+            if row.standing.hasSomethingToShow {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(OnymTokens.text3)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .accessibilityIdentifier("members.row.\(row.id)")
+        .contentShape(Rectangle())
+
+        return Group {
+            if !row.standing.hasSomethingToShow {
+                content
+                    .accessibilityIdentifier("members.row.\(row.id)")
+            } else {
+                // On the button, not on the `Group` wrapping it: the
+                // button is the accessibility element now that rows are
+                // tappable, and an identifier on the container is one a
+                // UI test may never see.
+                Button { activeSheet = .member(row) } label: { content }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("members.row.\(row.id)")
+            }
+        }
     }
 
     private func avatar(for row: MemberRow) -> some View {
@@ -304,9 +428,11 @@ struct ChatMembersView: View {
         }
     }
 
+    /// Sized rather than expanded: inside a scroll view a `Spacer`
+    /// collapses, so this reserves its own height instead of claiming
+    /// what is left of the screen.
     private var emptyState: some View {
         VStack(spacing: 12) {
-            Spacer()
             Image(systemName: "person.2")
                 .font(.system(size: 40))
                 .foregroundStyle(OnymTokens.text3)
@@ -318,9 +444,9 @@ struct ChatMembersView: View {
                 .foregroundStyle(OnymTokens.text2)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
-            Spacer()
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, minHeight: 220)
+        .padding(.top, 24)
         .accessibilityIdentifier("members.empty")
     }
 
@@ -343,21 +469,39 @@ struct ChatMembersView: View {
 
     private func rows(for group: ChatGroup) -> [MemberRow] {
         let activeKey = activeBlsHex
-        return group.memberProfiles
-            .map { (key, profile) in
-                MemberRow(
+        let standings = memo.standings(for: group)
+        // Built from the memo's entries rather than from the profiles,
+        // so a row's standing is never defaulted. The two are derived
+        // from one snapshot, so a missing profile can't happen — and if
+        // it ever did, dropping a row is honest where `.noRules` would
+        // have quietly mislabelled a member.
+        return standings
+            .compactMap { (key, standing) -> MemberRow? in
+                guard let profile = group.memberProfiles[key] else { return nil }
+                return MemberRow(
                     id: key,
                     blsHex: key,
                     blsPrefix: String(key.prefix(12)),
                     displayAlias: profile.alias.isEmpty ? "(unnamed)" : profile.alias,
-                    isSelf: activeKey.map { $0 == key } ?? false
+                    isSelf: activeKey.map { $0 == key } ?? false,
+                    standing: standing
                 )
             }
             .sorted { lhs, rhs in
-                // Self always first, then alias case-insensitively.
+                // Self always first, then alias case-insensitively,
+                // then the fingerprint.
+                //
+                // The last one isn't decoration: aliases are
+                // self-asserted and non-unique, the memo re-derives on
+                // every group change, and a dictionary hands its
+                // entries back in no particular order — so two members
+                // sharing a name could swap places under a thumb
+                // already moving toward a row that now opens somebody
+                // else's agreement.
                 if lhs.isSelf != rhs.isSelf { return lhs.isSelf }
-                return lhs.displayAlias.localizedCaseInsensitiveCompare(rhs.displayAlias)
-                    == .orderedAscending
+                let byAlias = lhs.displayAlias.localizedCaseInsensitiveCompare(rhs.displayAlias)
+                if byAlias != .orderedSame { return byAlias == .orderedAscending }
+                return lhs.blsHex < rhs.blsHex
             }
     }
 
@@ -367,5 +511,41 @@ struct ChatMembersView: View {
         let blsPrefix: String
         let displayAlias: String
         let isSelf: Bool
+        /// Derived from the stored signature rather than read from a
+        /// flag — once per group snapshot, via `StandingsMemo`.
+        let standing: GroupRulesStanding
+    }
+}
+
+/// One group snapshot's standings, computed the first time they are
+/// asked for and kept until the snapshot changes.
+///
+/// A reference type held in `@State` on purpose: the view needs to fill
+/// this during `body`, which rules out mutating `@State` value storage,
+/// and it must not trigger an invalidation of its own — the result is a
+/// pure function of the group already being rendered.
+///
+/// Keyed on `rulesStandingInputs` rather than the whole group: the
+/// latter was correct, but it byte-compared `avatarJPEG` on every body
+/// evaluation and retained a second copy of it for the screen's life.
+/// The key is declared beside `rulesStanding` so the two can't drift.
+@MainActor
+final class StandingsMemo {
+    private var snapshot: ChatGroup.RulesStandingInputs?
+    private var cached: [String: GroupRulesStanding] = [:]
+
+    /// Non-optional per key, so a caller can't fall back to an
+    /// unmarked row and call that a standing.
+    func standings(for group: ChatGroup) -> [String: GroupRulesStanding] {
+        let inputs = group.rulesStandingInputs
+        if snapshot == inputs { return cached }
+        cached = group.memberProfiles.keys.reduce(into: [:]) { out, key in
+            // The key came from `memberProfiles`, so the lookup cannot
+            // miss; `.noRules` here would be a lie about a member
+            // rather than a fallback.
+            out[key] = group.rulesStanding(ofMemberWith: key) ?? .noRules
+        }
+        snapshot = inputs
+        return cached
     }
 }
