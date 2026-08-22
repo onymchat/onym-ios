@@ -8,6 +8,7 @@ import SwiftUI
 /// content-free alert — so the copy says exactly that instead of
 /// "enable notifications to stay connected".
 public struct NotificationsSettingsView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @State private var flow: NotificationsSettingsFlow
     @State private var switchState: Bool
 
@@ -64,6 +65,17 @@ public struct NotificationsSettingsView: View {
             // flow.
             flow.refreshRegistrationState()
             switchState = flow.isEnabled
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // The footnote above sends the user to system Settings to
+            // allow or block notifications; they come back to this
+            // screen still mounted, so `.onAppear` never fires and only
+            // this catches the revoke.
+            guard phase == .active else { return }
+            Task {
+                await flow.appForegrounded()
+                switchState = flow.isEnabled
+            }
         }
         .onChange(of: switchState) { _, wanted in
             guard wanted != flow.isEnabled else { return }
