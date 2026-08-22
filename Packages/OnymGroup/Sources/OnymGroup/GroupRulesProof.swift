@@ -98,25 +98,41 @@ public struct GroupRulesProof: Equatable, Sendable {
     /// second member's proof has overwritten it, and hand out that
     /// member's agreement under the first one's name.
     public var suggestedFileName: String {
-        // A fixed locale, not the device's: `lowercased()` under a
-        // Turkish locale maps I to a dotless ı, so the same group would
-        // produce different filenames on two phones. And ASCII only —
-        // diacritic folding leaves CJK and Cyrillic untouched, so
-        // testing for "is a letter" would let them through into a name
-        // that is meant to survive being emailed around.
-        let stem = "\(groupName)-\(memberAlias)"
+        let stem = fileSafe("\(groupName)-\(memberAlias)")
+        let named = stem.isEmpty ? "group-rules" : stem
+        // The key is scrubbed too, not just the readable part. Roster
+        // keys arrive as arbitrary JSON object keys — nothing validates
+        // their shape on decode — and this string ends up in a
+        // filesystem path. A member keyed `../../../Documents/x`
+        // renders a row, gets a chevron, and the write lands outside
+        // the temporary directory. Verified: three levels is enough to
+        // reach the app container.
+        let key = fileSafe(String(memberBlsHex.prefix(12)))
+        return "onym-rules-proof-\(named)-\(key.isEmpty ? "member" : key).json"
+    }
+
+    /// Lowercase ASCII alphanumerics, runs of anything else collapsed
+    /// to a single dash, ends trimmed.
+    ///
+    /// One function for every part of the name, so a component added
+    /// later can't reintroduce a separator or a `..` by being appended
+    /// raw — which is how the key got in.
+    private func fileSafe(_ value: String) -> String {
+        value
+            // A fixed locale, not the device's: `lowercased()` under a
+            // Turkish locale maps I to a dotless ı, so the same group
+            // would produce different filenames on two phones. ASCII
+            // only — diacritic folding leaves CJK and Cyrillic
+            // untouched, so "is a letter" would let them through into a
+            // name that is meant to survive being emailed around.
             .folding(options: .diacriticInsensitive, locale: Locale(identifier: "en_US_POSIX"))
             .lowercased(with: Locale(identifier: "en_US_POSIX"))
             .map { $0.isASCII && ($0.isLetter || $0.isNumber) ? $0 : "-" }
             .reduce(into: "") { out, character in
-                // Collapse runs, so "Maple  Garden!" doesn't become
-                // "maple--garden-".
                 if character == "-", out.last == "-" { return }
                 out.append(character)
             }
             .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
-        let named = stem.isEmpty ? "group-rules" : stem
-        return "onym-rules-proof-\(named)-\(memberBlsHex.prefix(12)).json"
     }
 
     /// The file's bytes: pretty-printed, key-ordered JSON, so two

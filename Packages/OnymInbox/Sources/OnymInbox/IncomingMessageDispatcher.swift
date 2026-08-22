@@ -433,7 +433,43 @@ public struct IncomingMessageDispatcher: Sendable {
         // ordering means a sender that mistakenly includes us under
         // our own BLS key gets overwritten by our locally-trusted
         // alias + inbox pub — the receiver's view of itself wins.
+        // Scoped by owner as well as group: two identities on one
+        // device hold two rows, and the wrong one would stamp somebody
+        // else's agreements onto this roster.
+        let storedGroup = await groupRepository.currentGroups().first {
+            $0.groupIDData == invitation.groupID && $0.ownerIdentityID == ownerIdentityID
+        }
         var profiles = invitation.memberProfiles ?? [:]
+        // Every row, not only our own.
+        //
+        // The wire's roster is the admin's and wins on identity, but an
+        // invitation from a build that predates rules carries no
+        // agreements for anyone — and replacing the roster wholesale
+        // dropped the whole group to "Didn't sign" on the next replay.
+        // That is the same version-skew shape the self row is guarded
+        // against, one row over, so it gets the same rule: a record
+        // that proves something outranks one that doesn't.
+        for (key, stored) in storedGroup?.memberProfiles ?? [:] {
+            guard stored.agreedToRules(groupID: invitation.groupID) else { continue }
+            let wire = profiles[key]
+            guard wire?.agreedToRules(groupID: invitation.groupID) != true else { continue }
+            // Composed and re-verified rather than spliced on trust: if
+            // the wire announces a different sending key for this
+            // member, the stored signature does not cover the row we
+            // would be writing, and keeping it would store a proven
+            // agreement in a form that reads back as forged.
+            let candidate = MemberProfile(
+                alias: wire?.alias ?? stored.alias,
+                inboxPublicKey: wire?.inboxPublicKey ?? stored.inboxPublicKey,
+                sendingPubkey: wire?.sendingPubkey ?? stored.sendingPubkey,
+                rulesHash: stored.rulesHash,
+                rulesSignature: stored.rulesSignature,
+                rulesText: stored.rulesText
+            )
+            if candidate.agreedToRules(groupID: invitation.groupID) {
+                profiles[key] = candidate
+            }
+        }
         if let selfEntry = await selfMemberProfileEntry(for: ownerIdentityID) {
             // Identity wins locally; the agreement is whichever record
             // actually proves something.
@@ -453,18 +489,7 @@ public struct IncomingMessageDispatcher: Sendable {
             // "didn't sign", by version skew rather than by any code
             // path.
             //
-            // Scoped by owner as well as group — as the materializer
-            // and the join-guard both are (the replay shortcut below
-            // matches on the group alone, which is its own question):
-            // two identities on one device hold two rows
-            // for the same group, and the wrong one would stamp
-            // somebody else's agreement onto this profile.
-            let stored = await groupRepository.currentGroups()
-                .first {
-                    $0.groupIDData == invitation.groupID
-                        && $0.ownerIdentityID == ownerIdentityID
-                }?
-                .memberProfiles[selfEntry.key]
+            let stored = storedGroup?.memberProfiles[selfEntry.key]
             // Verified as the row that will actually be *stored*, not
             // as the row that arrived. The local alias and keys win, so
             // an agreement checked against the wire's `sendingPubkey`

@@ -24,7 +24,11 @@ struct ChatEmptyStateView: View {
 
                 if let invitation = invitationMessage,
                    !invitation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    section("INVITATION") {
+                    // "GROUP RULES", as the members screen calls the
+                    // same field. One body of text under two names
+                    // would be the exact split this work went to
+                    // trouble to avoid elsewhere.
+                    section("GROUP RULES") {
                         Text(invitation)
                             .font(.system(size: 14))
                             .foregroundStyle(OnymTokens.text)

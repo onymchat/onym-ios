@@ -254,6 +254,16 @@ struct MemberRulesProofView: View {
                 return nil
             }
         }.value
+        // A superseded write must not land. `.task(id:)` cancels this
+        // task, but cancellation doesn't reach `Task.detached` and
+        // awaiting a non-throwing task doesn't throw on cancel — so an
+        // earlier write finishing last would assign its URL and delete
+        // the newer one as `previous`, leaving Export on the old
+        // proof's bytes. Which is what `.task(id:)` was added to stop.
+        guard !Task.isCancelled else {
+            if let written { try? FileManager.default.removeItem(at: written) }
+            return
+        }
         if let written {
             // Replaces the previous write from *this* sheet — the proof
             // changed under it. A proof for a different member was
