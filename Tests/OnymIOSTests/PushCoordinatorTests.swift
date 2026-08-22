@@ -1,0 +1,106 @@
+import XCTest
+@testable import OnymIOS
+import OnymIdentity
+import OnymPush
+import OnymTransportNostr
+
+/// The privacy-load-bearing gate: notification authorization revoked
+/// in system Settings while the in-app preference says on means the
+/// toggle is a lie and the server still holds a registration — both
+/// the cold launch and the foreground hook must run the full disable
+/// path. The authorization probe is injected, so these tests drive it
+/// directly.
+final class PushCoordinatorTests: XCTestCase {
+    private var defaultsSuite: String!
+    private var keychain: IdentityKeychainStore!
+
+    override func setUp() {
+        super.setUp()
+        defaultsSuite = "push-coordinator-tests-\(UUID().uuidString)"
+        keychain = IdentityKeychainStore(testNamespace: defaultsSuite)
+    }
+
+    override func tearDown() {
+        UserDefaults(suiteName: defaultsSuite)?
+            .removePersistentDomain(forName: defaultsSuite)
+        try? keychain?.wipeAll()
+        keychain = nil
+        super.tearDown()
+    }
+
+    private func makePreferences(enabled: Bool) -> PushPreferenceStore {
+        let suite = defaultsSuite!
+        let store = PushPreferenceStore(defaults: { UserDefaults(suiteName: suite)! })
+        store.setEnabled(enabled)
+        return store
+    }
+
+    private func makeCoordinator(
+        preferences: PushPreferenceStore,
+        denied: @escaping @Sendable () async -> Bool
+    ) -> PushCoordinator {
+        PushCoordinator(
+            identityRepository: IdentityRepository(
+                keychain: keychain,
+                selectionStore: .inMemory()
+            ),
+            relaysRepository: NostrRelaysRepository(
+                store: InMemoryNostrRelaysSelectionStore(initial: .empty)
+            ),
+            client: StubPushBackendClient(),
+            preferences: preferences,
+            notificationAuthorizationDenied: denied
+        )
+    }
+
+    /// Cold launch: `.onChange(of: scenePhase)` never fires for the
+    /// initial `.active`, so `run()` itself must reconcile with system
+    /// Settings — enabled + denied means the full disable path, before
+    /// any APNs registration.
+    func testRunDisablesWhenAuthorizationWasRevoked() async throws {
+        let preferences = makePreferences(enabled: true)
+        let coordinator = makeCoordinator(preferences: preferences, denied: { true })
+
+        // run() then observes streams for the scene's life; poll the
+        // observable effect and cancel.
+        let scene = Task { await coordinator.run() }
+        defer { scene.cancel() }
+
+        let deadline = Date().addingTimeInterval(2)
+        while Date() < deadline, preferences.isEnabled {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertFalse(preferences.isEnabled)
+    }
+
+    func testForegroundDisablesWhenAuthorizationWasRevoked() async {
+        let preferences = makePreferences(enabled: true)
+        let coordinator = makeCoordinator(preferences: preferences, denied: { true })
+
+        await coordinator.appForegrounded()
+
+        XCTAssertFalse(preferences.isEnabled)
+        XCTAssertFalse(coordinator.registrationPending)
+    }
+
+    /// Authorization intact: the gate must NOT disable — the opt-in
+    /// survives the foreground reconciliation untouched.
+    func testForegroundKeepsAGrantedAuthorizationEnabled() async {
+        let preferences = makePreferences(enabled: true)
+        let coordinator = makeCoordinator(preferences: preferences, denied: { false })
+
+        await coordinator.appForegrounded()
+
+        XCTAssertTrue(preferences.isEnabled)
+    }
+
+    /// Denied but already off: nothing to reconcile, nothing flips.
+    func testForegroundWithPushOffIgnoresTheDenial() async {
+        let preferences = makePreferences(enabled: false)
+        let coordinator = makeCoordinator(preferences: preferences, denied: { true })
+
+        await coordinator.appForegrounded()
+
+        XCTAssertFalse(preferences.isEnabled)
+    }
+}

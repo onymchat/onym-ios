@@ -65,6 +65,25 @@ final class PushRegistrationPayloadTests: XCTestCase {
         )
     }
 
+    /// The digest binds grouping, not just the flattened (tag, relay)
+    /// pairs: the per-entry relay count makes one entry carrying two
+    /// relays digest differently from the same tag split across two
+    /// entries. This exact collision existed before the count was
+    /// added — pinned here so it cannot come back.
+    func testDigestIsGroupingSensitive() {
+        let grouped = [
+            PushSubscription(tag: "a1b2c3d4e5f60718", relays: ["wss://r1.example", "wss://r2.example"]),
+        ]
+        let split = [
+            PushSubscription(tag: "a1b2c3d4e5f60718", relays: ["wss://r1.example"]),
+            PushSubscription(tag: "a1b2c3d4e5f60718", relays: ["wss://r2.example"]),
+        ]
+        XCTAssertNotEqual(
+            SignedPushSessionPayload.digest(of: grouped),
+            SignedPushSessionPayload.digest(of: split)
+        )
+    }
+
     /// An absent device token and an empty one encode identically —
     /// intentional, matching the moderation payload's contract.
     func testAbsentAndEmptyDeviceTokenAgree() {
@@ -115,6 +134,17 @@ final class PushRegistrationPayloadTests: XCTestCase {
             subscriptions: subscriptions
         )
         XCTAssertEqual(hex(payload), expected)
+        // The empty-Data spelling is fixture-pinned too, not just
+        // proven equal to nil elsewhere: both spellings must produce
+        // these exact backend-verified bytes.
+        let emptyToken = SignedPushSessionPayload.register(
+            deviceToken: Data(),
+            userKey: userKey,
+            timestamp: timestamp,
+            apnsToken: apnsToken,
+            subscriptions: subscriptions
+        )
+        XCTAssertEqual(hex(emptyToken), expected)
     }
 
     func testUnregisterFixtureMatchesTheBackend() {
