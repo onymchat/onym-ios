@@ -175,7 +175,7 @@ private struct CreateGroupStep1View: View {
                     avatar
                     nameField
                     nameFootnote
-                    OnymSectionLabel(text: "Invitation message")
+                    OnymSectionLabel(text: "Group rules")
                     invitationField
                     invitationFootnote
                     OnymSectionLabel(text: "Group type")
@@ -252,7 +252,7 @@ private struct CreateGroupStep1View: View {
         TextField(
             "",
             text: $flow.invitationMessage,
-            prompt: Text("Add a greeting, group rules, or policy…")
+            prompt: Text("What everyone here agrees to. Optional.")
                 .foregroundColor(OnymTokens.text3),
             axis: .vertical
         )
@@ -262,6 +262,12 @@ private struct CreateGroupStep1View: View {
         .lineLimit(3...12)
         .textInputAutocapitalization(.sentences)
         .accessibilityIdentifier("create_group.step1.invitation_field")
+        // Clamped here, the way the name field above is, so a paste
+        // that overshoots is cut as it lands rather than at submit.
+        .onChange(of: flow.invitationMessage) { _, new in
+            let clamped = CreateGroupFlow.clampedRules(new)
+            if clamped != new { flow.invitationMessage = clamped }
+        }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .background(OnymTokens.surface2)
@@ -272,12 +278,24 @@ private struct CreateGroupStep1View: View {
     }
 
     private var invitationFootnote: some View {
-        Text("Shown to people before they accept your invite. Optional.")
-            .font(.system(size: 11.5))
-            .foregroundStyle(OnymTokens.text3)
-            .padding(.horizontal, 4)
-            .padding(.top, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        HStack(alignment: .top, spacing: 8) {
+            Text("Anyone joining reads these and signs that they agree, so you can show later what they agreed to.")
+                .frame(maxWidth: .infinity, alignment: .leading)
+            // Only once it starts to matter. A counter sitting at 500
+            // on an empty field reads as a demand for 500 characters;
+            // what a founder needs is warning that the room is running
+            // out, and the cap is the QR code's, so running out is real.
+            if flow.rulesRemaining <= 100 {
+                Text("\(flow.rulesRemaining)")
+                    .monospacedDigit()
+                    .foregroundStyle(flow.rulesRemaining <= 0 ? OnymTokens.amber : OnymTokens.text3)
+                    .accessibilityLabel("\(flow.rulesRemaining) characters left")
+            }
+        }
+        .font(.system(size: 11.5))
+        .foregroundStyle(OnymTokens.text3)
+        .padding(.horizontal, 4)
+        .padding(.top, 6)
     }
 
     /// Founder is the only group type today, so the picker is replaced by

@@ -93,7 +93,10 @@ public final class ShareInviteFlow: Identifiable {
             let cap = try await introducer.currentOrMint(
                 ownerIdentityID: activeID,
                 groupId: group.groupIDData,
-                groupName: group.name
+                groupName: group.name,
+                // Straight from the group, so a link shared today
+                // carries what this group asks of joiners today.
+                rules: group.linkableRules
             )
             currentIntroPub = cap.introPublicKey
             state = .ready(link: cap.toAppLink(), groupName: group.name)
@@ -128,7 +131,8 @@ public final class ShareInviteFlow: Identifiable {
             let cap = try await introducer.rotate(
                 ownerIdentityID: activeID,
                 groupId: group.groupIDData,
-                groupName: group.name
+                groupName: group.name,
+                rules: group.linkableRules
             )
             currentIntroPub = cap.introPublicKey
             state = .ready(link: cap.toAppLink(), groupName: group.name)

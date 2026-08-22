@@ -35,12 +35,54 @@ public final class CreateGroupFlow {
     // MARK: - Form state
 
     public var name: String
-    /// Optional free-text invitation the creator writes — a greeting,
-    /// group policy, or articles of association. Travels in the sealed
-    /// invite payloads (never the QR/link, never on-chain) so invitees
-    /// read it before accepting and it persists as the group's intro.
-    /// Any length; empty means "no invitation".
+    /// The group's rules: what everyone joining agrees to. Travels in
+    /// the sealed invite payloads *and*, since joiners must be able to
+    /// read them before agreeing, in the invite link itself — which is
+    /// where the length cap comes from. Persists as the group's intro,
+    /// and is the text a joiner's signature covers. Empty means the
+    /// group asks nothing, and no agreement is collected.
+    ///
+    /// Clamped rather than validated at submit: a founder who has typed
+    /// past the limit is told by the counter, and letting them keep
+    /// typing into a field that will refuse to mint a link at the end
+    /// is the worse failure.
+    ///
+    /// The clamp lives in the view's `onChange`, where the name field's
+    /// does — a plain stored property here, rather than one carrying a
+    /// `didSet` whose interaction with `@Observable`'s accessor
+    /// synthesis would have to be reasoned about before trusting
+    /// `rulesRemaining` to update live.
     var invitationMessage: String = ""
+
+    /// The same text clamped to what an invite can carry, in both units
+    /// that bound it.
+    ///
+    /// Bytes are the cap that decides whether a link is valid, and
+    /// characters are what the counter shows; a scalar can cost up to
+    /// four bytes, so trimming proceeds one character at a time rather
+    /// than slicing bytes and risking a cut mid-scalar.
+    public static func clampedRules(_ text: String) -> String {
+        var clamped = text.count > GroupRules.maxLength
+            ? String(text.prefix(GroupRules.maxLength))
+            : text
+        while clamped.utf8.count > GroupRules.maxBytes {
+            clamped.removeLast()
+        }
+        return clamped
+    }
+
+    /// How much room is left in the rules, for the field's counter.
+    ///
+    /// Whichever cap is closer: Latin text runs out of characters
+    /// first, and scripts that cost more per character run out of bytes
+    /// first. Showing the larger of the two would keep counting down
+    /// while typing had already stopped having any effect.
+    public var rulesRemaining: Int {
+        min(
+            GroupRules.maxLength - invitationMessage.count,
+            GroupRules.maxBytes - invitationMessage.utf8.count
+        )
+    }
     /// Always `.tyranny` in PR-C — the picker disables the others.
     public var governance: OnymUIGovernance = .tyranny
     public internal(set) var invitees: [OnymInvitee] = []

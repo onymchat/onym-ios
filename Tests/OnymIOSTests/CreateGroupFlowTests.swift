@@ -372,6 +372,52 @@ final class CreateGroupFlowTests: XCTestCase {
         XCTAssertNil(flow.error)
     }
 
+    // MARK: - Group rules
+
+    /// One `Character`, 25 UTF-8 bytes — the shape that makes a
+    /// character cap and a byte cap disagree.
+    private let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}"
+
+    func test_clampedRules_stopsAtTheCharacterCap() {
+        let typed = String(repeating: "a", count: GroupRules.maxLength + 50)
+        XCTAssertEqual(
+            CreateGroupFlow.clampedRules(typed).count, GroupRules.maxLength
+        )
+    }
+
+    func test_clampedRules_stopsAtTheByteCap_withoutCuttingAScalar() {
+        // 200 characters is well inside the character cap and five
+        // thousand bytes outside the byte one, which is the cap that
+        // decides whether a link is valid. Trimmed a character at a
+        // time, so what is left is still the text that was typed.
+        let clamped = CreateGroupFlow.clampedRules(String(repeating: family, count: 200))
+
+        XCTAssertEqual(
+            clamped,
+            String(repeating: family, count: GroupRules.maxBytes / family.utf8.count)
+        )
+        XCTAssertLessThanOrEqual(clamped.utf8.count, GroupRules.maxBytes)
+    }
+
+    func test_clampedRules_leavesTextThatFitsAlone() {
+        XCTAssertEqual(CreateGroupFlow.clampedRules("Be kind."), "Be kind.")
+        XCTAssertEqual(CreateGroupFlow.clampedRules(""), "")
+    }
+
+    func test_rulesRemaining_countsDownWhicheverCapIsCloser() async throws {
+        let flow = await makeFlow()
+
+        // Latin text runs out of characters first.
+        flow.invitationMessage = String(repeating: "a", count: 100)
+        XCTAssertEqual(flow.rulesRemaining, GroupRules.maxLength - 100)
+
+        // Fifty family emoji: 450 characters still to spare, and 250
+        // bytes. Showing the larger would keep counting down while
+        // typing had already stopped having any effect.
+        flow.invitationMessage = String(repeating: family, count: 50)
+        XCTAssertEqual(flow.rulesRemaining, GroupRules.maxBytes - 50 * 25)
+    }
+
     // MARK: - Helpers
 
     private func makeFlow() async -> CreateGroupFlow {

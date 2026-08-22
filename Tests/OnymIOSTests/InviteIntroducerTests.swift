@@ -286,6 +286,27 @@ final class InviteIntroducerTests: XCTestCase {
         XCTAssertEqual(rotated.introPublicKey, resolved.introPublicKey)
     }
 
+    func test_rotate_carriesTheRulesOntoTheFreshLink() async throws {
+        // "Generate new link" is the same invitation to the same group.
+        // A rotated link minted without rules hands every joiner on it
+        // the one-tap join and lands them on the founder's screen as
+        // having declined to agree.
+        let store = InMemoryIntroKeyStore()
+        let introducer = InviteIntroducer(store: store)
+
+        _ = try await introducer.currentOrMint(
+            ownerIdentityID: alice, groupId: sampleGroupId, rules: "Be kind."
+        )
+        let rotated = try await introducer.rotate(
+            ownerIdentityID: alice,
+            groupId: sampleGroupId,
+            groupName: "Family",
+            rules: "Be kind."
+        )
+
+        XCTAssertEqual(rotated.rules, "Be kind.")
+    }
+
     func test_rotate_leavesOtherGroupsAlone() async throws {
         let store = InMemoryIntroKeyStore()
         let introducer = InviteIntroducer(store: store)

@@ -743,7 +743,20 @@ public struct CreateGroupInteractor: Sendable {
                     ownerIdentityID: ownerIdentityID,
                     groupId: groupID,
                     groupName: groupName,
-                    label: IntroKeyEntry.fingerprint(of: inboxKey)
+                    label: IntroKeyEntry.fingerprint(of: inboxKey),
+                    // The offer carries the rules too, but a create-time
+                    // invitee can also be reached by the link this
+                    // capability encodes — and the two must ask them to
+                    // agree to the same words.
+                    //
+                    // Dropped from the link if it won't fit, for the
+                    // reason `ChatGroup.linkableRules` gives: a group
+                    // that can't mint an invite at all is the worse
+                    // failure, and truncating would have joiners sign
+                    // an abridged text that then fails to verify.
+                    rules: GroupRules.normalized(invitationMessage).flatMap {
+                        GroupRules.fits($0) ? $0 : nil
+                    }
                 )
             } catch {
                 throw CreateGroupError.invitationSendFailed(

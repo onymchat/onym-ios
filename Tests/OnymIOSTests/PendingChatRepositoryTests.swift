@@ -307,7 +307,8 @@ final class PendingChatRepositoryTests: XCTestCase {
                 inviterAlias: inviterAlias,
                 invitationMessage: invitationMessage,
                 receivedAt: existing.receivedAt,
-                status: existing.status
+                status: existing.status,
+                joinerLabel: existing.joinerLabel
             )
         }
 

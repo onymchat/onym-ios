@@ -33,15 +33,28 @@ public struct JoinConfirmView: View {
 
     @State private var label: String = ""
     @State private var isSending = false
+    /// Unticked until the person ticks it. Only ever gates Send for a
+    /// group that has rules — see `canSend`.
+    @State private var agreedToRules = false
 
     public var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 18) {
                     header
+                    // Same field, two names: since the rename, a
+                    // group's invitation message *is* its rules, so an
+                    // offer whose text became the rules card must not
+                    // also draw it as a greeting. Only a message that
+                    // says something different earns its own card.
                     if let message = confirmation.invitationMessage,
-                       !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                       !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                       message.trimmingCharacters(in: .whitespacesAndNewlines)
+                           != confirmation.rules {
                         invitationCard(message)
+                    }
+                    if let rules = confirmation.rules {
+                        rulesCard(rules)
                     }
                     nameField
                     disclosure
@@ -106,6 +119,48 @@ public struct JoinConfirmView: View {
             .accessibilityIdentifier("join_confirm.invitation_message")
     }
 
+    /// The rules, and the tick that turns reading them into agreeing.
+    ///
+    /// Send signs this exact text, so it is shown in full rather than
+    /// truncated behind a "more": a signature over words that were
+    /// folded away is not much of an agreement. The text is
+    /// founder-supplied and untrusted, hence rendered plain — no
+    /// markdown, no links to follow.
+    private func rulesCard(_ rules: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Group rules")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(OnymTokens.text3)
+            Text(rules)
+                .font(.system(size: 14))
+                .foregroundStyle(OnymTokens.text)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
+                .accessibilityIdentifier("join_confirm.rules_text")
+            Divider().overlay(OnymTokens.hairline)
+            Toggle(isOn: $agreedToRules) {
+                Text("I agree to these rules")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(OnymTokens.text)
+            }
+            .tint(OnymAccent.blue.color)
+            .accessibilityIdentifier("join_confirm.agree_toggle")
+            // Said plainly, because it is the part that outlives the
+            // tap: the founder keeps this, and can show it.
+            Text("Your agreement is signed with this identity\u{2019}s key and sent with your request.")
+                .font(.system(size: 11))
+                .foregroundStyle(OnymTokens.text2)
+        }
+        .padding(14)
+        .background(OnymTokens.surface2)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(OnymTokens.hairline, lineWidth: 1)
+        )
+        .accessibilityIdentifier("join_confirm.rules")
+    }
+
     /// Pre-filled, never blank: the identity's own name is the answer
     /// almost every time, so joining is Send and nothing else. The field
     /// is here for the times it isn't — a name you'd rather this room
@@ -148,6 +203,17 @@ public struct JoinConfirmView: View {
                     .font(.system(size: 12))
                     .foregroundStyle(OnymTokens.text2)
             }
+            if confirmation.rules != nil {
+                Label {
+                    Text("Your signed agreement to the rules goes with it.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(OnymTokens.text2)
+                } icon: {
+                    Image(systemName: "signature")
+                        .font(.system(size: 12))
+                        .foregroundStyle(OnymTokens.text2)
+                }
+            }
             row("group", value: shortHex(confirmation.groupIDHex))
             row("invite key", value: shortHex(hex(confirmation.introPublicKey)))
         }
@@ -165,7 +231,9 @@ public struct JoinConfirmView: View {
         } label: {
             Text(isSending
                  ? String(localized: "Sending\u{2026}")
-                 : String(localized: "Send join request"))
+                 : confirmation.rules == nil
+                    ? String(localized: "Send join request")
+                    : String(localized: "Agree and send request"))
                 .font(.system(size: 15, weight: .semibold))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
@@ -180,8 +248,16 @@ public struct JoinConfirmView: View {
     /// A name is required: an empty one reaches the founder as a blank
     /// row they are asked to admit. It is pre-filled from the identity,
     /// so this only bites if someone deliberately clears it.
+    ///
+    /// The rules tick is required only when there are rules. A group
+    /// that asks nothing of its joiners keeps that one-tap join: there
+    /// is nothing to affirm, and a tick standing for nothing is
+    /// friction that teaches people to tick without reading.
     private var canSend: Bool {
-        !isSending && !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard !isSending,
+              !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return false }
+        return confirmation.rules == nil || agreedToRules
     }
 
     /// `LocalizedStringKey`, not `String`: passing a `String` picks
