@@ -36,6 +36,35 @@ final class PushTokenEnvelopeTests: XCTestCase {
     func testSealRefusesAMalformedServerKey() {
         XCTAssertThrowsError(
             try PushTokenEnvelope.seal(apnsToken: Data([0x01]), serverPublicKey: Data([0x02]))
+        ) { error in
+            XCTAssertEqual(error as? PushTokenEnvelope.SealError, .invalidServerKey)
+        }
+    }
+
+    /// 32 zero bytes decodes as a key but names a low-order point
+    /// whose agreement CryptoKit rejects — the seal must surface that
+    /// as the same "not a server key" error, not an opaque CryptoKit
+    /// throw (this was the silent failure mode of the stub's old
+    /// all-zero default).
+    func testSealRefusesADegenerateServerKey() {
+        XCTAssertThrowsError(
+            try PushTokenEnvelope.seal(
+                apnsToken: Data([0x01]),
+                serverPublicKey: Data(repeating: 0, count: 32)
+            )
+        ) { error in
+            XCTAssertEqual(error as? PushTokenEnvelope.SealError, .invalidServerKey)
+        }
+    }
+
+    /// The stub's pinned default key must itself be sealable — the
+    /// property the deterministic default exists to guarantee.
+    func testStubDefaultKeyIsSealable() {
+        XCTAssertNoThrow(
+            try PushTokenEnvelope.seal(
+                apnsToken: Data([0x01]),
+                serverPublicKey: StubPushBackendClient.defaultRegistrationKey
+            )
         )
     }
 

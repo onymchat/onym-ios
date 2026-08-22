@@ -107,6 +107,32 @@ final class NotificationsSettingsFlowTests: XCTestCase {
         await flow.setEnabled(false)
         XCTAssertTrue(flow.registrationPending)
     }
+
+    /// The coordinator can disable underneath a still-mounted screen
+    /// (authorization revoked in system Settings, app foregrounded
+    /// back onto this view): the refresh re-reads the persisted opt-in
+    /// through the injected closure instead of trusting the
+    /// presentation-time snapshot.
+    func testRefreshResyncsIsEnabledFromTheStore() async {
+        let stored = Flag(true)
+        let flow = NotificationsSettingsFlow(
+            isEnabled: true,
+            enable: { true },
+            disable: {},
+            readIsEnabled: { stored.value }
+        )
+        XCTAssertTrue(flow.isEnabled)
+
+        // The coordinator disabled off-screen.
+        stored.value = false
+        flow.refreshRegistrationState()
+        XCTAssertFalse(flow.isEnabled)
+
+        // And a re-enable elsewhere reads back too.
+        stored.value = true
+        flow.refreshRegistrationState()
+        XCTAssertTrue(flow.isEnabled)
+    }
 }
 
 // MARK: - Small test actors

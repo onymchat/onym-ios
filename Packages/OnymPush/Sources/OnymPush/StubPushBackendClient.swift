@@ -23,6 +23,10 @@ public actor StubPushBackendClient: PushBackendClient {
     public var registrationKeyAnswer: Data
     public var registerAnswer: Result<PushRegisterResponse, Error>
     public var unregisterAnswer: Result<Void, Error>
+    /// Awaited inside `register` before the request is recorded — a
+    /// test can hold a register "in flight" (e.g. behind a gate it
+    /// controls) while it interleaves a disable, then let it land.
+    public var onRegister: (@Sendable () async -> Void)?
 
     public init(
         registrationKeyAnswer: Data = StubPushBackendClient.defaultRegistrationKey,
@@ -40,6 +44,9 @@ public actor StubPushBackendClient: PushBackendClient {
     }
 
     public func register(_ request: PushRegisterRequest) async throws -> PushRegisterResponse {
+        if let onRegister {
+            await onRegister()
+        }
         registered.append(request)
         return try registerAnswer.get()
     }
@@ -61,7 +68,7 @@ public actor StubPushBackendClient: PushBackendClient {
         registrationKeyAnswer = key
     }
 
-    public func setUnregisterAnswer(_ answer: Result<Void, Error>) {
-        unregisterAnswer = answer
+    public func setOnRegister(_ hook: (@Sendable () async -> Void)?) {
+        onRegister = hook
     }
 }
