@@ -40,8 +40,14 @@ public struct NotificationsSettingsView: View {
                     )
                 }
 
+                if flow.registrationPending {
+                    SettingsFootnote(
+                        "Activating\u{2026} the push server has not confirmed this device yet. This finishes on its own; check back if alerts don\u{2019}t arrive."
+                    )
+                }
+
                 SettingsFootnote(
-                    "How it works: an Onym-run push server watches your configured Nostr relays for your inbox codes and asks Apple to wake this device, a few seconds delayed at random. It never sees message content, senders, or groups — it holds only your inbox codes and an encrypted push token, and forgets both when you turn this off. The alert itself always reads \u{201C}New message\u{201D}; nothing about the conversation passes through Apple."
+                    "How it works: an Onym-run push server watches your configured Nostr relays for your inbox codes and asks Apple to wake this device, a few seconds delayed at random. It never sees message content, senders, or groups — it holds only your inbox codes and an encrypted push token, and asks the server to forget both when you turn this off (retried until the server confirms). All of your identities\u{2019} inbox codes are registered together, so the push server can tell they belong to one device. The alert itself always reads \u{201C}New message\u{201D}; nothing about the conversation passes through Apple."
                 )
             }
             .padding(.horizontal)
@@ -50,6 +56,11 @@ public struct NotificationsSettingsView: View {
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Notifications")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            // Registration completes off-screen; re-read so a finished
+            // (or still-pending) activation renders truthfully.
+            flow.refreshRegistrationState()
+        }
         .onChange(of: switchState) { _, wanted in
             guard wanted != flow.isEnabled else { return }
             Task {

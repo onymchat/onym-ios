@@ -35,7 +35,12 @@ actor PushCoordinator {
     private let identityRepository: IdentityRepository
     private let relaysRepository: NostrRelaysRepository
 
-    private var latestTags: [String] = []
+    /// nil until the first identity read completes — an actually-empty
+    /// identity list (loaded, count 0) becomes `[]`, which is
+    /// meaningful and clears the backend's tag set. The distinction
+    /// keeps a slow keychain read from causing an empty-set register
+    /// followed immediately by a re-register.
+    private var latestTags: [String]?
     private var latestRelays: [String] = []
 
     init(
@@ -57,6 +62,14 @@ actor PushCoordinator {
 
     nonisolated var isEnabled: Bool {
         preferences.isEnabled
+    }
+
+    /// Enabled but not yet accepted by the backend: authorization was
+    /// granted, but no registration fingerprint has been recorded —
+    /// Settings shows this as "activating" rather than claiming the
+    /// wake path works before it does.
+    nonisolated var registrationPending: Bool {
+        preferences.isEnabled && preferences.lastRegistrationFingerprint == nil
     }
 
     /// Runs for the scene's life from a `RootView`-level `.task`.
@@ -98,8 +111,19 @@ actor PushCoordinator {
     }
 
     /// Foreground hook, same shape as the moderation gate's: gives the
-    /// interactor its periodic-refresh opportunity without a timer.
+    /// interactor its periodic-refresh opportunity without a timer —
+    /// and reconciles with system Settings first: if the user revoked
+    /// notification authorization there while the in-app preference
+    /// says on, the toggle is a lie and the server still holds a
+    /// registration, so this runs the full disable path.
     func appForegrounded() async {
+        if preferences.isEnabled {
+            let settings = await UNUserNotificationCenter.current().notificationSettings()
+            if settings.authorizationStatus == .denied {
+                await disable()
+                return
+            }
+        }
         await interactor.appForegrounded()
     }
 
@@ -135,7 +159,7 @@ actor PushCoordinator {
     /// empty identity list clears the backend's tag set (the device
     /// row survives, so re-adding an identity needs no re-consent).
     private func pushDesiredSubscriptions() async {
-        guard !latestRelays.isEmpty else { return }
+        guard let latestTags, !latestRelays.isEmpty else { return }
         let subscriptions = latestTags.map {
             PushSubscription(tag: $0, relays: latestRelays)
         }

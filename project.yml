@@ -183,6 +183,9 @@ targets:
           - applinks:onym.app
         # Push notifications. `development` is the source-entitlements
         # value; automatic signing flips it to `production` on export.
+        # CAVEAT: only *automatic* signing rewrites it — a manually
+        # signed archive ships this development entitlement verbatim,
+        # and the app silently talks to APNs' sandbox in production.
         # Pushes are content-free alerts, so no UIBackgroundModes.
         aps-environment: development
     settings:

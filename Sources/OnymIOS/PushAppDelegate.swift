@@ -1,24 +1,59 @@
 import UIKit
+import UserNotifications
 
 /// The one thing an app delegate is still required for: APNs delivers
 /// the device token through `UIApplicationDelegate` callbacks, not a
 /// modern async API. This delegate does nothing else — the token is
-/// relayed into a stream `PushCoordinator` consumes, and failures are
+/// relayed into streams `PushCoordinator` consumes, and failures are
 /// silent (registration is retried on the next foreground; per the
 /// no-activity-logging stance nothing is recorded).
-final class PushAppDelegate: NSObject, UIApplicationDelegate {
-    private static let pipe = AsyncStream.makeStream(of: Data.self)
+final class PushAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    /// Multicast with replay: every subscriber gets its own stream, a
+    /// new subscriber immediately receives the latest token when APNs
+    /// already delivered one, and no continuation is ever finished —
+    /// the streams are process-lifetime by design, so a subscriber
+    /// arriving after the token (or a second subscriber, ever) can't
+    /// silently see nothing.
+    private static let lock = NSLock()
+    // nonisolated(unsafe): every touch is under `lock`.
+    private nonisolated(unsafe) static var latestToken: Data?
+    private nonisolated(unsafe) static var continuations: [AsyncStream<Data>.Continuation] = []
 
-    /// Every token APNs hands this process, in order. The token can
-    /// rotate on restore or reinstall, so this is a stream, not a
-    /// one-shot.
-    static var deviceTokens: AsyncStream<Data> { pipe.stream }
+    /// Every token APNs hands this process, in order, starting with
+    /// the most recent one if it already arrived. The token can rotate
+    /// on restore or reinstall, so this is a stream, not a one-shot.
+    static var deviceTokens: AsyncStream<Data> {
+        AsyncStream { continuation in
+            lock.lock()
+            defer { lock.unlock() }
+            continuations.append(continuation)
+            if let latestToken {
+                continuation.yield(latestToken)
+            }
+        }
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        // Foreground presentation goes through this delegate; set
+        // before anything can arrive.
+        UNUserNotificationCenter.current().delegate = self
+        return true
+    }
 
     func application(
         _ application: UIApplication,
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
     ) {
-        Self.pipe.continuation.yield(deviceToken)
+        Self.lock.lock()
+        Self.latestToken = deviceToken
+        let subscribers = Self.continuations
+        Self.lock.unlock()
+        for continuation in subscribers {
+            continuation.yield(deviceToken)
+        }
     }
 
     func application(
@@ -26,5 +61,16 @@ final class PushAppDelegate: NSObject, UIApplicationDelegate {
         didFailToRegisterForRemoteNotificationsWithError error: Error
     ) {
         // Quiet by design; the reconciler retries on later inputs.
+    }
+
+    /// A push arriving while the app is foregrounded still shows its
+    /// (content-free) banner — without this, foreground arrivals are
+    /// silently swallowed and the toggle looks broken exactly when the
+    /// user is watching.
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        [.banner, .sound]
     }
 }
