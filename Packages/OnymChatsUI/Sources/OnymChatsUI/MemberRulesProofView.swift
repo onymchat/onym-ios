@@ -25,12 +25,22 @@ struct MemberRulesProofView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 18) {
-                    verdict
-                    if let rules = proof.rules {
-                        signedText(rules)
+                    // A standing can lose its mark *after* presentation
+                    // — a refresh reply that clears the group's rules
+                    // turns an open `.didNotSign` sheet into
+                    // `.noRules`. The chevron gating can only stop the
+                    // ones that start that way, and what was left was a
+                    // blank card over a live Export button.
+                    if GroupRulesMark(proof.standing) == nil {
+                        nothingToShow
+                    } else {
+                        verdict
+                        if let rules = proof.rules {
+                            signedText(rules)
+                        }
+                        bytes
+                        export
                     }
-                    bytes
-                    export
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
@@ -47,7 +57,7 @@ struct MemberRulesProofView: View {
             }
         }
         .task(id: proof) { await writeFile() }
-        .task { await sweepEarlierExports() }
+        .task { await sweepStaleExports() }
         // One rule for the exported file, because the two this had
         // grown contradicted each other: **nothing written during this
         // sheet's life is ever deleted while it lives; everything left
@@ -60,13 +70,31 @@ struct MemberRulesProofView: View {
         // *previous* write had the same hazard, since the user may have
         // handed that one out a second earlier.
         //
-        // Sweeping on appear is what keeps that from accumulating.
-        // Each directory holds another member's rules text and
-        // signature, `tmp` is only purged under pressure, and a pile of
-        // those is the disclosure this screen is careful about
-        // everywhere else. The sheet that wrote them is gone by then,
-        // and so is any share sheet it presented.
+        // Sweeping *stale* exports is what keeps that from
+        // accumulating. Each directory holds another member's rules
+        // text and signature in plaintext, outside the encrypted store,
+        // and `tmp` is only purged under pressure — a pile of those is
+        // the disclosure this screen is careful about everywhere else.
+        // An hour old is the test, because it is the one thing that
+        // needs no coordination with whoever might still be reading.
         .reasonAlert("Couldn\u{2019}t prepare the file", reason: $writeError)
+    }
+
+    /// For a member whose standing stopped having anything to report
+    /// while this sheet was open.
+    private var nothingToShow: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "doc.text.magnifyingglass")
+                .font(.system(size: 34))
+                .foregroundStyle(OnymTokens.text3)
+            Text("There\u{2019}s nothing to show about this member\u{2019}s agreement any more.")
+                .font(.system(size: 15))
+                .foregroundStyle(OnymTokens.text)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 24)
+        .accessibilityIdentifier("rules_proof.nothing_to_show")
     }
 
     private var verdict: some View {
@@ -323,27 +351,46 @@ struct MemberRulesProofView: View {
         try FileManager.default.removeItem(at: export.deletingLastPathComponent())
     }
 
-    /// Deletes export directories left by earlier presentations.
+    /// Deletes export directories old enough that nothing can still be
+    /// reading them.
     ///
-    /// Runs once on appear, before this sheet writes its own — so it
-    /// can only ever remove files whose sheet, and whose share sheet,
-    /// are both long gone.
-    private func sweepEarlierExports() async {
+    /// Age, not "everything that was here when I appeared" — which is
+    /// what this was, and it was wrong twice over. The sweep and the
+    /// write are separate `.task` modifiers that both hop to
+    /// `Task.detached`, so nothing ordered the listing against this
+    /// sheet's own `createDirectory`: catch it and the sweep deletes
+    /// the export it is about to publish, handing `ShareLink` a dead
+    /// URL. And on iPad a second window's sheet is a live directory
+    /// that was present before this one appeared, so a snapshot at
+    /// appear would delete a file whose share sheet is open.
+    ///
+    /// An hour is far longer than any share sheet lives and far shorter
+    /// than "until the OS feels pressure", which is the alternative.
+    /// The directory this sheet is about to write is seconds old, so it
+    /// cannot be caught by any ordering.
+    private func sweepStaleExports() async {
         await Task.detached {
             let fileManager = FileManager.default
+            let cutoff = Date().addingTimeInterval(-Self.staleExportAge)
             let contents = try? fileManager.contentsOfDirectory(
                 at: fileManager.temporaryDirectory,
-                includingPropertiesForKeys: nil
+                includingPropertiesForKeys: [.creationDateKey]
             )
             for url in contents ?? []
             where url.lastPathComponent.hasPrefix(Self.exportDirectoryPrefix) {
+                let created = try? url.resourceValues(forKeys: [.creationDateKey]).creationDate
+                // No creation date means no evidence it is stale, and
+                // leaving a file is the recoverable mistake here.
+                guard let created, created < cutoff else { continue }
                 try? fileManager.removeItem(at: url)
             }
         }.value
     }
 
-    /// Names the directories this screen owns, so the sweep can tell
-    /// them from everything else sharing `tmp`.
+    /// How long an export is left alone before the next sheet may
+    /// remove it.
+    static let staleExportAge: TimeInterval = 60 * 60
+
     static let exportDirectoryPrefix = "rules-proof-"
 }
 

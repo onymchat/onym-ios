@@ -76,6 +76,33 @@ public enum GroupRulesStanding: Equatable, Sendable {
 }
 
 public extension ChatGroup {
+    /// Everything `rulesStanding` reads, and nothing else.
+    ///
+    /// A cache key for callers deriving standings for a whole roster.
+    /// Living here, beside the function it mirrors, is the point:
+    /// keying on the whole `ChatGroup` was correct but compared and
+    /// retained `avatarJPEG` on every evaluation, and keying on a list
+    /// of fields chosen at the call site would be a list nobody
+    /// remembers to update. Anything added to the derivation below has
+    /// to be added here, one screen away.
+    var rulesStandingInputs: RulesStandingInputs {
+        RulesStandingInputs(
+            id: id,
+            invitationMessage: invitationMessage,
+            memberProfiles: memberProfiles,
+            adminPubkeyHex: adminPubkeyHex,
+            groupType: groupType
+        )
+    }
+
+    struct RulesStandingInputs: Equatable, Sendable {
+        let id: String
+        let invitationMessage: String?
+        let memberProfiles: [String: MemberProfile]
+        let adminPubkeyHex: String?
+        let groupType: SEPGroupType
+    }
+
     /// Where the member stored under `blsHex` stands on this group's
     /// rules.
     ///

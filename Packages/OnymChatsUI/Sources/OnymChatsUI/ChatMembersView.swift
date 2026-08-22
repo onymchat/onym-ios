@@ -58,9 +58,9 @@ struct ChatMembersView: View {
     ///
     /// A memo rather than `onChange(initial: true)`, which fires *after*
     /// the first body evaluation: the roster's first frame drew every
-    /// row unmarked and unchevroned, then re-rendered. Keyed on the
-    /// whole `ChatGroup` value, so the cache is correct by construction
-    /// rather than by an invalidation list somebody has to keep in step.
+    /// row unmarked and unchevroned, then re-rendered. Keyed on
+    /// `ChatGroup.rulesStandingInputs` — everything the derivation
+    /// reads and nothing else, declared next to it.
     @State private var memo = StandingsMemo()
     /// Drives the admin-only rename alert.
     @State private var showRename = false
@@ -484,17 +484,23 @@ struct ChatMembersView: View {
 /// this during `body`, which rules out mutating `@State` value storage,
 /// and it must not trigger an invalidation of its own — the result is a
 /// pure function of the group already being rendered.
+///
+/// Keyed on `rulesStandingInputs` rather than the whole group: the
+/// latter was correct, but it byte-compared `avatarJPEG` on every body
+/// evaluation and retained a second copy of it for the screen's life.
+/// The key is declared beside `rulesStanding` so the two can't drift.
 @MainActor
 final class StandingsMemo {
-    private var snapshot: ChatGroup?
+    private var snapshot: ChatGroup.RulesStandingInputs?
     private var cached: [String: GroupRulesStanding] = [:]
 
     func standings(for group: ChatGroup) -> [String: GroupRulesStanding] {
-        if snapshot == group { return cached }
+        let inputs = group.rulesStandingInputs
+        if snapshot == inputs { return cached }
         cached = group.memberProfiles.keys.reduce(into: [:]) { out, key in
             out[key] = group.rulesStanding(ofMemberWith: key)
         }
-        snapshot = group
+        snapshot = inputs
         return cached
     }
 }

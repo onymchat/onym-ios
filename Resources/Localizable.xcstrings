@@ -8127,6 +8127,22 @@
           }
         }
       }
+    },
+    "There’s nothing to show about this member’s agreement any more.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "There’s nothing to show about this member’s agreement any more."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "О согласии этого участника больше нечего показать."
+          }
+        }
+      }
     }
   },
   "version": "1.0"
