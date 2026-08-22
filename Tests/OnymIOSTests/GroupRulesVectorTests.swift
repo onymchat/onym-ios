@@ -211,21 +211,3 @@ final class GroupRulesVectorTests: XCTestCase {
     }
 
 }
-
-private extension Data {
-    /// Test-only, so the golden signature can be written as the hex a
-    /// reader can compare against another implementation's output.
-    init?(hexString: String) {
-        var bytes: [UInt8] = []
-        var index = hexString.startIndex
-        while index < hexString.endIndex {
-            let next = hexString.index(index, offsetBy: 2, limitedBy: hexString.endIndex)
-            guard let next, let byte = UInt8(hexString[index..<next], radix: 16) else {
-                return nil
-            }
-            bytes.append(byte)
-            index = next
-        }
-        self.init(bytes)
-    }
-}

@@ -1,4 +1,5 @@
 import XCTest
+import CryptoKit
 @testable import OnymIOS
 import OnymChain
 import OnymIdentity
@@ -1136,7 +1137,9 @@ final class IncomingMessageDispatcherTests: XCTestCase {
         memberProfiles: [String: MemberProfile],
         adminEd25519PubkeyHex: String? = nil,
         groupType: SEPGroupType = .anarchy,
-        avatarJPEG: Data? = nil
+        avatarJPEG: Data? = nil,
+        invitationMessage: String? = nil,
+        owner: IdentityID? = nil
     ) async {
         // Default to .anarchy so the existing dispatcher tests skip
         // PR 13b's Tyranny-only on-chain commitment verification.
@@ -1144,7 +1147,7 @@ final class IncomingMessageDispatcherTests: XCTestCase {
         // in via the parameter and seed `chainState` accordingly.
         let group = ChatGroup(
             id: groupID.map { String(format: "%02x", $0) }.joined(),
-            ownerIdentityID: owner,
+            ownerIdentityID: owner ?? self.owner,
             name: "Family",
             groupSecret: Data(repeating: 0x55, count: 32),
             createdAt: Date(timeIntervalSince1970: 1_700_000_000),
@@ -1158,9 +1161,400 @@ final class IncomingMessageDispatcherTests: XCTestCase {
             adminPubkeyHex: nil,
             adminEd25519PubkeyHex: adminEd25519PubkeyHex,
             isPublishedOnChain: true,
-            avatarJPEG: avatarJPEG
+            avatarJPEG: avatarJPEG,
+            invitationMessage: invitationMessage
         )
         _ = await groups.insert(group)
+    }
+
+    // MARK: - Group rules
+
+    func test_announcement_carriesTheJoinersAgreementToEveryMember() async throws {
+        // The claim the whole feature rests on: an agreement is
+        // checkable by any member, not only the founder who admitted
+        // them. Everyone but that founder learns it from here.
+        let groupID = Data(repeating: 0xAB, count: 32)
+        let rules = "Be kind. No links."
+        let joinerKey = Curve25519.Signing.PrivateKey()
+        let joinerSendingPub = joinerKey.publicKey.rawRepresentation
+        let signature = try joinerKey.signature(for: GroupRules.statement(
+            groupID: groupID,
+            rulesHash: GroupRules.hash(rules),
+            joinerSendingPublicKey: joinerSendingPub
+        ))
+        let creator = MemberProfile(
+            alias: "Alice",
+            inboxPublicKey: Data(repeating: 0x10, count: 32),
+            sendingPubkey: Data(repeating: 0xEE, count: 32)
+        )
+        await seedGroup(
+            groupID: groupID,
+            memberProfiles: ["aa".repeated(48): creator],
+            invitationMessage: rules
+        )
+
+        let plaintext = try Self.encode(announcement: try Self.makeAnnouncement(
+            groupID: groupID,
+            joinerBlsHex: "bb".repeated(48),
+            joinerInboxByte: 0x33,
+            joinerAlias: "Bob",
+            adminAlias: "Alice",
+            joinerSendingPub: joinerSendingPub,
+            rulesHash: GroupRules.hash(rules),
+            rulesSignature: signature,
+            rulesText: rules
+        ))
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: FakeInvitationEnvelopeDecrypter(
+                mode: .fixed(plaintext),
+                senderEd25519PublicKey: Data(repeating: 0xEE, count: 32)
+            ),
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
+        )
+
+        await dispatcher.dispatch(
+            messageID: "msg-rules",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+
+        let after = await groups.currentGroups()
+        let updated = try XCTUnwrap(after.first { $0.groupIDData == groupID })
+        let joiner = try XCTUnwrap(updated.memberProfiles["bb".repeated(48)])
+        XCTAssertEqual(joiner.rulesText, rules,
+                       "the wording has to travel with the bytes it covers")
+        XCTAssertTrue(
+            joiner.agreedToRules(groupID: groupID),
+            "and an existing member must be able to check it themselves"
+        )
+        XCTAssertEqual(updated.rulesStanding(ofMemberWith: "bb".repeated(48)), .signed)
+    }
+
+    func test_announcement_fromAnOlderBuild_carriesNoAgreementAndSaysSo() async throws {
+        let groupID = Data(repeating: 0xAB, count: 32)
+        // Left as the fixture's `.anarchy`: Tyranny announcements go
+        // through on-chain commitment verification this suite doesn't
+        // seed. So this asserts what the announcement *carried* —
+        // nothing — and leaves what a group type makes of that to the
+        // standing tests either side of it.
+        await seedGroup(
+            groupID: groupID,
+            memberProfiles: ["aa".repeated(48): MemberProfile(
+                alias: "Alice",
+                inboxPublicKey: Data(repeating: 0x10, count: 32),
+                sendingPubkey: Data(repeating: 0xEE, count: 32)
+            )],
+            invitationMessage: "Be kind. No links."
+        )
+        let plaintext = try Self.encode(announcement: try Self.makeAnnouncement(
+            groupID: groupID,
+            joinerBlsHex: "bb".repeated(48),
+            joinerInboxByte: 0x33,
+            joinerAlias: "Bob",
+            adminAlias: "Alice"
+        ))
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: FakeInvitationEnvelopeDecrypter(
+                mode: .fixed(plaintext),
+                senderEd25519PublicKey: Data(repeating: 0xEE, count: 32)
+            ),
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
+        )
+        await dispatcher.dispatch(
+            messageID: "msg-legacy",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+
+        let after = await groups.currentGroups()
+        let updated = try XCTUnwrap(after.first { $0.groupIDData == groupID })
+        let joiner = try XCTUnwrap(updated.memberProfiles["bb".repeated(48)])
+        XCTAssertNil(joiner.rulesSignature)
+        XCTAssertNil(joiner.rulesText)
+    }
+
+    func test_aMemberWhoSignedNothing_inAGroupThatCollectsAgreements_didNotSign() async throws {
+        // The other half of the pair: where agreements *are* collected,
+        // an empty record means what it says.
+        let groupID = Data(repeating: 0xAB, count: 32)
+        await seedGroup(
+            groupID: groupID,
+            memberProfiles: ["bb".repeated(48): MemberProfile(
+                alias: "Bob",
+                inboxPublicKey: Data(repeating: 0x33, count: 32),
+                sendingPubkey: Data(repeating: 0xEE, count: 32)
+            )],
+            groupType: .tyranny,
+            invitationMessage: "Be kind. No links."
+        )
+        let all = await groups.currentGroups()
+        let group = try XCTUnwrap(all.first { $0.groupIDData == groupID })
+        XCTAssertEqual(group.rulesStanding(ofMemberWith: "bb".repeated(48)), .didNotSign)
+    }
+
+    func test_aGroupTypeWithNoJoinApproval_marksNobodyAsHavingDeclined() async throws {
+        // Anarchy and one-on-one have no join request and no admin, so
+        // `.author` — keyed on `adminPubkeyHex`, nil for both — would
+        // have marked every member, including whoever wrote the rules,
+        // as having refused to sign them. Unreachable today, since
+        // `.tyranny` is the only type `CreateGroupFlow` produces, and
+        // pinned so it stays right when the others ship.
+        let groupID = Data(repeating: 0xAB, count: 32)
+        await seedGroup(
+            groupID: groupID,
+            memberProfiles: ["aa".repeated(48): MemberProfile(
+                alias: "Alice",
+                inboxPublicKey: Data(repeating: 0x10, count: 32),
+                sendingPubkey: Data(repeating: 0xEE, count: 32)
+            )],
+            groupType: .anarchy,
+            invitationMessage: "Be kind. No links."
+        )
+        let all = await groups.currentGroups()
+        let group = try XCTUnwrap(all.first { $0.groupIDData == groupID })
+        XCTAssertEqual(group.rulesStanding(ofMemberWith: "aa".repeated(48)), .notCollected)
+    }
+
+    func test_aLaterInvitationWithoutTheSelfRow_doesNotEraseTheStoredAgreement() async throws {
+        // The path re-runs on every relay replay, and an admin on a
+        // build that predates the self row sends none. Copying the wire
+        // straight over put the joiner back to "didn't sign" — the
+        // defect this work exists to fix, reached by version skew.
+        let groupID = Data(repeating: 0xAB, count: 32)
+        let rules = "Be kind. No links."
+        let selfKey = Curve25519.Signing.PrivateKey()
+        let selfBlsHex = "cc".repeated(48)
+        let signature = try selfKey.signature(for: GroupRules.statement(
+            groupID: groupID,
+            rulesHash: GroupRules.hash(rules),
+            joinerSendingPublicKey: selfKey.publicKey.rawRepresentation
+        ))
+        // Already on the device, with the agreement recorded.
+        await seedGroup(
+            groupID: groupID,
+            memberProfiles: [selfBlsHex: MemberProfile(
+                alias: "Me",
+                inboxPublicKey: Data(repeating: 0x10, count: 32),
+                sendingPubkey: selfKey.publicKey.rawRepresentation,
+                rulesHash: GroupRules.hash(rules),
+                rulesSignature: signature,
+                rulesText: rules
+            )],
+            invitationMessage: rules
+        )
+
+        // A second invitation for the same group, from an admin whose
+        // build knows nothing about self rows.
+        let invitation = GroupInvitationPayload(
+            version: 1,
+            groupID: groupID,
+            groupSecret: Data(repeating: 0x55, count: 32),
+            name: "Family",
+            members: [],
+            epoch: 0,
+            salt: Data(repeating: 0x66, count: 32),
+            commitment: nil,
+            tierRaw: SEPTier.small.rawValue,
+            groupTypeRaw: SEPGroupType.anarchy.rawValue,
+            adminPubkeyHex: nil,
+            memberProfiles: nil,
+            invitationMessage: rules
+        )
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: FakeInvitationEnvelopeDecrypter(
+                mode: .fixed(try JSONEncoder().encode(invitation)),
+                senderEd25519PublicKey: Data(repeating: 0xEE, count: 32)
+            ),
+            identities: StubIdentities(summaries: [
+                IdentitySummary(
+                    id: owner,
+                    name: "Me",
+                    blsPublicKey: Data(selfBlsHex.hexBytes),
+                    inboxPublicKey: Data(repeating: 0x10, count: 32),
+                    sendingPublicKey: selfKey.publicKey.rawRepresentation
+                )
+            ]),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
+        )
+        await dispatcher.dispatch(
+            messageID: "msg-replay",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+
+        let after = await groups.currentGroups()
+        let updated = try XCTUnwrap(after.first { $0.groupIDData == groupID })
+        XCTAssertEqual(
+            updated.rulesStanding(ofMemberWith: selfBlsHex), .signed,
+            "an invitation that says nothing about our agreement must not delete it"
+        )
+    }
+
+    func test_aReApprovalWithNoText_doesNotDowngradeAVerifiedAgreement() async throws {
+        // Re-approving an old pending request after a rules edit sends
+        // the signature with no text (`JoinRequestApprover.textCovering`).
+        // Preferring the wire because it "has 64 bytes in it" turned an
+        // agreement that verifies into one that can't be checked.
+        let groupID = Data(repeating: 0xAB, count: 32)
+        let rules = "Be kind. No links."
+        let selfKey = Curve25519.Signing.PrivateKey()
+        let selfBlsHex = "cc".repeated(48)
+        let signature = try selfKey.signature(for: GroupRules.statement(
+            groupID: groupID,
+            rulesHash: GroupRules.hash(rules),
+            joinerSendingPublicKey: selfKey.publicKey.rawRepresentation
+        ))
+        await seedGroup(
+            groupID: groupID,
+            memberProfiles: [selfBlsHex: MemberProfile(
+                alias: "Me",
+                inboxPublicKey: Data(repeating: 0x10, count: 32),
+                sendingPubkey: selfKey.publicKey.rawRepresentation,
+                rulesHash: GroupRules.hash(rules),
+                rulesSignature: signature,
+                rulesText: rules
+            )],
+            invitationMessage: rules
+        )
+
+        // The wire's row: same signature, no wording to check it against.
+        let wireRow = MemberProfile(
+            alias: "Me",
+            inboxPublicKey: Data(repeating: 0x10, count: 32),
+            sendingPubkey: selfKey.publicKey.rawRepresentation,
+            rulesHash: GroupRules.hash(rules),
+            rulesSignature: signature,
+            rulesText: nil
+        )
+        await dispatchInvitation(
+            groupID: groupID,
+            rules: rules,
+            profiles: [selfBlsHex: wireRow],
+            selfBlsHex: selfBlsHex,
+            selfSendingPub: selfKey.publicKey.rawRepresentation
+        )
+
+        let after = await groups.currentGroups()
+        let updated = try XCTUnwrap(after.first { $0.groupIDData == groupID })
+        XCTAssertEqual(
+            updated.rulesStanding(ofMemberWith: selfBlsHex), .signed,
+            "a record that proves something outranks one that doesn't"
+        )
+    }
+
+    func test_theStoredFloorIsReadFromThisIdentitysRow() async throws {
+        // Two identities on one device hold two rows for one group.
+        // Looking the floor up by group alone read the other identity's
+        // row and stamped its agreement onto this profile.
+        let groupID = Data(repeating: 0xAB, count: 32)
+        let rules = "Be kind. No links."
+        let selfBlsHex = "cc".repeated(48)
+        let otherKey = Curve25519.Signing.PrivateKey()
+        let otherOwner = IdentityID()
+        let otherSignature = try otherKey.signature(for: GroupRules.statement(
+            groupID: groupID,
+            rulesHash: GroupRules.hash(rules),
+            joinerSendingPublicKey: otherKey.publicKey.rawRepresentation
+        ))
+        // The *other* identity's row for the same group, with an
+        // agreement. Ours has none.
+        await groups.setCurrentIdentity(otherOwner)
+        await seedGroup(
+            groupID: groupID,
+            memberProfiles: [selfBlsHex: MemberProfile(
+                alias: "Someone else",
+                inboxPublicKey: Data(repeating: 0x10, count: 32),
+                sendingPubkey: otherKey.publicKey.rawRepresentation,
+                rulesHash: GroupRules.hash(rules),
+                rulesSignature: otherSignature,
+                rulesText: rules
+            )],
+            invitationMessage: rules,
+            owner: otherOwner
+        )
+        await groups.setCurrentIdentity(owner)
+
+        await dispatchInvitation(
+            groupID: groupID,
+            rules: rules,
+            profiles: nil,
+            selfBlsHex: selfBlsHex,
+            selfSendingPub: Data(repeating: 0xEE, count: 32)
+        )
+
+        let after = await groups.currentGroups()
+        let mine = try XCTUnwrap(
+            after.first { $0.groupIDData == groupID && $0.ownerIdentityID == owner }
+        )
+        XCTAssertNil(
+            mine.memberProfiles[selfBlsHex]?.rulesSignature,
+            "another identity's agreement must not become ours"
+        )
+    }
+
+    /// Dispatches a `GroupInvitationPayload` as though it arrived
+    /// sealed, with this suite's `owner` as the recipient.
+    private func dispatchInvitation(
+        groupID: Data,
+        rules: String?,
+        profiles: [String: MemberProfile]?,
+        selfBlsHex: String,
+        selfSendingPub: Data
+    ) async {
+        let invitation = GroupInvitationPayload(
+            version: 1,
+            groupID: groupID,
+            groupSecret: Data(repeating: 0x55, count: 32),
+            name: "Family",
+            members: [],
+            epoch: 0,
+            salt: Data(repeating: 0x66, count: 32),
+            commitment: nil,
+            tierRaw: SEPTier.small.rawValue,
+            groupTypeRaw: SEPGroupType.anarchy.rawValue,
+            adminPubkeyHex: nil,
+            memberProfiles: profiles,
+            invitationMessage: rules
+        )
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: FakeInvitationEnvelopeDecrypter(
+                mode: .fixed((try? JSONEncoder().encode(invitation)) ?? Data()),
+                senderEd25519PublicKey: Data(repeating: 0xEE, count: 32)
+            ),
+            identities: StubIdentities(summaries: [
+                IdentitySummary(
+                    id: owner,
+                    name: "Me",
+                    blsPublicKey: Data(selfBlsHex.hexBytes),
+                    inboxPublicKey: Data(repeating: 0x10, count: 32),
+                    sendingPublicKey: selfSendingPub
+                )
+            ]),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
+        )
+        await dispatcher.dispatch(
+            messageID: "msg-\(UUID().uuidString)",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
     }
 
     private static func makeAnnouncement(
@@ -1168,14 +1562,21 @@ final class IncomingMessageDispatcherTests: XCTestCase {
         joinerBlsHex: String,
         joinerInboxByte: UInt8,
         joinerAlias: String,
-        adminAlias: String
+        adminAlias: String,
+        joinerSendingPub: Data = Data(repeating: 0xEE, count: 32),
+        rulesHash: Data? = nil,
+        rulesSignature: Data? = nil,
+        rulesText: String? = nil
     ) throws -> MemberAnnouncementPayload {
         let blsPub = Data(joinerBlsHex.hexBytes)
         let member = try MemberAnnouncementPayload.AnnouncedMember(
             blsPub: blsPub,
             inboxPub: Data(repeating: joinerInboxByte, count: 32),
             alias: joinerAlias,
-            sendingPub: Data(repeating: 0xEE, count: 32)
+            sendingPub: joinerSendingPub,
+            rulesHash: rulesHash,
+            rulesSignature: rulesSignature,
+            rulesText: rulesText
         )
         return try MemberAnnouncementPayload(
             version: 1,

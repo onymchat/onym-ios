@@ -47,11 +47,11 @@ final class MultiIdentityChatUITests: XCTestCase {
         app.launchArguments = ["--reset-keychain"] + baseArgs
         app.launch()
 
-        addIdentity(app, name: "Alice")
-        addIdentity(app, name: "Bob")
+        TwoIdentityFlow.addIdentity(app, name: "Alice")
+        TwoIdentityFlow.addIdentity(app, name: "Bob")
 
         // Identity 1 (Alice) creates a Founder group.
-        switchIdentity(app, to: "Alice")
+        TwoIdentityFlow.switchIdentity(app, to: "Alice")
         let create = CreateGroupScreen(app: app)
         create.open()
         create.typeName("Founders")
@@ -70,7 +70,7 @@ final class MultiIdentityChatUITests: XCTestCase {
         share.done()
 
         // Leave Bob active so session 2 boots as the joiner.
-        switchIdentity(app, to: "Bob")
+        TwoIdentityFlow.switchIdentity(app, to: "Bob")
         app.terminate()
 
         // ───────── Session 2: join → approve → chat ─────────
@@ -101,8 +101,8 @@ final class MultiIdentityChatUITests: XCTestCase {
         // Identity 1 (Alice) approves the join request — from inside the
         // group's chat thread, which is the whole point of the surface:
         // there is no separate "Join requests" screen to find.
-        switchIdentity(app, to: "Alice")
-        openChat(app)
+        TwoIdentityFlow.switchIdentity(app, to: "Alice")
+        TwoIdentityFlow.openChat(app)
         let thread = ChatThreadScreen(app: app)
         XCTAssertTrue(thread.waitReady(), "Alice's chat thread never opened")
         let joinRequest = JoinRequestRow(app: app)
@@ -112,8 +112,8 @@ final class MultiIdentityChatUITests: XCTestCase {
         thread.back()
 
         // ───────── Bob → Alice: message received + read ─────────
-        switchIdentity(app, to: "Bob")
-        openChat(app)
+        TwoIdentityFlow.switchIdentity(app, to: "Bob")
+        TwoIdentityFlow.openChat(app)
         XCTAssertTrue(thread.waitReady(), "Bob's chat thread never opened")
         thread.send("Hello from Bob")
         XCTAssertTrue(thread.waitForMessage("Hello from Bob"),
@@ -121,36 +121,36 @@ final class MultiIdentityChatUITests: XCTestCase {
         thread.back()
 
         // Alice asserts she received it; viewing ships a read receipt.
-        switchIdentity(app, to: "Alice")
-        openChat(app)
+        TwoIdentityFlow.switchIdentity(app, to: "Alice")
+        TwoIdentityFlow.openChat(app)
         XCTAssertTrue(thread.waitReady(), "Alice's chat thread never opened")
         XCTAssertTrue(thread.waitForMessage("Hello from Bob"),
                       "Alice never received Bob's message")
         thread.back()
 
         // Bob asserts his message was read.
-        switchIdentity(app, to: "Bob")
-        openChat(app)
+        TwoIdentityFlow.switchIdentity(app, to: "Bob")
+        TwoIdentityFlow.openChat(app)
         XCTAssertTrue(thread.waitForStatus("Read"),
                       "Bob's message never flipped to Read after Alice opened the thread")
         thread.back()
 
         // ───────── Alice → Bob: same, other direction ─────────
-        switchIdentity(app, to: "Alice")
-        openChat(app)
+        TwoIdentityFlow.switchIdentity(app, to: "Alice")
+        TwoIdentityFlow.openChat(app)
         thread.send("Hello from Alice")
         XCTAssertTrue(thread.waitForMessage("Hello from Alice"),
                       "Alice's own outgoing message never rendered")
         thread.back()
 
-        switchIdentity(app, to: "Bob")
-        openChat(app)
+        TwoIdentityFlow.switchIdentity(app, to: "Bob")
+        TwoIdentityFlow.openChat(app)
         XCTAssertTrue(thread.waitForMessage("Hello from Alice"),
                       "Bob never received Alice's message")
         thread.back()
 
-        switchIdentity(app, to: "Alice")
-        openChat(app)
+        TwoIdentityFlow.switchIdentity(app, to: "Alice")
+        TwoIdentityFlow.openChat(app)
         XCTAssertTrue(thread.waitForStatus("Read"),
                       "Alice's message never flipped to Read after Bob opened the thread")
         thread.back()
@@ -159,8 +159,8 @@ final class MultiIdentityChatUITests: XCTestCase {
         // Under `--ui-loopback` the attach button sends a generated test
         // image (the system photo picker can't be driven from XCUITest);
         // the blob round-trips through the in-memory Blossom fake.
-        switchIdentity(app, to: "Bob")
-        openChat(app)
+        TwoIdentityFlow.switchIdentity(app, to: "Bob")
+        TwoIdentityFlow.openChat(app)
         XCTAssertTrue(thread.waitReady(), "Bob's chat thread never opened")
         // Two-step: attach stages the image in the preview strip, then
         // Send confirms.
@@ -182,8 +182,8 @@ final class MultiIdentityChatUITests: XCTestCase {
                       "swiping down never dismissed the full-screen image viewer")
         thread.back()
 
-        switchIdentity(app, to: "Alice")
-        openChat(app)
+        TwoIdentityFlow.switchIdentity(app, to: "Alice")
+        TwoIdentityFlow.openChat(app)
         XCTAssertTrue(app.images["chat.bubble.image"].waitForExistence(timeout: 25),
                       "Alice never received + rendered the image")
         thread.back()
@@ -194,8 +194,8 @@ final class MultiIdentityChatUITests: XCTestCase {
         // driven from XCUITest); the audio blob round-trips through the
         // in-memory Blossom fake. The bubble exposes the player button as
         // `chat.bubble.voice.play`.
-        switchIdentity(app, to: "Alice")
-        openChat(app)
+        TwoIdentityFlow.switchIdentity(app, to: "Alice")
+        TwoIdentityFlow.openChat(app)
         XCTAssertTrue(thread.waitReady(), "Alice's chat thread never opened")
         // The mic button is shown when the composer is empty.
         app.buttons["chat.input.mic"].tap()
@@ -203,8 +203,8 @@ final class MultiIdentityChatUITests: XCTestCase {
                       "Alice's sent voice bubble never rendered")
         thread.back()
 
-        switchIdentity(app, to: "Bob")
-        openChat(app)
+        TwoIdentityFlow.switchIdentity(app, to: "Bob")
+        TwoIdentityFlow.openChat(app)
         XCTAssertTrue(app.buttons["chat.bubble.voice.play"].waitForExistence(timeout: 25),
                       "Bob never received + rendered the voice message")
         thread.back()
@@ -212,8 +212,8 @@ final class MultiIdentityChatUITests: XCTestCase {
         // ───────── Album: two images → one grid message ─────────
         // Stage two images in the preview strip, then Send once → a
         // single album bubble rendered as a grid.
-        switchIdentity(app, to: "Bob")
-        openChat(app)
+        TwoIdentityFlow.switchIdentity(app, to: "Bob")
+        TwoIdentityFlow.openChat(app)
         XCTAssertTrue(thread.waitReady(), "Bob's chat thread never opened for album")
         app.buttons["chat.input.attach"].tap()
         app.buttons["chat.input.attach"].tap()
@@ -230,7 +230,7 @@ final class MultiIdentityChatUITests: XCTestCase {
         // ───────── Search: find a message + open its chat ─────────
         // As Alice, search her messages for Bob's text, tap the result,
         // and assert it opens the chat thread scrolled to that message.
-        switchIdentity(app, to: "Alice")
+        TwoIdentityFlow.switchIdentity(app, to: "Alice")
         let search = SearchScreen(app: app)
         search.tapSearchTab()
         search.search(for: "Hello from Bob")
@@ -248,31 +248,6 @@ final class MultiIdentityChatUITests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func addIdentity(_ app: XCUIApplication, name: String) {
-        let settings = SettingsScreen(app: app)
-        settings.addIdentityViaCarousel(name: name)
-        // On create the carousel jumps to the new identity's QR page, so
-        // its alias appears as a static text.
-        let alias = app.staticTexts.matching(
-            NSPredicate(format: "label CONTAINS %@", name)
-        ).firstMatch
-        XCTAssertTrue(alias.waitForExistence(timeout: 8),
-                      "newly-added identity '\(name)' never appeared in the carousel")
-    }
-
-    /// Switch the active identity via the Chats toolbar picker, matching
-    /// the menu row by its visible name (we don't know the UUIDs here).
-    private func switchIdentity(_ app: XCUIApplication, to name: String) {
-        let chats = ChatsScreen(app: app)
-        chats.tapChatsTab()
-        chats.tapPicker()
-        let item = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", name)).firstMatch
-        XCTAssertTrue(item.waitForExistence(timeout: 5),
-                      "identity '\(name)' never appeared in the picker menu")
-        item.tap()
-        _ = chats.navTitle(name).waitForExistence(timeout: 5)
-    }
-
     /// Poll until `element` no longer exists, or the timeout elapses.
     private func waitForDisappearance(of element: XCUIElement, timeout: TimeInterval) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
@@ -283,13 +258,4 @@ final class MultiIdentityChatUITests: XCTestCase {
         return !element.exists
     }
 
-    /// Open the single group's thread from the Chats list.
-    private func openChat(_ app: XCUIApplication) {
-        let row = app.buttons.matching(
-            NSPredicate(format: "identifier BEGINSWITH 'chats.row.'")
-        ).firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 25),
-                      "chat row never appeared in the list")
-        row.tap()
-    }
 }
