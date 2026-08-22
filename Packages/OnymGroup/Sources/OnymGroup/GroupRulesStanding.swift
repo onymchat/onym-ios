@@ -63,6 +63,22 @@ public enum GroupRulesStanding: Equatable, Sendable {
     /// about the same member, and only one of them is odd.
     case doesNotVerify
 
+    /// Whether this standing has anything to report about a member.
+    ///
+    /// The question a *screen* asks — whether to draw a mark, offer a
+    /// way in, or write an export — but it belongs to the standing, not
+    /// to the mark that renders it. It was `GroupRulesMark(...) != nil`
+    /// at three call sites, one of which decides whether a member's
+    /// agreement is written to disk in plaintext; a presentation type
+    /// is the wrong thing to be asking about that.
+    public var hasSomethingToShow: Bool {
+        switch self {
+        case .noRules, .notCollected: false
+        case .author, .signed, .signedEarlierVersion, .didNotSign,
+             .unknownRules, .doesNotVerify: true
+        }
+    }
+
     /// True only where a signature was actually checked and passed.
     /// The mark on a row, and the `signed` field in an export, both
     /// come from here rather than from separate readings.

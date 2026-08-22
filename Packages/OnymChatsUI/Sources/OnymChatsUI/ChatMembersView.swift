@@ -106,6 +106,12 @@ struct ChatMembersView: View {
                 }
             }
         }
+        // Swept from here too, not only from the proof sheet: a user
+        // who opens exactly one sheet and never another would otherwise
+        // leave that member's rules and signature in plaintext until
+        // the OS felt pressure. Any later visit to any group's member
+        // list clears it.
+        .task { await MemberRulesProofView.sweepStaleExports() }
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
             case .member(let row):
@@ -370,7 +376,7 @@ struct ChatMembersView: View {
             // getting a chevron onto a sheet with no verdict, no
             // headline and an Export button for a group that collects
             // nothing — the dead end this rule was written to avoid.
-            if mark != nil {
+            if row.standing.hasSomethingToShow {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(OnymTokens.text3)
@@ -381,7 +387,7 @@ struct ChatMembersView: View {
         .contentShape(Rectangle())
 
         return Group {
-            if mark == nil {
+            if !row.standing.hasSomethingToShow {
                 content
             } else {
                 Button { activeSheet = .member(row) } label: { content }
@@ -443,18 +449,21 @@ struct ChatMembersView: View {
     private func rows(for group: ChatGroup) -> [MemberRow] {
         let activeKey = activeBlsHex
         let standings = memo.standings(for: group)
-        return group.memberProfiles
-            .map { (key, profile) in
-                MemberRow(
+        // Built from the memo's entries rather than from the profiles,
+        // so a row's standing is never defaulted. The two are derived
+        // from one snapshot, so a missing profile can't happen — and if
+        // it ever did, dropping a row is honest where `.noRules` would
+        // have quietly mislabelled a member.
+        return standings
+            .compactMap { (key, standing) -> MemberRow? in
+                guard let profile = group.memberProfiles[key] else { return nil }
+                return MemberRow(
                     id: key,
                     blsHex: key,
                     blsPrefix: String(key.prefix(12)),
                     displayAlias: profile.alias.isEmpty ? "(unnamed)" : profile.alias,
                     isSelf: activeKey.map { $0 == key } ?? false,
-                    // The memo derives from this same snapshot, so the
-                    // lookup always hits; the second call is a
-                    // belt-and-braces fallback rather than a path.
-                    standing: standings[key] ?? group.rulesStanding(ofMemberWith: key) ?? .noRules
+                    standing: standing
                 )
             }
             .sorted { lhs, rhs in
@@ -494,11 +503,16 @@ final class StandingsMemo {
     private var snapshot: ChatGroup.RulesStandingInputs?
     private var cached: [String: GroupRulesStanding] = [:]
 
+    /// Non-optional per key, so a caller can't fall back to an
+    /// unmarked row and call that a standing.
     func standings(for group: ChatGroup) -> [String: GroupRulesStanding] {
         let inputs = group.rulesStandingInputs
         if snapshot == inputs { return cached }
         cached = group.memberProfiles.keys.reduce(into: [:]) { out, key in
-            out[key] = group.rulesStanding(ofMemberWith: key)
+            // The key came from `memberProfiles`, so the lookup cannot
+            // miss; `.noRules` here would be a lie about a member
+            // rather than a fallback.
+            out[key] = group.rulesStanding(ofMemberWith: key) ?? .noRules
         }
         snapshot = inputs
         return cached

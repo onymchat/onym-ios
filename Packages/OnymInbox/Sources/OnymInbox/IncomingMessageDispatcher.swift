@@ -639,7 +639,10 @@ public struct IncomingMessageDispatcher: Sendable {
             // when one exists the wire needs to say "cleared" rather
             // than say nothing, because those are the two cases this
             // cannot currently tell apart.
-            invitationMessage: invitation.invitationMessage
+            // Normalized, not just nil-checked: a sender spelling "no
+            // rules" as "" would otherwise walk straight past the
+            // fallback and reintroduce the flip it exists to stop.
+            invitationMessage: GroupRules.normalized(invitation.invitationMessage)
                 ?? storedGroup?.invitationMessage
         )
 

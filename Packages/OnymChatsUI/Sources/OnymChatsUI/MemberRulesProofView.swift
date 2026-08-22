@@ -31,7 +31,7 @@ struct MemberRulesProofView: View {
                     // `.noRules`. The chevron gating can only stop the
                     // ones that start that way, and what was left was a
                     // blank card over a live Export button.
-                    if GroupRulesMark(proof.standing) == nil {
+                    if !proof.standing.hasSomethingToShow {
                         nothingToShow
                     } else {
                         verdict
@@ -57,7 +57,7 @@ struct MemberRulesProofView: View {
             }
         }
         .task(id: proof) { await writeFile() }
-        .task { await sweepStaleExports() }
+        .task { await Self.sweepStaleExports() }
         // One rule for the exported file, because the two this had
         // grown contradicted each other: **nothing written during this
         // sheet's life is ever deleted while it lives; everything left
@@ -226,7 +226,11 @@ struct MemberRulesProofView: View {
                 }
                 .accessibilityIdentifier("rules_proof.export")
             } else {
-                exportLabel(enabled: false)
+                // A `Button`, disabled, rather than a dimmed label: a
+                // tap during the write is inert either way, but only
+                // one of them tells VoiceOver that it is.
+                Button(action: {}) { exportLabel(enabled: false) }
+                    .disabled(true)
                     .accessibilityIdentifier("rules_proof.export_preparing")
             }
             Text(proof.standing.isProven
@@ -287,7 +291,7 @@ struct MemberRulesProofView: View {
         // another member's rules text, sending key and signature in
         // plaintext outside the encrypted store until a later sheet
         // sweeps it — twenty members tapped through is twenty of those.
-        guard GroupRulesMark(proof.standing) != nil else {
+        guard proof.standing.hasSomethingToShow else {
             file = nil
             return
         }
@@ -377,7 +381,7 @@ struct MemberRulesProofView: View {
     /// than "until the OS feels pressure", which is the alternative.
     /// The directory this sheet is about to write is seconds old, so it
     /// cannot be caught by any ordering.
-    private func sweepStaleExports() async {
+    static func sweepStaleExports() async {
         await Task.detached {
             let fileManager = FileManager.default
             let cutoff = Date().addingTimeInterval(-Self.staleExportAge)

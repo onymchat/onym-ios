@@ -25,11 +25,11 @@ struct GroupRulesMark {
     let text: String
     let color: Color
 
-    /// `nil` where there is no standing worth reporting: a group with
-    /// no rules, or one whose kind collects no agreements. "Not
-    /// applicable" on every row of every such group is noise, and the
-    /// row keeps the BLS prefix it always showed.
+    /// `nil` where the standing has nothing to report — see
+    /// `GroupRulesStanding.hasSomethingToShow`, which is where that
+    /// question lives now.
     init?(_ standing: GroupRulesStanding) {
+        guard standing.hasSomethingToShow else { return nil }
         switch standing {
         case .noRules, .notCollected:
             return nil
