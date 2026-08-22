@@ -171,6 +171,9 @@ struct RootView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 dependencies.moderationGateFlow.appForegrounded()
+                if let pushCoordinator = dependencies.pushCoordinator {
+                    Task { await pushCoordinator.appForegrounded() }
+                }
             }
         }
         // Settings → Restart Onboarding: present a fresh walk
@@ -357,7 +360,8 @@ struct RootView: View {
                             { restart.requestRestart() }
                         },
                         makeDeviceBackupView: deviceBackupView.map { view in { view } },
-                        makeBackupOperatorSettingsFlow: dependencies.makeBackupOperatorSettingsFlow
+                        makeBackupOperatorSettingsFlow: dependencies.makeBackupOperatorSettingsFlow,
+                        makeNotificationsSettingsFlow: dependencies.makeNotificationsSettingsFlow
                     )
                 }
                 .safeAreaInset(edge: .bottom, spacing: 0) {

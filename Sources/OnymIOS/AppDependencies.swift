@@ -130,6 +130,14 @@ struct AppDependencies {
     /// point: this is the surface that exists BEFORE any consent, and
     /// the one that makes the other appear.
     let makeBackupOperatorSettingsFlow: (@MainActor () -> BackupOperatorSettingsFlow)?
+    /// Settings → Notifications. Optional so builds without the push
+    /// stack (UI-test harness) show no row — same pattern as the
+    /// moderation and discovery factories.
+    let makeNotificationsSettingsFlow: (@MainActor () -> NotificationsSettingsFlow)?
+    /// The push registration coordinator: runs from a root-level
+    /// `.task`, re-reconciles on foreground. Nil alongside the factory
+    /// above.
+    let pushCoordinator: PushCoordinator?
     /// Raised by the backup picker's consent apply step so the root
     /// view re-resolves the Device Backup screen immediately. Without
     /// it a consent given from a Settings sheet — where the tab never

@@ -65,6 +65,10 @@ public struct SettingsView: View {
     /// could never be reached from a standing start. The section shows
     /// when EITHER is wired.
     let makeBackupOperatorSettingsFlow: (@MainActor () -> BackupOperatorSettingsFlow)?
+    /// Settings → Notifications. Optional so the section hides when
+    /// the app runs without the push stack wired — same pattern as
+    /// moderation and discovery.
+    let makeNotificationsSettingsFlow: (@MainActor () -> NotificationsSettingsFlow)?
 
     public init(
         makeBackupFlow: @escaping @MainActor () -> RecoveryPhraseBackupFlow,
@@ -80,7 +84,8 @@ public struct SettingsView: View {
         makeDiscoverySettingsFlow: (@MainActor () -> DiscoverySettingsFlow)? = nil,
         onRestartOnboarding: (@MainActor () -> Void)? = nil,
         makeDeviceBackupView: (@MainActor () -> DeviceBackupVendorsView)? = nil,
-        makeBackupOperatorSettingsFlow: (@MainActor () -> BackupOperatorSettingsFlow)? = nil
+        makeBackupOperatorSettingsFlow: (@MainActor () -> BackupOperatorSettingsFlow)? = nil,
+        makeNotificationsSettingsFlow: (@MainActor () -> NotificationsSettingsFlow)? = nil
     ) {
         self.makeBackupFlow = makeBackupFlow
         self.makeRelayerSettingsFlow = makeRelayerSettingsFlow
@@ -96,6 +101,7 @@ public struct SettingsView: View {
         self.onRestartOnboarding = onRestartOnboarding
         self.makeDeviceBackupView = makeDeviceBackupView
         self.makeBackupOperatorSettingsFlow = makeBackupOperatorSettingsFlow
+        self.makeNotificationsSettingsFlow = makeNotificationsSettingsFlow
     }
 
     @State private var showRecoveryPhrase = false
@@ -233,6 +239,31 @@ public struct SettingsView: View {
                     .accessibilityIdentifier("settings.blossom_relays_row")
                 }
                 SettingsFootnote("Nostr relays and Blossom servers carry your messages and media. Replace them with your own instances for maximum privacy.")
+
+                // Hidden until the app wires the push stack, like the
+                // other optional sections.
+                if let makeNotificationsSettingsFlow {
+                    SettingsSectionLabel("NOTIFICATIONS")
+                    SettingsCard {
+                        NavigationLink {
+                            NotificationsSettingsView(flow: makeNotificationsSettingsFlow())
+                        } label: {
+                            SettingsRow(
+                                title: "Notifications",
+                                subtitle: "Content-free wakes, off by default",
+                                last: true
+                            ) {
+                                SettingsIconTile(
+                                    symbol: "bell.badge.fill",
+                                    bg: SettingsTile.indigo
+                                )
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("settings.notifications_row")
+                    }
+                    SettingsFootnote("Off means no third party ever learns this device wants waking. On hands Onym's push server your inbox codes and Apple a content-free alert — never message content.")
+                }
 
                 // Absent until the app supplies it, like every other
                 // optional section here — a build without backup wired

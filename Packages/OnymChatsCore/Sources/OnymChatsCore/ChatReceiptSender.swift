@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import OnymFoundation
 import OnymTransport
 import OnymIdentity
 
@@ -69,12 +70,8 @@ public struct ChatReceiptSender: ChatReceiptSending {
         return (try? await inboxTransport.send(sealed, to: tag)) != nil
     }
 
-    /// Same derivation as `SendMessageInteractor` / `IntroInboxPump`.
     static func inboxTag(from inboxPublicKey: Data) -> String {
-        var hasher = SHA256()
-        hasher.update(data: Data("sep-inbox-v1".utf8))
-        hasher.update(data: inboxPublicKey)
-        return hasher.finalize().prefix(8).map { String(format: "%02x", $0) }.joined()
+        InboxTag.derive(from: inboxPublicKey)
     }
 }
 
