@@ -634,6 +634,64 @@ final class PendingChatsFlowTests: XCTestCase {
         XCTAssertEqual(sent0, 0)
     }
 
+    // MARK: - Group rules
+
+    func test_aLinkWithoutRules_signsNothing() async throws {
+        // A group that asks nothing collects no agreement — and the
+        // screen keeps its one tap.
+        let harness = await Harness.make(owner: owner)
+        await harness.flow.start()
+
+        guard case .confirm(let confirmation) = await harness.flow.prepareJoin(
+            capability: harness.capability()
+        ) else { return XCTFail("expected the confirmation screen") }
+        XCTAssertNil(confirmation.rules)
+        await harness.flow.confirmJoin(confirmation, label: "Bob")
+
+        try await waitForAsync { await harness.sender.calls.count == 1 }
+        let signed = await harness.sender.calls.first?.rules
+        XCTAssertNil(signed)
+    }
+
+    func test_aPushedOffer_signsTheRulesItArrivedWith() async throws {
+        // A pushed invitation has no capability to read rules from:
+        // they live on the stored offer, and reaching for the
+        // capability's copy would sign text nobody was shown.
+        let harness = await Harness.make(owner: owner)
+        await harness.flow.start()
+        let chat = harness.makeChat(invitationMessage: "House rules apply.")
+        await harness.repository.record(chat)
+        try await waitFor { harness.flow.rows.count == 1 }
+
+        let confirmation = await harness.flow.prepareAccept(rowID: chat.id)
+        XCTAssertEqual(confirmation?.rules, "House rules apply.")
+        await harness.flow.confirmJoin(try XCTUnwrap(confirmation), label: "Bob")
+
+        try await waitForAsync { await harness.sender.calls.count == 1 }
+        let signed = await harness.sender.calls.first?.rules
+        XCTAssertEqual(signed, "House rules apply.")
+    }
+
+    func test_askAgain_reSignsTheSameRules() async throws {
+        // A re-send months later has to say what the first one said.
+        // The capability is long gone by then, so the row is where the
+        // agreed text has to have survived.
+        let harness = await Harness.make(owner: owner)
+        await harness.flow.start()
+        let capability = harness.capability(rules: "Be kind. No links.")
+        guard case .confirm(let confirmation) = await harness.flow.prepareJoin(
+            capability: capability
+        ) else { return XCTFail("expected the confirmation screen") }
+        await harness.flow.confirmJoin(confirmation, label: "Bob")
+        try await waitFor { harness.flow.rows.first?.state == .waiting }
+
+        harness.flow.retry(confirmation.rowID)
+
+        try await waitForAsync { await harness.sender.calls.count == 2 }
+        let resigned = await harness.sender.calls.last?.rules
+        XCTAssertEqual(resigned, "Be kind. No links.")
+    }
+
     // MARK: - Harness
 
     @MainActor

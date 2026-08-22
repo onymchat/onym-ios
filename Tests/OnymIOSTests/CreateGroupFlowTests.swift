@@ -420,6 +420,22 @@ final class CreateGroupFlowTests: XCTestCase {
 
     // MARK: - Helpers
 
+    // MARK: - Group rules
+
+    func test_clampedRulesStillMintALink() async throws {
+        // The clamp and `IntroCapability`'s cap have to agree: one
+        // apart and every full-length rules set would fail at share
+        // time, after the founder had already typed it.
+        let overshoot = String(repeating: "x", count: GroupRules.maxBytes + 50)
+        XCTAssertNoThrow(
+            try IntroCapability(
+                introPublicKey: Data(repeating: 0x44, count: 32),
+                groupId: Data(repeating: 0x11, count: 32),
+                rules: CreateGroupFlow.clampedRules(overshoot)
+            )
+        )
+    }
+
     private func makeFlow() async -> CreateGroupFlow {
         let env = await CreateGroupFlowTestEnv.make()
         return CreateGroupFlow(interactor: env.interactor)
