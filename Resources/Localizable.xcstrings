@@ -3278,22 +3278,6 @@
         }
       }
     },
-    "INVITATION": {
-      "localizations": {
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "ПРИГЛАШЕНИЕ"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "INVITATION"
-          }
-        }
-      }
-    },
     "Invite": {
       "localizations": {
         "en": {

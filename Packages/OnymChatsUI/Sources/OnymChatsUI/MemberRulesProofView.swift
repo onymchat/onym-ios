@@ -282,6 +282,15 @@ struct MemberRulesProofView: View {
     /// the file holding the bytes it was written with. Whoever tapped
     /// Export would have sent the old ones.
     private func writeFile() async {
+        // Nothing to export, nothing to write. The `nothingToShow`
+        // branch has no Export button to feed, and every write leaves
+        // another member's rules text, sending key and signature in
+        // plaintext outside the encrypted store until a later sheet
+        // sweeps it — twenty members tapped through is twenty of those.
+        guard GroupRulesMark(proof.standing) != nil else {
+            file = nil
+            return
+        }
         let proof = proof
         // Cleared first. The screen has already re-rendered from the
         // live group, so between a proof change and its write landing

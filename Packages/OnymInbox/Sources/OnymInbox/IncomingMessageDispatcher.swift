@@ -621,7 +621,26 @@ public struct IncomingMessageDispatcher: Sendable {
             // can still fill it in.
             avatarJPEG: invitation.avatar,
             // The group's invitation/intro, as the sender wrote it.
+            // The stored rules stand when the wire omits them, for the
+            // same reason each member row does.
+            //
+            // The live case is an admin on a build that predates the
+            // fix in `GroupStateVerifier`: their refresh reply carries
+            // no rules at all, and taking that literally set
+            // `invitationMessage` to nil — which flips every verified
+            // agreement on this device from `signed` to
+            // `signedEarlierVersion` (the signed text no longer equals
+            // "no rules"), empties the rules section, and has the proof
+            // sheet announce that the group changed its rules when
+            // nobody did.
+            //
+            // The cost is that rules can't be cleared by omission. No
+            // path clears them today — they are set at creation — and
+            // when one exists the wire needs to say "cleared" rather
+            // than say nothing, because those are the two cases this
+            // cannot currently tell apart.
             invitationMessage: invitation.invitationMessage
+                ?? storedGroup?.invitationMessage
         )
 
         // Was this thread already on the device? Relays replay the

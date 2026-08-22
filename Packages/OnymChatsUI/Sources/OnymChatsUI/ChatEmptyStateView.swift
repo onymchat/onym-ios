@@ -1,5 +1,6 @@
 import SwiftUI
 import OnymDesign
+import OnymGroup
 
 /// Rich empty-state shown in a chat thread that has no messages yet.
 /// Surfaces the group's invitation message (if any), the member roster
@@ -22,8 +23,12 @@ struct ChatEmptyStateView: View {
                     .foregroundStyle(OnymTokens.text)
                     .frame(maxWidth: .infinity, alignment: .center)
 
-                if let invitation = invitationMessage,
-                   !invitation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                // `GroupRules.normalized`, as the members screen uses.
+                // The two agree today only because
+                // `GroupRules.trimmedCodepoints` was written to match
+                // Foundation's set — and the reason it is pinned there
+                // is that Foundation may revise it.
+                if let invitation = GroupRules.normalized(invitationMessage) {
                     // "GROUP RULES", as the members screen calls the
                     // same field. One body of text under two names
                     // would be the exact split this work went to
