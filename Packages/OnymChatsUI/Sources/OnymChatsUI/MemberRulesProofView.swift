@@ -51,10 +51,9 @@ struct MemberRulesProofView: View {
         // Deliberately *not* deleted on dismiss. `ShareLink` hands out
         // a URL, not a copy, and an AirDrop target or a share extension
         // that reads it lazily loses the file if this sheet tidies up
-        // first — the export silently fails at the moment it is used.
-        // The replacement-on-write below covers the case that matters
-        // (a proof about a different member left behind), and `tmp` is
-        // the OS's to sweep.
+        // first — the export failing at the moment it is used. What is
+        // left behind is one small file per member opened, each
+        // overwritten on the next open, in a directory the OS sweeps.
         .reasonAlert("Couldn\u{2019}t prepare the file", reason: $writeError)
     }
 
@@ -245,15 +244,21 @@ struct MemberRulesProofView: View {
             }
         }.value
         if let written {
-            // Same name, same place, so the replacement overwrites in
-            // practice — but a proof for a different member has a
-            // different name, and leaving that one behind is the
-            // disclosure `onDisappear` exists to avoid.
+            // Replaces the previous write from *this* sheet — the proof
+            // changed under it. A proof for a different member was
+            // written by a different presentation and is not reachable
+            // from here; it keeps its own name, is overwritten the next
+            // time that member is opened, and is `tmp`'s to sweep.
             if let previous, previous != written {
                 try? FileManager.default.removeItem(at: previous)
             }
             file = written
         } else {
+            // Cleared, not left pointing at the last successful write.
+            // Otherwise a failed re-write leaves Export live and
+            // sharing the *previous* proof's bytes — which is the exact
+            // thing `.task(id: proof)` was added to prevent.
+            file = nil
             writeError = String(localized: "This device couldn\u{2019}t write the proof file.")
         }
     }

@@ -48,7 +48,7 @@ struct ChatMembersView: View {
 
     @State private var activeSheet: ActiveSheet?
     /// Standings, derived once per group snapshot rather than per
-    /// render.
+    /// render — and on demand, rather than one frame late.
     ///
     /// Each one is an Ed25519 verify plus a SHA-256, and this body
     /// re-renders off the group stream and on every keystroke in the
@@ -56,11 +56,12 @@ struct ChatMembersView: View {
     /// 9.35 ms for 256 — over half a frame, on the main actor, for an
     /// answer that cannot have changed in between.
     ///
-    /// Keyed on the whole `ChatGroup` value, so the cache is correct by
-    /// construction rather than by a list of invalidation triggers
-    /// someone has to keep in step: everything a standing depends on is
-    /// inside the value being compared.
-    @State private var standings: [String: GroupRulesStanding] = [:]
+    /// A memo rather than `onChange(initial: true)`, which fires *after*
+    /// the first body evaluation: the roster's first frame drew every
+    /// row unmarked and unchevroned, then re-rendered. Keyed on the
+    /// whole `ChatGroup` value, so the cache is correct by construction
+    /// rather than by an invalidation list somebody has to keep in step.
+    @State private var memo = StandingsMemo()
     /// Drives the admin-only rename alert.
     @State private var showRename = false
     @State private var renameText = ""
@@ -104,9 +105,6 @@ struct ChatMembersView: View {
                     .accessibilityIdentifier("members.share_invite_button")
                 }
             }
-        }
-        .onChange(of: currentGroup, initial: true) { _, group in
-            standings = group.map(Self.derivedStandings(in:)) ?? [:]
         }
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
@@ -329,6 +327,7 @@ struct ChatMembersView: View {
     }
 
     private func memberRow(_ row: MemberRow) -> some View {
+        let mark = GroupRulesMark(row.standing)
         let content = HStack(spacing: 12) {
             avatar(for: row)
             VStack(alignment: .leading, spacing: 2) {
@@ -350,7 +349,7 @@ struct ChatMembersView: View {
                 Text("BLS \(row.blsPrefix)\u{2026}")
                     .font(.system(size: 12, weight: .regular, design: .monospaced))
                     .foregroundStyle(OnymTokens.text3)
-                if let mark = GroupRulesMark(row.standing) {
+                if let mark {
                     HStack(spacing: 4) {
                         Image(systemName: mark.symbol)
                             .font(.system(size: 10, weight: .semibold))
@@ -366,7 +365,7 @@ struct ChatMembersView: View {
             // getting a chevron onto a sheet with no verdict, no
             // headline and an Export button for a group that collects
             // nothing — the dead end this rule was written to avoid.
-            if GroupRulesMark(row.standing) != nil {
+            if mark != nil {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(OnymTokens.text3)
@@ -377,7 +376,7 @@ struct ChatMembersView: View {
         .contentShape(Rectangle())
 
         return Group {
-            if GroupRulesMark(row.standing) == nil {
+            if mark == nil {
                 content
             } else {
                 Button { activeSheet = .member(row) } label: { content }
@@ -436,15 +435,9 @@ struct ChatMembersView: View {
 
     // MARK: - Row construction
 
-    /// Every member's standing for one snapshot of the group.
-    nonisolated static func derivedStandings(in group: ChatGroup) -> [String: GroupRulesStanding] {
-        group.memberProfiles.keys.reduce(into: [:]) { out, key in
-            out[key] = group.rulesStanding(ofMemberWith: key)
-        }
-    }
-
     private func rows(for group: ChatGroup) -> [MemberRow] {
         let activeKey = activeBlsHex
+        let standings = memo.standings(for: group)
         return group.memberProfiles
             .map { (key, profile) in
                 MemberRow(
@@ -453,7 +446,10 @@ struct ChatMembersView: View {
                     blsPrefix: String(key.prefix(12)),
                     displayAlias: profile.alias.isEmpty ? "(unnamed)" : profile.alias,
                     isSelf: activeKey.map { $0 == key } ?? false,
-                    standing: standings[key] ?? .noRules
+                    // The memo derives from this same snapshot, so the
+                    // lookup always hits; the second call is a
+                    // belt-and-braces fallback rather than a path.
+                    standing: standings[key] ?? group.rulesStanding(ofMemberWith: key) ?? .noRules
                 )
             }
             .sorted { lhs, rhs in
@@ -470,8 +466,30 @@ struct ChatMembersView: View {
         let blsPrefix: String
         let displayAlias: String
         let isSelf: Bool
-        /// Re-derived on every render from the stored signature, not
-        /// cached: see `GroupRulesStanding`.
+        /// Derived from the stored signature rather than read from a
+        /// flag — once per group snapshot, via `StandingsMemo`.
         let standing: GroupRulesStanding
+    }
+}
+
+/// One group snapshot's standings, computed the first time they are
+/// asked for and kept until the snapshot changes.
+///
+/// A reference type held in `@State` on purpose: the view needs to fill
+/// this during `body`, which rules out mutating `@State` value storage,
+/// and it must not trigger an invalidation of its own — the result is a
+/// pure function of the group already being rendered.
+@MainActor
+final class StandingsMemo {
+    private var snapshot: ChatGroup?
+    private var cached: [String: GroupRulesStanding] = [:]
+
+    func standings(for group: ChatGroup) -> [String: GroupRulesStanding] {
+        if snapshot == group { return cached }
+        cached = group.memberProfiles.keys.reduce(into: [:]) { out, key in
+            out[key] = group.rulesStanding(ofMemberWith: key)
+        }
+        snapshot = group
+        return cached
     }
 }

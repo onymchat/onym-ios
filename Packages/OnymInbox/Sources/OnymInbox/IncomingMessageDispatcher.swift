@@ -465,7 +465,23 @@ public struct IncomingMessageDispatcher: Sendable {
                         && $0.ownerIdentityID == ownerIdentityID
                 }?
                 .memberProfiles[selfEntry.key]
-            let wire = profiles[selfEntry.key]
+            // Verified as the row that will actually be *stored*, not
+            // as the row that arrived. The local alias and keys win, so
+            // an agreement checked against the wire's `sendingPubkey`
+            // and then persisted beside ours would — if the two ever
+            // differ — be accepted as proven and re-read as
+            // `doesNotVerify`: red, about yourself, which is the class
+            // of bug this whole change exists to remove.
+            let wire = profiles[selfEntry.key].map {
+                MemberProfile(
+                    alias: selfEntry.value.alias,
+                    inboxPublicKey: selfEntry.value.inboxPublicKey,
+                    sendingPubkey: selfEntry.value.sendingPubkey,
+                    rulesHash: $0.rulesHash,
+                    rulesSignature: $0.rulesSignature,
+                    rulesText: $0.rulesText
+                )
+            }
             let agreement: MemberProfile?
             if wire?.agreedToRules(groupID: invitation.groupID) == true {
                 // The wire proves it. Freshest record that verifies.
