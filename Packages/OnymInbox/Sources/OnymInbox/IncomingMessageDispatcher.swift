@@ -495,10 +495,30 @@ public struct IncomingMessageDispatcher: Sendable {
                 // downgrade a verified agreement into an uncheckable
                 // one.
                 agreement = stored
+            } else if let wire, wire.rulesSignature != nil {
+                // Neither proves anything, and the wire has bytes. Keep
+                // them — evidence survives for a later look — but drop
+                // the wording, which is the same rule
+                // `JoinRequestApprover.textCovering` argues for.
+                //
+                // Signature plus text that fails against our own key
+                // reads as `doesNotVerify`: red, "signature doesn't
+                // check out", on the joiner's own row, which is the
+                // failure this whole change exists to remove. Without
+                // the text it reads as `unknownRules` — can't be
+                // checked — which is what is actually true when an
+                // inviter ships bytes for our row that don't match our
+                // key.
+                agreement = MemberProfile(
+                    alias: wire.alias,
+                    inboxPublicKey: wire.inboxPublicKey,
+                    sendingPubkey: wire.sendingPubkey,
+                    rulesHash: wire.rulesHash,
+                    rulesSignature: wire.rulesSignature,
+                    rulesText: nil
+                )
             } else {
-                // Neither proves anything; keep whichever has bytes at
-                // all, so the evidence survives for a later look.
-                agreement = wire?.rulesSignature != nil ? wire : stored
+                agreement = stored
             }
             profiles[selfEntry.key] = MemberProfile(
                 alias: selfEntry.value.alias,

@@ -84,7 +84,19 @@ public struct GroupRulesProof: Equatable, Sendable {
     }
 
     /// A filename someone can find again in a Files app six months
-    /// later: the group and the member, not a hash.
+    /// later — and one no two members of a group can share.
+    ///
+    /// The readable part is the group and the alias, which is what a
+    /// person recognises. The key prefix after it is what makes the
+    /// name unique, and it is not decoration: aliases are self-asserted
+    /// and explicitly non-unique, and the ASCII-only stem collapses
+    /// entirely for a group named in Cyrillic or CJK — every member of
+    /// a Russian-named group was writing to
+    /// `onym-rules-proof-group-rules.json`. Since the export is
+    /// deliberately left in place for the share sheet to read, a
+    /// collision means a share extension can pick up the file after a
+    /// second member's proof has overwritten it, and hand out that
+    /// member's agreement under the first one's name.
     public var suggestedFileName: String {
         // A fixed locale, not the device's: `lowercased()` under a
         // Turkish locale maps I to a dotless ı, so the same group would
@@ -104,7 +116,7 @@ public struct GroupRulesProof: Equatable, Sendable {
             }
             .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
         let named = stem.isEmpty ? "group-rules" : stem
-        return "onym-rules-proof-\(named).json"
+        return "onym-rules-proof-\(named)-\(memberBlsHex.prefix(12)).json"
     }
 
     /// The file's bytes: pretty-printed, key-ordered JSON, so two
