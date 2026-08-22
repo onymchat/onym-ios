@@ -291,6 +291,10 @@ struct MemberRulesProofView: View {
         // another member's rules text, sending key and signature in
         // plaintext outside the encrypted store until a later sheet
         // sweeps it — twenty members tapped through is twenty of those.
+        // Both cleared up front: a failure that was never dismissed
+        // would otherwise still be on screen after a later write
+        // succeeded, or over the `nothingToShow` branch.
+        writeError = nil
         guard proof.standing.hasSomethingToShow else {
             file = nil
             return
@@ -329,7 +333,16 @@ struct MemberRulesProofView: View {
                     withIntermediateDirectories: true
                 )
                 let url = directory.appendingPathComponent(proof.suggestedFileName)
-                try proof.jsonData().write(to: url, options: .atomic)
+                // Unreadable while the device is locked, unless
+                // something already has it open — which is the share
+                // extension this file exists for. These are another
+                // member's rules and signature in plaintext, outside
+                // the encrypted store; the default class is weaker than
+                // the rest of the screen's posture.
+                try proof.jsonData().write(
+                    to: url,
+                    options: [.atomic, .completeFileProtectionUnlessOpen]
+                )
                 return url
             } catch {
                 return nil

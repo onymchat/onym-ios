@@ -106,6 +106,7 @@ public struct GroupRulesProof: Equatable, Sendable {
         // good. The same reason the characters are scrubbed: this
         // string is a stranger's, and it reaches a filesystem.
         let stem = String(fileSafe("\(groupName)-\(memberAlias)").prefix(60))
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
         let named = stem.isEmpty ? "group-rules" : stem
         // The key is scrubbed too, not just the readable part. Roster
         // keys arrive as arbitrary JSON object keys — nothing validates
@@ -126,7 +127,7 @@ public struct GroupRulesProof: Equatable, Sendable {
         return "onym-rules-proof-\(named)-\(key).json"
     }
 
-    static func hex(_ data: Data) -> String { Data(data).hexString }
+    static func hex(_ data: Data) -> String { data.hexString }
 
     /// Lowercase ASCII alphanumerics, runs of anything else collapsed
     /// to a single dash, ends trimmed.
