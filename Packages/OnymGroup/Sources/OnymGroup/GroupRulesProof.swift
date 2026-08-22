@@ -87,16 +87,19 @@ public struct GroupRulesProof: Equatable, Sendable {
     /// later — and one no two members of a group can share.
     ///
     /// The readable part is the group and the alias, which is what a
-    /// person recognises. The key prefix after it is what makes the
-    /// name unique, and it is not decoration: aliases are self-asserted
-    /// and explicitly non-unique, and the ASCII-only stem collapses
-    /// entirely for a group named in Cyrillic or CJK — every member of
-    /// a Russian-named group was writing to
-    /// `onym-rules-proof-group-rules.json`. Since the export is
-    /// deliberately left in place for the share sheet to read, a
-    /// collision means a share extension can pick up the file after a
-    /// second member's proof has overwritten it, and hand out that
-    /// member's agreement under the first one's name.
+    /// person recognises. The key prefix after it is what keeps two
+    /// members apart, and it is not decoration: aliases are
+    /// self-asserted and explicitly non-unique, and the ASCII-only stem
+    /// collapses entirely for a group named in Cyrillic or CJK — every
+    /// member of a Russian-named group produced
+    /// `onym-rules-proof-group-rules.json`.
+    ///
+    /// It no longer guards against one member's export overwriting
+    /// another's: each write lands in its own directory now, so two of
+    /// them can't contend for a path. What it still does is make the
+    /// file identifiable once it has left this app — in a Files listing,
+    /// an inbox, a folder of evidence — where the name is all the
+    /// context there is.
     public var suggestedFileName: String {
         // Clamped, because neither of these is ours. `groupName` and
         // `memberAlias` arrive off the wire with no length cap of their

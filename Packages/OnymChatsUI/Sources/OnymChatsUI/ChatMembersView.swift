@@ -71,18 +71,25 @@ struct ChatMembersView: View {
             if let group = currentGroup {
                 VStack(spacing: 0) {
                     header(for: group)
-                    // Above the branch, not inside the list: the rules
-                    // are the group's, not the roster's, and a member
-                    // who agreed months ago shouldn't lose their only
-                    // way back to the words they agreed to because the
-                    // directory hasn't filled in.
-                    if let rules = GroupRules.normalized(group.invitationMessage) {
-                        rulesSection(rules)
-                    }
-                    if group.memberProfiles.isEmpty {
-                        emptyState
-                    } else {
-                        list(for: group)
+                    // One scroll view over both, rather than the rules
+                    // above it. They belong to the group and not to the
+                    // roster — so they show even when the directory
+                    // hasn't filled in — but `GroupRules.maxBytes`
+                    // allows about forty lines, and hoisting them out
+                    // of the scroll view made long rules unscrollable
+                    // *and* squeezed the roster to nothing. Neither
+                    // reachable is worse than the problem it fixed.
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            if let rules = GroupRules.normalized(group.invitationMessage) {
+                                rulesSection(rules)
+                            }
+                            if group.memberProfiles.isEmpty {
+                                emptyState
+                            } else {
+                                roster(for: group)
+                            }
+                        }
                     }
                 }
             } else {
@@ -278,8 +285,10 @@ struct ChatMembersView: View {
     /// because only their broadcast passes the receiver's admin check.
     private var canChangeName: Bool { canShareInvite }
 
-    private func list(for group: ChatGroup) -> some View {
-        ScrollView {
+    /// The roster itself. No `ScrollView` of its own — the caller owns
+    /// the one that has to contain the rules as well.
+    private func roster(for group: ChatGroup) -> some View {
+        Group {
             let memberRows = rows(for: group)
             VStack(spacing: 0) {
                 ForEach(memberRows) { row in
@@ -419,9 +428,11 @@ struct ChatMembersView: View {
         }
     }
 
+    /// Sized rather than expanded: inside a scroll view a `Spacer`
+    /// collapses, so this reserves its own height instead of claiming
+    /// what is left of the screen.
     private var emptyState: some View {
         VStack(spacing: 12) {
-            Spacer()
             Image(systemName: "person.2")
                 .font(.system(size: 40))
                 .foregroundStyle(OnymTokens.text3)
@@ -433,9 +444,9 @@ struct ChatMembersView: View {
                 .foregroundStyle(OnymTokens.text2)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
-            Spacer()
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, minHeight: 220)
+        .padding(.top, 24)
         .accessibilityIdentifier("members.empty")
     }
 
