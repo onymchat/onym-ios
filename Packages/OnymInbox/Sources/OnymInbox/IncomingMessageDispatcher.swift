@@ -440,7 +440,16 @@ public struct IncomingMessageDispatcher: Sendable {
             $0.groupIDData == invitation.groupID && $0.ownerIdentityID == ownerIdentityID
         }
         var profiles = invitation.memberProfiles ?? [:]
-        // Every row, not only our own.
+        // Resolved before the loop so the loop can skip it. The self
+        // row has its own, stricter precedence below, and running both
+        // over it made the second read the first's output as though it
+        // had come off the wire: a stored row whose signature fails
+        // against our key was rewritten to signature-without-text, and
+        // the self block then persisted that — destroying the text and
+        // turning `doesNotVerify` into `unknownRules`. Two rules, one
+        // row, and the loser was the evidence.
+        let selfEntry = await selfMemberProfileEntry(for: ownerIdentityID)
+        // Every *other* row.
         //
         // The wire's roster is the admin's and wins on identity, but an
         // invitation from a build that predates rules carries no
@@ -449,7 +458,7 @@ public struct IncomingMessageDispatcher: Sendable {
         // That is the same version-skew shape the self row is guarded
         // against, one row over, so it gets the same rule: a record
         // that proves something outranks one that doesn't.
-        for (key, stored) in storedGroup?.memberProfiles ?? [:] {
+        for (key, stored) in storedGroup?.memberProfiles ?? [:] where key != selfEntry?.key {
             // Only rows the admin still lists. Re-inserting one they
             // dropped would make this directory permanently additive —
             // harmless while nothing removes members, and not something
@@ -496,7 +505,7 @@ public struct IncomingMessageDispatcher: Sendable {
                 rulesText: nil
             )
         }
-        if let selfEntry = await selfMemberProfileEntry(for: ownerIdentityID) {
+        if let selfEntry {
             // Identity wins locally; the agreement is whichever record
             // actually proves something.
             //

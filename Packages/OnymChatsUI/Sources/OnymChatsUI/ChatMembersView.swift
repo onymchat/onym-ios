@@ -467,10 +467,20 @@ struct ChatMembersView: View {
                 )
             }
             .sorted { lhs, rhs in
-                // Self always first, then alias case-insensitively.
+                // Self always first, then alias case-insensitively,
+                // then the fingerprint.
+                //
+                // The last one isn't decoration: aliases are
+                // self-asserted and non-unique, the memo re-derives on
+                // every group change, and a dictionary hands its
+                // entries back in no particular order — so two members
+                // sharing a name could swap places under a thumb
+                // already moving toward a row that now opens somebody
+                // else's agreement.
                 if lhs.isSelf != rhs.isSelf { return lhs.isSelf }
-                return lhs.displayAlias.localizedCaseInsensitiveCompare(rhs.displayAlias)
-                    == .orderedAscending
+                let byAlias = lhs.displayAlias.localizedCaseInsensitiveCompare(rhs.displayAlias)
+                if byAlias != .orderedSame { return byAlias == .orderedAscending }
+                return lhs.blsHex < rhs.blsHex
             }
     }
 

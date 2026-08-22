@@ -21,10 +21,14 @@ public enum GroupRulesStanding: Equatable, Sendable {
     /// The group has rules, and this kind of group has no way to agree
     /// to them: no join request, no approval, nobody to be the author.
     ///
-    /// Not reachable today — `.tyranny` is the only governance type
-    /// `CreateGroupFlow` will produce, and the other two cards are
-    /// dimmed with a "Soon" pill — so this case exists to be correct
-    /// when they ship rather than to fix a live bug. Without it,
+    /// No group *this app creates* can be in this state today:
+    /// `CreateGroupFlow` only ever produces `.tyranny`, and the other
+    /// cards are dimmed with a "Soon" pill. It is not dead code, and
+    /// shouldn't be deleted as such — `CreateGroupInteractor` can build
+    /// the other types, and the dispatcher materializes whatever
+    /// `groupTypeRaw` arrives on the wire, so the day either changes
+    /// this is what stands between those groups and marking every
+    /// member, author included, as having refused to sign. Without it,
     /// `.author` keyed on `adminPubkeyHex` (nil for both) would mark
     /// every member of an anarchy group, including whoever wrote the
     /// rules, as having declined to sign them.
