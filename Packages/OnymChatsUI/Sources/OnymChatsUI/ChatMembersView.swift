@@ -32,6 +32,9 @@ struct ChatMembersView: View {
     /// Drives the admin-only rename alert.
     @State private var showRename = false
     @State private var renameText = ""
+    /// The member whose agreement is being looked at. Also the sheet's
+    /// presentation state — one member at a time, by construction.
+    @State private var selectedMember: MemberRow?
 
     var body: some View {
         Group {
@@ -71,6 +74,18 @@ struct ChatMembersView: View {
                     .accessibilityLabel("Share invite link")
                     .accessibilityIdentifier("members.share_invite_button")
                 }
+            }
+        }
+        .sheet(item: $selectedMember) { row in
+            if let group = currentGroup {
+                MemberRulesProofView(
+                    proof: GroupRulesProof(
+                        group: group,
+                        member: row.profile,
+                        blsHex: row.blsHex
+                    ),
+                    onClose: { selectedMember = nil }
+                )
             }
         }
         .sheet(item: $shareInviteFlow) { flow in
@@ -211,9 +226,8 @@ struct ChatMembersView: View {
 
     private func list(for group: ChatGroup) -> some View {
         ScrollView {
-            if let message = group.invitationMessage,
-               !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                invitationSection(message)
+            if let rules = GroupRules.normalized(group.invitationMessage) {
+                rulesSection(rules)
             }
             VStack(spacing: 0) {
                 ForEach(rows(for: group)) { row in
@@ -242,11 +256,15 @@ struct ChatMembersView: View {
         }
     }
 
-    /// The group's invitation message (greeting / policy / articles),
-    /// shown as the group's intro at the top of the info screen.
-    private func invitationSection(_ message: String) -> some View {
+    /// The group's rules, shown to everyone rather than only to the
+    /// people still deciding whether to join.
+    ///
+    /// A member who agreed months ago has no other way back to the
+    /// words they agreed to — the confirmation screen is long gone, and
+    /// until now the text lived only in an invitation nobody keeps.
+    private func rulesSection(_ message: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("INVITATION")
+            Text("GROUP RULES")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(OnymTokens.text3)
                 .padding(.leading, 4)
@@ -261,14 +279,14 @@ struct ChatMembersView: View {
                     RoundedRectangle(cornerRadius: 12).stroke(OnymTokens.hairline, lineWidth: 1)
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 12))
-                .accessibilityIdentifier("members.invitation")
+                .accessibilityIdentifier("members.rules")
         }
         .padding(.horizontal, 16)
         .padding(.top, 12)
     }
 
     private func memberRow(_ row: MemberRow) -> some View {
-        HStack(spacing: 12) {
+        let content = HStack(spacing: 12) {
             avatar(for: row)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
@@ -281,15 +299,74 @@ struct ChatMembersView: View {
                             .foregroundStyle(OnymTokens.text2)
                     }
                 }
-                Text("BLS \(row.blsPrefix)\u{2026}")
-                    .font(.system(size: 12, weight: .regular, design: .monospaced))
-                    .foregroundStyle(OnymTokens.text3)
+                if let mark = Self.mark(for: row.standing) {
+                    HStack(spacing: 4) {
+                        Image(systemName: mark.symbol)
+                            .font(.system(size: 10, weight: .semibold))
+                        Text(mark.text)
+                            .font(.system(size: 12))
+                    }
+                    .foregroundStyle(mark.color)
+                    .accessibilityIdentifier("members.standing.\(row.id)")
+                } else {
+                    Text("BLS \(row.blsPrefix)\u{2026}")
+                        .font(.system(size: 12, weight: .regular, design: .monospaced))
+                        .foregroundStyle(OnymTokens.text3)
+                }
             }
             Spacer(minLength: 0)
+            // Only where there is something to hand someone. A
+            // chevron on a row whose sheet would say "nothing to show"
+            // is an invitation to a dead end.
+            if row.standing != .noRules {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(OnymTokens.text3)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+        .contentShape(Rectangle())
+
+        return Group {
+            if row.standing == .noRules {
+                content
+            } else {
+                Button { selectedMember = row } label: { content }
+                    .buttonStyle(.plain)
+            }
+        }
         .accessibilityIdentifier("members.row.\(row.id)")
+    }
+
+    /// The mark beside a name. `nil` for a group with no rules, where
+    /// the row keeps the BLS prefix it always showed — there is no
+    /// standing to report, and "not applicable" on every row in every
+    /// group without rules is noise.
+    ///
+    /// The wording tracks `ChatJoinRequestCell`'s deliberately: a
+    /// member's standing and a request's verdict are the same fact at
+    /// two moments, and two vocabularies for it would read as two
+    /// different things.
+    nonisolated static func mark(
+        for standing: GroupRulesStanding
+    ) -> (symbol: String, text: String, color: Color)? {
+        switch standing {
+        case .noRules:
+            nil
+        case .author:
+            ("pencil", String(localized: "Wrote the rules"), OnymTokens.text2)
+        case .signed:
+            ("checkmark.seal.fill", String(localized: "Signed the rules"), OnymTokens.green)
+        case .signedEarlierVersion:
+            ("clock.badge.checkmark",
+             String(localized: "Signed an earlier version"), OnymTokens.text2)
+        case .didNotSign:
+            ("minus.circle", String(localized: "Didn\u{2019}t sign"), OnymTokens.amber)
+        case .doesNotVerify:
+            ("exclamationmark.triangle.fill",
+             String(localized: "Signature doesn\u{2019}t check out"), OnymTokens.red)
+        }
     }
 
     private func avatar(for row: MemberRow) -> some View {
@@ -350,7 +427,9 @@ struct ChatMembersView: View {
                     blsHex: key,
                     blsPrefix: String(key.prefix(12)),
                     displayAlias: profile.alias.isEmpty ? "(unnamed)" : profile.alias,
-                    isSelf: activeKey.map { $0 == key } ?? false
+                    isSelf: activeKey.map { $0 == key } ?? false,
+                    standing: group.rulesStanding(of: profile, blsHex: key),
+                    profile: profile
                 )
             }
             .sorted { lhs, rhs in
@@ -367,5 +446,9 @@ struct ChatMembersView: View {
         let blsPrefix: String
         let displayAlias: String
         let isSelf: Bool
+        /// Re-derived on every render from the stored signature, not
+        /// cached: see `GroupRulesStanding`.
+        let standing: GroupRulesStanding
+        let profile: MemberProfile
     }
 }

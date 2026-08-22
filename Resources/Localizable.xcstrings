@@ -7807,6 +7807,342 @@
           }
         }
       }
+    },
+    "GROUP RULES": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GROUP RULES"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ПРАВИЛА ГРУППЫ"
+          }
+        }
+      }
+    },
+    "Wrote the rules": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wrote the rules"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Составил правила"
+          }
+        }
+      }
+    },
+    "Signed the rules": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signed the rules"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Подписал правила"
+          }
+        }
+      }
+    },
+    "Signed an earlier version": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signed an earlier version"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Подписал более раннюю версию"
+          }
+        }
+      }
+    },
+    "Didn’t sign": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Didn’t sign"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не подписал"
+          }
+        }
+      }
+    },
+    "Signature doesn’t check out": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signature doesn’t check out"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Подпись не проходит проверку"
+          }
+        }
+      }
+    },
+    "Export proof": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export proof"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Экспортировать подтверждение"
+          }
+        }
+      }
+    },
+    "WHAT THEY SIGNED": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WHAT THEY SIGNED"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ЧТО БЫЛО ПОДПИСАНО"
+          }
+        }
+      }
+    },
+    "The group’s rules have changed since. This is the wording they agreed to.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The group’s rules have changed since. This is the wording they agreed to."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "С тех пор правила группы изменились. Здесь та формулировка, с которой согласились."
+          }
+        }
+      }
+    },
+    "signing key": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "signing key"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ключ подписи"
+          }
+        }
+      }
+    },
+    "signature": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "signature"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "подпись"
+          }
+        }
+      }
+    },
+    "Couldn’t prepare the file": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t prepare the file"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не удалось подготовить файл"
+          }
+        }
+      }
+    },
+    "This device couldn’t write the proof file.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This device couldn’t write the proof file."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Это устройство не смогло записать файл подтверждения."
+          }
+        }
+      }
+    },
+    "A file anyone can check with any Ed25519 tool — it explains how inside.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A file anyone can check with any Ed25519 tool — it explains how inside."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Файл, который каждый может проверить любым инструментом Ed25519 — внутри описано как."
+          }
+        }
+      }
+    },
+    "The file records what this device knows. There is no signature in it to check.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The file records what this device knows. There is no signature in it to check."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Файл фиксирует то, что известно этому устройству. Подписи для проверки в нём нет."
+          }
+        }
+      }
+    },
+    "This group has no rules, so nothing was asked of anyone.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This group has no rules, so nothing was asked of anyone."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "У этой группы нет правил, поэтому ни от кого ничего не требовалось."
+          }
+        }
+      }
+    },
+    "They set these rules for the group. Founders don’t sign their own.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "They set these rules for the group. Founders don’t sign their own."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Этот участник задал правила группы. Основатели не подписывают собственные правила."
+          }
+        }
+      }
+    },
+    "They read these rules and signed them with this identity’s key before joining.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "They read these rules and signed them with this identity’s key before joining."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Этот участник прочитал правила и подписал их ключом своей личности перед вступлением."
+          }
+        }
+      }
+    },
+    "They signed the rules as they were written when they joined. The group has changed them since.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "They signed the rules as they were written when they joined. The group has changed them since."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Этот участник подписал правила в той редакции, что действовала при вступлении. С тех пор группа их изменила."
+          }
+        }
+      }
+    },
+    "They joined before this group had rules, or from an app version that predates them.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "They joined before this group had rules, or from an app version that predates them."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Этот участник вступил до появления правил в группе или из версии приложения, которая их не поддерживала."
+          }
+        }
+      }
+    },
+    "A signature is stored for them and it doesn’t check out. Nothing here can be shown as their agreement.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A signature is stored for them and it doesn’t check out. Nothing here can be shown as their agreement."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Для этого участника сохранена подпись, и она не проходит проверку. Ничто здесь нельзя предъявить как его согласие."
+          }
+        }
+      }
     }
   },
   "version": "1.0"
