@@ -90,8 +90,8 @@ final class PushRegistrationPayloadTests: XCTestCase {
     func testRegisterFixtureMatchesTheBackend() {
         let expected = "000000156f6e796d2d707573682d72656769737465722d76310000000c646576696365"
             + "2d746f6b656e0000000d6f6e796d3a6b65793a6161626200000014323032362d30382d"
-            + "32325431323a30303a30305a000000060a0b0c0deeff000000203ae773f8c0e9d68"
-            + "10aadf1564c3c63821a019269b84d50ddccb902878399fc48"
+            + "32325431323a30303a30305a000000060a0b0c0deeff00000020058ea2fe4226d7fb35"
+            + "a804975feb9961e1800113e70fd39a7dd61647cbdd92b5"
         let payload = SignedPushSessionPayload.register(
             deviceToken: deviceToken,
             userKey: userKey,
@@ -105,8 +105,8 @@ final class PushRegistrationPayloadTests: XCTestCase {
     func testRegisterWithoutTokenFixtureMatchesTheBackend() {
         let expected = "000000156f6e796d2d707573682d72656769737465722d7631000000000000000d6f6e"
             + "796d3a6b65793a6161626200000014323032362d30382d32325431323a30303a30305a"
-            + "000000060a0b0c0deeff000000203ae773f8c0e9d6810aadf1564c3c63821a019269b8"
-            + "4d50ddccb902878399fc48"
+            + "000000060a0b0c0deeff00000020058ea2fe4226d7fb35a804975feb9961e1800113e7"
+            + "0fd39a7dd61647cbdd92b5"
         let payload = SignedPushSessionPayload.register(
             deviceToken: nil,
             userKey: userKey,
@@ -133,7 +133,28 @@ final class PushRegistrationPayloadTests: XCTestCase {
     func testSubscriptionsDigestFixtureMatchesTheBackend() {
         XCTAssertEqual(
             hex(SignedPushSessionPayload.digest(of: subscriptions)),
-            "3ae773f8c0e9d6810aadf1564c3c63821a019269b84d50ddccb902878399fc48"
+            "058ea2fe4226d7fb35a804975feb9961e1800113e70fd39a7dd61647cbdd92b5"
+        )
+    }
+
+    /// The digest binds grouping, not just flattened pairs: an entry
+    /// with an empty relay list still contributes bytes (tag plus a
+    /// zero relay count), so `{tag, relays: []}` differs from omitting
+    /// the entry — and an empty subscription list digests to
+    /// SHA-256 of nothing, both pinned against the backend.
+    func testEmptyRelayListsStillShapeTheDigest() {
+        let bareEntry = [PushSubscription(tag: "a1b2c3d4e5f60718", relays: [])]
+        XCTAssertEqual(
+            hex(SignedPushSessionPayload.digest(of: bareEntry)),
+            "03a2f27940d35cb25a941ba710b844a82cf4aabf50aa0c893785cf8726aab8b8"
+        )
+        XCTAssertEqual(
+            hex(SignedPushSessionPayload.digest(of: [])),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        )
+        XCTAssertNotEqual(
+            SignedPushSessionPayload.digest(of: bareEntry),
+            SignedPushSessionPayload.digest(of: [])
         )
     }
 

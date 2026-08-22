@@ -36,14 +36,16 @@ final class PushRegistrationInteractorTests: XCTestCase {
 
     private func makeInteractor(
         client: StubPushBackendClient,
-        preferences: PushPreferenceStore
+        preferences: PushPreferenceStore,
+        clock: @escaping @Sendable () -> Date = Date.init
     ) -> PushRegistrationInteractor {
         PushRegistrationInteractor(
             client: client,
             signer: StubSigner(),
             attestation: NoAttestation(),
             preferences: preferences,
-            debounce: .milliseconds(20)
+            debounce: .milliseconds(20),
+            clock: clock
         )
     }
 
@@ -158,5 +160,104 @@ final class PushRegistrationInteractorTests: XCTestCase {
         let unregistered = await client.unregistered
         XCTAssertEqual(unregistered.count, 1)
         XCTAssertNil(preferences.lastRegistrationFingerprint)
+        // The successful unregister leaves nothing pending and no
+        // stale token to fall back to.
+        XCTAssertNil(preferences.pendingUnregisterToken)
+        XCTAssertNil(preferences.lastRegisteredToken)
+    }
+
+    /// One offline opt-out must not leave the device registered on the
+    /// server: the intent persists past the failure and drains at the
+    /// next reconcile opportunity.
+    func testOfflineDisablePersistsPendingUnregisterAndDrainsOnForeground() async throws {
+        let client = StubPushBackendClient()
+        let preferences = makePreferences(enabled: true)
+        let interactor = makeInteractor(client: client, preferences: preferences)
+
+        await interactor.updateToken(Data([0x0a, 0x0b]))
+        await interactor.updateSubscriptions([PushSubscription(tag: "a1b2c3d4e5f60718", relays: ["wss://nostr.onym.app"])])
+        try await settle()
+
+        await client.setUnregisterAnswer(.failure(PushClientError.invalidResponse))
+        preferences.setEnabled(false)
+        await interactor.pushDisabled()
+
+        // The attempt happened, failed, and the intent survived it.
+        let afterFailure = await client.unregistered
+        XCTAssertEqual(afterFailure.count, 1)
+        XCTAssertEqual(preferences.pendingUnregisterToken, Data([0x0a, 0x0b]))
+
+        // Next foreground: the pending unregister drains first, and
+        // with the preference off nothing re-registers.
+        await client.setUnregisterAnswer(.success(()))
+        await interactor.appForegrounded()
+        try await settle()
+
+        let drained = await client.unregistered
+        XCTAssertEqual(drained.count, 2)
+        XCTAssertNil(preferences.pendingUnregisterToken)
+        let registered = await client.registered
+        XCTAssertEqual(registered.count, 1)
+    }
+
+    /// Disabling in a launch where APNs has not (re)delivered the
+    /// token falls back to the last successfully registered one — the
+    /// register recorded it for exactly this moment.
+    func testDisableWithoutLiveTokenFallsBackToTheRecordedOne() async throws {
+        let client = StubPushBackendClient()
+        let preferences = makePreferences(enabled: true)
+        let first = makeInteractor(client: client, preferences: preferences)
+
+        await first.updateToken(Data([0x0a, 0x0b]))
+        await first.updateSubscriptions([PushSubscription(tag: "a1b2c3d4e5f60718", relays: ["wss://nostr.onym.app"])])
+        try await settle()
+        XCTAssertEqual(preferences.lastRegisteredToken, Data([0x0a, 0x0b]))
+
+        // A fresh interactor — same persisted state, no APNs token yet.
+        let second = makeInteractor(client: client, preferences: preferences)
+        preferences.setEnabled(false)
+        await second.pushDisabled()
+
+        let unregistered = await client.unregistered
+        XCTAssertEqual(unregistered.count, 1)
+        XCTAssertNil(preferences.pendingUnregisterToken)
+    }
+
+    func testRegisterRecordsExpiry() async throws {
+        let expires = Date(timeIntervalSince1970: 1_800_000_000)
+        let client = StubPushBackendClient(
+            registerAnswer: .success(PushRegisterResponse(expiresAt: expires))
+        )
+        let preferences = makePreferences(enabled: true)
+        let interactor = makeInteractor(client: client, preferences: preferences)
+
+        await interactor.updateToken(Data([0x01]))
+        await interactor.updateSubscriptions([PushSubscription(tag: "a1b2c3d4e5f60718", relays: ["wss://nostr.onym.app"])])
+        try await settle()
+
+        XCTAssertEqual(preferences.registrationExpiresAt, expires)
+    }
+
+    /// The backend's own expiry drives the refresh: an unchanged
+    /// registration re-registers once `now` is within seven days of
+    /// `expiresAt`, even though the fixed interval has not elapsed.
+    func testNearExpiryReRegistersDespiteUnchangedInputs() async throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let client = StubPushBackendClient(
+            registerAnswer: .success(
+                PushRegisterResponse(expiresAt: now.addingTimeInterval(3 * 24 * 3600))
+            )
+        )
+        let preferences = makePreferences(enabled: true)
+        let interactor = makeInteractor(client: client, preferences: preferences, clock: { now })
+
+        await interactor.updateToken(Data([0x01]))
+        await interactor.updateSubscriptions([PushSubscription(tag: "a1b2c3d4e5f60718", relays: ["wss://nostr.onym.app"])])
+        try await settle()
+        await interactor.appForegrounded()
+        try await settle()
+
+        let registered = await client.registered
+        XCTAssertEqual(registered.count, 2)
     }
 }

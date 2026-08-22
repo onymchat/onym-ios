@@ -53,6 +53,10 @@ public actor StubPushBackendClient: PushBackendClient {
         registerAnswer = answer
     }
 
+    public func setUnregisterAnswer(_ answer: Result<Void, Error>) {
+        unregisterAnswer = answer
+    }
+
     public func setRegistrationKeyAnswer(_ key: Data) {
         registrationKeyAnswer = key
     }
