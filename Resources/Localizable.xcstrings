@@ -1804,22 +1804,6 @@
         }
       }
     },
-    "Add a greeting, group rules, or policy…": {
-      "localizations": {
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Добавьте приветствие, правила или политику группы…"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Add a greeting, group rules, or policy…"
-          }
-        }
-      }
-    },
     "Add Custom URL": {
       "extractionState": "stale",
       "localizations": {
@@ -7824,22 +7808,6 @@
         }
       }
     },
-    "Wrote the rules": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Wrote the rules"
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Составил правила"
-          }
-        }
-      }
-    },
     "Export proof": {
       "localizations": {
         "en": {
@@ -8156,6 +8124,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Для этого участника сохранена подпись, но формулировки, которую она покрывает, нет на этом устройстве — проверить её здесь нечем."
+          }
+        }
+      }
+    },
+    "THE RULES THEY SET": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "THE RULES THEY SET"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ПРАВИЛА, КОТОРЫЕ ОН УСТАНОВИЛ"
           }
         }
       }

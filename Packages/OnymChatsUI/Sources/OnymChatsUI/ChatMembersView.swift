@@ -28,13 +28,29 @@ struct ChatMembersView: View {
     let setGroupAvatar: @MainActor (String, Data?) async -> Void
     let setGroupName: @MainActor (String, String) async -> Void
 
-    @State private var shareInviteFlow: ShareInviteFlow?
+    /// Both sheets present from this screen through one `sheet(item:)`
+    /// over one enum — the rule `GateCheckRequiredView` already
+    /// established here: two `.sheet` modifiers on the same view and
+    /// SwiftUI has a long history of honouring only one of them. The
+    /// admin's share-invite sheet would have been the silent casualty,
+    /// and the harder one to notice, since only admins reach it.
+    private enum ActiveSheet: Identifiable {
+        case member(MemberRow)
+        case shareInvite(ShareInviteFlow)
+
+        var id: String {
+            switch self {
+            case .member(let row): "member:\(row.id)"
+            case .shareInvite(let flow): "share:\(flow.id)"
+            }
+        }
+    }
+
+    @State private var activeSheet: ActiveSheet?
     /// Drives the admin-only rename alert.
     @State private var showRename = false
     @State private var renameText = ""
-    /// The member whose agreement is being looked at. Also the sheet's
-    /// presentation state — one member at a time, by construction.
-    @State private var selectedMember: MemberRow?
+
 
     var body: some View {
         Group {
@@ -67,7 +83,7 @@ struct ChatMembersView: View {
             if canShareInvite {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        shareInviteFlow = makeShareInviteFlow()
+                        activeSheet = .shareInvite(makeShareInviteFlow())
                     } label: {
                         Image(systemName: "person.crop.circle.badge.plus")
                     }
@@ -76,26 +92,29 @@ struct ChatMembersView: View {
                 }
             }
         }
-        .sheet(item: $selectedMember) { row in
-            // Resolved from the live group at present time, not from
-            // the row's captured profile: a roster update while the
-            // sheet is open would otherwise leave a proof rendered
-            // beside a group it no longer describes. `nil` covers the
-            // group being deleted underneath — an empty sheet is worse
-            // than one that says what happened.
-            if let group = currentGroup,
-               let proof = GroupRulesProof(group: group, blsHex: row.blsHex) {
-                MemberRulesProofView(proof: proof, onClose: { selectedMember = nil })
-            } else {
-                MemberGoneView(onClose: { selectedMember = nil })
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .member(let row):
+                // Resolved from the live group at present time, not
+                // from the row's captured profile: a roster update
+                // while the sheet is open would otherwise leave a proof
+                // rendered beside a group it no longer describes. The
+                // fallback covers the group being deleted underneath —
+                // an empty sheet is worse than one that says what
+                // happened.
+                if let group = currentGroup,
+                   let proof = GroupRulesProof(group: group, blsHex: row.blsHex) {
+                    MemberRulesProofView(proof: proof, onClose: { activeSheet = nil })
+                } else {
+                    MemberGoneView(onClose: { activeSheet = nil })
+                }
+            case .shareInvite(let flow):
+                ShareInviteView(
+                    groupID: groupID,
+                    flow: flow,
+                    onDone: { activeSheet = nil }
+                )
             }
-        }
-        .sheet(item: $shareInviteFlow) { flow in
-            ShareInviteView(
-                groupID: groupID,
-                flow: flow,
-                onDone: { shareInviteFlow = nil }
-            )
         }
         .alert("Rename group", isPresented: $showRename) {
             TextField("Group name", text: $renameText)
@@ -343,7 +362,7 @@ struct ChatMembersView: View {
             if row.standing == .noRules {
                 content
             } else {
-                Button { selectedMember = row } label: { content }
+                Button { activeSheet = .member(row) } label: { content }
                     .buttonStyle(.plain)
             }
         }

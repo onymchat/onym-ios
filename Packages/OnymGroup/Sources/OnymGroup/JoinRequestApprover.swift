@@ -396,6 +396,11 @@ public actor JoinRequestApprover: JoinRequestApproving {
         // of it. Without this they arrive to find themselves marked as
         // never having signed the rules they had just agreed to — on
         // the one screen where their agreement is the point.
+        // Computed once, and used for the invitation, the local record
+        // and the fan-out alike — three copies of one agreement that
+        // must not disagree about what it covers.
+        let agreedText = Self.textCovering(req, rules: anchored.invitationMessage)
+
         var invitedProfiles = anchored.memberProfiles
         if let blsPub = req.joinerBlsPublicKey {
             let key = blsPub.map { String(format: "%02x", $0) }.joined()
@@ -405,7 +410,7 @@ public actor JoinRequestApprover: JoinRequestApproving {
                 sendingPubkey: req.joinerSendingPublicKey,
                 rulesHash: req.rulesHash,
                 rulesSignature: req.rulesSignature,
-                rulesText: anchored.invitationMessage
+                rulesText: agreedText
             )
         }
 
@@ -484,7 +489,8 @@ public actor JoinRequestApprover: JoinRequestApproving {
                 sendingPub: req.joinerSendingPublicKey,
                 alias: req.joinerDisplayLabel,
                 rulesHash: req.rulesHash,
-                rulesSignature: req.rulesSignature
+                rulesSignature: req.rulesSignature,
+                rulesText: agreedText
             )
             // Deliberately NOT gated on `alreadyInRoster`. That flag
             // reads `members` (the crypto roster, advanced by the
@@ -509,7 +515,8 @@ public actor JoinRequestApprover: JoinRequestApproving {
                 // this. Kept to the founder, the evidence would reach
                 // nobody who joined earlier.
                 rulesHash: req.rulesHash,
-                rulesSignature: req.rulesSignature
+                rulesSignature: req.rulesSignature,
+                rulesText: agreedText
             )
             // The admin's own "X joined" row. Everyone else derives
             // theirs from the announcement fanned out just above,
@@ -714,7 +721,8 @@ public actor JoinRequestApprover: JoinRequestApproving {
         sendingPub: Data,
         alias: String,
         rulesHash: Data?,
-        rulesSignature: Data?
+        rulesSignature: Data?,
+        rulesText: String?
     ) async {
         let key = blsPub.map { String(format: "%02x", $0) }.joined()
         var updated = group
@@ -724,12 +732,12 @@ public actor JoinRequestApprover: JoinRequestApproving {
             sendingPubkey: sendingPub,
             rulesHash: rulesHash,
             rulesSignature: rulesSignature,
-            // This device's own copy, as of the approval — the text the
-            // verdict above was reached against. Kept whatever that
-            // verdict was: it is what the founder decided in front of,
-            // and re-reading the decision later needs the words, not a
-            // pointer to whatever the group says by then.
-            rulesText: group.invitationMessage
+            // Only the wording this signature actually covers — see
+            // `textCovering`. The hash and signature are kept either
+            // way, so an agreement whose text this device has lost is
+            // still on the record as unverifiable rather than as
+            // absent.
+            rulesText: rulesText
         )
         await groupRepository.insert(updated)
     }
@@ -753,7 +761,8 @@ public actor JoinRequestApprover: JoinRequestApproving {
         joinerSendingPub: Data,
         joinerAlias: String,
         rulesHash: Data?,
-        rulesSignature: Data?
+        rulesSignature: Data?,
+        rulesText: String?
     ) async {
         let adminAlias = await identity.currentIdentityName() ?? ""
         let announced: MemberAnnouncementPayload.AnnouncedMember
@@ -765,7 +774,7 @@ public actor JoinRequestApprover: JoinRequestApproving {
                 sendingPub: joinerSendingPub,
                 rulesHash: rulesHash,
                 rulesSignature: rulesSignature,
-                rulesText: group.invitationMessage
+                rulesText: rulesText
             )
         } catch {
             // Wrong-sized BLS pubkey shouldn't happen — we already
@@ -1027,6 +1036,32 @@ public actor JoinRequestApprover: JoinRequestApproving {
             rulesSignature: payload.rulesSignature,
             rulesHash: payload.rulesHash
         )
+    }
+
+    /// The rules text to store beside a joiner's signature, or nil when
+    /// this device doesn't hold what they signed.
+    ///
+    /// Pairing a signature with whatever the group says *now* is what
+    /// made a founder's edit between request and approval land on the
+    /// joiner as "their signature doesn't check out" — red, about
+    /// themselves, on their first look at the group. It isn't true
+    /// either: the signature is fine, and it is this device that no
+    /// longer has the wording it covers.
+    ///
+    /// Withholding the text instead resolves to `unknownRules` — "can't
+    /// be checked" — which is exactly what happened. The hash and
+    /// signature are still kept: dropping the row entirely would throw
+    /// away the only evidence that they agreed to anything, and a
+    /// founder who later recovers the old wording could still check it.
+    ///
+    /// A signature that fails against rules we *do* hold is a different
+    /// thing and keeps its text, so it still reads as `doesNotVerify`.
+    static func textCovering(_ request: PendingRequest, rules: String?) -> String? {
+        guard let rules = GroupRules.normalized(rules),
+              let signed = request.rulesHash,
+              signed == GroupRules.hash(rules)
+        else { return nil }
+        return rules
     }
 
     /// Decide the agreement once, here, where the group's own rules are

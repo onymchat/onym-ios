@@ -435,7 +435,8 @@ public struct IncomingMessageDispatcher: Sendable {
         // alias + inbox pub — the receiver's view of itself wins.
         var profiles = invitation.memberProfiles ?? [:]
         if let selfEntry = await selfMemberProfileEntry(for: ownerIdentityID) {
-            // Identity wins locally; the agreement comes from the wire.
+            // Identity wins locally; the agreement comes from the wire,
+            // and an absent one from the wire changes nothing.
             //
             // Our alias and keys are ours to assert, which is what the
             // overwrite is for. Our *agreement* is not: this device
@@ -443,14 +444,26 @@ public struct IncomingMessageDispatcher: Sendable {
             // record is the only one there is. Taking it on trust costs
             // nothing — it is checked against our own sending key every
             // time it is read, so a wrong one simply fails to verify.
+            //
+            // But taking *nil* on trust costs the whole record. This
+            // path re-runs on every relay replay and on any later
+            // invitation for a group already here, and an admin on a
+            // build that predates the self row sends none — so a
+            // straight copy would erase a stored agreement and put the
+            // joiner back to "didn't sign", by version skew rather than
+            // by any code path. The stored profile is the floor.
+            let stored = await groupRepository.currentGroups()
+                .first { $0.groupIDData == invitation.groupID }?
+                .memberProfiles[selfEntry.key]
             let wire = profiles[selfEntry.key]
+            let agreement = wire?.rulesSignature != nil ? wire : stored
             profiles[selfEntry.key] = MemberProfile(
                 alias: selfEntry.value.alias,
                 inboxPublicKey: selfEntry.value.inboxPublicKey,
                 sendingPubkey: selfEntry.value.sendingPubkey,
-                rulesHash: wire?.rulesHash,
-                rulesSignature: wire?.rulesSignature,
-                rulesText: wire?.rulesText
+                rulesHash: agreement?.rulesHash,
+                rulesSignature: agreement?.rulesSignature,
+                rulesText: agreement?.rulesText
             )
         }
 

@@ -47,7 +47,7 @@ struct MemberRulesProofView: View {
                 }
             }
         }
-        .task { writeFile() }
+        .task { await writeFile() }
         .onDisappear {
             // Actually delivered rather than merely intended: `tmp` is
             // swept at the OS's discretion, which can be days. The copy
@@ -101,7 +101,12 @@ struct MemberRulesProofView: View {
 
     private func signedText(_ rules: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("WHAT THEY SIGNED")
+            // "WHAT THEY SIGNED" sat directly under "Founders don't
+            // sign their own" for the author, where the same text is
+            // shown because the rules are theirs. The file avoids the
+            // contradiction by routing the author through `note`; the
+            // screen has to vary the heading.
+            Text(proof.standing == .author ? "THE RULES THEY SET" : "WHAT THEY SIGNED")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(OnymTokens.text3)
             Text(rules)
@@ -109,7 +114,11 @@ struct MemberRulesProofView: View {
                 .foregroundStyle(OnymTokens.text)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .textSelection(.enabled)
-            if proof.rules != proof.currentRules {
+            // From the standing, not a string compare of the two
+            // copies: `GroupRulesProof` single-sources this exact fact
+            // for the file, and two derivations agree only until
+            // normalization changes.
+            if proof.standing == .signedEarlierVersion {
                 // Named on the screen as well as in the file: someone
                 // comparing this against the rules section a tap away
                 // should not have to work out why they differ.
@@ -202,14 +211,25 @@ struct MemberRulesProofView: View {
     /// that matters is the one the person sends, and leaving proofs
     /// about other people lying around this device is a disclosure
     /// nobody asked for.
-    private func writeFile() {
+    private func writeFile() async {
         guard file == nil else { return }
-        do {
-            let url = FileManager.default.temporaryDirectory
-                .appendingPathComponent(proof.suggestedFileName)
-            try proof.jsonData().write(to: url, options: .atomic)
-            file = url
-        } catch {
+        let proof = proof
+        // Off the main actor: encode-and-write is small today, but it
+        // runs on the sheet's first frame, and "small today" is how a
+        // hitch gets built in.
+        let written: URL? = await Task.detached {
+            do {
+                let url = FileManager.default.temporaryDirectory
+                    .appendingPathComponent(proof.suggestedFileName)
+                try proof.jsonData().write(to: url, options: .atomic)
+                return url
+            } catch {
+                return nil
+            }
+        }.value
+        if let written {
+            file = written
+        } else {
             writeError = String(localized: "This device couldn\u{2019}t write the proof file.")
         }
     }
