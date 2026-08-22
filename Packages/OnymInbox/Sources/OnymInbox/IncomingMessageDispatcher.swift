@@ -864,7 +864,14 @@ public struct IncomingMessageDispatcher: Sendable {
         updated.memberProfiles[key] = MemberProfile(
             alias: payload.newMember.alias,
             inboxPublicKey: payload.newMember.inboxPub,
-            sendingPubkey: payload.newMember.sendingPub
+            sendingPubkey: payload.newMember.sendingPub,
+            // Carried through rather than defaulted away: this is the
+            // step that makes a member's agreement checkable by
+            // everyone already in the group, not only by the founder
+            // who admitted them.
+            rulesHash: payload.newMember.rulesHash,
+            rulesSignature: payload.newMember.rulesSignature,
+            rulesText: payload.newMember.rulesText
         )
         await groupRepository.insert(updated)
 

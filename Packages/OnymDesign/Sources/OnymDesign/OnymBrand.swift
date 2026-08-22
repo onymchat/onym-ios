@@ -22,6 +22,15 @@ public enum OnymTokens {
     public static let hairlineStrong  = Color.dynamic(light: .black.opacity(0.12), dark: .white.opacity(0.12))
     public static let green           = Color.dynamic(light: hex(0x1FA84A),  dark: hex(0x34C759))
     public static let red             = Color.dynamic(light: hex(0xE5392E),  dark: hex(0xFF453A))
+    /// Caution, not failure: something a person should read before
+    /// deciding, where `red` would say the decision is already wrong.
+    ///
+    /// The light value is darker than the system orange it started as.
+    /// `#FF9500` on `surface2` is ~2.1:1, which fails WCAG AA for the
+    /// caption-sized text this is used on — and it is used on the lines
+    /// a founder is most expected to actually read. `#B25E00` clears
+    /// 4.5:1. The dark variant already did.
+    public static let amber           = Color.dynamic(light: hex(0xB25E00),  dark: hex(0xFF9F0A))
 
     /// Reads on accent fills (button labels, governance card check
     /// glyphs, success seal). Light → white text on saturated accent;

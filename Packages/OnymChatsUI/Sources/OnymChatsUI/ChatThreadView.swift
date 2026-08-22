@@ -607,6 +607,7 @@ public struct ChatThreadView: View {
                     // surface at all (the old modal was the only place
                     // that listed requests across groups); it ages out
                     // via `SwiftDataIntroRequestStore.retention`.
+                    agreement: request.rulesAgreement,
                     isInFlight: approveRequestsFlow.isInFlight(request.id),
                     // Each row reads its own failure, so two outstanding
                     // errors both stay explained.

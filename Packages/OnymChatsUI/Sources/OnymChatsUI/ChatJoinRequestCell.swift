@@ -1,4 +1,5 @@
 import UIKit
+import SwiftUI
 import OnymDesign
 import OnymGroup
 
@@ -16,6 +17,11 @@ struct ChatJoinRequestDisplay: Equatable {
     /// self-asserted by the joiner and nothing stops them typing someone
     /// else's name.
     let fingerprint: String
+    /// Whether this joiner agreed to the group's rules, already
+    /// decided by `JoinRequestApprover` against the group's own copy of
+    /// the text. The cell renders it and nothing more — a view is the
+    /// wrong place to be verifying signatures.
+    let agreement: JoinRequestApprover.RulesAgreement
     /// A call is in flight: spinner on, both buttons disabled.
     let isInFlight: Bool
     /// Last failure for this request, if any.
@@ -42,6 +48,7 @@ final class ChatJoinRequestCell: UITableViewCell {
     private let card = UIView()
     private let titleLabel = UILabel()
     private let fingerprintLabel = UILabel()
+    private let agreementLabel = UILabel()
     private let errorLabel = UILabel()
     private let hintLabel = UILabel()
     private let declineButton = UIButton(type: .system)
@@ -78,6 +85,10 @@ final class ChatJoinRequestCell: UITableViewCell {
         fingerprintLabel.adjustsFontForContentSizeCategory = true
         fingerprintLabel.textColor = UIColor(OnymTokens.text3)
         fingerprintLabel.numberOfLines = 1
+
+        agreementLabel.font = .preferredFont(forTextStyle: .caption1)
+        agreementLabel.adjustsFontForContentSizeCategory = true
+        agreementLabel.numberOfLines = 0
 
         errorLabel.font = .preferredFont(forTextStyle: .caption1)
         errorLabel.adjustsFontForContentSizeCategory = true
@@ -117,6 +128,7 @@ final class ChatJoinRequestCell: UITableViewCell {
         stack.spacing = 8
         stack.addArrangedSubview(titleLabel)
         stack.addArrangedSubview(fingerprintLabel)
+        stack.addArrangedSubview(agreementLabel)
         stack.addArrangedSubview(buttonRow)
         stack.addArrangedSubview(hintLabel)
         stack.addArrangedSubview(errorLabel)
@@ -168,6 +180,18 @@ final class ChatJoinRequestCell: UITableViewCell {
         titleLabel.text = String(localized: "\(display.alias) wants to join")
         fingerprintLabel.text = String(localized: "inbox \(display.fingerprint)")
 
+        // Above the buttons on purpose: it is one of the two things
+        // this decision turns on, and a founder who has already tapped
+        // Accept is not helped by finding out underneath it.
+        if let agreement = Self.agreementText(display.agreement) {
+            agreementLabel.text = agreement.text
+            agreementLabel.textColor = UIColor(agreement.color)
+            agreementLabel.isHidden = false
+        } else {
+            agreementLabel.text = nil
+            agreementLabel.isHidden = true
+        }
+
         var accept = Self.buttonConfiguration(
             title: display.isInFlight
                 ? String(localized: "Anchoring on chain…")
@@ -187,9 +211,41 @@ final class ChatJoinRequestCell: UITableViewCell {
         errorLabel.text = display.errorText
         errorLabel.isHidden = display.errorText == nil
 
+        agreementLabel.accessibilityIdentifier = "chat.join_request.agreement.\(display.requestID)"
         accessibilityIdentifier = "chat.join_request.\(display.requestID)"
         acceptButton.accessibilityIdentifier = "chat.join_request.accept.\(display.requestID)"
         declineButton.accessibilityIdentifier = "chat.join_request.decline.\(display.requestID)"
+    }
+
+    /// `nil` when the group has no rules — there is nothing to report
+    /// about an agreement nobody was asked for, and an "n/a" line would
+    /// be noise on every request in every group without rules.
+    ///
+    /// The three failing cases read differently because they *are*
+    /// different, and the founder's next move differs with them: an
+    /// unsigned request is usually an older app, and asking again fixes
+    /// it; a signature over rules this device doesn't hold can't be
+    /// checked either way, so it claims nothing and is coloured
+    /// neutrally; a signature that fails against our own rules is
+    /// neither of those, and is the only one that should give a founder
+    /// pause about the request itself.
+    private static func agreementText(
+        _ agreement: JoinRequestApprover.RulesAgreement
+    ) -> (text: String, color: Color)? {
+        switch agreement {
+        case .notRequired:
+            nil
+        case .agreed:
+            (String(localized: "Signed the group rules"), OnymTokens.green)
+        case .unknownRules:
+            // Neutral, not reassuring: nothing here was verified.
+            (String(localized: "Signed rules this device doesn\u{2019}t have \u{2014} can\u{2019}t be checked"),
+             OnymTokens.text2)
+        case .notSigned:
+            (String(localized: "Didn\u{2019}t sign the group rules"), OnymTokens.amber)
+        case .invalid:
+            (String(localized: "Their signature on the rules doesn\u{2019}t check out"), OnymTokens.red)
+        }
     }
 
     @objc private func tappedAccept() {

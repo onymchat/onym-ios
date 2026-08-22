@@ -319,7 +319,8 @@ final class ApproveRequestsFlowTests: XCTestCase {
 
     private static func makeRequest(
         id: String,
-        alias: String
+        alias: String,
+        agreement: JoinRequestApprover.RulesAgreement = .notRequired
     ) -> JoinRequestApprover.PendingRequest {
         JoinRequestApprover.PendingRequest(
             id: id,
@@ -329,7 +330,10 @@ final class ApproveRequestsFlowTests: XCTestCase {
             joinerSendingPublicKey: Data(repeating: 0xEE, count: 32),
             joinerDisplayLabel: alias,
             groupId: Data(repeating: 0xBB, count: 32),
-            groupName: "Family"
+            groupName: "Family",
+            rulesAgreement: agreement,
+            rulesSignature: nil,
+            rulesHash: nil
         )
     }
 
