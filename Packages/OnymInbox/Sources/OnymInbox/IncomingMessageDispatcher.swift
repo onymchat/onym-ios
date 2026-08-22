@@ -435,7 +435,23 @@ public struct IncomingMessageDispatcher: Sendable {
         // alias + inbox pub — the receiver's view of itself wins.
         var profiles = invitation.memberProfiles ?? [:]
         if let selfEntry = await selfMemberProfileEntry(for: ownerIdentityID) {
-            profiles[selfEntry.key] = selfEntry.value
+            // Identity wins locally; the agreement comes from the wire.
+            //
+            // Our alias and keys are ours to assert, which is what the
+            // overwrite is for. Our *agreement* is not: this device
+            // signed it and kept no copy, so the admitting device's
+            // record is the only one there is. Taking it on trust costs
+            // nothing — it is checked against our own sending key every
+            // time it is read, so a wrong one simply fails to verify.
+            let wire = profiles[selfEntry.key]
+            profiles[selfEntry.key] = MemberProfile(
+                alias: selfEntry.value.alias,
+                inboxPublicKey: selfEntry.value.inboxPublicKey,
+                sendingPubkey: selfEntry.value.sendingPubkey,
+                rulesHash: wire?.rulesHash,
+                rulesSignature: wire?.rulesSignature,
+                rulesText: wire?.rulesText
+            )
         }
 
         // Stamp the inviting envelope's Ed25519 pubkey as the

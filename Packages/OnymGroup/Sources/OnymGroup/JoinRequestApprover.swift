@@ -387,6 +387,28 @@ public actor JoinRequestApprover: JoinRequestApproving {
             }
         }
 
+        // The directory the joiner will land with, including their own
+        // row.
+        //
+        // Their own row has to come from here, because it is the one
+        // thing about themselves they cannot reconstruct: this device
+        // holds the signature they sent, and their device kept no copy
+        // of it. Without this they arrive to find themselves marked as
+        // never having signed the rules they had just agreed to — on
+        // the one screen where their agreement is the point.
+        var invitedProfiles = anchored.memberProfiles
+        if let blsPub = req.joinerBlsPublicKey {
+            let key = blsPub.map { String(format: "%02x", $0) }.joined()
+            invitedProfiles[key] = MemberProfile(
+                alias: req.joinerDisplayLabel,
+                inboxPublicKey: req.joinerInboxPublicKey,
+                sendingPubkey: req.joinerSendingPublicKey,
+                rulesHash: req.rulesHash,
+                rulesSignature: req.rulesSignature,
+                rulesText: anchored.invitationMessage
+            )
+        }
+
         let invite = GroupInvitationPayload(
             version: 1,
             groupID: anchored.groupIDData,
@@ -400,10 +422,11 @@ public actor JoinRequestApprover: JoinRequestApproving {
             groupTypeRaw: anchored.groupType.rawValue,
             adminPubkeyHex: anchored.adminPubkeyHex,
             // Ship the directory-as-known so the joiner sees existing
-            // peers + admin by name from the moment they land. The
-            // joiner's own profile gets backfilled by the receiver's
-            // materializer from their active identity.
-            memberProfiles: anchored.memberProfiles.isEmpty ? nil : anchored.memberProfiles,
+            // peers + admin by name from the moment they land — plus
+            // their own row, for the agreement they can't rebuild
+            // themselves. The receiver still overwrites the alias and
+            // keys in it with its own; see the materializer.
+            memberProfiles: invitedProfiles.isEmpty ? nil : invitedProfiles,
             // Tyranny invitees only get the full snapshot here (the
             // create-time offer carries nothing), so this is where the
             // group photo reaches them.
