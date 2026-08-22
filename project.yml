@@ -39,6 +39,9 @@ packages:
   OnymModerationUI: {path: Packages/OnymModerationUI}
   OnymDiscovery: {path: Packages/OnymDiscovery}
   OnymOnboarding: {path: Packages/OnymOnboarding}
+  # No target dependency yet (that lands with the app wiring): listed
+  # so the package resolves with the project and CI compiles it.
+  OnymPush: {path: Packages/OnymPush}
 
 targets:
   OnymIOS:
@@ -239,6 +242,7 @@ targets:
       - package: OnymModerationUI
       - package: OnymDiscovery
       - package: OnymOnboarding
+      - package: OnymPush
 
   OnymIOSUITests:
     type: bundle.ui-testing

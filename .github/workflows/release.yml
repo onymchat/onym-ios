@@ -228,6 +228,21 @@ jobs:
             -derivedDataPath /tmp/onym-foundation-tests \
             -resultBundlePath /tmp/onym-foundation.xcresult
 
+      - name: xcodebuild build (OnymPush package)
+        # OnymPush has no package test target (its suites live in
+        # OnymIOSTests, run above) but nothing else compiles the
+        # package on its own, so a signature-payload typo could land
+        # green. Build it standalone here — same `always()` rationale
+        # as the package test steps.
+        if: always()
+        working-directory: Packages/OnymPush
+        run: |
+          rm -rf /tmp/onym-push-build
+          xcodebuild build \
+            -scheme OnymPush \
+            -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }},OS=latest" \
+            -derivedDataPath /tmp/onym-push-build
+
       - name: Upload unit test xcresult
         # `always()` so `report-to-issue` can parse green runs too —
         # not just failures.
