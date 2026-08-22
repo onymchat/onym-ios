@@ -30,9 +30,7 @@ struct MemberRulesProofView: View {
                     if let rules = proof.rules {
                         signedText(rules)
                     }
-                    if proof.standing.isProven {
-                        bytes
-                    }
+                    bytes
                     export
                 }
                 .padding(.horizontal, 16)
@@ -50,6 +48,13 @@ struct MemberRulesProofView: View {
             }
         }
         .task { writeFile() }
+        .onDisappear {
+            // Actually delivered rather than merely intended: `tmp` is
+            // swept at the OS's discretion, which can be days. The copy
+            // that matters is the one already handed to the share
+            // sheet.
+            if let file { try? FileManager.default.removeItem(at: file) }
+        }
         .reasonAlert("Couldn\u{2019}t prepare the file", reason: $writeError)
     }
 
@@ -87,6 +92,8 @@ struct MemberRulesProofView: View {
             String(localized: "They signed the rules as they were written when they joined. The group has changed them since.")
         case .didNotSign:
             String(localized: "They joined before this group had rules, or from an app version that predates them.")
+        case .unknownRules:
+            String(localized: "A signature is stored for them, but the wording it covers isn\u{2019}t on this device, so nothing here can check it.")
         case .doesNotVerify:
             String(localized: "A signature is stored for them and it doesn\u{2019}t check out. Nothing here can be shown as their agreement.")
         }
@@ -129,8 +136,15 @@ struct MemberRulesProofView: View {
     /// the file can be seen to be about the same thing.
     private var bytes: some View {
         VStack(alignment: .leading, spacing: 8) {
-            row(String(localized: "signing key"), value: proof.sendingPublicKey.map(short) ?? "")
-            row(String(localized: "signature"), value: proof.signature.map(short) ?? "")
+            // Always, even where there is no signature: the title of
+            // this sheet is an alias the member chose for themselves,
+            // and two people can choose the same one. The fingerprint
+            // is what says which member this is about.
+            row(String(localized: "member"), value: shortHex(proof.memberBlsHex))
+            if proof.standing.isProven {
+                row(String(localized: "signing key"), value: proof.sendingPublicKey.map(short) ?? "")
+                row(String(localized: "signature"), value: proof.signature.map(short) ?? "")
+            }
         }
         .padding(14)
         .background(OnymTokens.surface)
@@ -174,7 +188,10 @@ struct MemberRulesProofView: View {
     }
 
     private func short(_ data: Data) -> String {
-        let hex = data.map { String(format: "%02x", $0) }.joined()
+        shortHex(data.map { String(format: "%02x", $0) }.joined())
+    }
+
+    private func shortHex(_ hex: String) -> String {
         guard hex.count > 16 else { return hex }
         return hex.prefix(8) + "\u{2026}" + hex.suffix(8)
     }
@@ -195,5 +212,36 @@ struct MemberRulesProofView: View {
         } catch {
             writeError = String(localized: "This device couldn\u{2019}t write the proof file.")
         }
+    }
+}
+
+
+/// Shown where a member's proof was asked for and the group (or the
+/// member) is no longer there — a roster change while the sheet was
+/// opening, or a group deleted underneath it. A sheet that renders
+/// nothing at all reads as a bug; this reads as what happened.
+struct MemberGoneView: View {
+    let onClose: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 12) {
+                Image(systemName: "person.crop.circle.badge.questionmark")
+                    .font(.system(size: 34))
+                    .foregroundStyle(OnymTokens.text3)
+                Text("This member is no longer in the group.")
+                    .font(.system(size: 15))
+                    .foregroundStyle(OnymTokens.text)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(OnymTokens.bg.ignoresSafeArea())
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done", action: onClose)
+                }
+            }
+        }
+        .accessibilityIdentifier("rules_proof.member_gone")
     }
 }

@@ -77,15 +77,17 @@ struct ChatMembersView: View {
             }
         }
         .sheet(item: $selectedMember) { row in
-            if let group = currentGroup {
-                MemberRulesProofView(
-                    proof: GroupRulesProof(
-                        group: group,
-                        member: row.profile,
-                        blsHex: row.blsHex
-                    ),
-                    onClose: { selectedMember = nil }
-                )
+            // Resolved from the live group at present time, not from
+            // the row's captured profile: a roster update while the
+            // sheet is open would otherwise leave a proof rendered
+            // beside a group it no longer describes. `nil` covers the
+            // group being deleted underneath — an empty sheet is worse
+            // than one that says what happened.
+            if let group = currentGroup,
+               let proof = GroupRulesProof(group: group, blsHex: row.blsHex) {
+                MemberRulesProofView(proof: proof, onClose: { selectedMember = nil })
+            } else {
+                MemberGoneView(onClose: { selectedMember = nil })
             }
         }
         .sheet(item: $shareInviteFlow) { flow in
@@ -229,10 +231,16 @@ struct ChatMembersView: View {
             if let rules = GroupRules.normalized(group.invitationMessage) {
                 rulesSection(rules)
             }
+            let memberRows = rows(for: group)
             VStack(spacing: 0) {
-                ForEach(rows(for: group)) { row in
+                ForEach(memberRows) { row in
                     memberRow(row)
-                    if row.id != rows(for: group).last?.id {
+                    // Computed once above rather than per iteration.
+                    // `rows(for:)` runs an Ed25519 verify per member,
+                    // and re-deriving it inside the loop made that
+                    // quadratic — a hundred-member group meant ten
+                    // thousand verifications per render.
+                    if row.id != memberRows.last?.id {
                         Divider()
                             .background(OnymTokens.hairline)
                             .padding(.leading, 56)
@@ -299,6 +307,14 @@ struct ChatMembersView: View {
                             .foregroundStyle(OnymTokens.text2)
                     }
                 }
+                // The fingerprint stays. It is the load-bearing
+                // identifier — aliases are self-asserted, so two
+                // members calling themselves the same thing are told
+                // apart by this and nothing else — and the standing is
+                // a second line rather than a replacement for it.
+                Text("BLS \(row.blsPrefix)\u{2026}")
+                    .font(.system(size: 12, weight: .regular, design: .monospaced))
+                    .foregroundStyle(OnymTokens.text3)
                 if let mark = Self.mark(for: row.standing) {
                     HStack(spacing: 4) {
                         Image(systemName: mark.symbol)
@@ -307,11 +323,6 @@ struct ChatMembersView: View {
                             .font(.system(size: 12))
                     }
                     .foregroundStyle(mark.color)
-                    .accessibilityIdentifier("members.standing.\(row.id)")
-                } else {
-                    Text("BLS \(row.blsPrefix)\u{2026}")
-                        .font(.system(size: 12, weight: .regular, design: .monospaced))
-                        .foregroundStyle(OnymTokens.text3)
                 }
             }
             Spacer(minLength: 0)
@@ -344,10 +355,10 @@ struct ChatMembersView: View {
     /// standing to report, and "not applicable" on every row in every
     /// group without rules is noise.
     ///
-    /// The wording tracks `ChatJoinRequestCell`'s deliberately: a
-    /// member's standing and a request's verdict are the same fact at
-    /// two moments, and two vocabularies for it would read as two
-    /// different things.
+    /// These are `ChatJoinRequestCell`'s own strings, not a matching
+    /// set. A member's standing and a request's verdict are the same
+    /// fact at two moments; near-duplicates would have given
+    /// translators two of everything to drift apart.
     nonisolated static func mark(
         for standing: GroupRulesStanding
     ) -> (symbol: String, text: String, color: Color)? {
@@ -355,17 +366,23 @@ struct ChatMembersView: View {
         case .noRules:
             nil
         case .author:
-            ("pencil", String(localized: "Wrote the rules"), OnymTokens.text2)
+            ("pencil", String(localized: "Wrote the group rules"), OnymTokens.text2)
         case .signed:
-            ("checkmark.seal.fill", String(localized: "Signed the rules"), OnymTokens.green)
+            ("checkmark.seal.fill",
+             String(localized: "Signed the group rules"), OnymTokens.green)
         case .signedEarlierVersion:
             ("clock.badge.checkmark",
-             String(localized: "Signed an earlier version"), OnymTokens.text2)
+             String(localized: "Signed an earlier version of the rules"), OnymTokens.text2)
         case .didNotSign:
-            ("minus.circle", String(localized: "Didn\u{2019}t sign"), OnymTokens.amber)
+            ("minus.circle",
+             String(localized: "Didn\u{2019}t sign the group rules"), OnymTokens.amber)
+        case .unknownRules:
+            ("questionmark.circle",
+             String(localized: "Signed rules this device doesn\u{2019}t have \u{2014} can\u{2019}t be checked"),
+             OnymTokens.text2)
         case .doesNotVerify:
             ("exclamationmark.triangle.fill",
-             String(localized: "Signature doesn\u{2019}t check out"), OnymTokens.red)
+             String(localized: "Their signature on the rules doesn\u{2019}t check out"), OnymTokens.red)
         }
     }
 
@@ -428,8 +445,7 @@ struct ChatMembersView: View {
                     blsPrefix: String(key.prefix(12)),
                     displayAlias: profile.alias.isEmpty ? "(unnamed)" : profile.alias,
                     isSelf: activeKey.map { $0 == key } ?? false,
-                    standing: group.rulesStanding(of: profile, blsHex: key),
-                    profile: profile
+                    standing: group.rulesStanding(ofMemberWith: key) ?? .noRules
                 )
             }
             .sorted { lhs, rhs in
@@ -449,6 +465,5 @@ struct ChatMembersView: View {
         /// Re-derived on every render from the stored signature, not
         /// cached: see `GroupRulesStanding`.
         let standing: GroupRulesStanding
-        let profile: MemberProfile
     }
 }

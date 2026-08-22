@@ -7840,70 +7840,6 @@
         }
       }
     },
-    "Signed the rules": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Signed the rules"
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Подписал правила"
-          }
-        }
-      }
-    },
-    "Signed an earlier version": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Signed an earlier version"
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Подписал более раннюю версию"
-          }
-        }
-      }
-    },
-    "Didn’t sign": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Didn’t sign"
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Не подписал"
-          }
-        }
-      }
-    },
-    "Signature doesn’t check out": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Signature doesn’t check out"
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Подпись не проходит проверку"
-          }
-        }
-      }
-    },
     "Export proof": {
       "localizations": {
         "en": {
@@ -8140,6 +8076,86 @@
           "stringUnit": {
             "state": "translated",
             "value": "Для этого участника сохранена подпись, и она не проходит проверку. Ничто здесь нельзя предъявить как его согласие."
+          }
+        }
+      }
+    },
+    "Wrote the group rules": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wrote the group rules"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Составил правила группы"
+          }
+        }
+      }
+    },
+    "Signed an earlier version of the rules": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signed an earlier version of the rules"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Подписал более раннюю версию правил"
+          }
+        }
+      }
+    },
+    "member": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "member"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "участник"
+          }
+        }
+      }
+    },
+    "This member is no longer in the group.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This member is no longer in the group."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Этого участника больше нет в группе."
+          }
+        }
+      }
+    },
+    "A signature is stored for them, but the wording it covers isn’t on this device, so nothing here can check it.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A signature is stored for them, but the wording it covers isn’t on this device, so nothing here can check it."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Для этого участника сохранена подпись, но формулировки, которую она покрывает, нет на этом устройстве — проверить её здесь нечем."
           }
         }
       }
