@@ -200,6 +200,140 @@ final class JoinRequestApproverTests: XCTestCase {
         XCTAssertEqual(profile.inboxPublicKey, env.joinerInboxPub)
     }
 
+    // MARK: - Group rules
+
+    /// The rules the fixture's joiner signs.
+    private static let fixtureRules = "Be kind. No links."
+
+    func test_approve_keepsTheAgreementOnTheLocalMemberRecord() async throws {
+        let key = Curve25519.Signing.PrivateKey()
+        let env = try await seedEnvironment(
+            groupRules: Self.fixtureRules, joinerSigningKey: key
+        )
+        await env.approver.pumpOnce()
+        let outcome = await env.approver.approve(requestId: env.requestID)
+        XCTAssertEqual(outcome, .sent)
+
+        let all = await groups.currentGroups()
+        let group = try XCTUnwrap(all.first { $0.groupIDData == env.groupID })
+        let joinerHex = env.joinerBlsPub.map { String(format: "%02x", $0) }.joined()
+        let profile = try XCTUnwrap(group.memberProfiles[joinerHex])
+        XCTAssertNotNil(profile.rulesSignature)
+        XCTAssertEqual(profile.rulesText, Self.fixtureRules,
+                       "the text the verdict was reached against, kept with the bytes")
+        XCTAssertTrue(profile.agreedToRules(groupID: env.groupID))
+        XCTAssertEqual(group.rulesStanding(ofMemberWith: joinerHex), .signed)
+    }
+
+    func test_approve_shipsTheJoinersOwnRowInTheInvitation() async throws {
+        // The joiner keeps no copy of the signature they sent, so this
+        // is the only way their own device can ever show it. Without
+        // it they land marked as never having signed the rules they had
+        // just agreed to.
+        let key = Curve25519.Signing.PrivateKey()
+        let env = try await seedEnvironment(
+            groupRules: Self.fixtureRules, joinerSigningKey: key
+        )
+        await env.approver.pumpOnce()
+        let outcome = await env.approver.approve(requestId: env.requestID)
+        XCTAssertEqual(outcome, .sent)
+
+        let sends = await transport.sends
+        let sealed = try XCTUnwrap(
+            sends.first { $0.inbox == env.expectedJoinerTag }?.payload
+        )
+        let invite = try await decodeInvitation(sealed)
+        let joinerHex = env.joinerBlsPub.map { String(format: "%02x", $0) }.joined()
+        let row = try XCTUnwrap(
+            invite.memberProfiles?[joinerHex],
+            "the invitation must carry the joiner's own row"
+        )
+        XCTAssertNotNil(row.rulesSignature)
+        XCTAssertEqual(row.rulesText, Self.fixtureRules)
+        XCTAssertTrue(
+            row.agreedToRules(groupID: env.groupID),
+            "and it must be the agreement, not just its shape"
+        )
+        XCTAssertEqual(invite.invitationMessage, Self.fixtureRules,
+                       "along with the rules themselves")
+    }
+
+    func test_approve_recordsAnAgreementItCouldNotVerify() async throws {
+        // The founder saw the verdict and admitted them anyway. Keeping
+        // the bytes is what lets that decision be re-read later; the
+        // standing stays honest about them.
+        let env = try await seedEnvironment(
+            groupRules: Self.fixtureRules,
+            joinerSigningKey: nil
+        )
+        await env.approver.pumpOnce()
+        let outcome = await env.approver.approve(requestId: env.requestID)
+        XCTAssertEqual(outcome, .sent)
+
+        let all = await groups.currentGroups()
+        let group = try XCTUnwrap(all.first { $0.groupIDData == env.groupID })
+        let joinerHex = env.joinerBlsPub.map { String(format: "%02x", $0) }.joined()
+        XCTAssertEqual(group.rulesStanding(ofMemberWith: joinerHex), .didNotSign)
+    }
+
+    func test_approve_afterTheRulesChanged_doesNotAccuseTheJoiner() async throws {
+        // A founder editing the rules between request and approval used
+        // to ship the joiner a row pairing their signature with the new
+        // wording — resolving, on their own first look at the group, to
+        // "their signature doesn't check out". It isn't true: the
+        // signature is fine and this device no longer holds what it
+        // covers.
+        let key = Curve25519.Signing.PrivateKey()
+        let env = try await seedEnvironment(
+            groupRules: Self.fixtureRules, joinerSigningKey: key
+        )
+        await env.approver.pumpOnce()
+
+        // The edit, after the request was signed and before it is acted on.
+        let before = await groups.currentGroups()
+        var edited = try XCTUnwrap(before.first { $0.groupIDData == env.groupID })
+        edited.invitationMessage = "Be kind. No links. And no photos."
+        _ = await groups.insert(edited)
+
+        let outcome = await env.approver.approve(requestId: env.requestID)
+        XCTAssertEqual(outcome, .sent)
+
+        let joinerHex = env.joinerBlsPub.map { String(format: "%02x", $0) }.joined()
+        let after = await groups.currentGroups()
+        let group = try XCTUnwrap(after.first { $0.groupIDData == env.groupID })
+        let profile = try XCTUnwrap(group.memberProfiles[joinerHex])
+        XCTAssertNotNil(profile.rulesSignature, "the evidence is kept")
+        XCTAssertNil(profile.rulesText, "but not paired with words it doesn't cover")
+        XCTAssertEqual(
+            group.rulesStanding(ofMemberWith: joinerHex), .unknownRules,
+            "can't be checked — not an accusation"
+        )
+
+        // And the same restraint in what the joiner is sent.
+        let sends = await transport.sends
+        let sealed = try XCTUnwrap(
+            sends.first { $0.inbox == env.expectedJoinerTag }?.payload
+        )
+        let invite = try await decodeInvitation(sealed)
+        let row = try XCTUnwrap(invite.memberProfiles?[joinerHex])
+        XCTAssertNotNil(row.rulesSignature)
+        XCTAssertNil(row.rulesText)
+    }
+
+    /// Opens an invitation the approver sealed to the joiner.
+    ///
+    /// The fixture collapses joiner and admin into one identity, so the
+    /// active identity is also the recipient — `decryptInvitation` is
+    /// the supported way in, rather than pulling the key out by hand.
+    private func decodeInvitation(_ sealed: Data) async throws -> GroupInvitationPayload {
+        let ownerID = try await XCTUnwrapAsync(await identity.currentSelectedID())
+        let plaintext = try await identity.decryptInvitation(
+            envelopeBytes: sealed,
+            asIdentity: ownerID
+        )
+        return try JSONDecoder().decode(GroupInvitationPayload.self, from: plaintext)
+    }
+
     // MARK: - PR 5: broadcastJoin fanout
 
     func test_approve_fanoutTargetsExistingMembersExcludingAdminAndJoiner() async throws {
@@ -660,7 +794,9 @@ final class JoinRequestApproverTests: XCTestCase {
     private func seedEnvironment(
         insertGroup: Bool = true,
         extraMemberProfiles: [String: MemberProfile] = [:],
-        omitJoinerLeafHash: Bool = false
+        omitJoinerLeafHash: Bool = false,
+        groupRules: String? = nil,
+        joinerSigningKey: Curve25519.Signing.PrivateKey? = nil
     ) async throws -> Env {
         let active = try await identity.bootstrap()
         let ownerID = try await XCTUnwrapAsync(await identity.currentSelectedID())
@@ -697,13 +833,29 @@ final class JoinRequestApproverTests: XCTestCase {
         let joinerBlsPub = Data(repeating: 0xCC, count: 48)
         let joinerLeafHash = Data(repeating: 0xDD, count: 32)
         let joinerAlias = "Joiner Bob"
+        // A real agreement when the group has rules, so the approver's
+        // handling of it can be asserted rather than assumed.
+        let joinerSendingPub = joinerSigningKey?.publicKey.rawRepresentation
+            ?? Data(repeating: 0xEE, count: 32)
+        var rulesHash: Data?
+        var rulesSignature: Data?
+        if let groupRules, let joinerSigningKey {
+            rulesHash = GroupRules.hash(groupRules)
+            rulesSignature = try joinerSigningKey.signature(for: GroupRules.statement(
+                groupID: groupID,
+                rulesHash: GroupRules.hash(groupRules),
+                joinerSendingPublicKey: joinerSendingPub
+            ))
+        }
         let joinPayload = try JoinRequestPayload(
             joinerInboxPublicKey: joinerInboxPub,
             joinerBlsPublicKey: joinerBlsPub,
             joinerLeafHash: omitJoinerLeafHash ? nil : joinerLeafHash,
-            joinerSendingPublicKey: Data(repeating: 0xEE, count: 32),
+            joinerSendingPublicKey: joinerSendingPub,
             joinerDisplayLabel: joinerAlias,
-            groupId: groupID
+            groupId: groupID,
+            rulesHash: rulesHash,
+            rulesSignature: rulesSignature
         )
         let joinPayloadBytes = try JSONEncoder().encode(joinPayload)
         let sealed = try await identity.sealInvitation(
@@ -753,7 +905,8 @@ final class JoinRequestApproverTests: XCTestCase {
                 groupType: .tyranny,
                 adminPubkeyHex: adminBlsHex,
                 adminEd25519PubkeyHex: nil,
-                isPublishedOnChain: true
+                isPublishedOnChain: true,
+                invitationMessage: groupRules
             )
             _ = await groups.insert(group)
         }

@@ -228,6 +228,55 @@ final class GroupStateVerifierTests: XCTestCase {
         XCTAssertEqual(sends, 0, "a non-admin device must not answer refresh requests")
     }
 
+    func test_handleRefreshRequest_theReplyCarriesTheGroupsRules() async throws {
+        // A joiner whose first invitation deferred with
+        // `.staleNeedsRefresh` materializes from this payload. Without
+        // the rules they land in a group that appears to ask nothing of
+        // anyone — every member unmarked, and their own agreement,
+        // shipped in `memberProfiles` right beside it, meaningless.
+        let verifier = makeVerifier()
+        let rules = "Be kind. No links."
+        let requesterBls = Data(repeating: 0x02, count: 48)
+        let requesterBlsHex = requesterBls.map { String(format: "%02x", $0) }.joined()
+        // The requester's inbox key is this device's own, so the reply
+        // — sealed to the requester — can be opened and read. The
+        // verifier only checks cryptographic shape here, not that the
+        // two parties are distinct.
+        let active = await identity.currentIdentity()
+        let me = try XCTUnwrap(active)
+        let group = seedTyrannyGroup(
+            adminPubkeyHex: await myBlsHex(),
+            memberProfiles: [requesterBlsHex: MemberProfile(
+                alias: "Member",
+                inboxPublicKey: me.inboxPublicKey,
+                sendingPubkey: Data(repeating: 0xEE, count: 32)
+            )],
+            invitationMessage: rules
+        )
+        _ = await groups.insert(group)
+
+        let request = try GroupStateRefreshRequest(
+            groupID: Data(repeating: 0x42, count: 32),
+            requesterInboxPublicKey: me.inboxPublicKey,
+            requesterBlsPublicKey: requesterBls
+        )
+        await verifier.handleRefreshRequest(
+            request, ownerIdentityID: owner, requesterEd25519: Data(repeating: 0xEE, count: 32)
+        )
+
+        let payload = await transport.lastPayload()
+        let sealed = try XCTUnwrap(payload, "the admin must answer a member's refresh request")
+        // The keychain identity, not this suite's synthetic `owner` —
+        // the envelope is sealed to the former's inbox key.
+        let selected = await identity.currentSelectedID()
+        let plaintext = try await identity.decryptInvitation(
+            envelopeBytes: sealed,
+            asIdentity: try XCTUnwrap(selected)
+        )
+        let invite = try JSONDecoder().decode(GroupInvitationPayload.self, from: plaintext)
+        XCTAssertEqual(invite.invitationMessage, rules)
+    }
+
     /// Full loop: a pending verification is cleared once the fresh
     /// snapshot materializes the group.
     func test_resolve_clearsPendingWhenGroupMaterializes() async throws {
@@ -326,7 +375,8 @@ final class GroupStateVerifierTests: XCTestCase {
 
     private func seedTyrannyGroup(
         adminPubkeyHex: String,
-        memberProfiles: [String: MemberProfile]
+        memberProfiles: [String: MemberProfile],
+        invitationMessage: String? = nil
     ) -> ChatGroup {
         ChatGroup(
             id: String(repeating: "42", count: 32),
@@ -343,7 +393,8 @@ final class GroupStateVerifierTests: XCTestCase {
             groupType: .tyranny,
             adminPubkeyHex: adminPubkeyHex,
             adminEd25519PubkeyHex: String(repeating: "ee", count: 32),
-            isPublishedOnChain: true
+            isPublishedOnChain: true,
+            invitationMessage: invitationMessage
         )
     }
 
@@ -364,10 +415,14 @@ final class GroupStateVerifierTests: XCTestCase {
 
 private actor VerifierRecordingInboxTransport: InboxTransport {
     private(set) var sends: Int = 0
+    /// Kept so a test can open the reply and read what it carried, not
+    /// only count that one went out.
+    private(set) var payloads: [Data] = []
     func connect(to endpoints: [TransportEndpoint]) async {}
     func disconnect() async {}
     func send(_ payload: Data, to inbox: TransportInboxID) async throws -> PublishReceipt {
         sends += 1
+        payloads.append(payload)
         return PublishReceipt(messageID: "spy-\(sends)", acceptedBy: 1)
     }
     nonisolated func subscribe(inbox: TransportInboxID) -> AsyncStream<InboundInbox> {
@@ -375,4 +430,5 @@ private actor VerifierRecordingInboxTransport: InboxTransport {
     }
     func unsubscribe(inbox: TransportInboxID) async {}
     func sendCount() -> Int { sends }
+    func lastPayload() -> Data? { payloads.last }
 }
