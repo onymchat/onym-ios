@@ -16,23 +16,35 @@ public final class NotificationsSettingsFlow {
     /// denied — the switch snaps back and the UI points at system
     /// Settings.
     public private(set) var authorizationDenied = false
+    /// On, but the backend has not yet accepted a registration —
+    /// authorization is granted while the APNs token and register call
+    /// are still in flight. The view shows "activating" instead of
+    /// claiming the wake path works before it does.
+    public private(set) var registrationPending = false
 
     private let enable: () async -> Bool
     private let disable: () async -> Void
+    private let isRegistrationPending: () -> Bool
 
     /// - Parameters:
     ///   - isEnabled: the persisted opt-in at presentation time.
     ///   - enable: requests authorization, registers with APNs and the
     ///     push backend. Returns false when authorization was denied.
     ///   - disable: unregisters everywhere and clears the opt-in.
+    ///   - isRegistrationPending: whether the opt-in is on with no
+    ///     accepted registration yet — re-read on view appearance and
+    ///     after each toggle, since registration completes off-screen.
     public init(
         isEnabled: Bool,
         enable: @escaping () async -> Bool,
-        disable: @escaping () async -> Void
+        disable: @escaping () async -> Void,
+        isRegistrationPending: @escaping () -> Bool = { false }
     ) {
         self.isEnabled = isEnabled
         self.enable = enable
         self.disable = disable
+        self.isRegistrationPending = isRegistrationPending
+        registrationPending = isRegistrationPending()
     }
 
     public func setEnabled(_ wanted: Bool) async {
@@ -47,6 +59,16 @@ public final class NotificationsSettingsFlow {
         } else {
             await disable()
             isEnabled = false
+            // The denial note described a previous attempt; an
+            // explicit off makes it stale.
+            authorizationDenied = false
         }
+        refreshRegistrationState()
+    }
+
+    /// Registration completes off-screen (APNs token delivery, then
+    /// the backend call), so the view re-reads on appearance.
+    public func refreshRegistrationState() {
+        registrationPending = isRegistrationPending()
     }
 }

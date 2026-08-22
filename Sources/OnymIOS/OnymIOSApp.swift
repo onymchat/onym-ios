@@ -1551,7 +1551,8 @@ struct OnymIOSApp: App {
                 NotificationsSettingsFlow(
                     isEnabled: pushCoordinator.isEnabled,
                     enable: { await pushCoordinator.enable() },
-                    disable: { await pushCoordinator.disable() }
+                    disable: { await pushCoordinator.disable() },
+                    isRegistrationPending: { pushCoordinator.registrationPending }
                 )
             },
             pushCoordinator: pushCoordinator,
