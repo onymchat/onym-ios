@@ -30,7 +30,16 @@ public actor PushRegistrationInteractor {
 
     private var apnsToken: Data?
     private var subscriptions: [PushSubscription]?
-    private var pendingReconcile: Task<Void, Never>?
+    /// The *sleeping* debounce only — never the pass itself. Inputs
+    /// (and `pushDisabled`) cancel this handle to coalesce or drop a
+    /// pass that has not started; the pass body runs in a separate
+    /// unstructured Task that nothing here ever cancels, so an input
+    /// arriving mid-pass can never abort in-flight HTTP (wasting a
+    /// single-use signature the backend may already have spent) and a
+    /// disable can never delegate its drain to a Task it just
+    /// cancelled — where every URLSession call would throw
+    /// `URLError.cancelled` immediately and be swallowed.
+    private var pendingDebounce: Task<Void, Never>?
     /// Reconciliation must never overlap itself — nor the opt-out
     /// drain, which takes the same slot: two interleaved passes would
     /// spend two single-use session signatures on the same state, and
@@ -101,8 +110,12 @@ public actor PushRegistrationInteractor {
     /// last successfully registered token when APNs has not delivered
     /// one this launch.
     public func pushDisabled() async {
-        pendingReconcile?.cancel()
-        pendingReconcile = nil
+        // Cancels only a debounce still sleeping. A pass already
+        // running keeps its Task: it holds the single pass slot, so
+        // the `claimPass()` below fails and the drain is queued — and
+        // the holder drains it from a Task no one cancelled.
+        pendingDebounce?.cancel()
+        pendingDebounce = nil
         let token = apnsToken ?? preferences.lastRegisteredToken
         preferences.clearRegistration()
         guard let token else { return }
@@ -127,12 +140,18 @@ public actor PushRegistrationInteractor {
     // MARK: - Reconciliation
 
     private func scheduleReconcile() {
-        pendingReconcile?.cancel()
+        pendingDebounce?.cancel()
         let delay = debounce
-        pendingReconcile = Task { [weak self] in
+        pendingDebounce = Task { [weak self] in
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled else { return }
-            await self?.reconcile()
+            // The pass runs in its own unstructured Task so that a
+            // later input cancelling the *next* debounce — or a
+            // disable cancelling this one a beat too late — never
+            // propagates cancellation into a pass whose HTTP is
+            // already in flight. Overlap is impossible regardless:
+            // `claimPass()` serializes passes on the actor.
+            Task { await self?.reconcile() }
         }
     }
 
