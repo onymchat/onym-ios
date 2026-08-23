@@ -210,9 +210,7 @@ public actor PushRegistrationInteractor {
            let registeredAt = preferences.lastRegisteredAt,
            now.timeIntervalSince(registeredAt) < refreshInterval,
            let expiresAt = preferences.registrationExpiresAt,
-           now < expiresAt.addingTimeInterval(
-               -Self.expiryMargin(registeredAt: registeredAt, expiresAt: expiresAt)
-           ) {
+           !Self.refreshDueByExpiry(now: now, registeredAt: registeredAt, expiresAt: expiresAt) {
             return
         }
 
@@ -281,12 +279,26 @@ public actor PushRegistrationInteractor {
         }
     }
 
-    /// How close to `expiresAt` counts as "expiring": at most
-    /// `maxExpiryMargin`, but never more than half the window the
-    /// backend granted, so a short window still leaves a usable
-    /// "already registered" period.
-    static func expiryMargin(registeredAt: Date, expiresAt: Date) -> TimeInterval {
-        min(maxExpiryMargin, max(0, expiresAt.timeIntervalSince(registeredAt)) / 2)
+    /// A granted window shorter than this (including `expiresAt` at or
+    /// behind `registeredAt`) is degenerate: any margin would make the
+    /// "already registered" skip unsatisfiable, so every foreground
+    /// would re-register and spend a signature.
+    static let minimumExpiryWindow: TimeInterval = 3600
+
+    /// Whether the backend-granted window says it is time to
+    /// re-register. Normally: within `maxExpiryMargin` of `expiresAt`,
+    /// but never more than half the granted window, so a short window
+    /// still leaves a usable "already registered" period. A window
+    /// below `minimumExpiryWindow` is ignored entirely and the fixed
+    /// `refreshInterval` alone paces re-registration — the simplest
+    /// rule that keeps the refresh bounded from both sides: a sane
+    /// grant is honored with margin, a degenerate one cannot turn
+    /// every foreground into a register.
+    static func refreshDueByExpiry(now: Date, registeredAt: Date, expiresAt: Date) -> Bool {
+        let window = expiresAt.timeIntervalSince(registeredAt)
+        guard window >= Self.minimumExpiryWindow else { return false }
+        let margin = min(maxExpiryMargin, window / 2)
+        return now >= expiresAt.addingTimeInterval(-margin)
     }
 
     /// Drains every pending unregister, not a single slot: a rotation
