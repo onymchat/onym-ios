@@ -170,6 +170,53 @@ final class PushBackendClientTests: XCTestCase {
         )
     }
 
+    /// A refusal whose body is not the `{error, message}` envelope (a
+    /// proxy's HTML, an empty body) still surfaces typed: the
+    /// synthetic `http_<status>` code, not a decode error.
+    func testNonEnvelopeRefusalFallsBackToSyntheticCode() async throws {
+        StubURLProtocol.set(handler: { request in
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: 503, httpVersion: nil, headerFields: nil
+            )!
+            return (Data("<html>upstream unavailable</html>".utf8), response)
+        })
+        do {
+            _ = try await makeClient().register(makeRegisterRequest())
+            XCTFail("503 must throw")
+        } catch let PushClientError.rejected(rejection) {
+            XCTAssertEqual(rejection.statusCode, 503)
+            XCTAssertEqual(rejection.rawCode, "http_503")
+            XCTAssertEqual(rejection.code, .unknown("http_503"))
+        }
+    }
+
+    /// RFC 3339 permits fractional seconds and Foundation's `.iso8601`
+    /// strategy does not — the dual-formatter decode is the client's
+    /// sole reason both shapes work, so the fractional one is pinned.
+    func testFractionalSecondsExpiryDecodes() async throws {
+        let recorded = Recorder<RecordedWire>()
+        recordRequests(
+            into: recorded,
+            payload: Data(#"{"expiresAt":"2026-10-21T12:00:00.250Z"}"#.utf8)
+        )
+        let response = try await makeClient().register(makeRegisterRequest())
+        let whole = ISO8601DateFormatter.push.date(from: "2026-10-21T12:00:00Z")!
+        XCTAssertEqual(response.expiresAt.timeIntervalSince(whole), 0.25, accuracy: 0.001)
+    }
+
+    /// The other half of the transport guard: an https scheme with an
+    /// *empty* host (`https:///`) is refused before any request, same
+    /// as a non-https scheme.
+    func testEmptyHostHTTPSBaseURLIsRefused() async throws {
+        let client = makeClient(baseURL: URL(string: "https:///push")!)
+        do {
+            _ = try await client.registrationKey()
+            XCTFail("an empty host must be refused")
+        } catch let PushClientError.insecureBaseURL(url) {
+            XCTAssertEqual(url, "https:///push")
+        }
+    }
+
     func testRefusalEnvelopeSurfacesVerbatim() async throws {
         StubURLProtocol.set(handler: { request in
             let response = HTTPURLResponse(
