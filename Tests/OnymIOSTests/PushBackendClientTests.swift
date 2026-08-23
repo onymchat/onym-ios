@@ -40,16 +40,22 @@ final class PushBackendClientTests: XCTestCase {
         )
     }
 
+    /// What the URLProtocol handler saw of one request.
+    struct RecordedWire {
+        let url: String?
+        let body: Data?
+    }
+
     /// Records the request URL and (streamed) body, answering `payload`
-    /// with `status`.
+    /// with `status`. The handler runs on the URL loading system's
+    /// thread; `Recorder` carries the value back safely.
     private func recordRequests(
-        into recorded: NSMutableDictionary,
+        into recorded: Recorder<RecordedWire>,
         status: Int = 200,
         payload: Data = Data()
     ) {
         StubURLProtocol.set(handler: { request in
-            recorded["url"] = request.url?.absoluteString
-            recorded["body"] = request.httpBody ?? request.httpBodyStream.map { stream in
+            let body = request.httpBody ?? request.httpBodyStream.map { stream in
                 stream.open()
                 defer { stream.close() }
                 var data = Data()
@@ -61,6 +67,7 @@ final class PushBackendClientTests: XCTestCase {
                 }
                 return data
             }
+            recorded.record(RecordedWire(url: request.url?.absoluteString, body: body))
             let response = HTTPURLResponse(
                 url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil
             )!
@@ -79,16 +86,16 @@ final class PushBackendClientTests: XCTestCase {
     }
 
     func testRegisterSendsCamelCaseBase64Body() async throws {
-        let recorded = NSMutableDictionary()
+        let recorded = Recorder<RecordedWire>()
         recordRequests(
             into: recorded,
             payload: Data(#"{"expiresAt":"2026-10-21T12:00:00Z"}"#.utf8)
         )
 
         let response = try await makeClient().register(makeRegisterRequest())
-        XCTAssertEqual(recorded["url"] as? String, "https://push.example/v1/register")
+        XCTAssertEqual(recorded.value?.url, "https://push.example/v1/register")
         let body = try JSONSerialization.jsonObject(
-            with: recorded["body"] as? Data ?? Data()
+            with: recorded.value?.body ?? Data()
         ) as? [String: Any]
         XCTAssertEqual(body?["userKey"] as? String, "onym:key:aabb")
         XCTAssertEqual(body?["timestamp"] as? String, "2026-08-22T12:00:00Z")
@@ -111,7 +118,7 @@ final class PushBackendClientTests: XCTestCase {
     }
 
     func testRegisterSendsPresentDeviceTokenAsBase64() async throws {
-        let recorded = NSMutableDictionary()
+        let recorded = Recorder<RecordedWire>()
         recordRequests(
             into: recorded,
             payload: Data(#"{"expiresAt":"2026-10-21T12:00:00Z"}"#.utf8)
@@ -120,7 +127,7 @@ final class PushBackendClientTests: XCTestCase {
 
         _ = try await makeClient().register(makeRegisterRequest(deviceToken: attestation))
         let body = try JSONSerialization.jsonObject(
-            with: recorded["body"] as? Data ?? Data()
+            with: recorded.value?.body ?? Data()
         ) as? [String: Any]
         XCTAssertEqual(body?["deviceToken"] as? String, attestation.base64EncodedString())
     }
@@ -129,7 +136,7 @@ final class PushBackendClientTests: XCTestCase {
     /// base64 body shape minus subscriptions, and an empty 200 counts
     /// as success — there is nothing to decode.
     func testUnregisterSendsBodyAndAcceptsEmptyOK() async throws {
-        let recorded = NSMutableDictionary()
+        let recorded = Recorder<RecordedWire>()
         recordRequests(into: recorded)
 
         try await makeClient().unregister(
@@ -147,9 +154,9 @@ final class PushBackendClientTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(recorded["url"] as? String, "https://push.example/v1/unregister")
+        XCTAssertEqual(recorded.value?.url, "https://push.example/v1/unregister")
         let body = try JSONSerialization.jsonObject(
-            with: recorded["body"] as? Data ?? Data()
+            with: recorded.value?.body ?? Data()
         ) as? [String: Any]
         XCTAssertEqual(body?["userKey"] as? String, "onym:key:aabb")
         XCTAssertEqual(body?["timestamp"] as? String, "2026-08-22T12:00:00Z")
