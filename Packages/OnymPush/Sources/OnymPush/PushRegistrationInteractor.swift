@@ -73,6 +73,12 @@ public actor PushRegistrationInteractor {
     /// production.
     private var onReconcileFailure: (@Sendable (Error) -> Void)?
 
+    /// Intended for tests only — but it is public production API, and
+    /// nothing here can stop a caller from wiring the hook to a
+    /// persistent sink and building exactly the failure/activity log
+    /// this package declines to keep. The app target must never set
+    /// it; a production caller reaching for it should treat this
+    /// caveat as the review gate.
     public func setOnReconcileFailure(_ hook: (@Sendable (Error) -> Void)?) {
         onReconcileFailure = hook
     }
