@@ -39,8 +39,9 @@ packages:
   OnymModerationUI: {path: Packages/OnymModerationUI}
   OnymDiscovery: {path: Packages/OnymDiscovery}
   OnymOnboarding: {path: Packages/OnymOnboarding}
-  # No target dependency yet (that lands with the app wiring): listed
-  # so the package resolves with the project and CI compiles it.
+  # OnymIOSTests links this (its suites live there); CI additionally
+  # builds the package standalone to prove it compiles without any app
+  # scaffolding — see release.yml's "xcodebuild build (OnymPush)" step.
   OnymPush: {path: Packages/OnymPush}
 
 targets:

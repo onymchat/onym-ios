@@ -229,11 +229,13 @@ jobs:
             -resultBundlePath /tmp/onym-foundation.xcresult
 
       - name: xcodebuild build (OnymPush package)
-        # OnymPush has no package test target (its suites live in
-        # OnymIOSTests, run above) but nothing else compiles the
-        # package on its own, so a signature-payload typo could land
-        # green. Build it standalone here — same `always()` rationale
-        # as the package test steps.
+        # OnymPush's suites live in OnymIOSTests (run above), which
+        # already compiles the package — as a dependency of the app
+        # target. This standalone build proves something the app build
+        # cannot: the package needs no app scaffolding, so an
+        # accidental reference to app-side types fails here instead of
+        # landing green. Same `always()` rationale as the package test
+        # steps.
         if: always()
         working-directory: Packages/OnymPush
         run: |
