@@ -111,4 +111,42 @@ final class PushCoordinatorTests: XCTestCase {
 
         XCTAssertFalse(preferences.isEnabled)
     }
+
+    // MARK: - Relay caps (backend alignment)
+
+    /// The backend refuses registrations over its caps (4 relays per
+    /// tag, 8 hosts / 4 URLs-per-host per device); the client
+    /// truncates first so a big relay list degrades to the four
+    /// highest-priority relays instead of a refused register.
+    func testCappedRelaysKeepsShortListsVerbatim() {
+        XCTAssertEqual(PushCoordinator.cappedRelays([]), [])
+        let two = ["wss://a.example", "wss://b.example"]
+        XCTAssertEqual(PushCoordinator.cappedRelays(two), two)
+    }
+
+    /// Deterministic priority: the default relay first (the backend
+    /// exempts it from capacity caps), then configured order.
+    func testCappedRelaysPrefersTheDefaultRelayThenConfiguredOrder() {
+        let configured = [
+            "wss://a.example", "wss://b.example", "wss://c.example",
+            "wss://d.example", PushCoordinator.defaultRelayURL, "wss://e.example",
+        ]
+        XCTAssertEqual(
+            PushCoordinator.cappedRelays(configured),
+            [
+                PushCoordinator.defaultRelayURL,
+                "wss://a.example", "wss://b.example", "wss://c.example",
+            ]
+        )
+    }
+
+    /// A duplicate URL must not burn one of the four slots.
+    func testCappedRelaysDeduplicates() {
+        XCTAssertEqual(
+            PushCoordinator.cappedRelays(
+                ["wss://a.example", "wss://a.example", "wss://b.example"]
+            ),
+            ["wss://a.example", "wss://b.example"]
+        )
+    }
 }

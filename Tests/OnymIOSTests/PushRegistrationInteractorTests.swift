@@ -436,6 +436,36 @@ final class PushRegistrationInteractorTests: XCTestCase {
         XCTAssertEqual(preferences.lastRegisteredToken, Data([0x0c, 0x0d]))
     }
 
+    /// Backend alignment: the process-wide rate limiter answers HTTP
+    /// 429 with code "capacity", and the backend claims the single-use
+    /// signature only after every other check passes — so a capacity
+    /// refusal leaves the request resubmittable and the client must
+    /// treat it as fully retryable: nothing recorded, nothing cleared,
+    /// the next trigger simply tries again.
+    func testCapacityRefusalIsFullyRetryable() async throws {
+        let client = StubPushBackendClient(
+            registerAnswer: .failure(PushClientError.rejected(
+                PushRejection(statusCode: 429, rawCode: "capacity", message: "over the window")
+            ))
+        )
+        let preferences = makePreferences(enabled: true)
+        let interactor = makeInteractor(client: client, preferences: preferences)
+
+        await interactor.updateToken(Data([0x01]))
+        await interactor.updateSubscriptions([PushSubscription(tag: "a1b2c3d4e5f60718", relays: ["wss://nostr.onym.app"])])
+        try await waitUntil { await client.registered.count == 1 }
+        // Refused: no fingerprint, no token, nothing to unlearn.
+        XCTAssertNil(preferences.lastRegistrationFingerprint)
+        XCTAssertNil(preferences.lastRegisteredToken)
+        XCTAssertTrue(preferences.pendingUnregisterTokens.isEmpty)
+
+        // The window passed: the next opportunity registers cleanly.
+        await client.setRegisterAnswer(.success(PushRegisterResponse(expiresAt: .distantFuture)))
+        await interactor.appForegrounded()
+        try await waitUntil { await client.registered.count == 2 }
+        XCTAssertNotNil(preferences.lastRegistrationFingerprint)
+    }
+
     /// The dropped-token scenario from review: a rotation whose drain
     /// failed (old token still owed) followed by a disable (new token
     /// now owed too) is *two* debts — the old single-slot store kept
