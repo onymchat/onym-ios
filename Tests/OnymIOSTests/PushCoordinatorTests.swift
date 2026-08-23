@@ -13,6 +13,12 @@ import OnymTransportNostr
 final class PushCoordinatorTests: XCTestCase {
     private var defaultsSuite: String!
     private var keychain: IdentityKeychainStore!
+    /// The scene-lifetime `run()` task, hoisted so tearDown can await
+    /// its actual completion: `cancel()` alone is asynchronous, and a
+    /// still-winding-down task group would race the keychain wipe and
+    /// defaults-domain removal below — cross-test bleed dressed as a
+    /// flake.
+    private var scene: Task<Void, Never>?
 
     override func setUp() {
         super.setUp()
@@ -20,12 +26,14 @@ final class PushCoordinatorTests: XCTestCase {
         keychain = IdentityKeychainStore(testNamespace: defaultsSuite)
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
+        scene?.cancel()
+        _ = await scene?.value
+        scene = nil
         UserDefaults(suiteName: defaultsSuite)?
             .removePersistentDomain(forName: defaultsSuite)
         try? keychain?.wipeAll()
         keychain = nil
-        super.tearDown()
     }
 
     private func makePreferences(enabled: Bool) -> PushPreferenceStore {
@@ -62,9 +70,9 @@ final class PushCoordinatorTests: XCTestCase {
         let coordinator = makeCoordinator(preferences: preferences, denied: { true })
 
         // run() then observes streams for the scene's life; poll the
-        // observable effect and cancel.
-        let scene = Task { await coordinator.run() }
-        defer { scene.cancel() }
+        // observable effect. tearDown cancels the task and awaits its
+        // completion before wiping shared state.
+        scene = Task { await coordinator.run() }
 
         let deadline = Date().addingTimeInterval(2)
         while Date() < deadline, preferences.isEnabled {
