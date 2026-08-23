@@ -319,6 +319,30 @@ final class PushRegistrationInteractorTests: XCTestCase {
         XCTAssertEqual(registered.count, 1)
     }
 
+    /// A *degenerate* window — `expiresAt` at (or behind) the moment
+    /// of registration — must not make "already registered"
+    /// unsatisfiable either: below the one-hour floor the grant is
+    /// ignored entirely and the fixed interval alone paces, so a
+    /// foreground stays quiet instead of re-registering (and spending
+    /// a signature) every single time.
+    func testDegenerateExpiryWindowDoesNotChurn() async throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let client = StubPushBackendClient(
+            registerAnswer: .success(PushRegisterResponse(expiresAt: now))
+        )
+        let preferences = makePreferences(enabled: true)
+        let interactor = makeInteractor(client: client, preferences: preferences, clock: { now })
+
+        await interactor.updateToken(Data([0x01]))
+        await interactor.updateSubscriptions([PushSubscription(tag: "a1b2c3d4e5f60718", relays: ["wss://nostr.onym.app"])])
+        try await waitUntil { await client.registered.count == 1 }
+        await interactor.appForegrounded()
+        try await settle()
+
+        let registered = await client.registered
+        XCTAssertEqual(registered.count, 1)
+    }
+
     /// The fixed interval alone forces a refresh: with `expiresAt`
     /// far away, an unchanged registration still re-registers once the
     /// interval has elapsed, so the backend's 60-day sweep never reaps
