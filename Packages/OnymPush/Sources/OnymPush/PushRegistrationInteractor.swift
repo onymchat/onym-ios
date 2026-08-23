@@ -119,7 +119,7 @@ public actor PushRegistrationInteractor {
         let token = apnsToken ?? preferences.lastRegisteredToken
         preferences.clearRegistration()
         guard let token else { return }
-        preferences.setPendingUnregister(token: token)
+        preferences.addPendingUnregister(token: token)
         // The drain takes the same single pass slot reconciliation
         // uses: running alongside a pass would spend a second
         // single-use signature, and that pass's register could land
@@ -197,12 +197,10 @@ public actor PushRegistrationInteractor {
         // APNs rotated the token: the backend keys registrations by
         // token hash, so the replaced row would stay wake-able until
         // the 60-day sweep. Queue the old token through the existing
-        // pending-unregister path (persisted, retried) and try to
-        // drain it now, before its replacement registers.
-        if let previous = preferences.lastRegisteredToken,
-           previous != token,
-           preferences.pendingUnregisterToken == nil {
-            preferences.setPendingUnregister(token: previous)
+        // pending-unregister path (persisted, retried, deduplicated)
+        // and try to drain it now, before its replacement registers.
+        if let previous = preferences.lastRegisteredToken, previous != token {
+            preferences.addPendingUnregister(token: previous)
             await drainPendingUnregister()
         }
 
@@ -222,7 +220,7 @@ public actor PushRegistrationInteractor {
         // unhonored *now* is superseded by the registration about to
         // replace it, but one the user asks for *during* the attempt
         // is the newer instruction and must survive it.
-        let supersededUnregister = preferences.pendingUnregisterToken
+        let unregisterWasPending = preferences.pendingUnregisterTokens.contains(token)
 
         do {
             let serverKey = try await client.registrationKey()
@@ -256,7 +254,7 @@ public actor PushRegistrationInteractor {
             // token goes onto the pending-unregister path instead (the
             // follow-up pass the disable queued drains it).
             guard preferences.isEnabled else {
-                preferences.setPendingUnregister(token: token)
+                preferences.addPendingUnregister(token: token)
                 return
             }
             preferences.recordRegistration(
@@ -267,12 +265,13 @@ public actor PushRegistrationInteractor {
             )
             // A registration for this token retires an unregister that
             // was already pending for it (replace-all upsert): draining
-            // it later would tear down the live registration. An
-            // opt-out that arrived mid-attempt is left alone — the
-            // follow-up pass drains it.
-            if supersededUnregister == token,
-               preferences.pendingUnregisterToken == token {
-                preferences.clearPendingUnregister()
+            // it later would tear down the live registration. Only
+            // *this* token's entry is removed — unregisters pending
+            // for other tokens (a failed rotation's debt) are untouched
+            // — and an opt-out that arrived mid-attempt is left alone:
+            // the follow-up pass drains it.
+            if unregisterWasPending {
+                preferences.removePendingUnregister(token: token)
             }
         } catch {
             // Deliberately quiet: registration is retried on the next
@@ -290,17 +289,23 @@ public actor PushRegistrationInteractor {
         min(maxExpiryMargin, max(0, expiresAt.timeIntervalSince(registeredAt)) / 2)
     }
 
+    /// Drains every pending unregister, not a single slot: a rotation
+    /// whose drain failed and a subsequent disable each owe the
+    /// backend a distinct unregister, and both debts must survive.
     private func drainPendingUnregister() async {
-        guard let pending = preferences.pendingUnregisterToken else { return }
-        do {
-            try await unregister(token: pending)
-            preferences.clearPendingUnregister()
-            if preferences.lastRegisteredToken == pending {
-                preferences.clearLastRegisteredToken()
+        for pending in preferences.pendingUnregisterTokens {
+            do {
+                try await unregister(token: pending)
+                preferences.removePendingUnregister(token: pending)
+                if preferences.lastRegisteredToken == pending {
+                    preferences.clearLastRegisteredToken()
+                }
+            } catch {
+                // Stays pending; retried at the next reconcile
+                // opportunity. The remaining tokens are still tried —
+                // they are independent debts.
+                onReconcileFailure?(error)
             }
-        } catch {
-            // Stays pending; retried at the next reconcile opportunity.
-            onReconcileFailure?(error)
         }
     }
 

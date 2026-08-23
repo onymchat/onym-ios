@@ -13,7 +13,7 @@ public struct PushPreferenceStore: Sendable {
     private static let registeredAtKey = "push.lastRegisteredAt"
     private static let expiresAtKey = "push.registrationExpiresAt"
     private static let lastRegisteredTokenKey = "push.lastRegisteredToken"
-    private static let pendingUnregisterTokenKey = "push.pendingUnregisterToken"
+    private static let pendingUnregisterTokensKey = "push.pendingUnregisterTokens"
 
     private let defaults: @Sendable () -> UserDefaults
 
@@ -62,20 +62,34 @@ public struct PushPreferenceStore: Sendable {
         defaults().removeObject(forKey: Self.lastRegisteredTokenKey)
     }
 
-    /// An unregister the backend has not yet acknowledged: set before
-    /// the attempt, cleared only on success, retried at every
-    /// reconcile opportunity — so one offline opt-out cannot leave the
-    /// device registered forever.
-    public var pendingUnregisterToken: Data? {
-        defaults().data(forKey: Self.pendingUnregisterTokenKey)
+    /// Every unregister the backend has not yet acknowledged: each
+    /// token is added before the attempt, removed only on success, and
+    /// retried at every reconcile opportunity — so one offline opt-out
+    /// cannot leave the device registered forever. A *set*, not a
+    /// slot: a rotation whose drain failed (old token still pending)
+    /// followed by a disable (new token now pending too) owes the
+    /// backend two unregisters, and a single slot would silently drop
+    /// one, leaving that token wake-able until the 60-day sweep.
+    /// Persisted as an array; membership is deduplicated on add.
+    public var pendingUnregisterTokens: [Data] {
+        defaults().array(forKey: Self.pendingUnregisterTokensKey) as? [Data] ?? []
     }
 
-    public func setPendingUnregister(token: Data) {
-        defaults().set(token, forKey: Self.pendingUnregisterTokenKey)
+    public func addPendingUnregister(token: Data) {
+        var tokens = pendingUnregisterTokens
+        guard !tokens.contains(token) else { return }
+        tokens.append(token)
+        defaults().set(tokens, forKey: Self.pendingUnregisterTokensKey)
     }
 
-    public func clearPendingUnregister() {
-        defaults().removeObject(forKey: Self.pendingUnregisterTokenKey)
+    public func removePendingUnregister(token: Data) {
+        var tokens = pendingUnregisterTokens
+        tokens.removeAll { $0 == token }
+        if tokens.isEmpty {
+            defaults().removeObject(forKey: Self.pendingUnregisterTokensKey)
+        } else {
+            defaults().set(tokens, forKey: Self.pendingUnregisterTokensKey)
+        }
     }
 
     public func recordRegistration(
