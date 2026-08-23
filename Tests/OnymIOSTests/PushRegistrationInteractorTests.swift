@@ -37,12 +37,13 @@ final class PushRegistrationInteractorTests: XCTestCase {
     private func makeInteractor(
         client: StubPushBackendClient,
         preferences: PushPreferenceStore,
+        signer: StubSigner = StubSigner(),
         refreshInterval: TimeInterval = 7 * 24 * 3600,
         clock: @escaping @Sendable () -> Date = Date.init
     ) -> PushRegistrationInteractor {
         PushRegistrationInteractor(
             client: client,
-            signer: StubSigner(),
+            signer: signer,
             attestation: NoAttestation(),
             preferences: preferences,
             debounce: .milliseconds(20),
@@ -224,7 +225,12 @@ final class PushRegistrationInteractorTests: XCTestCase {
     func testDisableWithoutLiveTokenFallsBackToTheRecordedOne() async throws {
         let client = StubPushBackendClient()
         let preferences = makePreferences(enabled: true)
-        let first = makeInteractor(client: client, preferences: preferences)
+        // One signer for both interactors: a relaunch keeps the same
+        // signing identity, and a per-interactor random key would let
+        // this test pass even if the fallback token were wrongly
+        // derived from signer state rather than from the store.
+        let signer = StubSigner()
+        let first = makeInteractor(client: client, preferences: preferences, signer: signer)
 
         await first.updateToken(Data([0x0a, 0x0b]))
         await first.updateSubscriptions([PushSubscription(tag: "a1b2c3d4e5f60718", relays: ["wss://nostr.onym.app"])])
@@ -232,13 +238,17 @@ final class PushRegistrationInteractorTests: XCTestCase {
         XCTAssertEqual(preferences.lastRegisteredToken, Data([0x0a, 0x0b]))
 
         // A fresh interactor — same persisted state, no APNs token yet.
-        let second = makeInteractor(client: client, preferences: preferences)
+        let second = makeInteractor(client: client, preferences: preferences, signer: signer)
         preferences.setEnabled(false)
         await second.pushDisabled()
 
         let unregistered = await client.unregistered
         XCTAssertEqual(unregistered.count, 1)
         XCTAssertTrue(preferences.pendingUnregisterTokens.isEmpty)
+        // Same signer, so the unregister names the same userKey the
+        // register did — the relaunch scenario as it actually is.
+        let registered = await client.registered
+        XCTAssertEqual(unregistered.first?.userKey, registered.first?.userKey)
     }
 
     func testRegisterRecordsExpiry() async throws {
