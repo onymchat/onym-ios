@@ -181,7 +181,7 @@ final class PushRegistrationInteractorTests: XCTestCase {
         XCTAssertNil(preferences.lastRegistrationFingerprint)
         // The successful unregister leaves nothing pending and no
         // stale token to fall back to.
-        XCTAssertNil(preferences.pendingUnregisterToken)
+        XCTAssertTrue(preferences.pendingUnregisterTokens.isEmpty)
         XCTAssertNil(preferences.lastRegisteredToken)
 
         preferences.setEnabled(false)
@@ -206,14 +206,14 @@ final class PushRegistrationInteractorTests: XCTestCase {
         // The attempt happened, failed, and the intent survived it.
         let afterFailure = await client.unregistered
         XCTAssertEqual(afterFailure.count, 1)
-        XCTAssertEqual(preferences.pendingUnregisterToken, Data([0x0a, 0x0b]))
+        XCTAssertEqual(preferences.pendingUnregisterTokens, [Data([0x0a, 0x0b])])
 
         // Next foreground: the pending unregister drains first, and
         // with the preference off nothing re-registers.
         await client.setUnregisterAnswer(.success(()))
         await interactor.appForegrounded()
         try await waitUntil { await client.unregistered.count == 2 }
-        XCTAssertNil(preferences.pendingUnregisterToken)
+        XCTAssertTrue(preferences.pendingUnregisterTokens.isEmpty)
         let registered = await client.registered
         XCTAssertEqual(registered.count, 1)
     }
@@ -238,7 +238,7 @@ final class PushRegistrationInteractorTests: XCTestCase {
 
         let unregistered = await client.unregistered
         XCTAssertEqual(unregistered.count, 1)
-        XCTAssertNil(preferences.pendingUnregisterToken)
+        XCTAssertTrue(preferences.pendingUnregisterTokens.isEmpty)
     }
 
     func testRegisterRecordsExpiry() async throws {
@@ -393,8 +393,45 @@ final class PushRegistrationInteractorTests: XCTestCase {
         try await waitUntil { await client.registered.count == 2 }
         try await waitUntil { await client.unregistered.count == 1 }
 
-        XCTAssertNil(preferences.pendingUnregisterToken)
+        XCTAssertTrue(preferences.pendingUnregisterTokens.isEmpty)
         XCTAssertEqual(preferences.lastRegisteredToken, Data([0x0c, 0x0d]))
+    }
+
+    /// The dropped-token scenario from review: a rotation whose drain
+    /// failed (old token still owed) followed by a disable (new token
+    /// now owed too) is *two* debts — the old single-slot store kept
+    /// only the newer one and the old token stayed wake-able until the
+    /// backend's 60-day sweep. Both must survive and both must drain.
+    func testRotationDebtAndDisableDebtBothDrain() async throws {
+        let client = StubPushBackendClient()
+        let preferences = makePreferences(enabled: true)
+        let interactor = makeInteractor(client: client, preferences: preferences)
+
+        await interactor.updateToken(Data([0x0a]))
+        await interactor.updateSubscriptions([PushSubscription(tag: "a1b2c3d4e5f60718", relays: ["wss://nostr.onym.app"])])
+        try await waitUntil { await client.registered.count == 1 }
+
+        // Rotation with the unregister path down: A's debt persists
+        // past the failed drain while B registers.
+        await client.setUnregisterAnswer(.failure(PushClientError.invalidResponse))
+        await interactor.updateToken(Data([0x0b]))
+        try await waitUntil { await client.registered.count == 2 }
+        XCTAssertEqual(preferences.pendingUnregisterTokens, [Data([0x0a])])
+
+        // Disable while A is still owed: B joins the set instead of
+        // overwriting A.
+        preferences.setEnabled(false)
+        await interactor.pushDisabled()
+        XCTAssertEqual(
+            Set(preferences.pendingUnregisterTokens),
+            Set([Data([0x0a]), Data([0x0b])])
+        )
+
+        // Network back: one opportunity drains both debts.
+        await client.setUnregisterAnswer(.success(()))
+        await interactor.appForegrounded()
+        try await waitUntil { preferences.pendingUnregisterTokens.isEmpty }
+        XCTAssertNil(preferences.lastRegisteredToken)
     }
 
     /// Swallowed reconcile errors are observable through the test-only
@@ -453,7 +490,7 @@ final class PushRegistrationInteractorTests: XCTestCase {
         await interactor.pushDisabled()
         let beforeLanding = await client.unregistered
         XCTAssertTrue(beforeLanding.isEmpty)
-        XCTAssertEqual(preferences.pendingUnregisterToken, Data([0x0a, 0x0b]))
+        XCTAssertEqual(preferences.pendingUnregisterTokens, [Data([0x0a, 0x0b])])
 
         // Let the register land — after the unregister intent.
         await client.setOnRegister(nil)
@@ -463,7 +500,7 @@ final class PushRegistrationInteractorTests: XCTestCase {
         // Nothing recorded as registered, nothing left pending: the
         // register that landed late was superseded and torn down.
         XCTAssertNil(preferences.lastRegistrationFingerprint)
-        XCTAssertNil(preferences.pendingUnregisterToken)
+        XCTAssertTrue(preferences.pendingUnregisterTokens.isEmpty)
         let registered = await client.registered
         XCTAssertEqual(registered.count, 1)
     }
