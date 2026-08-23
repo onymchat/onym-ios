@@ -48,9 +48,9 @@ final class PushBackendClientTests: XCTestCase {
 
     /// Records the request URL and (streamed) body, answering `payload`
     /// with `status`. The handler runs on the URL loading system's
-    /// thread; `Recorder` carries the value back safely.
+    /// thread; `RecorderBox` carries the value back safely.
     private func recordRequests(
-        into recorded: Recorder<RecordedWire>,
+        into recorded: RecorderBox<RecordedWire>,
         status: Int = 200,
         payload: Data = Data()
     ) {
@@ -86,7 +86,7 @@ final class PushBackendClientTests: XCTestCase {
     }
 
     func testRegisterSendsCamelCaseBase64Body() async throws {
-        let recorded = Recorder<RecordedWire>()
+        let recorded = RecorderBox<RecordedWire>()
         recordRequests(
             into: recorded,
             payload: Data(#"{"expiresAt":"2026-10-21T12:00:00Z"}"#.utf8)
@@ -118,7 +118,7 @@ final class PushBackendClientTests: XCTestCase {
     }
 
     func testRegisterSendsPresentDeviceTokenAsBase64() async throws {
-        let recorded = Recorder<RecordedWire>()
+        let recorded = RecorderBox<RecordedWire>()
         recordRequests(
             into: recorded,
             payload: Data(#"{"expiresAt":"2026-10-21T12:00:00Z"}"#.utf8)
@@ -136,7 +136,7 @@ final class PushBackendClientTests: XCTestCase {
     /// base64 body shape minus subscriptions, and an empty 200 counts
     /// as success — there is nothing to decode.
     func testUnregisterSendsBodyAndAcceptsEmptyOK() async throws {
-        let recorded = Recorder<RecordedWire>()
+        let recorded = RecorderBox<RecordedWire>()
         recordRequests(into: recorded)
 
         try await makeClient().unregister(
@@ -194,7 +194,7 @@ final class PushBackendClientTests: XCTestCase {
     /// strategy does not — the dual-formatter decode is the client's
     /// sole reason both shapes work, so the fractional one is pinned.
     func testFractionalSecondsExpiryDecodes() async throws {
-        let recorded = Recorder<RecordedWire>()
+        let recorded = RecorderBox<RecordedWire>()
         recordRequests(
             into: recorded,
             payload: Data(#"{"expiresAt":"2026-10-21T12:00:00.250Z"}"#.utf8)

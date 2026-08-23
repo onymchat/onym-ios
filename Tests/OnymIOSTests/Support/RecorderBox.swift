@@ -6,7 +6,7 @@ import Foundation
 /// happens-after in practice, but under Swift 5 mode nothing checks —
 /// this box makes the crossing explicit, safe, and typed where an
 /// `NSMutableDictionary` is none of the three.
-final class Recorder<Value>: @unchecked Sendable {
+final class RecorderBox<Value>: @unchecked Sendable {
     private let lock = NSLock()
     private var stored: Value?
 
