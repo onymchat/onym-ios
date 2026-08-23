@@ -194,10 +194,58 @@ actor PushCoordinator {
     /// can't cause a clearing register followed by a re-register.
     private func pushDesiredSubscriptions() async {
         guard let latestTags, let latestRelays else { return }
-        let subscriptions = latestRelays.isEmpty
+        let relays = Self.cappedRelays(latestRelays)
+        let subscriptions = relays.isEmpty
             ? []
-            : latestTags.map { PushSubscription(tag: $0, relays: latestRelays) }
+            : latestTags.map { PushSubscription(tag: $0, relays: relays) }
         await interactor.updateSubscriptions(subscriptions)
+    }
+
+    // MARK: - Backend relay caps
+
+    /// The deployed backend's per-request caps
+    /// (onym-push `apple/README.md`, `apple/src/config.rs` defaults):
+    /// at most 4 relays per tag, 8 distinct relay hosts per device,
+    /// and 4 URLs per host per device. Every tag shares this one relay
+    /// list, so capping the list once satisfies the per-tag cap —
+    /// and because 4 URLs can span at most 4 hosts with at most 4 on
+    /// any one, it satisfies both host caps too; they are still
+    /// enforced here explicitly so a future cap change fails safe.
+    private static let maxRelaysPerTag = 4
+    private static let maxRelayHosts = 8
+    private static let maxRelaysPerHost = 4
+
+    /// The one relay the backend exempts from its capacity caps.
+    static let defaultRelayURL = "wss://nostr.onym.app"
+
+    /// Truncates the configured relay list to what the backend will
+    /// accept, deterministically: the default relay first (the backend
+    /// exempts it from capacity caps, so it is the never-wasted slot),
+    /// then the user's configured relays in their configured order,
+    /// deduplicated, dropped once any cap is reached. Truncation is
+    /// silent by design — recording "which relays we didn't register"
+    /// would be an activity log this app declines to keep, and a
+    /// refused register would silence pushes entirely, which is worse
+    /// than watching the user's four highest-priority relays.
+    static func cappedRelays(_ configured: [String]) -> [String] {
+        var ordered = configured
+        if let index = ordered.firstIndex(of: defaultRelayURL), index != 0 {
+            ordered.remove(at: index)
+            ordered.insert(defaultRelayURL, at: 0)
+        }
+        var result: [String] = []
+        var urlsPerHost: [String: Int] = [:]
+        for relay in ordered {
+            guard result.count < maxRelaysPerTag else { break }
+            guard !result.contains(relay) else { continue }
+            let host = URL(string: relay)?.host?.lowercased() ?? relay
+            let count = urlsPerHost[host] ?? 0
+            if count == 0, urlsPerHost.count >= maxRelayHosts { continue }
+            guard count < maxRelaysPerHost else { continue }
+            urlsPerHost[host] = count + 1
+            result.append(relay)
+        }
+        return result
     }
 
     private func registerWithAPNs() async {
