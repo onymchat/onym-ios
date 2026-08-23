@@ -38,7 +38,7 @@ final class NotificationsSettingsFlowTests: XCTestCase {
     /// two overlapping enables would prompt twice and register twice.
     func testReentrantSetEnabledIsDropped() async {
         let enableCalls = Counter()
-        let gate = AsyncGate()
+        let gate = OneShotGate()
         let flow = NotificationsSettingsFlow(
             isEnabled: false,
             enable: {
@@ -58,7 +58,7 @@ final class NotificationsSettingsFlowTests: XCTestCase {
         // Second flip while working: rejected without a second call.
         await flow.setEnabled(true)
 
-        await gate.open()
+        gate.open()
         await first.value
 
         let calls = await enableCalls.value
@@ -140,22 +140,6 @@ final class NotificationsSettingsFlowTests: XCTestCase {
 private actor Counter {
     private(set) var value = 0
     func increment() { value += 1 }
-}
-
-private actor AsyncGate {
-    private var opened = false
-    private var waiters: [CheckedContinuation<Void, Never>] = []
-
-    func wait() async {
-        if opened { return }
-        await withCheckedContinuation { waiters.append($0) }
-    }
-
-    func open() {
-        opened = true
-        for waiter in waiters { waiter.resume() }
-        waiters.removeAll()
-    }
 }
 
 /// A mutable box the @MainActor tests flip between reads.

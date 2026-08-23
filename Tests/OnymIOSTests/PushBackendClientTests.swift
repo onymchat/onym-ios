@@ -24,7 +24,7 @@ final class PushBackendClientTests: XCTestCase {
         URLSessionPushBackendClient(baseURL: baseURL ?? self.baseURL, session: session)
     }
 
-    private func makeRegisterRequest(deviceToken: Data? = nil) throws -> PushRegisterRequest {
+    private func makeRegisterRequest(deviceToken: Data? = nil) -> PushRegisterRequest {
         PushRegisterRequest(
             deviceToken: deviceToken,
             userKey: "onym:key:aabb",

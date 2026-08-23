@@ -510,8 +510,8 @@ final class PushRegistrationInteractorTests: XCTestCase {
         let preferences = makePreferences(enabled: true)
         let interactor = makeInteractor(client: client, preferences: preferences)
 
-        let gate = TestGate()
-        let inFlight = TestGate()
+        let gate = OneShotGate()
+        let inFlight = OneShotGate()
         await client.setOnRegister {
             inFlight.open()
             await gate.wait()
@@ -571,31 +571,3 @@ private final class FailureBox: @unchecked Sendable {
     }
 }
 
-/// A reusable one-shot gate for holding an async call open.
-private final class TestGate: @unchecked Sendable {
-    private let lock = NSLock()
-    private var opened = false
-    private var waiters: [CheckedContinuation<Void, Never>] = []
-
-    func wait() async {
-        await withCheckedContinuation { continuation in
-            lock.lock()
-            if opened {
-                lock.unlock()
-                continuation.resume()
-                return
-            }
-            waiters.append(continuation)
-            lock.unlock()
-        }
-    }
-
-    func open() {
-        lock.lock()
-        opened = true
-        let resumed = waiters
-        waiters = []
-        lock.unlock()
-        for waiter in resumed { waiter.resume() }
-    }
-}
