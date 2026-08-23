@@ -28,15 +28,22 @@ final class PushAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
             let id = UUID()
             lock.lock()
             continuations[id] = continuation
-            let replay = latestToken
+            // The replay is yielded *inside* the lock, deliberately: a
+            // token APNs delivers between unlock and a late replay
+            // would be yielded first and the older replay would land
+            // second — and the consumer's last-write-wins `updateToken`
+            // would then register a stale token. Delivery holds the
+            // same lock, so ordering is settled here. Yielding to an
+            // AsyncStream continuation is non-blocking, so holding the
+            // lock across it is safe.
+            if let replay = latestToken {
+                continuation.yield(replay)
+            }
             lock.unlock()
             continuation.onTermination = { _ in
                 lock.lock()
                 defer { lock.unlock() }
                 continuations.removeValue(forKey: id)
-            }
-            if let replay {
-                continuation.yield(replay)
             }
         }
     }
