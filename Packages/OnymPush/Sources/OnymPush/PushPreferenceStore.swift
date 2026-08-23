@@ -7,6 +7,18 @@ import Foundation
 /// push backend, and Apple) the inbox-tag ↔ device linkage the rest of
 /// the app avoids creating, so that trade is the user's to make in
 /// Settings, never a default.
+///
+/// Raw APNs tokens sit here in plaintext `UserDefaults`, deliberately.
+/// An APNs token is not a secret in the keychain sense: it is a
+/// routing handle that only the operator's APNs auth key can turn
+/// into a delivered push, and Apple rotates it on restore or
+/// reinstall — a copy lifted from an unencrypted backup lets an
+/// attacker do nothing on their own. That is a different posture from
+/// `UserDefaultsCaseSubmissionStore` (encrypted at rest because a
+/// statement is the user's own words), and a different adversary from
+/// the one `PushTokenEnvelope` defends against (passive capture in
+/// the operator's infrastructure, where the token would otherwise sit
+/// beside the APNs key that makes it potent).
 public struct PushPreferenceStore: Sendable {
     private static let enabledKey = "push.enabled"
     private static let fingerprintKey = "push.lastRegistrationFingerprint"
