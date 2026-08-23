@@ -40,7 +40,12 @@ actor PushCoordinator {
     /// keeps a slow keychain read from causing an empty-set register
     /// followed immediately by a re-register.
     private var latestTags: [String]?
-    private var latestRelays: [String] = []
+    /// Same nil-until-loaded shape as `latestTags`: nil means the
+    /// relay configuration has not been read yet, `[]` is meaningful —
+    /// the user removed every relay, so nothing is watchable and the
+    /// backend's subscription set must be cleared (see
+    /// `pushDesiredSubscriptions`).
+    private var latestRelays: [String]?
 
     init(
         identityRepository: IdentityRepository,
@@ -179,12 +184,19 @@ actor PushCoordinator {
 
     /// Every identity's tag, watched on every configured relay. An
     /// empty identity list clears the backend's tag set (the device
-    /// row survives, so re-adding an identity needs no re-consent).
+    /// row survives, so re-adding an identity needs no re-consent) —
+    /// and an empty *relay* list resolves to the same empty
+    /// subscription set: with no relay to watch, no tag is watchable,
+    /// and the backend refuses entries with zero relays. The two empty
+    /// cases are therefore symmetric on the wire; what they share is
+    /// "stop watching everything, keep the device registered". Only a
+    /// not-yet-loaded input (nil) is withheld, so a slow first read
+    /// can't cause a clearing register followed by a re-register.
     private func pushDesiredSubscriptions() async {
-        guard let latestTags, !latestRelays.isEmpty else { return }
-        let subscriptions = latestTags.map {
-            PushSubscription(tag: $0, relays: latestRelays)
-        }
+        guard let latestTags, let latestRelays else { return }
+        let subscriptions = latestRelays.isEmpty
+            ? []
+            : latestTags.map { PushSubscription(tag: $0, relays: latestRelays) }
         await interactor.updateSubscriptions(subscriptions)
     }
 
