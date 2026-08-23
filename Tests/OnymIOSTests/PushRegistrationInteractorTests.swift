@@ -185,7 +185,12 @@ final class PushRegistrationInteractorTests: XCTestCase {
         XCTAssertTrue(preferences.pendingUnregisterTokens.isEmpty)
         XCTAssertNil(preferences.lastRegisteredToken)
 
-        preferences.setEnabled(false)
+        // And no register follows: with the preference still on (the
+        // artificial state above), a follow-up reconcile pass would
+        // happily re-register — the disable must not queue one.
+        try await settle()
+        let registered = await client.registered
+        XCTAssertEqual(registered.count, 1)
     }
 
     /// One offline opt-out must not leave the device registered on the
