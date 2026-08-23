@@ -48,7 +48,7 @@ public struct NotificationsSettingsView: View {
                 }
 
                 SettingsFootnote(
-                    "How it works: an Onym-run push server watches your configured Nostr relays for your inbox codes and asks Apple to wake this device, a few seconds delayed at random. It never sees message content, senders, or groups — it holds only your inbox codes and an encrypted push token, and asks the server to forget both when you turn this off (retried until the server confirms). All of your identities\u{2019} inbox codes are registered together, so the push server can tell they belong to one device. The alert itself always reads \u{201C}New message\u{201D}; nothing about the conversation passes through Apple."
+                    "How it works: an Onym-run push server watches your configured Nostr relays for your inbox codes and asks Apple to wake this device, a few seconds delayed at random. It never sees message content, senders, or groups. What this device sends it: your inbox codes, an encrypted push token, a signing key created on this device just for push and linked to none of your identities, and a device-attestation token from Apple. Turning this off tells the server to forget this device (retried until it confirms). All of your identities\u{2019} inbox codes are registered together, so the push server can tell they belong to one device. The alert itself always reads \u{201C}New message\u{201D}; nothing about the conversation passes through Apple."
                 )
             }
             .padding(.horizontal)

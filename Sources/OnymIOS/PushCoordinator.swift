@@ -7,12 +7,6 @@ import OnymTransportNostr
 import UIKit
 import UserNotifications
 
-/// The moderation signer already has exactly the shape the push seam
-/// needs (`userKeyID` + detached `sign`), so it serves both. The push
-/// backend verifies the key and discards it — which identity signs is
-/// immaterial there.
-extension IdentityModerationSigner: PushSigner {}
-
 /// Push's attestation seam over the same `DCDevice` provider the
 /// moderation stack uses: a fresh token per call, nil where the
 /// platform has none (simulator, enterprise build).
@@ -52,6 +46,12 @@ actor PushCoordinator {
         identityRepository: IdentityRepository,
         relaysRepository: NostrRelaysRepository,
         client: PushBackendClient = URLSessionPushBackendClient(),
+        // The device-local push key, never an identity's key: push
+        // registrations refresh on their own schedule, and an
+        // identity-keyed signature would let the backend link the
+        // persona keys that sign successive refreshes for one device
+        // token. See `DevicePushSigner`.
+        signer: PushSigner = DevicePushSigner(),
         preferences: PushPreferenceStore = PushPreferenceStore(),
         notificationAuthorizationDenied: @escaping @Sendable () async -> Bool = {
             await UNUserNotificationCenter.current()
@@ -64,7 +64,7 @@ actor PushCoordinator {
         self.notificationAuthorizationDenied = notificationAuthorizationDenied
         self.interactor = PushRegistrationInteractor(
             client: client,
-            signer: IdentityModerationSigner(repository: identityRepository),
+            signer: signer,
             attestation: DCDevicePushAttestation(),
             preferences: preferences
         )
