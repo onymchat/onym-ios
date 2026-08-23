@@ -11,6 +11,18 @@ import Foundation
 /// The transport repositories own their lifecycles; this interactor
 /// only *observes* identity and relay state and talks to the push
 /// backend. It never drives transports.
+///
+/// A named trade: one registration carries every identity's inbox tag
+/// under one signature, so the push backend can tell that all of this
+/// user's personas live on one device. The backend's contract is
+/// replace-all per device token — per-identity registration is
+/// structurally incompatible with it — so this correlation is
+/// documented (here and in Settings) rather than papered over. The
+/// signature itself adds nothing to it: the app signs with a
+/// device-local key created for push alone (the app target's
+/// `DevicePushSigner`), so the `userKey` the backend sees is linked to
+/// no identity and never rotates with persona switches — successive
+/// refreshes cannot be used to link persona keys.
 public actor PushRegistrationInteractor {
     private let client: PushBackendClient
     private let signer: PushSigner

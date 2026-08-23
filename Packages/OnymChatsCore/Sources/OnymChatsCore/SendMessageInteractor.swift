@@ -1,6 +1,7 @@
 import Foundation
 import CryptoKit
 import OSLog
+import OnymFoundation
 import OnymTransport
 import OnymIdentity
 import OnymTransportBlossom
@@ -1199,16 +1200,8 @@ public actor SendMessageInteractor {
         }
     }
 
-    /// Same derivation as `IdentityRepository.inboxTag(from:)` —
-    /// duplicated here because the repo's helper is private and we
-    /// only need the formula, not the keychain lookup. Matches
-    /// `CreateGroupInteractor.inboxTag(from:)`.
     private static func inboxTag(from inboxPublicKey: Data) -> String {
-        var hasher = SHA256()
-        hasher.update(data: Data("sep-inbox-v1".utf8))
-        hasher.update(data: inboxPublicKey)
-        let hash = hasher.finalize()
-        return hash.prefix(8).map { String(format: "%02x", $0) }.joined()
+        InboxTag.derive(from: inboxPublicKey)
     }
 }
 

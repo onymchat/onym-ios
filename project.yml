@@ -76,6 +76,7 @@ targets:
       - package: OnymModerationUI
       - package: OnymDiscovery
       - package: OnymOnboarding
+      - package: OnymPush
     # Hand-written Info.plist via xcodegen's `info:` block. We tried
     # the GENERATE_INFOPLIST_FILE + INFOPLIST_KEY_* approach first but
     # `INFOPLIST_KEY_UILaunchScreen_BackgroundColor` / `_ImageName` are
@@ -180,6 +181,14 @@ targets:
         # over once Apple's CDN has fetched + validated the file.
         com.apple.developer.associated-domains:
           - applinks:onym.app
+        # Push notifications. `development` is the source-entitlements
+        # value; automatic signing flips it to `production` on export —
+        # and this target signs automatically (CODE_SIGN_STYLE:
+        # Automatic, below), so the caveat about manually signed
+        # archives shipping the sandbox entitlement is inert here; it
+        # would matter only if signing ever moved to Manual.
+        # Pushes are content-free alerts, so no UIBackgroundModes.
+        aps-environment: development
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.onym.ios

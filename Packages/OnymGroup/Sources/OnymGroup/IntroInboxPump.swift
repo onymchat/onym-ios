@@ -1,5 +1,5 @@
-import CryptoKit
 import Foundation
+import OnymFoundation
 import OnymTransport
 
 /// Sender-side pump for intro inbox subscriptions. Mirrors
@@ -54,15 +54,8 @@ public struct IntroInboxPump: Sendable {
         await subs.applyEmpty()
     }
 
-    /// Mirror of `IdentityRepository.inboxTag(from:)` /
-    /// `InboxFanoutInteractor.inboxTag(from:)`. Pure function of
-    /// the pubkey; safe to recompute.
     public static func inboxTag(from publicKey: Data) -> String {
-        var hasher = SHA256()
-        hasher.update(data: Data("sep-inbox-v1".utf8))
-        hasher.update(data: publicKey)
-        let digest = hasher.finalize()
-        return digest.prefix(8).map { String(format: "%02x", $0) }.joined()
+        InboxTag.derive(from: publicKey)
     }
 }
 

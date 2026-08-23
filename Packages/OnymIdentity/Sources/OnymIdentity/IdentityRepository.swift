@@ -947,11 +947,7 @@ public actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelop
     }
 
     private static func inboxTag(from inboxPublicKey: Data) -> String {
-        var hasher = SHA256()
-        hasher.update(data: Data("sep-inbox-v1".utf8))
-        hasher.update(data: inboxPublicKey)
-        let hash = hasher.finalize()
-        return hash.prefix(8).map { String(format: "%02x", $0) }.joined()
+        InboxTag.derive(from: inboxPublicKey)
     }
 
     // MARK: - Naming helpers
