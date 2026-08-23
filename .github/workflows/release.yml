@@ -228,6 +228,23 @@ jobs:
             -derivedDataPath /tmp/onym-foundation-tests \
             -resultBundlePath /tmp/onym-foundation.xcresult
 
+      - name: xcodebuild build (OnymPush package)
+        # OnymPush's suites live in OnymIOSTests (run above), which
+        # already compiles the package — as a dependency of the app
+        # target. This standalone build proves something the app build
+        # cannot: the package needs no app scaffolding, so an
+        # accidental reference to app-side types fails here instead of
+        # landing green. Same `always()` rationale as the package test
+        # steps.
+        if: always()
+        working-directory: Packages/OnymPush
+        run: |
+          rm -rf /tmp/onym-push-build
+          xcodebuild build \
+            -scheme OnymPush \
+            -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }},OS=latest" \
+            -derivedDataPath /tmp/onym-push-build
+
       - name: Upload unit test xcresult
         # `always()` so `report-to-issue` can parse green runs too —
         # not just failures.

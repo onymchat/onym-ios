@@ -39,6 +39,10 @@ packages:
   OnymModerationUI: {path: Packages/OnymModerationUI}
   OnymDiscovery: {path: Packages/OnymDiscovery}
   OnymOnboarding: {path: Packages/OnymOnboarding}
+  # OnymIOSTests links this (its suites live there); CI additionally
+  # builds the package standalone to prove it compiles without any app
+  # scaffolding — see release.yml's "xcodebuild build (OnymPush)" step.
+  OnymPush: {path: Packages/OnymPush}
 
 targets:
   OnymIOS:
@@ -239,6 +243,7 @@ targets:
       - package: OnymModerationUI
       - package: OnymDiscovery
       - package: OnymOnboarding
+      - package: OnymPush
 
   OnymIOSUITests:
     type: bundle.ui-testing
