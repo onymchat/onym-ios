@@ -61,7 +61,7 @@ struct OfferDetailView: View {
                     SettingsSectionLabel("SERVICE TERMS")
                     SettingsCard {
                         Text(verbatim: service)
-                            .font(.system(size: 12, design: .monospaced))
+                            .font(OnymType.mono(size: 12))
                             .foregroundStyle(OnymTokens.text2)
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -84,10 +84,10 @@ struct OfferDetailView: View {
     private func detailRow(_ label: LocalizedStringKey, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label)
-                .font(.system(size: 13, weight: .semibold))
+                .font(OnymType.font(size: 13, weight: .semibold))
                 .foregroundStyle(OnymTokens.text)
             Text(verbatim: value)
-                .font(.system(size: 13, design: .monospaced))
+                .font(OnymType.mono(size: 13))
                 .foregroundStyle(OnymTokens.text2)
         }
     }

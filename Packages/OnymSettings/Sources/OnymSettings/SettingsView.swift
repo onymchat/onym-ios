@@ -459,23 +459,23 @@ public struct SettingsView: View {
             HStack(spacing: 10) {
                 Circle().fill(SettingsTile.amber).frame(width: 22, height: 22)
                     .overlay(Image(systemName: "exclamationmark")
-                        .font(.system(size: 12, weight: .bold))
+                        .font(OnymType.font(size: 12, weight: .bold))
                         .foregroundStyle(.white))
                 Text(count == 1
                      ? "1 identity hasn’t been backed up yet."
                      : "\(count) identities haven’t been backed up yet.")
-                    .font(.system(size: 13))
+                    .font(OnymType.font(size: 13))
                     .foregroundStyle(Color(red: 0.36, green: 0.227, blue: 0))
                 Spacer(minLength: 4)
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(OnymType.font(size: 12, weight: .semibold))
                     .foregroundStyle(Color(red: 0.36, green: 0.227, blue: 0))
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .background(Color(red: 1, green: 0.965, blue: 0.898),
-                        in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        in: RoundedRectangle(cornerRadius: OnymRadius.inset, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: OnymRadius.inset, style: .continuous)
                 .stroke(Color(red: 1, green: 0.847, blue: 0.627), lineWidth: 0.5))
             .padding(.horizontal, 16)
             .padding(.top, 12)
@@ -489,11 +489,11 @@ public struct SettingsView: View {
             OnymMark(size: 26, color: OnymTokens.text3)
                 .padding(.top, 28)
             Text("Built by people who think privacy is a right")
-                .font(.system(size: 12))
+                .font(OnymType.font(size: 12))
                 .foregroundStyle(OnymTokens.text3)
                 .multilineTextAlignment(.center)
             Text(aboutSubtitle)
-                .font(.system(size: 11, design: .monospaced))
+                .font(OnymType.mono(size: 11))
                 .foregroundStyle(OnymTokens.text3)
         }
         .frame(maxWidth: .infinity)

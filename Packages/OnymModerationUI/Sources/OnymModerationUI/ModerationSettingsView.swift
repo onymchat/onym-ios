@@ -172,10 +172,10 @@ public struct ModerationSettingsView: View {
     private func row(_ label: LocalizedStringKey, _ value: String, monospaced: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label)
-                .font(.system(size: 13, weight: .semibold))
+                .font(OnymType.font(size: 13, weight: .semibold))
                 .foregroundStyle(OnymTokens.text)
             Text(value)
-                .font(monospaced ? .system(size: 11, design: .monospaced) : .system(size: 13))
+                .font(monospaced ? OnymType.mono(size: 11) : OnymType.font(size: 13))
                 .foregroundStyle(OnymTokens.text2)
                 .textSelection(.enabled)
         }

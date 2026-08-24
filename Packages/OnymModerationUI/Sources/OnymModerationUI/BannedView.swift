@@ -57,14 +57,14 @@ public struct BannedView: View {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(spacing: 10) {
                     Image(systemName: "hand.raised.fill")
-                        .font(.system(size: 40))
+                        .font(OnymType.font(size: 40))
                         .foregroundStyle(OnymTokens.red)
                     Text("This device is banned from Onym")
-                        .font(.system(size: 20, weight: .semibold))
+                        .font(OnymType.font(size: 20, weight: .semibold))
                         .foregroundStyle(OnymTokens.text)
                         .multilineTextAlignment(.center)
                     Text(expiryLine)
-                        .font(.system(size: 14))
+                        .font(OnymType.font(size: 14))
                         .foregroundStyle(OnymTokens.text2)
                         .multilineTextAlignment(.center)
                 }
@@ -132,11 +132,11 @@ public struct BannedView: View {
                                 openURL(appealURL)
                             } label: {
                                 Text("Appeal at the authority's appellate")
-                                    .font(.system(size: 15, weight: .medium))
+                                    .font(OnymType.font(size: 15, weight: .medium))
                                     .foregroundStyle(OnymTokens.text)
                                     .frame(maxWidth: .infinity, minHeight: 44)
                                     .background(OnymTokens.surface2,
-                                                in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                                in: RoundedRectangle(cornerRadius: OnymRadius.inset, style: .continuous))
                             }
                             .buttonStyle(.plain)
                             .accessibilityIdentifier("moderation.banned.appeal_external")
@@ -165,11 +165,11 @@ public struct BannedView: View {
                             }
                         } label: {
                             Text("I'm this device's new owner")
-                                .font(.system(size: 15, weight: .medium))
+                                .font(OnymType.font(size: 15, weight: .medium))
                                 .foregroundStyle(OnymTokens.text)
                                 .frame(maxWidth: .infinity, minHeight: 44)
                                 .background(OnymTokens.surface2,
-                                            in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                            in: RoundedRectangle(cornerRadius: OnymRadius.inset, style: .continuous))
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("moderation.banned.new_holder")
@@ -186,7 +186,7 @@ public struct BannedView: View {
                                 openURL(url)
                             } label: {
                                 Text("File the claim at the authority instead")
-                                    .font(.system(size: 13))
+                                    .font(OnymType.font(size: 13))
                                     .foregroundStyle(OnymTokens.text2)
                                     .frame(maxWidth: .infinity, minHeight: 36)
                             }
@@ -218,10 +218,10 @@ public struct BannedView: View {
     private func detailRow(_ label: LocalizedStringKey, _ value: String, monospaced: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label)
-                .font(.system(size: 13, weight: .semibold))
+                .font(OnymType.font(size: 13, weight: .semibold))
                 .foregroundStyle(OnymTokens.text)
             Text(value)
-                .font(monospaced ? .system(size: 12, design: .monospaced) : .system(size: 13))
+                .font(monospaced ? OnymType.mono(size: 12) : OnymType.font(size: 13))
                 .foregroundStyle(OnymTokens.text2)
                 .textSelection(.enabled)
         }

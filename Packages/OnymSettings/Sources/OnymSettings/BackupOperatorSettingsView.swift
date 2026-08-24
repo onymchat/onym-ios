@@ -70,7 +70,7 @@ struct BackupOperatorSettingsView: View {
     private var emptyCard: some View {
         SettingsCard {
             Text("No backup operators are listed by the discovery providers you trust. Add a provider that lists one, and it will appear here.")
-                .font(.system(size: 14))
+                .font(OnymType.font(size: 14))
                 .foregroundStyle(OnymTokens.text3)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 16).padding(.vertical, 14)

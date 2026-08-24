@@ -102,7 +102,7 @@ public struct ModerationConsentContent: View {
         VStack(spacing: 12) {
             ProgressView()
             Text("Loading moderation authorities…")
-                .font(.system(size: 14))
+                .font(OnymType.font(size: 14))
                 .foregroundStyle(OnymTokens.text2)
         }
         .frame(maxWidth: .infinity)
@@ -113,7 +113,7 @@ public struct ModerationConsentContent: View {
     private var picker: some View {
         SettingsLargeTitle(pickerTitle)
         Text(pickerBlurb)
-            .font(.system(size: 14))
+            .font(OnymType.font(size: 14))
             .foregroundStyle(OnymTokens.text2)
             .lineSpacing(3)
             .padding(.horizontal, 16)
@@ -126,7 +126,7 @@ public struct ModerationConsentContent: View {
             SettingsCard {
                 VStack(spacing: 10) {
                     Text(message)
-                        .font(.system(size: 14))
+                        .font(OnymType.font(size: 14))
                         .foregroundStyle(OnymTokens.text2)
                     Button("Retry") { flow.tappedRetry() }
                         .accessibilityIdentifier("moderation.consent.retry")
@@ -143,7 +143,7 @@ public struct ModerationConsentContent: View {
         case .success where flow.state.authorities.isEmpty:
             SettingsCard {
                 Text("No authorities are published yet.")
-                    .font(.system(size: 14))
+                    .font(OnymType.font(size: 14))
                     .foregroundStyle(OnymTokens.text3)
                     .frame(maxWidth: .infinity)
                     .padding(16)
@@ -198,10 +198,10 @@ public struct ModerationConsentContent: View {
     private func hashRow(_ label: LocalizedStringKey, _ hash: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label)
-                .font(.system(size: 13, weight: .semibold))
+                .font(OnymType.font(size: 13, weight: .semibold))
                 .foregroundStyle(OnymTokens.text)
             Text(hash)
-                .font(.system(size: 11, design: .monospaced))
+                .font(OnymType.mono(size: 11))
                 .foregroundStyle(OnymTokens.text2)
                 .textSelection(.enabled)
         }
@@ -249,7 +249,7 @@ public struct ModerationConsentContent: View {
             SettingsLargeTitle(verbatim: flow.state.selectedListing?.name ?? String(localized: "Terms"))
 
             Text("These are the exact terms you're consenting to. A case can only ever reach you under a violation class listed here, with these windows and this appeal path.")
-                .font(.system(size: 14))
+                .font(OnymType.font(size: 14))
                 .foregroundStyle(OnymTokens.text2)
                 .lineSpacing(3)
                 .padding(.horizontal, 16)
@@ -265,10 +265,10 @@ public struct ModerationConsentContent: View {
             SettingsCard {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Manifest hash")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(OnymType.font(size: 13, weight: .semibold))
                         .foregroundStyle(OnymTokens.text)
                     Text(reviewing.manifestHash)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(OnymType.mono(size: 11))
                         .foregroundStyle(OnymTokens.text2)
                         .textSelection(.enabled)
                 }
@@ -293,7 +293,7 @@ public struct ModerationConsentContent: View {
                 .accessibilityIdentifier("moderation.consent.agree")
 
                 Button("Back") { flow.tappedBack() }
-                    .font(.system(size: 14))
+                    .font(OnymType.font(size: 14))
                     .foregroundStyle(OnymTokens.text2)
                     .disabled(flow.state.step == .signing)
                     .accessibilityIdentifier("moderation.consent.back")
@@ -306,10 +306,10 @@ public struct ModerationConsentContent: View {
     private var done: some View {
         VStack(spacing: 12) {
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 44))
+                .font(OnymType.font(size: 44))
                 .foregroundStyle(OnymTokens.green)
             Text("Mandate signed")
-                .font(.system(size: 17, weight: .semibold))
+                .font(OnymType.font(size: 17, weight: .semibold))
                 .foregroundStyle(OnymTokens.text)
         }
         .frame(maxWidth: .infinity)
@@ -337,7 +337,7 @@ public struct ModerationConsentContent: View {
                     }
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Definition")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(OnymType.font(size: 13, weight: .semibold))
                             .foregroundStyle(OnymTokens.text)
                         definitionLink(violationClass.definition)
                     }
@@ -373,10 +373,10 @@ public struct ModerationConsentContent: View {
     private func termRow(_ label: LocalizedStringKey, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label)
-                .font(.system(size: 13, weight: .semibold))
+                .font(OnymType.font(size: 13, weight: .semibold))
                 .foregroundStyle(OnymTokens.text)
             Text(value)
-                .font(.system(size: 13))
+                .font(OnymType.font(size: 13))
                 .foregroundStyle(OnymTokens.text2)
         }
     }
@@ -387,10 +387,10 @@ public struct ModerationConsentContent: View {
     private func definitionLink(_ address: String) -> some View {
         if let url = URL(string: address), url.scheme == "https" {
             Link(address, destination: url)
-                .font(.system(size: 12, design: .monospaced))
+                .font(OnymType.mono(size: 12))
         } else {
             Text(address)
-                .font(.system(size: 12, design: .monospaced))
+                .font(OnymType.mono(size: 12))
                 .foregroundStyle(OnymTokens.text2)
                 .textSelection(.enabled)
         }

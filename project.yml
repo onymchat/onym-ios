@@ -17,6 +17,7 @@ packages:
     url: https://github.com/onymchat/onym-sdk-swift.git
     from: 0.0.2
   OnymDesign: {path: Packages/OnymDesign}
+  OnymDesignTokens: {path: Packages/OnymDesignTokens}
   OnymFoundation: {path: Packages/OnymFoundation}
   OnymTransport: {path: Packages/OnymTransport}
   OnymChain: {path: Packages/OnymChain}
@@ -54,6 +55,7 @@ targets:
     dependencies:
       - package: OnymSDK
       - package: OnymDesign
+      - package: OnymDesignTokens
       - package: OnymFoundation
       - package: OnymTransport
       - package: OnymChain
@@ -230,6 +232,7 @@ targets:
       - target: OnymIOS
       - package: OnymSDK
       - package: OnymDesign
+      - package: OnymDesignTokens
       - package: OnymFoundation
       - package: OnymTransport
       - package: OnymChain

@@ -1,5 +1,6 @@
 import CoreImage.CIFilterBuiltins
 import SwiftUI
+import OnymDesignTokens
 
 /// Standalone QR generator used by Settings → Share Invite Key and the
 /// per-identity invite hero. Mirrors the design's `QRCode` helper —
@@ -23,7 +24,7 @@ public struct SettingsQRCode: View {
                     .scaledToFit()
                     .frame(width: size, height: size)
             } else {
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: OnymRadius.badge)
                     .fill(OnymTokens.surface3)
                     .frame(width: size, height: size)
             }
@@ -34,7 +35,7 @@ public struct SettingsQRCode: View {
                 .overlay(OnymMark(size: size * 0.18, color: OnymTokens.text))
         }
         .background(OnymTokens.surface2)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: OnymRadius.inset, style: .continuous))
     }
 
     private func generate() -> UIImage? {

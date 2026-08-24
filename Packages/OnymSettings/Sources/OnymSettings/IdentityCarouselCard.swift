@@ -84,7 +84,7 @@ struct IdentityCarouselCard: View {
             pageIndicator
         }
         .background(OnymTokens.surface2,
-                    in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    in: RoundedRectangle(cornerRadius: OnymRadius.panel, style: .continuous))
         .padding(.horizontal, 16)
         .padding(.top, 4)
         .sheet(item: removalBinding) { summary in
@@ -160,8 +160,8 @@ struct IdentityCarouselCard: View {
                 size: 190
             )
             .padding(12)
-            .background(.white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .background(.white, in: RoundedRectangle(cornerRadius: OnymRadius.card, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: OnymRadius.card, style: .continuous)
                 .stroke(isActive ? OnymAccent.blue.color : OnymTokens.hairline,
                         lineWidth: isActive ? 2 : 1))
 
@@ -171,12 +171,12 @@ struct IdentityCarouselCard: View {
                 } label: {
                     HStack(spacing: 5) {
                         Text(summary.name)
-                            .font(.system(size: 20, weight: .bold))
+                            .font(OnymType.font(size: 20, weight: .bold))
                             .tracking(-0.2)
                             .foregroundStyle(isActive ? OnymAccent.blue.color : OnymTokens.text)
                             .lineLimit(1)
                         Image(systemName: "pencil")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(OnymType.font(size: 13, weight: .semibold))
                             .foregroundStyle(OnymTokens.text3)
                     }
                 }
@@ -184,7 +184,7 @@ struct IdentityCarouselCard: View {
                 .accessibilityIdentifier("identity.rename.\(summary.id.rawValue.uuidString)")
                 if isActive {
                     Text("ACTIVE")
-                        .font(.system(size: 10, weight: .bold))
+                        .font(OnymType.font(size: 10, weight: .bold))
                         .tracking(0.6)
                         .foregroundStyle(OnymAccent.blue.color)
                         .padding(.horizontal, 8)
@@ -192,15 +192,15 @@ struct IdentityCarouselCard: View {
                         .background(OnymAccent.blue.color.opacity(0.14), in: Capsule())
                 } else {
                     Text("Swipe here to switch")
-                        .font(.system(size: 11))
+                        .font(OnymType.font(size: 11))
                         .foregroundStyle(OnymTokens.text3)
                 }
                 Text("Start a chat by scanning")
-                    .font(.system(size: 11))
+                    .font(OnymType.font(size: 11))
                     .foregroundStyle(OnymTokens.text2)
                     .padding(.top, 2)
                 Text("BLS \(flow.blsPrefix(of: summary))")
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(OnymType.mono(size: 11))
                     .foregroundStyle(OnymTokens.text3)
                     .multilineTextAlignment(.center)
             }
@@ -241,15 +241,15 @@ struct IdentityCarouselCard: View {
         Button(action: action) {
             VStack(spacing: 5) {
                 Image(systemName: icon)
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(OnymType.font(size: 17, weight: .semibold))
                 Text(title)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(OnymType.font(size: 11, weight: .medium))
             }
             .foregroundStyle(destructive ? OnymTokens.red : OnymAccent.blue.color)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 10)
             .background(OnymTokens.surface3,
-                        in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        in: RoundedRectangle(cornerRadius: OnymRadius.inset, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -264,19 +264,19 @@ struct IdentityCarouselCard: View {
                     .blur(radius: 9)
                     .opacity(0.4)
                     .background(.white.opacity(0.4),
-                               in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                               in: RoundedRectangle(cornerRadius: OnymRadius.card, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: OnymRadius.card, style: .continuous)
                         .stroke(OnymTokens.hairline, lineWidth: 1))
                 Image(systemName: "plus.circle.fill")
-                    .font(.system(size: 40, weight: .regular))
+                    .font(OnymType.font(size: 40))
                     .foregroundStyle(OnymAccent.blue.color)
             }
 
             Text("Add identity")
-                .font(.system(size: 20, weight: .bold))
+                .font(OnymType.font(size: 20, weight: .bold))
                 .foregroundStyle(OnymTokens.text)
             Text("A fresh key — separate contacts and chats from your other identities.")
-                .font(.system(size: 12))
+                .font(OnymType.font(size: 12))
                 .foregroundStyle(OnymTokens.text2)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 8)
@@ -285,12 +285,12 @@ struct IdentityCarouselCard: View {
                 .textInputAutocapitalization(.words)
                 .autocorrectionDisabled()
                 .focused($addNameFocused)
-                .font(.system(size: 16))
+                .font(OnymType.font(size: 16))
                 .padding(.horizontal, 14)
                 .padding(.vertical, 11)
                 .background(OnymTokens.bg,
-                            in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            in: RoundedRectangle(cornerRadius: OnymRadius.inset, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: OnymRadius.inset, style: .continuous)
                     .stroke(OnymTokens.hairline, lineWidth: 1))
                 .accessibilityIdentifier("identity.add.name_field")
 
@@ -299,11 +299,11 @@ struct IdentityCarouselCard: View {
                 flow.submitAdd()
             } label: {
                 Text("Create identity")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(OnymType.font(size: 15, weight: .semibold))
                     .foregroundStyle(OnymTokens.onAccent)
                     .frame(maxWidth: .infinity, minHeight: 44)
                     .background(OnymAccent.blue.color,
-                                in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                in: RoundedRectangle(cornerRadius: OnymRadius.inset, style: .continuous))
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("identity.add.create_button")
@@ -313,7 +313,7 @@ struct IdentityCarouselCard: View {
                 showRestore = true
             } label: {
                 Text("Restore from recovery phrase")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(OnymType.font(size: 13, weight: .medium))
                     .foregroundStyle(OnymAccent.blue.color)
             }
             .buttonStyle(.plain)
@@ -322,7 +322,7 @@ struct IdentityCarouselCard: View {
 
             if let error = flow.addError {
                 Text(error)
-                    .font(.system(size: 11.5))
+                    .font(OnymType.font(size: 11.5))
                     .foregroundStyle(OnymTokens.red)
                     .multilineTextAlignment(.center)
             }
@@ -374,7 +374,7 @@ struct RenameIdentitySheet: View {
                             .textInputAutocapitalization(.words)
                             .autocorrectionDisabled()
                             .focused($focused)
-                            .font(.system(size: 16.5))
+                            .font(OnymType.font(size: 16.5))
                             .submitLabel(.done)
                             .onSubmit(save)
                             .onChange(of: text) { _, newValue in
@@ -389,11 +389,11 @@ struct RenameIdentitySheet: View {
 
                     Button(action: save) {
                         Text("Save")
-                            .font(.system(size: 16, weight: .semibold))
+                            .font(OnymType.font(size: 16, weight: .semibold))
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity, minHeight: 50)
                             .background(OnymAccent.blue.color,
-                                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                        in: RoundedRectangle(cornerRadius: OnymRadius.field, style: .continuous))
                     }
                     .buttonStyle(.plain)
                     .disabled(!canSave)
@@ -456,7 +456,7 @@ struct RestoreIdentitySheet: View {
                         TextField("word word word …", text: $phrase, axis: .vertical)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
-                            .font(.system(size: 16, design: .monospaced))
+                            .font(OnymType.mono(size: 16))
                             .lineLimit(3...6)
                             .padding(.horizontal, 16)
                             .padding(.vertical, 12)
@@ -467,7 +467,7 @@ struct RestoreIdentitySheet: View {
                         TextField("Name (optional)", text: $name)
                             .textInputAutocapitalization(.words)
                             .autocorrectionDisabled()
-                            .font(.system(size: 16.5))
+                            .font(OnymType.font(size: 16.5))
                             .padding(.horizontal, 16)
                             .padding(.vertical, 12)
                             .accessibilityIdentifier("restore_identity.name_field")
@@ -475,7 +475,7 @@ struct RestoreIdentitySheet: View {
 
                     if let error = flow.addError {
                         Text(error)
-                            .font(.system(size: 13))
+                            .font(OnymType.font(size: 13))
                             .foregroundStyle(OnymTokens.red)
                             .padding(.horizontal, 20)
                             .accessibilityIdentifier("restore_identity.error")
@@ -483,11 +483,11 @@ struct RestoreIdentitySheet: View {
 
                     Button(action: restore) {
                         Text("Restore")
-                            .font(.system(size: 16, weight: .semibold))
+                            .font(OnymType.font(size: 16, weight: .semibold))
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity, minHeight: 50)
                             .background(OnymAccent.blue.color,
-                                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                        in: RoundedRectangle(cornerRadius: OnymRadius.field, style: .continuous))
                     }
                     .buttonStyle(.plain)
                     .disabled(!canRestore)

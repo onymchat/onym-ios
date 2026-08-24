@@ -70,7 +70,7 @@ public struct ModerationReportView: View {
     private var unrenderablePhoto: some View {
         VStack(alignment: .leading, spacing: 16) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 44))
+                .font(OnymType.font(size: 44))
                 .foregroundStyle(.orange)
             Text("This photo can't be displayed.")
                 .font(.title3.weight(.semibold))
@@ -85,7 +85,7 @@ public struct ModerationReportView: View {
     private var alreadyFiled: some View {
         VStack(alignment: .leading, spacing: 16) {
             Image(systemName: "checkmark.shield.fill")
-                .font(.system(size: 44))
+                .font(OnymType.font(size: 44))
                 .foregroundStyle(.green)
             Text("Your authority already has this report on file.")
                 .font(.title3.weight(.semibold))
@@ -116,7 +116,7 @@ public struct ModerationReportView: View {
                         .resizable()
                         .scaledToFit()
                         .frame(maxWidth: .infinity, maxHeight: 260)
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                        .clipShape(RoundedRectangle(cornerRadius: OnymRadius.card))
                         .accessibilityLabel("The photo you are disclosing")
                         .accessibilityIdentifier("moderation.report.photo")
                 }
@@ -125,7 +125,7 @@ public struct ModerationReportView: View {
                         .font(.body)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(16)
-                        .background(.background, in: RoundedRectangle(cornerRadius: 14))
+                        .background(.background, in: RoundedRectangle(cornerRadius: OnymRadius.card))
                         .textSelection(.enabled)
                 }
                 if !flow.message.images.isEmpty {
@@ -154,7 +154,7 @@ public struct ModerationReportView: View {
                         }
                     }
                 }
-                .background(.background, in: RoundedRectangle(cornerRadius: 14))
+                .background(.background, in: RoundedRectangle(cornerRadius: OnymRadius.card))
                 .accessibilityIdentifier("moderation.report.class")
             }
 
@@ -210,7 +210,7 @@ public struct ModerationReportView: View {
             } label: {
                 HStack(alignment: .top, spacing: 12) {
                     Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 20))
+                        .font(OnymType.font(size: 20))
                         .foregroundStyle(isSelected ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
                         .padding(.top, 1)
                     Text(Self.displayName(for: item.classId))
@@ -297,7 +297,7 @@ public struct ModerationReportView: View {
     private func success(_ receipt: ReportReceipt) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             Image(systemName: "checkmark.shield.fill")
-                .font(.system(size: 44))
+                .font(OnymType.font(size: 44))
                 .foregroundStyle(.green)
             Text("Your authority accepted the report.")
                 .font(.title3.weight(.semibold))

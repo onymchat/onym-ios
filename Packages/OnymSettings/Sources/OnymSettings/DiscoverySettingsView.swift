@@ -39,7 +39,7 @@ struct DiscoverySettingsView: View {
                         Circle().fill(OnymAccent.blue.color)
                             .frame(width: 30, height: 30)
                             .overlay(Image(systemName: "plus")
-                                .font(.system(size: 14, weight: .bold))
+                                .font(OnymType.font(size: 14, weight: .bold))
                                 .foregroundStyle(OnymTokens.onAccent))
                     }
                     .accessibilityIdentifier("settings.discovery.add")
@@ -87,7 +87,7 @@ struct DiscoverySettingsView: View {
         if sources.isEmpty {
             SettingsCard {
                 Text("No discovery providers configured. Add one below.")
-                    .font(.system(size: 14))
+                    .font(OnymType.font(size: 14))
                     .foregroundStyle(OnymTokens.text3)
                     .frame(maxWidth: .infinity)
                     .padding(.horizontal, 16).padding(.vertical, 14)
@@ -113,7 +113,7 @@ struct DiscoverySettingsView: View {
                     .accessibilityIdentifier("settings.discovery.source.\(status.source.providerId)")
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: OnymRadius.card, style: .continuous))
             .padding(.horizontal, 16)
         }
     }
@@ -125,26 +125,26 @@ struct DiscoverySettingsView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
                         Text(verbatim: status.source.userLabel)
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(OnymType.font(size: 15, weight: .semibold))
                             .foregroundStyle(OnymTokens.text)
                         statusChip(for: status)
                     }
                     Text(status.source.manifestURL.absoluteString)
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(OnymType.mono(size: 12))
                         .foregroundStyle(OnymTokens.text3)
                         .lineLimit(1)
                         .truncationMode(.middle)
                     if let fingerprint = status.source.operatorKeyFingerprint {
                         Text(verbatim: String(localized: "Key \(fingerprint)"))
-                            .font(.system(size: 12, design: .monospaced))
+                            .font(OnymType.mono(size: 12))
                             .foregroundStyle(OnymTokens.text2)
                     } else {
                         Text("Key not yet confirmed")
-                            .font(.system(size: 12))
+                            .font(OnymType.font(size: 12))
                             .foregroundStyle(OnymTokens.text3)
                     }
                     Text(entriesLine(for: status))
-                        .font(.system(size: 12))
+                        .font(OnymType.font(size: 12))
                         .foregroundStyle(OnymTokens.text3)
                     // Integrity/completeness notes from the last
                     // refresh: needs-confirmation, skipped catalogs and
@@ -154,13 +154,13 @@ struct DiscoverySettingsView: View {
                     // source never reads as a silently empty one.
                     ForEach(status.notes, id: \.self) { note in
                         Text(verbatim: note)
-                            .font(.system(size: 12))
+                            .font(OnymType.font(size: 12))
                             .foregroundStyle(SettingsTile.amber)
                             .lineLimit(3)
                     }
                     if let error = status.lastError {
                         Text(verbatim: error)
-                            .font(.system(size: 12))
+                            .font(OnymType.font(size: 12))
                             .foregroundStyle(status.lastErrorIsIntegrity ? OnymTokens.red : OnymTokens.text2)
                             .lineLimit(3)
                     }
@@ -169,7 +169,7 @@ struct DiscoverySettingsView: View {
                         // relaunching the app must never be the only
                         // way to re-attempt a fetch.
                         Button("Retry") { flow.tappedRefresh() }
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(OnymType.font(size: 13, weight: .semibold))
                             .foregroundStyle(OnymAccent.blue.color)
                             .buttonStyle(.plain)
                             .accessibilityIdentifier("settings.discovery.source.\(status.source.providerId).retry")
@@ -182,7 +182,7 @@ struct DiscoverySettingsView: View {
                             flow.tappedConfirmSource(providerId: status.source.providerId)
                             showAddSheet = true
                         }
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(OnymType.font(size: 13, weight: .semibold))
                         .foregroundStyle(OnymAccent.blue.color)
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("settings.discovery.source.\(status.source.providerId).confirm")

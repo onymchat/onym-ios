@@ -95,7 +95,7 @@ struct BlossomRelaySettingsView: View {
         if endpoints.isEmpty {
             SettingsCard {
                 Text("No servers configured. Media can't be sent or received.")
-                    .font(.system(size: 14))
+                    .font(OnymType.font(size: 14))
                     .foregroundStyle(OnymTokens.text3)
                     .frame(maxWidth: .infinity)
                     .padding(.horizontal, 16).padding(.vertical, 14)
@@ -121,7 +121,7 @@ struct BlossomRelaySettingsView: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     HStack(spacing: 6) {
                                         Text(endpoint.name)
-                                            .font(.system(size: 15, weight: .semibold))
+                                            .font(OnymType.font(size: 15, weight: .semibold))
                                             .foregroundStyle(OnymTokens.text)
                                         // First endpoint is the one
                                         // uploads/downloads target.
@@ -130,30 +130,30 @@ struct BlossomRelaySettingsView: View {
                                             // is feminine (identity);
                                             // a server is masculine.
                                             Text("ACTIVE_SERVICE_CHIP")
-                                                .font(.system(size: 10, weight: .bold))
+                                                .font(OnymType.font(size: 10, weight: .bold))
                                                 .foregroundStyle(OnymAccent.blue.color)
                                                 .padding(.horizontal, 6)
                                                 .padding(.vertical, 2)
                                                 .background(
                                                     OnymAccent.blue.color.opacity(0.12),
-                                                    in: RoundedRectangle(cornerRadius: 4)
+                                                    in: RoundedRectangle(cornerRadius: OnymRadius.chip)
                                                 )
                                                 .accessibilityIdentifier("blossom.active_badge")
                                         }
                                         if endpoint.isDefault {
                                             Text("DEFAULT")
-                                                .font(.system(size: 10, weight: .bold))
+                                                .font(OnymType.font(size: 10, weight: .bold))
                                                 .foregroundStyle(OnymTokens.text2)
                                                 .padding(.horizontal, 6)
                                                 .padding(.vertical, 2)
                                                 .background(
                                                     OnymTokens.surface3,
-                                                    in: RoundedRectangle(cornerRadius: 4)
+                                                    in: RoundedRectangle(cornerRadius: OnymRadius.chip)
                                                 )
                                         }
                                     }
                                     Text(endpoint.url.absoluteString)
-                                        .font(.system(size: 12, design: .monospaced))
+                                        .font(OnymType.mono(size: 12))
                                         .foregroundStyle(OnymTokens.text3)
                                         .lineLimit(1)
                                 }
@@ -165,13 +165,13 @@ struct BlossomRelaySettingsView: View {
                                         flow.tappedMakeActive(url: endpoint.url)
                                     } label: {
                                         Text("Make Active")
-                                            .font(.system(size: 12, weight: .semibold))
+                                            .font(OnymType.font(size: 12, weight: .semibold))
                                             .foregroundStyle(OnymAccent.blue.color)
                                             .padding(.horizontal, 10)
                                             .padding(.vertical, 6)
                                             .background(
                                                 OnymTokens.surface3,
-                                                in: RoundedRectangle(cornerRadius: 8)
+                                                in: RoundedRectangle(cornerRadius: OnymRadius.badge)
                                             )
                                     }
                                     .buttonStyle(.plain)
@@ -193,7 +193,7 @@ struct BlossomRelaySettingsView: View {
                     }
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: OnymRadius.card, style: .continuous))
             .padding(.horizontal, 16)
         }
     }
@@ -215,33 +215,33 @@ struct BlossomRelaySettingsView: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.URL)
-                    .font(.system(size: 14, design: .monospaced))
+                    .font(OnymType.mono(size: 14))
                     .foregroundStyle(OnymTokens.text)
                     .padding(.vertical, 8)
                     .padding(.horizontal, 10)
                     .background(
                         OnymTokens.surface3,
-                        in: RoundedRectangle(cornerRadius: 8)
+                        in: RoundedRectangle(cornerRadius: OnymRadius.badge)
                     )
                     .accessibilityIdentifier("blossom.add.custom_url_field")
                     Button {
                         flow.tappedAddCustom()
                     } label: {
                         Text("Add")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(OnymType.font(size: 14, weight: .semibold))
                             .foregroundStyle(OnymTokens.onAccent)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 8)
                             .background(
                                 OnymAccent.blue.color,
-                                in: RoundedRectangle(cornerRadius: 8)
+                                in: RoundedRectangle(cornerRadius: OnymRadius.badge)
                             )
                     }
                     .accessibilityIdentifier("blossom.add.custom_button")
                 }
                 if let error = flow.state.customDraftError {
                     Text(error)
-                        .font(.system(size: 12))
+                        .font(OnymType.font(size: 12))
                         .foregroundStyle(OnymTokens.red)
                         .accessibilityIdentifier("blossom.add.custom_error")
                 }
@@ -264,10 +264,10 @@ struct BlossomRelaySettingsView: View {
                     )
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Restore default")
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(OnymType.font(size: 15, weight: .semibold))
                             .foregroundStyle(OnymTokens.text)
                         Text("Re-install Onym Official as the only server.")
-                            .font(.system(size: 12))
+                            .font(OnymType.font(size: 12))
                             .foregroundStyle(OnymTokens.text3)
                     }
                     Spacer(minLength: 0)

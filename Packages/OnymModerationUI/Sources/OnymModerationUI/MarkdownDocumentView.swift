@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import OnymDesign
 
 /// One block of a parsed markdown document. Foundation's markdown
 /// parser (`AttributedString(markdown:)` with `.full` syntax) styles
@@ -342,10 +343,10 @@ struct MarkdownDocumentContent: View {
                 .font(.system(.footnote, design: .monospaced))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(12)
-                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: OnymRadius.badge))
         case .quote:
             HStack(alignment: .top, spacing: 10) {
-                RoundedRectangle(cornerRadius: 2)
+                RoundedRectangle(cornerRadius: OnymRadius.chip)
                     .fill(.tertiary)
                     .frame(width: 3)
                 Text(block.text)
@@ -367,7 +368,7 @@ struct MarkdownDocumentContent: View {
                 }
             }
             .padding(12)
-            .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+            .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: OnymRadius.badge))
         }
     }
 

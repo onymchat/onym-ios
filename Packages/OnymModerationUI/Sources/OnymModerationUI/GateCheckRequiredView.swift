@@ -53,13 +53,13 @@ public struct GateCheckRequiredView: View {
         VStack(spacing: 14) {
             Spacer()
             Image(systemName: "checkmark.shield")
-                .font(.system(size: 40))
+                .font(OnymType.font(size: 40))
                 .foregroundStyle(OnymTokens.text2)
             Text("Verification required")
-                .font(.system(size: 20, weight: .semibold))
+                .font(OnymType.font(size: 20, weight: .semibold))
                 .foregroundStyle(OnymTokens.text)
             Text(message)
-                .font(.system(size: 14))
+                .font(OnymType.font(size: 14))
                 .foregroundStyle(OnymTokens.text2)
                 .multilineTextAlignment(.center)
                 .lineSpacing(3)
@@ -79,7 +79,7 @@ public struct GateCheckRequiredView: View {
             }
             if let retryMessage {
                 Text(retryMessage)
-                    .font(.system(size: 13))
+                    .font(OnymType.font(size: 13))
                     .foregroundStyle(OnymTokens.text2)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
@@ -101,7 +101,7 @@ public struct GateCheckRequiredView: View {
                lookupRecoveryCaseIDs != nil,
                makeRecoveryCaseFlow != nil {
                 Button("Appeal by case ID") { activeSheet = .caseAppeal }
-                    .font(.system(size: 14, weight: .medium))
+                    .font(OnymType.font(size: 14, weight: .medium))
                     .foregroundStyle(OnymTokens.text)
                     .accessibilityIdentifier("moderation.gate_required.appeal")
             }
@@ -210,7 +210,7 @@ private struct RecoveryAppealView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Share your retained Onym identity with the Authority to recover your cases and open an appeal. Only case IDs are returned; your private key never leaves this device.")
-                    .font(.system(size: 14))
+                    .font(OnymType.font(size: 14))
                     .foregroundStyle(OnymTokens.text2)
                     .lineSpacing(3)
 
@@ -218,7 +218,7 @@ private struct RecoveryAppealView: View {
                     ProgressView("Finding your cases…")
                 } else if caseIDs.isEmpty {
                     Text("No appealable cases were found for this identity.")
-                        .font(.system(size: 14))
+                        .font(OnymType.font(size: 14))
                         .foregroundStyle(OnymTokens.text2)
                 } else {
                     SettingsCard {
@@ -227,7 +227,7 @@ private struct RecoveryAppealView: View {
                                 Button { openCase(caseID) } label: {
                                     HStack {
                                         Text(caseID)
-                                            .font(.system(size: 13, design: .monospaced))
+                                            .font(OnymType.mono(size: 13))
                                             .foregroundStyle(OnymTokens.text)
                                             .lineLimit(1)
                                         Spacer()
@@ -252,7 +252,7 @@ private struct RecoveryAppealView: View {
 
                 if let errorMessage {
                     Text(errorMessage)
-                        .font(.system(size: 13))
+                        .font(OnymType.font(size: 13))
                         .foregroundStyle(OnymTokens.red)
                         .accessibilityIdentifier("moderation.recovery.error")
                 }

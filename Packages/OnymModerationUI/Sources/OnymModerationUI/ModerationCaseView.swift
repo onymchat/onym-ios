@@ -113,12 +113,12 @@ public struct ModerationCaseView: View {
                         HStack(spacing: 8) {
                             ProgressView()
                             Text("Fetching the case from your authority…")
-                                .font(.system(size: 13))
+                                .font(OnymType.font(size: 13))
                                 .foregroundStyle(OnymTokens.text2)
                         }
                     } else {
                         Text("No case status is available yet.")
-                            .font(.system(size: 13))
+                            .font(OnymType.font(size: 13))
                             .foregroundStyle(OnymTokens.text2)
                     }
                 }
@@ -142,11 +142,11 @@ public struct ModerationCaseView: View {
             Task { await flow.refresh() }
         } label: {
             Text("Try again")
-                .font(.system(size: 15, weight: .medium))
+                .font(OnymType.font(size: 15, weight: .medium))
                 .foregroundStyle(OnymTokens.text)
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .background(OnymTokens.surface2,
-                            in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            in: RoundedRectangle(cornerRadius: OnymRadius.inset, style: .continuous))
         }
         .buttonStyle(.plain)
         .padding(.horizontal, 16)
@@ -168,13 +168,13 @@ public struct ModerationCaseView: View {
                                 : "Your response is on file.",
                             systemImage: "checkmark.circle.fill"
                         )
-                        .font(.system(size: 13))
+                        .font(OnymType.font(size: 13))
                         .foregroundStyle(OnymTokens.text)
                         .accessibilityIdentifier("moderation.case.response_receipt")
                     }
                     if flow.state.appealReceipt != nil {
                         Label("Your appeal is filed. The authority reviews it; a successful appeal issues a reversal.", systemImage: "checkmark.circle.fill")
-                            .font(.system(size: 13))
+                            .font(OnymType.font(size: 13))
                             .foregroundStyle(OnymTokens.text)
                             .accessibilityIdentifier("moderation.case.appeal_receipt")
                     }
@@ -195,10 +195,10 @@ public struct ModerationCaseView: View {
                     ForEach(Array(events.enumerated()), id: \.offset) { _, event in
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             Text(event.at.formatted(date: .abbreviated, time: .shortened))
-                                .font(.system(size: 12, design: .monospaced))
+                                .font(OnymType.mono(size: 12))
                                 .foregroundStyle(OnymTokens.text3)
                             Text(eventLabel(event.kind))
-                                .font(.system(size: 13))
+                                .font(OnymType.font(size: 13))
                                 .foregroundStyle(OnymTokens.text2)
                         }
                     }
@@ -218,20 +218,20 @@ public struct ModerationCaseView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     if flow.state.responseReceipt != nil {
                         Text("You can file additional statements while the case is open; they attach to the same case.")
-                            .font(.system(size: 12))
+                            .font(OnymType.font(size: 12))
                             .foregroundStyle(OnymTokens.text3)
                     }
                     TextEditor(text: $responseText)
                         .frame(minHeight: 100)
-                        .font(.system(size: 14))
+                        .font(OnymType.font(size: 14))
                         .scrollContentBackground(.hidden)
                         .padding(8)
                         .background(OnymTokens.surface,
-                                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    in: RoundedRectangle(cornerRadius: OnymRadius.control, style: .continuous))
                         .accessibilityIdentifier("moderation.case.response_editor")
                     if let passed = flow.responseDeadlinePassed {
                         Text("The response deadline (\(passed.formatted(date: .abbreviated, time: .shortened))) has passed by this device's clock. A filing is still accepted — it will be marked late.")
-                            .font(.system(size: 12))
+                            .font(OnymType.font(size: 12))
                             .foregroundStyle(OnymTokens.text3)
                     }
                     if let message = flow.state.responseErrorMessage {
@@ -268,15 +268,15 @@ public struct ModerationCaseView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     TextEditor(text: $appealText)
                         .frame(minHeight: 80)
-                        .font(.system(size: 14))
+                        .font(OnymType.font(size: 14))
                         .scrollContentBackground(.hidden)
                         .padding(8)
                         .background(OnymTokens.surface,
-                                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    in: RoundedRectangle(cornerRadius: OnymRadius.control, style: .continuous))
                         .accessibilityIdentifier("moderation.case.appeal_editor")
                     if let passed = flow.appealDeadlinePassed {
                         Text("The appeal window closed \(passed.formatted(date: .abbreviated, time: .shortened)) by this device's clock. The authority decides whether a filing is still accepted.")
-                            .font(.system(size: 12))
+                            .font(OnymType.font(size: 12))
                             .foregroundStyle(OnymTokens.text3)
                     }
                     if let message = flow.state.appealErrorMessage {
@@ -312,15 +312,15 @@ public struct ModerationCaseView: View {
             SettingsCard {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("If you acquired this device after the ban, you can file a new-holder claim. A human reviews it on an expedited basis — a device is not a person.")
-                        .font(.system(size: 13))
+                        .font(OnymType.font(size: 13))
                         .foregroundStyle(OnymTokens.text2)
                     if flow.state.newHolderReceipt != nil {
                         Label("Your claim is submitted for expedited human review.", systemImage: "checkmark.circle.fill")
-                            .font(.system(size: 13))
+                            .font(OnymType.font(size: 13))
                             .foregroundStyle(OnymTokens.text)
                             .accessibilityIdentifier("moderation.case.new_holder_receipt")
                         Text("You can file a corrected claim; it attaches to the same case.")
-                            .font(.system(size: 12))
+                            .font(OnymType.font(size: 12))
                             .foregroundStyle(OnymTokens.text3)
                     }
                     // The editor stays after a receipt: `filed` is
@@ -331,11 +331,11 @@ public struct ModerationCaseView: View {
                     Group {
                         TextEditor(text: $newHolderText)
                             .frame(minHeight: 60)
-                            .font(.system(size: 14))
+                            .font(OnymType.font(size: 14))
                             .scrollContentBackground(.hidden)
                             .padding(8)
                             .background(OnymTokens.surface,
-                                        in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                        in: RoundedRectangle(cornerRadius: OnymRadius.control, style: .continuous))
                             .accessibilityIdentifier("moderation.case.new_holder_editor")
                         if let message = flow.state.newHolderErrorMessage {
                             inlineError(message, id: "moderation.case.new_holder_error")
@@ -348,11 +348,11 @@ public struct ModerationCaseView: View {
                             }
                         } label: {
                             Text(flow.state.isSubmittingNewHolder ? "Filing…" : "File new-holder claim")
-                                .font(.system(size: 15, weight: .medium))
+                                .font(OnymType.font(size: 15, weight: .medium))
                                 .foregroundStyle(OnymTokens.text)
                                 .frame(maxWidth: .infinity, minHeight: 44)
                                 .background(OnymTokens.surface2,
-                                            in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                            in: RoundedRectangle(cornerRadius: OnymRadius.inset, style: .continuous))
                         }
                         .buttonStyle(.plain)
                         .disabled(trimmed(newHolderText).isEmpty || flow.state.isSubmittingNewHolder)
@@ -421,14 +421,14 @@ public struct ModerationCaseView: View {
 
     private func inlineError(_ message: String, id: String) -> some View {
         Text(message)
-            .font(.system(size: 12))
+            .font(OnymType.font(size: 12))
             .foregroundStyle(OnymTokens.red)
             .accessibilityIdentifier(id)
     }
 
     private func errorText(_ message: String, id: String) -> some View {
         Text(message)
-            .font(.system(size: 12))
+            .font(OnymType.font(size: 12))
             .foregroundStyle(OnymTokens.red)
             .padding(.horizontal, 16)
             .padding(.top, 8)
@@ -438,10 +438,10 @@ public struct ModerationCaseView: View {
     private func row(_ label: LocalizedStringKey, _ value: String, monospaced: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label)
-                .font(.system(size: 13, weight: .semibold))
+                .font(OnymType.font(size: 13, weight: .semibold))
                 .foregroundStyle(OnymTokens.text)
             Text(value)
-                .font(monospaced ? .system(size: 12, design: .monospaced) : .system(size: 13))
+                .font(monospaced ? OnymType.mono(size: 12) : OnymType.font(size: 13))
                 .foregroundStyle(OnymTokens.text2)
                 .textSelection(.enabled)
         }

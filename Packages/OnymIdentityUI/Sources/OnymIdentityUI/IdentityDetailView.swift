@@ -44,7 +44,7 @@ struct IdentityDetailView: View {
                     } right: {
                         if isActive {
                             Text("Active")
-                                .font(.system(size: 14.5))
+                                .font(OnymType.font(size: 14.5))
                                 .foregroundStyle(OnymTokens.text2)
                         }
                     }
@@ -129,12 +129,12 @@ struct IdentityDetailView: View {
             .padding(.top, 14)
 
             Text("BLS \(flow.blsPrefix(of: summary))…")
-                .font(.system(size: 12, design: .monospaced))
+                .font(OnymType.mono(size: 12))
                 .foregroundStyle(OnymTokens.text2)
 
             if isActive {
                 Text("Active identity")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(OnymType.font(size: 12, weight: .medium))
                     .foregroundStyle(OnymTokens.green)
                     .padding(.top, 4)
             }
@@ -159,25 +159,25 @@ struct IdentityDetailView: View {
                     )
                     .padding(12)
                     .background(OnymTokens.surface2,
-                                in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                in: RoundedRectangle(cornerRadius: OnymRadius.panel, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: OnymRadius.panel, style: .continuous)
                         .stroke(OnymTokens.hairline, lineWidth: 1))
 
                     Text("Scan with Onym on another device to open a private chat with this identity.")
-                        .font(.system(size: 13))
+                        .font(OnymType.font(size: 13))
                         .foregroundStyle(OnymTokens.text2)
                         .multilineTextAlignment(.center)
                         .lineSpacing(2)
                         .frame(maxWidth: 280)
 
                     Text(settingsInviteURL(blsPublicKey: summary.inboxPublicKey))
-                        .font(.system(size: 11.5, design: .monospaced))
+                        .font(OnymType.mono(size: 11.5))
                         .foregroundStyle(OnymTokens.text2)
                         .lineLimit(1).truncationMode(.middle)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
                         .background(OnymTokens.surface3,
-                                    in: RoundedRectangle(cornerRadius: 8))
+                                    in: RoundedRectangle(cornerRadius: OnymRadius.badge))
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 20)
@@ -201,7 +201,7 @@ struct IdentityDetailView: View {
                     ShareLink(item: settingsInviteURL(blsPublicKey: summary.inboxPublicKey)) {
                         HStack(spacing: 6) {
                             Image(systemName: "square.and.arrow.up")
-                            Text("Share").font(.system(size: 15, weight: .medium))
+                            Text("Share").font(OnymType.font(size: 15, weight: .medium))
                         }
                         .foregroundStyle(OnymAccent.blue.color)
                         .frame(maxWidth: .infinity, minHeight: 44)
@@ -238,12 +238,12 @@ private struct EditableIdentityName: View {
                 .multilineTextAlignment(.center)
                 .textInputAutocapitalization(.words)
                 .autocorrectionDisabled()
-                .font(.system(size: 24, weight: .bold))
+                .font(OnymType.font(size: 24, weight: .bold))
                 .foregroundStyle(OnymTokens.text)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    RoundedRectangle(cornerRadius: OnymRadius.badge, style: .continuous)
                         .stroke(OnymAccent.blue.color, lineWidth: 1.5)
                 )
                 .onChange(of: draft) { _, newValue in
@@ -266,10 +266,10 @@ private struct EditableIdentityName: View {
             } label: {
                 HStack(spacing: 6) {
                     Text(currentName)
-                        .font(.system(size: 24, weight: .bold))
+                        .font(OnymType.font(size: 24, weight: .bold))
                         .foregroundStyle(OnymTokens.text)
                     Image(systemName: "pencil")
-                        .font(.system(size: 14, weight: .medium))
+                        .font(OnymType.font(size: 14, weight: .medium))
                         .foregroundStyle(OnymTokens.text2.opacity(0.55))
                 }
                 .padding(.horizontal, 6)

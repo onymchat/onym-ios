@@ -1,4 +1,5 @@
 import SwiftUI
+import OnymDesignTokens
 
 // MARK: - Section / row / card primitives shared by the Settings tree
 //
@@ -37,16 +38,16 @@ public struct SettingsIconTile: View {
     }
 
     public var body: some View {
-        RoundedRectangle(cornerRadius: 7, style: .continuous)
+        RoundedRectangle(cornerRadius: OnymRadius.tile, style: .continuous)
             .fill(bg)
             .frame(width: size, height: size)
             .overlay(
                 Image(systemName: symbol)
-                    .font(.system(size: size * 0.5, weight: weight))
+                    .font(OnymType.font(size: size * 0.5, weight: weight))
                     .foregroundStyle(.white)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                RoundedRectangle(cornerRadius: OnymRadius.tile, style: .continuous)
                     .stroke(.white.opacity(0.18), lineWidth: 0.5)
             )
     }
@@ -66,12 +67,12 @@ public struct SettingsContentTile<Content: View>: View {
     }
 
     public var body: some View {
-        RoundedRectangle(cornerRadius: 7, style: .continuous)
+        RoundedRectangle(cornerRadius: OnymRadius.tile, style: .continuous)
             .fill(bg)
             .frame(width: size, height: size)
             .overlay(content().foregroundStyle(.white))
             .overlay(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                RoundedRectangle(cornerRadius: OnymRadius.tile, style: .continuous)
                     .stroke(.white.opacity(0.18), lineWidth: 0.5)
             )
     }
@@ -100,7 +101,7 @@ public struct SettingsSectionLabel<Trailing: View>: View {
     public var body: some View {
         HStack(alignment: .bottom) {
             (verbatimText.map { Text(verbatim: $0) } ?? Text(text))
-                .font(.system(size: 12.5, weight: .medium))
+                .font(OnymType.font(size: 12.5, weight: .medium))
                 .foregroundStyle(OnymTokens.text2)
             Spacer()
             trailing()
@@ -137,7 +138,7 @@ public struct SettingsFootnote: View {
     }
     public var body: some View {
         (verbatimText.map { Text(verbatim: $0) } ?? Text(text))
-            .font(.system(size: 12.5))
+            .font(OnymType.font(size: 12.5))
             .foregroundStyle(OnymTokens.text2)
             .lineSpacing(2)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -160,7 +161,7 @@ public struct SettingsLargeTitle: View {
     }
     public var body: some View {
         (verbatimText.map { Text(verbatim: $0) } ?? Text(text))
-            .font(.system(size: 34, weight: .bold))
+            .font(OnymType.font(size: 34, weight: .bold))
             .foregroundStyle(OnymTokens.text)
             .tracking(-0.75)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -180,7 +181,7 @@ public struct SettingsCard<Content: View>: View {
     public var body: some View {
         VStack(spacing: 0) { content() }
             .background(OnymTokens.surface2,
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        in: RoundedRectangle(cornerRadius: OnymRadius.card, style: .continuous))
             .padding(.horizontal, 16)
     }
 }
@@ -221,8 +222,8 @@ public struct SwipeToDeleteRow<Content: View>: View {
         ZStack(alignment: .trailing) {
             Button(role: .destructive, action: confirmDelete) {
                 VStack(spacing: 3) {
-                    Image(systemName: "trash.fill").font(.system(size: 16, weight: .semibold))
-                    Text(deleteLabel).font(.system(size: 11, weight: .semibold))
+                    Image(systemName: "trash.fill").font(OnymType.font(size: 16, weight: .semibold))
+                    Text(deleteLabel).font(OnymType.font(size: 11, weight: .semibold))
                 }
                 .foregroundStyle(.white)
                 .frame(width: revealWidth)
@@ -385,15 +386,15 @@ public struct SettingsRow<Tile: View, Right: View>: View {
                 VStack(alignment: .leading, spacing: 1) {
                     (verbatimTitle.map { Text(verbatim: $0) } ?? Text(title))
                         .font(titleMono
-                              ? .system(size: 16.5, design: .monospaced)
-                              : .system(size: 16.5))
+                              ? OnymType.mono(size: 16.5)
+                              : OnymType.font(size: 16.5))
                         .foregroundStyle(titleColor)
                         .lineLimit(1)
                     if let subtitle {
                         Text(subtitle)
                             .font(subtitleMono
-                                  ? .system(size: 12.5, design: .monospaced)
-                                  : .system(size: 12.5))
+                                  ? OnymType.mono(size: 12.5)
+                                  : OnymType.font(size: 12.5))
                             .foregroundStyle(OnymTokens.text2)
                             .lineLimit(subtitleLineLimit)
                             .truncationMode(.middle)
@@ -403,7 +404,7 @@ public struct SettingsRow<Tile: View, Right: View>: View {
                 right()
                 if hasChevron {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(OnymType.font(size: 12, weight: .semibold))
                         .foregroundStyle(OnymTokens.text3)
                 }
             }
@@ -491,11 +492,11 @@ public struct SettingsChip: View {
 
     public var body: some View {
         Text(text)
-            .font(.system(size: 9.5, weight: .bold))
+            .font(OnymType.font(size: 9.5, weight: .bold))
             .tracking(0.5)
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
-            .background(bg, in: RoundedRectangle(cornerRadius: 4))
+            .background(bg, in: RoundedRectangle(cornerRadius: OnymRadius.chip))
             .foregroundStyle(fg)
     }
 }
@@ -523,7 +524,7 @@ public struct SettingsTextButton: View {
         Button(action: action) {
             HStack(spacing: 6) {
                 Image(systemName: systemImage)
-                Text(title).font(.system(size: 15, weight: .medium))
+                Text(title).font(OnymType.font(size: 15, weight: .medium))
             }
             .foregroundStyle(foreground)
             .frame(maxWidth: .infinity, minHeight: 44)
@@ -551,13 +552,13 @@ public struct SettingsPrimaryButton<Label: View>: View {
     public var body: some View {
         Button(action: action) {
             label()
-                .font(.system(size: 16, weight: .semibold))
+                .font(OnymType.font(size: 16, weight: .semibold))
                 .foregroundStyle(OnymTokens.onAccent)
                 .frame(maxWidth: .infinity, minHeight: 50)
                 .background(disabled
                             ? OnymAccent.blue.color.opacity(0.45)
                             : OnymAccent.blue.color,
-                            in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            in: RoundedRectangle(cornerRadius: OnymRadius.card, style: .continuous))
         }
         .disabled(disabled)
     }

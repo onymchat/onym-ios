@@ -1,4 +1,5 @@
 import SwiftUI
+import OnymDesignTokens
 
 /// Top-level view for the "Back up keys" flow. Stateless w.r.t. domain
 /// data — reads `flow.step` and renders the matching subview, wires
@@ -134,7 +135,7 @@ private struct IntroScreen: View {
                 }
                 .background(
                     Color(UIColor.secondarySystemGroupedBackground),
-                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    in: RoundedRectangle(cornerRadius: OnymRadius.control, style: .continuous)
                 )
                 .padding(.horizontal, 16)
 
@@ -147,7 +148,7 @@ private struct IntroScreen: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
                     .foregroundStyle(Color.white)
-                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: OnymRadius.card, style: .continuous))
                 }
                 .disabled(!isReady)
                 .opacity(isReady ? 1 : 0.5)
@@ -163,7 +164,7 @@ private struct IntroScreen: View {
     private var heroCard: some View {
         VStack(spacing: 12) {
             ZStack {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                RoundedRectangle(cornerRadius: OnymRadius.hero, style: .continuous)
                     .fill(LinearGradient(
                         colors: [Color.accentColor, Color.purple],
                         startPoint: .topLeading,
@@ -172,7 +173,7 @@ private struct IntroScreen: View {
                     .frame(width: 72, height: 72)
                     .shadow(color: Color.accentColor.opacity(0.25), radius: 10, x: 0, y: 8)
                 Image(systemName: "key.fill")
-                    .font(.system(size: 30, weight: .semibold))
+                    .font(OnymType.font(size: 30, weight: .semibold))
                     .foregroundStyle(.white)
             }
             Text("Your identity, in 12 words")
@@ -188,7 +189,7 @@ private struct IntroScreen: View {
         .frame(maxWidth: .infinity)
         .background(
             Color(UIColor.secondarySystemGroupedBackground),
-            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+            in: RoundedRectangle(cornerRadius: OnymRadius.panel, style: .continuous)
         )
     }
 
@@ -263,7 +264,7 @@ private struct RevealScreen: View {
                             .padding(.vertical, 12)
                             .background(
                                 Color.accentColor.opacity(0.12),
-                                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                in: RoundedRectangle(cornerRadius: OnymRadius.card, style: .continuous)
                             )
                     }
                     .disabled(!revealed)
@@ -278,7 +279,7 @@ private struct RevealScreen: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
                         .foregroundStyle(Color.white)
-                        .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .background(Color.accentColor, in: RoundedRectangle(cornerRadius: OnymRadius.card, style: .continuous))
                 }
                 .disabled(!revealed)
                 .opacity(revealed ? 1 : 0.5)
@@ -325,7 +326,7 @@ private struct RevealScreen: View {
                     .padding(.vertical, 7)
                     .background(
                         Color.primary.opacity(0.03),
-                        in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        in: RoundedRectangle(cornerRadius: OnymRadius.badge, style: .continuous)
                     )
                 }
             }
@@ -341,7 +342,7 @@ private struct RevealScreen: View {
                                 .fill(Color.primary.opacity(0.08))
                                 .frame(width: 44, height: 44)
                             Image(systemName: "eye.slash")
-                                .font(.system(size: 18, weight: .semibold))
+                                .font(OnymType.font(size: 18, weight: .semibold))
                                 .foregroundStyle(Color.primary)
                         }
                         Text("Tap to reveal")
@@ -356,7 +357,7 @@ private struct RevealScreen: View {
         .frame(maxWidth: .infinity)
         .background(
             Color(UIColor.secondarySystemGroupedBackground),
-            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+            in: RoundedRectangle(cornerRadius: OnymRadius.panel, style: .continuous)
         )
     }
 }
@@ -382,7 +383,7 @@ private struct VerifyScreen: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                     Text("\(round.wordPosition)")
-                        .font(.system(size: 64, weight: .bold))
+                        .font(OnymType.font(size: 64, weight: .bold))
                         .foregroundStyle(Color.accentColor)
                         .monospacedDigit()
                         .accessibilityIdentifier("verify.position")
@@ -392,7 +393,7 @@ private struct VerifyScreen: View {
                 .padding(.horizontal, 16)
                 .background(
                     Color(UIColor.secondarySystemGroupedBackground),
-                    in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    in: RoundedRectangle(cornerRadius: OnymRadius.panel, style: .continuous)
                 )
                 .padding(.horizontal, 16)
                 .padding(.bottom, 20)
@@ -444,7 +445,7 @@ private struct VerifyOption: View {
                             .fill(Color.green)
                             .frame(width: 22, height: 22)
                         Image(systemName: "checkmark")
-                            .font(.system(size: 12, weight: .bold))
+                            .font(OnymType.font(size: 12, weight: .bold))
                             .foregroundStyle(.white)
                     }
                 }
@@ -453,9 +454,9 @@ private struct VerifyOption: View {
             .padding(.horizontal, 18)
             .padding(.vertical, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(background, in: RoundedRectangle(cornerRadius: OnymRadius.card, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: OnymRadius.card, style: .continuous)
                     .strokeBorder(border, lineWidth: 1.5)
             )
         }
@@ -516,7 +517,7 @@ private struct DoneScreen: View {
                     .frame(width: 96, height: 96)
                     .shadow(color: Color.green.opacity(0.4), radius: 16, x: 0, y: 12)
                 Image(systemName: "checkmark")
-                    .font(.system(size: 44, weight: .bold))
+                    .font(OnymType.font(size: 44, weight: .bold))
                     .foregroundStyle(.white)
             }
             .padding(.bottom, 24)
@@ -538,7 +539,7 @@ private struct DoneScreen: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
                     .foregroundStyle(.white)
-                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: OnymRadius.card, style: .continuous))
             }
             .padding(.horizontal, 16)
             .accessibilityIdentifier("done.button")
@@ -572,11 +573,11 @@ private struct RoundedIcon: View {
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
+            RoundedRectangle(cornerRadius: OnymRadius.tile, style: .continuous)
                 .fill(background)
                 .frame(width: 30, height: 30)
             Image(systemName: systemImage)
-                .font(.system(size: 15, weight: .semibold))
+                .font(OnymType.font(size: 15, weight: .semibold))
                 .foregroundStyle(.white)
         }
     }

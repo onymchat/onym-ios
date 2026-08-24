@@ -260,11 +260,11 @@ struct ChatMembersView: View {
                 } label: {
                     HStack(spacing: 5) {
                         Text(group.name)
-                            .font(.system(size: 18, weight: .semibold))
+                            .font(OnymType.font(size: 18, weight: .semibold))
                             .foregroundStyle(OnymTokens.text)
                             .lineLimit(1)
                         Image(systemName: "pencil")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(OnymType.font(size: 13, weight: .semibold))
                             .foregroundStyle(OnymTokens.text3)
                     }
                 }
@@ -272,7 +272,7 @@ struct ChatMembersView: View {
                 .accessibilityIdentifier("members.rename_button")
             } else {
                 Text(group.name)
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(OnymType.font(size: 18, weight: .semibold))
                     .foregroundStyle(OnymTokens.text)
                     .lineLimit(1)
             }
@@ -307,15 +307,15 @@ struct ChatMembersView: View {
             }
             .background(OnymTokens.surface2)
             .overlay(
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: OnymRadius.inset)
                     .stroke(OnymTokens.hairline, lineWidth: 1)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .clipShape(RoundedRectangle(cornerRadius: OnymRadius.inset))
             .padding(.horizontal, 16)
             .padding(.top, 12)
 
             Text("\(group.memberProfiles.count) member\(group.memberProfiles.count == 1 ? "" : "s")")
-                .font(.system(size: 12))
+                .font(OnymType.font(size: 12))
                 .foregroundStyle(OnymTokens.text3)
                 .padding(.top, 8)
                 .padding(.bottom, 24)
@@ -331,20 +331,20 @@ struct ChatMembersView: View {
     private func rulesSection(_ message: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("GROUP RULES")
-                .font(.system(size: 12, weight: .semibold))
+                .font(OnymType.font(size: 12, weight: .semibold))
                 .foregroundStyle(OnymTokens.text3)
                 .padding(.leading, 4)
             Text(message)
-                .font(.system(size: 15))
+                .font(OnymType.font(size: 15))
                 .foregroundStyle(OnymTokens.text)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .textSelection(.enabled)
                 .padding(14)
                 .background(OnymTokens.surface2)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 12).stroke(OnymTokens.hairline, lineWidth: 1)
+                    RoundedRectangle(cornerRadius: OnymRadius.inset).stroke(OnymTokens.hairline, lineWidth: 1)
                 )
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .clipShape(RoundedRectangle(cornerRadius: OnymRadius.inset))
                 .accessibilityIdentifier("members.rules")
         }
         .padding(.horizontal, 16)
@@ -358,11 +358,11 @@ struct ChatMembersView: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(row.displayAlias)
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(OnymType.font(size: 15, weight: .semibold))
                         .foregroundStyle(OnymTokens.text)
                     if row.isSelf {
                         Text("(you)")
-                            .font(.system(size: 12))
+                            .font(OnymType.font(size: 12))
                             .foregroundStyle(OnymTokens.text2)
                     }
                 }
@@ -372,14 +372,14 @@ struct ChatMembersView: View {
                 // apart by this and nothing else — and the standing is
                 // a second line rather than a replacement for it.
                 Text("BLS \(row.blsPrefix)\u{2026}")
-                    .font(.system(size: 12, weight: .regular, design: .monospaced))
+                    .font(OnymType.mono(size: 12))
                     .foregroundStyle(OnymTokens.text3)
                 if let mark {
                     HStack(spacing: 4) {
                         Image(systemName: mark.symbol)
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(OnymType.font(size: 10, weight: .semibold))
                         Text(mark.text)
-                            .font(.system(size: 12))
+                            .font(OnymType.font(size: 12))
                     }
                     .foregroundStyle(mark.color)
                 }
@@ -392,7 +392,7 @@ struct ChatMembersView: View {
             // nothing — the dead end this rule was written to avoid.
             if row.standing.hasSomethingToShow {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(OnymType.font(size: 12, weight: .semibold))
                     .foregroundStyle(OnymTokens.text3)
             }
         }
@@ -423,7 +423,7 @@ struct ChatMembersView: View {
                 .fill(OnymAccent.blue.color.opacity(row.isSelf ? 1.0 : 0.6))
                 .frame(width: 36, height: 36)
             Text(initial)
-                .font(.system(size: 14, weight: .semibold))
+                .font(OnymType.font(size: 14, weight: .semibold))
                 .foregroundStyle(OnymTokens.onAccent)
         }
     }
@@ -434,13 +434,13 @@ struct ChatMembersView: View {
     private var emptyState: some View {
         VStack(spacing: 12) {
             Image(systemName: "person.2")
-                .font(.system(size: 40))
+                .font(OnymType.font(size: 40))
                 .foregroundStyle(OnymTokens.text3)
             Text("No members yet")
-                .font(.system(size: 15, weight: .semibold))
+                .font(OnymType.font(size: 15, weight: .semibold))
                 .foregroundStyle(OnymTokens.text)
             Text("Invite people from the chat to see them here.")
-                .font(.system(size: 13))
+                .font(OnymType.font(size: 13))
                 .foregroundStyle(OnymTokens.text2)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
@@ -454,10 +454,10 @@ struct ChatMembersView: View {
         VStack(spacing: 12) {
             Spacer()
             Image(systemName: "questionmark.circle")
-                .font(.system(size: 40))
+                .font(OnymType.font(size: 40))
                 .foregroundStyle(OnymTokens.text3)
             Text("Group not found")
-                .font(.system(size: 15, weight: .semibold))
+                .font(OnymType.font(size: 15, weight: .semibold))
                 .foregroundStyle(OnymTokens.text)
             Spacer()
         }

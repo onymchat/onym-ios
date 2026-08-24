@@ -136,11 +136,11 @@ struct PendingChatThreadView: View {
                 imageData: nil
             )
             Text(displayName)
-                .font(.system(size: 20, weight: .bold))
+                .font(OnymType.font(size: 20, weight: .bold))
                 .foregroundStyle(OnymTokens.text)
             if !row.inviterAlias.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Text("\(row.inviterAlias) invited you")
-                    .font(.system(size: 13))
+                    .font(OnymType.font(size: 13))
                     .foregroundStyle(OnymTokens.text2)
             }
         }
@@ -151,12 +151,12 @@ struct PendingChatThreadView: View {
     /// already has.
     private func invitationCard(_ message: String) -> some View {
         Text(message)
-            .font(.system(size: 14))
+            .font(OnymType.font(size: 14))
             .foregroundStyle(OnymTokens.text)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
             .background(OnymTokens.surface2)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .clipShape(RoundedRectangle(cornerRadius: OnymRadius.inset))
             .textSelection(.enabled)
             .accessibilityIdentifier("pending_chat.invitation_message")
     }
@@ -167,7 +167,7 @@ struct PendingChatThreadView: View {
             switch row.state {
             case .offered:
                 Text("Accepting sends a request. The founder decides who comes in, so you'll be in once they approve.")
-                    .font(.system(size: 13))
+                    .font(OnymType.font(size: 13))
                     .foregroundStyle(OnymTokens.text2)
                     .multilineTextAlignment(.center)
                 primaryButton(
@@ -220,7 +220,7 @@ struct PendingChatThreadView: View {
         VStack(spacing: 10) {
             ProgressView().controlSize(.large)
             Text(title)
-                .font(.system(size: 16, weight: .semibold))
+                .font(OnymType.font(size: 16, weight: .semibold))
                 .foregroundStyle(OnymTokens.text)
                 // On the headline, and nothing above it carries an
                 // identifier: SwiftUI pushes a container's identifier
@@ -228,7 +228,7 @@ struct PendingChatThreadView: View {
                 // stack silently renames every leaf inside it.
                 .accessibilityIdentifier("pending_chat.waiting")
             Text(detail)
-                .font(.system(size: 13))
+                .font(OnymType.font(size: 13))
                 .foregroundStyle(OnymTokens.text2)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 16)
@@ -243,10 +243,10 @@ struct PendingChatThreadView: View {
     private func stuck(_ row: PendingChatsFlow.Row) -> some View {
         VStack(spacing: 12) {
             Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 30))
+                .font(OnymType.font(size: 30))
                 .foregroundStyle(OnymTokens.text2)
             Text(stuckMessage(row.state))
-                .font(.system(size: 13))
+                .font(OnymType.font(size: 13))
                 .foregroundStyle(OnymTokens.text2)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 16)
@@ -301,13 +301,13 @@ struct PendingChatThreadView: View {
                         .scaleEffect(0.8)
                 }
                 Text(title)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(OnymType.font(size: 15, weight: .semibold))
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 14)
             .background(OnymAccent.blue.color.opacity(disabled ? 0.7 : 1.0))
             .foregroundStyle(OnymTokens.onAccent)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .clipShape(RoundedRectangle(cornerRadius: OnymRadius.inset))
         }
         .disabled(disabled)
         .accessibilityIdentifier(identifier)
@@ -323,12 +323,12 @@ struct PendingChatThreadView: View {
     ) -> some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 14, weight: .semibold))
+                .font(OnymType.font(size: 14, weight: .semibold))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)
                 .background(OnymTokens.surface2)
                 .foregroundStyle(OnymTokens.text)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .clipShape(RoundedRectangle(cornerRadius: OnymRadius.inset))
         }
         .disabled(disabled)
         .accessibilityIdentifier(identifier)
@@ -339,19 +339,19 @@ struct PendingChatThreadView: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(OnymTokens.red)
             Text(message)
-                .font(.system(size: 13))
+                .font(OnymType.font(size: 13))
                 .foregroundStyle(OnymTokens.text)
             Spacer()
             Button {
                 flow.dismissError()
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(OnymType.font(size: 12, weight: .semibold))
                     .foregroundStyle(OnymTokens.text2)
             }
         }
         .padding(12)
         .background(OnymTokens.red.opacity(0.12))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .clipShape(RoundedRectangle(cornerRadius: OnymRadius.control))
     }
 }
