@@ -66,6 +66,80 @@ public enum OnymType {
         .system(size: size, weight: weight)
     }
 
+    // MARK: UIKit
+
+    /// The text face, for the UIKit half of the app.
+    ///
+    /// The chat thread draws its cells in UIKit, so without these the
+    /// most-used screen in the app would be the one place an adopter's
+    /// typeface never reached.
+    ///
+    /// Pair with `adjustsFontForContentSizeCategory = true`. Unlike the
+    /// SwiftUI side this goes through `UIFontMetrics.scaledFont`, which
+    /// is what that flag tracks — a label given a font this package had
+    /// already multiplied would size correctly once and then never
+    /// follow the reader again.
+    ///
+    /// The cost is that `scaledFont` rounds to whole points. Every size
+    /// UIKit asks for here is already whole, so nothing rounds today;
+    /// a half-point size passed to this would quietly become a whole one.
+    public static func uiFont(size: CGFloat, weight: UIFont.Weight = .regular) -> UIFont {
+        scaled(.systemFont(ofSize: size, weight: weight))
+    }
+
+    /// The mono face for UIKit — fingerprints, keys.
+    public static func uiMono(size: CGFloat, weight: UIFont.Weight = .regular) -> UIFont {
+        scaled(.monospacedSystemFont(ofSize: size, weight: weight))
+    }
+
+    /// Proportional face with fixed-width digits — timers and durations,
+    /// where a counting number should not shuffle the layout each tick.
+    public static func uiMonoDigit(size: CGFloat, weight: UIFont.Weight = .regular) -> UIFont {
+        scaled(.monospacedDigitSystemFont(ofSize: size, weight: weight))
+    }
+
+    /// The body face for a UIKit text *container* — a `UITextView`
+    /// whose layout maths reads `font.lineHeight` back out.
+    ///
+    /// The three candidates all report the same metrics — 17pt,
+    /// `lineHeight` 20.287, `ceil` 21:
+    ///
+    /// - `preferredFont(forTextStyle: .body)`
+    /// - `systemFont(ofSize: 17)`
+    /// - `UIFontMetrics.scaledFont(for: systemFont(ofSize: 17))`
+    ///
+    /// They do not lay out the same. The composer sizes itself to
+    /// `ceil(font.lineHeight) * 3` and agrees with its own contents when
+    /// given the text-style font; given the metrics-derived one it
+    /// stands two points taller than three lines of its own text.
+    ///
+    /// Why the layout differs when the reported metrics match is not
+    /// established — only that it does, repeatably, and that a test
+    /// caught it. That is the honest extent of what is known here.
+    ///
+    /// Use this where the app measures text rather than merely draws
+    /// it. Adopters swapping the typeface should return their own face
+    /// here too, keeping its natural leading.
+    public static func uiBody() -> UIFont {
+        .preferredFont(forTextStyle: .body)
+    }
+
+    /// UIKit's `fixed`: a size that does not answer to the setting,
+    /// for labels pinned inside artwork — a duration badge sitting on a
+    /// video thumbnail, an overflow count on a photo tile.
+    public static func uiFixed(size: CGFloat, weight: UIFont.Weight = .regular) -> UIFont {
+        .systemFont(ofSize: size, weight: weight)
+    }
+
+    private static func scaled(_ font: UIFont) -> UIFont {
+        // `compatibleWith:` for the same reason `scale()` needs it —
+        // `scaledFont(for:)` alone ignores `UITraitCollection.current`
+        // and hands back the unscaled font at every setting. Measured:
+        // 12pt in, 12pt out, at the largest accessibility size.
+        UIFontMetrics(forTextStyle: .body)
+            .scaledFont(for: font, compatibleWith: .current)
+    }
+
     /// The reader's text-size setting, as a multiplier.
     ///
     /// Keyed to `.body`, so the whole app moves on one curve rather than

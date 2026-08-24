@@ -116,7 +116,10 @@ final class AlbumGridView: UIView {
             addSubview(playGlyph)
 
             overflowLabel.translatesAutoresizingMaskIntoConstraints = false
-            overflowLabel.font = .systemFont(ofSize: 22, weight: .semibold)
+            // Fixed: this sits centred on a photo tile in a grid of fixed
+            // cells. Growing it 2.8× would spill out of the tile. The
+            // count is announced instead — see accessibilityLabel below.
+            overflowLabel.font = OnymType.uiFixed(size: 22, weight: .semibold)
             overflowLabel.textColor = .white
             overflowLabel.textAlignment = .center
             overflowLabel.backgroundColor = OnymTokens.scrimUI.withAlphaComponent(0.45)
@@ -150,6 +153,13 @@ final class AlbumGridView: UIView {
             playGlyph.isHidden = !item.isVideo
             overflowLabel.isHidden = overflowCount <= 0
             overflowLabel.text = overflowCount > 0 ? "+\(overflowCount)" : nil
+            // The plate cannot grow with the reader's setting without
+            // spilling out of its tile, so the count is spoken instead
+            // of only drawn.
+            overflowLabel.isAccessibilityElement = overflowCount > 0
+            overflowLabel.accessibilityLabel = overflowCount > 0
+                ? "\(overflowCount) more"
+                : nil
             imageView.image = Blurhash.decode(poster.blurhash, size: CGSize(width: 24, height: 24))
             guard let imageLoader else { return }
             let sha = poster.sha256

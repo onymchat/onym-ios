@@ -363,7 +363,10 @@ final class ChatBubbleCell: UITableViewCell {
         }
         bodyView.setBody(
             message.body,
-            font: .preferredFont(forTextStyle: .body),
+            // uiBody, not uiFont(17): the cell measures this text to
+            // size itself, so the font's leading has to be the leading
+            // TextKit will actually lay out.
+            font: OnymType.uiBody(),
             color: bodyColor
         )
         applyNameHeader(sender)
@@ -940,7 +943,9 @@ final class ChatBubbleCell: UITableViewCell {
         attachmentImageView.addSubview(playOverlay)
 
         durationLabel.translatesAutoresizingMaskIntoConstraints = false
-        durationLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+        // Fixed: a duration plate sitting on a video thumbnail, whose
+        // size the thumbnail dictates.
+        durationLabel.font = OnymType.uiFixed(size: 11, weight: .semibold)
         durationLabel.textColor = .white
         durationLabel.textAlignment = .center
         durationLabel.backgroundColor = OnymTokens.scrimUI.withAlphaComponent(0.55)
@@ -1038,8 +1043,7 @@ final class ChatBubbleCell: UITableViewCell {
         quoteBar.layer.cornerCurve = .continuous
         quoteContainer.addSubview(quoteBar)
 
-        let nameBase = UIFont.systemFont(ofSize: 12, weight: .semibold)
-        quoteNameLabel.font = UIFontMetrics(forTextStyle: .caption1).scaledFont(for: nameBase)
+        quoteNameLabel.font = OnymType.uiFont(size: 12, weight: .semibold)
         quoteNameLabel.adjustsFontForContentSizeCategory = true
         quoteNameLabel.numberOfLines = 1
         quoteNameLabel.lineBreakMode = .byTruncatingTail
@@ -1047,8 +1051,7 @@ final class ChatBubbleCell: UITableViewCell {
         quoteNameLabel.accessibilityIdentifier = "chat.bubble.quote.name"
         quoteContainer.addSubview(quoteNameLabel)
 
-        let snippetBase = UIFont.systemFont(ofSize: 13, weight: .regular)
-        quoteSnippetLabel.font = UIFontMetrics(forTextStyle: .caption1).scaledFont(for: snippetBase)
+        quoteSnippetLabel.font = OnymType.uiFont(size: 13)
         quoteSnippetLabel.adjustsFontForContentSizeCategory = true
         quoteSnippetLabel.numberOfLines = 1
         quoteSnippetLabel.lineBreakMode = .byTruncatingTail
@@ -1082,8 +1085,7 @@ final class ChatBubbleCell: UITableViewCell {
         contentView.addSubview(statusImageView2)
 
         failureLabel.translatesAutoresizingMaskIntoConstraints = false
-        let base = UIFont.systemFont(ofSize: 12, weight: .regular)
-        failureLabel.font = UIFontMetrics(forTextStyle: .caption1).scaledFont(for: base)
+        failureLabel.font = OnymType.uiFont(size: 12)
         failureLabel.adjustsFontForContentSizeCategory = true
         failureLabel.numberOfLines = 0
         failureLabel.textAlignment = .right
@@ -1096,8 +1098,7 @@ final class ChatBubbleCell: UITableViewCell {
     private func buildNameLabel() {
         nameLabel.translatesAutoresizingMaskIntoConstraints = false
         // Scaled so it tracks Dynamic Type — `systemFont` alone wouldn't.
-        let base = UIFont.systemFont(ofSize: 12, weight: .semibold)
-        nameLabel.font = UIFontMetrics(forTextStyle: .caption1).scaledFont(for: base)
+        nameLabel.font = OnymType.uiFont(size: 12, weight: .semibold)
         nameLabel.adjustsFontForContentSizeCategory = true
         nameLabel.numberOfLines = 1
         nameLabel.lineBreakMode = .byTruncatingTail
