@@ -76,21 +76,21 @@ final class ChatJoinRequestCell: UITableViewCell {
         card.layer.borderColor = UIColor(OnymTokens.hairline).cgColor
         contentView.addSubview(card)
 
-        titleLabel.font = .preferredFont(forTextStyle: .subheadline)
+        titleLabel.font = OnymType.uiFont(size: 15)
         titleLabel.adjustsFontForContentSizeCategory = true
         titleLabel.textColor = UIColor(OnymTokens.text)
         titleLabel.numberOfLines = 0
 
-        fingerprintLabel.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        fingerprintLabel.font = OnymType.uiMono(size: 12)
         fingerprintLabel.adjustsFontForContentSizeCategory = true
         fingerprintLabel.textColor = UIColor(OnymTokens.text3)
         fingerprintLabel.numberOfLines = 1
 
-        agreementLabel.font = .preferredFont(forTextStyle: .caption1)
+        agreementLabel.font = OnymType.uiFont(size: 12)
         agreementLabel.adjustsFontForContentSizeCategory = true
         agreementLabel.numberOfLines = 0
 
-        errorLabel.font = .preferredFont(forTextStyle: .caption1)
+        errorLabel.font = OnymType.uiFont(size: 12)
         errorLabel.adjustsFontForContentSizeCategory = true
         errorLabel.textColor = UIColor(OnymTokens.red)
         errorLabel.numberOfLines = 0
@@ -98,7 +98,7 @@ final class ChatJoinRequestCell: UITableViewCell {
         // The on-chain admit is a PLONK proof plus a relayer round-trip
         // plus a Stellar confirmation — several seconds of apparent
         // nothing. Say so rather than letting it read as a hung tap.
-        hintLabel.font = .preferredFont(forTextStyle: .caption2)
+        hintLabel.font = OnymType.uiFont(size: 11)
         hintLabel.adjustsFontForContentSizeCategory = true
         hintLabel.textColor = UIColor(OnymTokens.text2)
         hintLabel.numberOfLines = 0
@@ -168,7 +168,7 @@ final class ChatJoinRequestCell: UITableViewCell {
             : UIColor(OnymTokens.text)
         config.titleTextAttributesTransformer = .init { incoming in
             var out = incoming
-            out.font = .preferredFont(forTextStyle: .subheadline)
+            out.font = OnymType.uiFont(size: 15)
             return out
         }
         return config

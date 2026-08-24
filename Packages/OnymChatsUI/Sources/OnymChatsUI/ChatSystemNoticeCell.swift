@@ -32,7 +32,7 @@ final class ChatSystemNoticeCell: UITableViewCell {
         contentView.addSubview(pill)
 
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.font = .preferredFont(forTextStyle: .footnote)
+        label.font = OnymType.uiFont(size: 13)
         label.adjustsFontForContentSizeCategory = true
         label.textColor = UIColor(OnymTokens.text2)
         label.textAlignment = .center

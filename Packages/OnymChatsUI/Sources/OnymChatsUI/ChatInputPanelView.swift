@@ -154,7 +154,7 @@ final class ChatInputPanelView: UIView {
         topDivider.translatesAutoresizingMaskIntoConstraints = false
         addSubview(topDivider)
 
-        textView.font = .preferredFont(forTextStyle: .body)
+        textView.font = OnymType.uiBody()
         textView.adjustsFontForContentSizeCategory = true
         textView.textColor = UIColor(OnymTokens.text)
         // Mid-grey pill on the near-black background (matches the attach /
@@ -270,13 +270,15 @@ final class ChatInputPanelView: UIView {
         recordingOverlay.addSubview(recordingDot)
 
         recordingTimeLabel.translatesAutoresizingMaskIntoConstraints = false
-        recordingTimeLabel.font = .monospacedDigitSystemFont(ofSize: 15, weight: .regular)
+        recordingTimeLabel.font = OnymType.uiMonoDigit(size: 15)
+        recordingTimeLabel.adjustsFontForContentSizeCategory = true
         recordingTimeLabel.textColor = UIColor(OnymTokens.text)
         recordingTimeLabel.text = "0:00"
         recordingOverlay.addSubview(recordingTimeLabel)
 
         recordingHintLabel.translatesAutoresizingMaskIntoConstraints = false
-        recordingHintLabel.font = .preferredFont(forTextStyle: .subheadline)
+        recordingHintLabel.font = OnymType.uiFont(size: 15)
+        recordingHintLabel.adjustsFontForContentSizeCategory = true
         recordingHintLabel.textColor = UIColor(OnymTokens.text3)
         recordingHintLabel.text = "‹ slide to cancel"
         recordingHintLabel.textAlignment = .center
@@ -307,8 +309,7 @@ final class ChatInputPanelView: UIView {
         replyBannerBar.layer.cornerCurve = .continuous
         replyBanner.addSubview(replyBannerBar)
 
-        let titleBase = UIFont.systemFont(ofSize: 12, weight: .semibold)
-        replyBannerTitle.font = UIFontMetrics(forTextStyle: .caption1).scaledFont(for: titleBase)
+        replyBannerTitle.font = OnymType.uiFont(size: 12, weight: .semibold)
         replyBannerTitle.adjustsFontForContentSizeCategory = true
         replyBannerTitle.numberOfLines = 1
         replyBannerTitle.lineBreakMode = .byTruncatingTail
@@ -316,8 +317,7 @@ final class ChatInputPanelView: UIView {
         replyBannerTitle.accessibilityIdentifier = "chat.input.reply_banner.title"
         replyBanner.addSubview(replyBannerTitle)
 
-        let snippetBase = UIFont.systemFont(ofSize: 13, weight: .regular)
-        replyBannerSnippet.font = UIFontMetrics(forTextStyle: .caption1).scaledFont(for: snippetBase)
+        replyBannerSnippet.font = OnymType.uiFont(size: 13)
         replyBannerSnippet.adjustsFontForContentSizeCategory = true
         replyBannerSnippet.numberOfLines = 1
         replyBannerSnippet.lineBreakMode = .byTruncatingTail

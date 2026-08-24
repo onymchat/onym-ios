@@ -57,12 +57,15 @@ final class ChatVoiceMessageView: UIView {
         addSubview(waveform)
 
         durationLabel.translatesAutoresizingMaskIntoConstraints = false
-        durationLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        durationLabel.font = OnymType.uiMonoDigit(size: 12)
+        durationLabel.adjustsFontForContentSizeCategory = true
         durationLabel.setContentHuggingPriority(.required, for: .horizontal)
         addSubview(durationLabel)
 
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: Self.contentHeight),
+            // The row holds a duration that scales, so 40pt is a floor
+            // rather than a height.
+            heightAnchor.constraint(greaterThanOrEqualToConstant: Self.contentHeight),
 
             playButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
             playButton.centerYAnchor.constraint(equalTo: centerYAnchor),
