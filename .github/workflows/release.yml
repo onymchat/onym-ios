@@ -228,6 +228,35 @@ jobs:
             -derivedDataPath /tmp/onym-foundation-tests \
             -resultBundlePath /tmp/onym-foundation.xcresult
 
+      - name: xcodebuild test (OnymDesignTokens package)
+        # The token contract and the contrast floors. These gate the
+        # palette against a resync from the design system quietly
+        # reintroducing a colour that fails WCAG AA — which is exactly
+        # how the amber token went wrong once already. Same `always()`
+        # rationale as the other package test steps.
+        if: always()
+        working-directory: Packages/OnymDesignTokens
+        run: |
+          rm -rf /tmp/onym-designtokens-tests /tmp/onym-designtokens.xcresult
+          xcodebuild test \
+            -scheme OnymDesignTokens \
+            -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }},OS=latest" \
+            -derivedDataPath /tmp/onym-designtokens-tests \
+            -resultBundlePath /tmp/onym-designtokens.xcresult
+
+      - name: xcodebuild test (OnymDesign package)
+        # Sender-to-accent mapping: determinism across launches and
+        # devices, and sensitivity to every byte of the pubkey.
+        if: always()
+        working-directory: Packages/OnymDesign
+        run: |
+          rm -rf /tmp/onym-design-tests /tmp/onym-design.xcresult
+          xcodebuild test \
+            -scheme OnymDesign \
+            -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }},OS=latest" \
+            -derivedDataPath /tmp/onym-design-tests \
+            -resultBundlePath /tmp/onym-design.xcresult
+
       - name: xcodebuild build (OnymPush package)
         # OnymPush's suites live in OnymIOSTests (run above), which
         # already compiles the package — as a dependency of the app
@@ -275,6 +304,22 @@ jobs:
         with:
           name: foundation-tests-xcresult
           path: /tmp/onym-foundation.xcresult
+          retention-days: 7
+
+      - name: Upload OnymDesignTokens test xcresult
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: designtokens-tests-xcresult
+          path: /tmp/onym-designtokens.xcresult
+          retention-days: 7
+
+      - name: Upload OnymDesign test xcresult
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: design-tests-xcresult
+          path: /tmp/onym-design.xcresult
           retention-days: 7
 
   ui-tests:
@@ -779,6 +824,20 @@ jobs:
           path: /tmp/foundation-xcresult
         continue-on-error: true
 
+      - name: Download designtokens-tests xcresult
+        uses: actions/download-artifact@v4
+        with:
+          name: designtokens-tests-xcresult
+          path: /tmp/designtokens-xcresult
+        continue-on-error: true
+
+      - name: Download design-tests xcresult
+        uses: actions/download-artifact@v4
+        with:
+          name: design-tests-xcresult
+          path: /tmp/design-xcresult
+        continue-on-error: true
+
       - name: Download ui-tests xcresult
         uses: actions/download-artifact@v4
         with:
@@ -798,6 +857,8 @@ jobs:
             --bundle "/tmp/unit-xcresult"       --target OnymIOSTests \
             --bundle "/tmp/discovery-xcresult"  --target OnymDiscoveryTests \
             --bundle "/tmp/foundation-xcresult" --target OnymFoundationTests \
+            --bundle "/tmp/designtokens-xcresult" --target OnymDesignTokensTests \
+            --bundle "/tmp/design-xcresult"     --target OnymDesignTests \
             --bundle "/tmp/ui-xcresult"         --target OnymIOSUITests \
             --results /tmp/results.json \
             --comment-md /tmp/failure_comment.md

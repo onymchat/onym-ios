@@ -37,7 +37,11 @@ public enum OnymTint {
     // Orange — the contract-detail tile, the anarchy badge.
     public static let orangeSoft  = hex(0xFEF0E0)
     public static let orangeSoft2 = hex(0xFFE0C0)
-    public static let orangeInk   = hex(0xD14A00)
+    /// Darker than the `#D14A00` this started as. That value measured
+    /// 4.00:1 on `orangeSoft` and 3.85:1 on the 16%-alpha orange tint,
+    /// failing WCAG AA on both — the same failure the `amber` token had
+    /// and for the same reason. `#BE4300` clears 4.5:1 on each.
+    public static let orangeInk   = hex(0xBE4300)
 
     // Amber — the notice banner: fill, hairline, and the text on it.
     public static let amberSoft   = hex(0xFFF6E5)
