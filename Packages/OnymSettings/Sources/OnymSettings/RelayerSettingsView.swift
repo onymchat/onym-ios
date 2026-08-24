@@ -24,16 +24,16 @@ struct RelayerSettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                SettingsLargeTitle("Relayer")
+                LargeTitle("Relayer")
 
                 strategyToggle
 
-                SettingsSectionLabel("CONFIGURED · \(flow.state.snapshot.configuration.endpoints.count)")
+                SectionLabel("CONFIGURED · \(flow.state.snapshot.configuration.endpoints.count)")
                 configuredCard
 
-                SettingsSectionLabel("ADD FROM PUBLISHED LIST")
+                SectionLabel("ADD FROM PUBLISHED LIST")
                 publishedCard
-                SettingsFootnote("Published by the onym-relayer project. Tap to add.")
+                Footnote("Published by the onym-relayer project. Tap to add.")
 
                 DiscoveryCatalogSection(
                     entries: flow.catalogEntries,
@@ -44,9 +44,9 @@ struct RelayerSettingsView: View {
                     onSelect: { consentEntry = $0 }
                 )
 
-                SettingsSectionLabel("ADD CUSTOM URL")
+                SectionLabel("ADD CUSTOM URL")
                 customURLCard
-                SettingsFootnote("Use a private deployment, localhost, or any relayer not in the published list.")
+                Footnote("Use a private deployment, localhost, or any relayer not in the published list.")
 
                 runYourOwnCTA
             }
@@ -126,7 +126,7 @@ struct RelayerSettingsView: View {
     private var configuredCard: some View {
         let endpoints = flow.state.snapshot.configuration.endpoints
         if endpoints.isEmpty {
-            SettingsCard {
+            Card {
                 Text("No relayers configured. Add one below.")
                     .font(OnymType.font(size: 14))
                     .foregroundStyle(OnymTokens.text3)
@@ -134,7 +134,7 @@ struct RelayerSettingsView: View {
                     .padding(.horizontal, 16).padding(.vertical, 14)
             }
         } else {
-            // Custom rounded/clipped stack (not SettingsCard) so each
+            // Custom rounded/clipped stack (not Card) so each
             // row can swipe left to reveal a Delete action masked to the
             // card's corners. Rows carry the card's surface color so the
             // reveal stays hidden until slid.
@@ -144,7 +144,7 @@ struct RelayerSettingsView: View {
                         accessibilityID: "relayer.configured.\(endpoint.url.absoluteString)",
                         onDelete: { flow.tappedRemove(url: endpoint.url) }
                     ) {
-                        SettingsRow(
+                        Row(
                             title: LocalizedStringKey(endpoint.name),
                             subtitle: endpoint.url.absoluteString,
                             subtitleMono: true,
@@ -163,7 +163,7 @@ struct RelayerSettingsView: View {
                         } right: {
                             HStack(spacing: 4) {
                                 ForEach(endpoint.networks, id: \.self) { net in
-                                    SettingsChip(
+                                    Chip(
                                         text: net.uppercased(),
                                         fg: chipColor(for: net),
                                         bg: chipColor(for: net).opacity(0.15)
@@ -195,7 +195,7 @@ struct RelayerSettingsView: View {
     private var publishedCard: some View {
         let snapshot = flow.state.snapshot
         let unconfigured = flow.unconfiguredKnownList
-        SettingsCard {
+        Card {
             switch snapshot.fetchStatus {
             case .idle:
                 fetchingRow
@@ -249,7 +249,7 @@ struct RelayerSettingsView: View {
     @ViewBuilder
     private func knownList(_ unconfigured: [RelayerEndpoint]) -> some View {
         ForEach(Array(unconfigured.enumerated()), id: \.element.url) { idx, endpoint in
-            SettingsRow(
+            Row(
                 title: LocalizedStringKey(endpoint.name),
                 subtitle: endpoint.url.absoluteString,
                 subtitleMono: true,
@@ -266,7 +266,7 @@ struct RelayerSettingsView: View {
             } right: {
                 HStack(spacing: 4) {
                     ForEach(endpoint.networks, id: \.self) { net in
-                        SettingsChip(
+                        Chip(
                             text: net.uppercased(),
                             fg: chipColor(for: net),
                             bg: chipColor(for: net).opacity(0.15)
@@ -281,7 +281,7 @@ struct RelayerSettingsView: View {
     // MARK: - Custom URL
 
     private var customURLCard: some View {
-        SettingsCard {
+        Card {
             TextField("https://relayer.example.com",
                       text: Binding(
                         get: { flow.state.customDraft },
@@ -303,7 +303,7 @@ struct RelayerSettingsView: View {
 
             SettingsRowDivider(inset: 16)
 
-            SettingsRow(
+            Row(
                 title: "Add Custom URL",
                 hasChevron: false,
                 inset: 0,

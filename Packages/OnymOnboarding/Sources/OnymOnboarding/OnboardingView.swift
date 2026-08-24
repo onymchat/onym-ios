@@ -297,7 +297,7 @@ struct PlaceholderStepContent: View {
 }
 
 /// Fallback step indicator: plain dots. The app replaces it with
-/// `SettingsStepIndicator` via the `stepIndicator` slot.
+/// `StepIndicator` via the `stepIndicator` slot.
 struct DefaultStepIndicator: View {
     let index: Int
     let count: Int

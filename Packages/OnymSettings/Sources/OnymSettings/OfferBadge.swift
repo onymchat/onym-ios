@@ -9,7 +9,7 @@ struct OfferBadge: View {
     let offer: ServiceOffer
 
     var body: some View {
-        SettingsChip(
+        Chip(
             text: Self.modelDisplayName(offer.model).uppercased(),
             fg: offer.isFree ? OnymTokens.green : OnymTile.gray,
             bg: (offer.isFree ? OnymTokens.green : OnymTile.gray).opacity(0.15)
@@ -42,10 +42,10 @@ struct OfferDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                SettingsLargeTitle(verbatim: offer.offerId)
+                LargeTitle(verbatim: offer.offerId)
 
-                SettingsSectionLabel("OFFER")
-                SettingsCard {
+                SectionLabel("OFFER")
+                Card {
                     VStack(alignment: .leading, spacing: 8) {
                         detailRow("Offer ID", offer.offerId)
                         detailRow("Model", OfferBadge.modelDisplayName(offer.model))
@@ -58,8 +58,8 @@ struct OfferDetailView: View {
                 }
 
                 if let service = serviceSummary {
-                    SettingsSectionLabel("SERVICE TERMS")
-                    SettingsCard {
+                    SectionLabel("SERVICE TERMS")
+                    Card {
                         Text(verbatim: service)
                             .font(OnymType.mono(size: 12))
                             .foregroundStyle(OnymTokens.text2)
@@ -67,11 +67,11 @@ struct OfferDetailView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(16)
                     }
-                    SettingsFootnote("Published by the operator as part of the signed manifest. This app doesn't interpret it — it's shown exactly as offered.")
+                    Footnote("Published by the operator as part of the signed manifest. This app doesn't interpret it — it's shown exactly as offered.")
                 }
 
                 if !isEntitled {
-                    SettingsFootnote("Purchasing is not yet available in this app. Paid offers become selectable once in-app purchases land.")
+                    Footnote("Purchasing is not yet available in this app. Paid offers become selectable once in-app purchases land.")
                 }
             }
             .padding(.bottom, 32)

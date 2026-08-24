@@ -369,7 +369,7 @@ struct RenameIdentitySheet: View {
                         .padding(.horizontal, 20)
                         .padding(.top, 16)
 
-                    SettingsCard {
+                    Card {
                         TextField("Identity name", text: $text)
                             .textInputAutocapitalization(.words)
                             .autocorrectionDisabled()
@@ -452,7 +452,7 @@ struct RestoreIdentitySheet: View {
                         .padding(.horizontal, 20)
                         .padding(.top, 16)
 
-                    SettingsCard {
+                    Card {
                         TextField("word word word …", text: $phrase, axis: .vertical)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
@@ -463,7 +463,7 @@ struct RestoreIdentitySheet: View {
                             .accessibilityIdentifier("restore_identity.phrase_field")
                     }
 
-                    SettingsCard {
+                    Card {
                         TextField("Name (optional)", text: $name)
                             .textInputAutocapitalization(.words)
                             .autocorrectionDisabled()

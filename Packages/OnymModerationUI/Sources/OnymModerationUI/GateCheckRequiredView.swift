@@ -65,7 +65,7 @@ public struct GateCheckRequiredView: View {
                 .lineSpacing(3)
                 .padding(.horizontal, 32)
             if canRetry {
-                SettingsPrimaryButton(action: retry) {
+                PrimaryButton(action: retry) {
                     if isRetrying {
                         ProgressView().tint(OnymTokens.onAccent)
                     } else {
@@ -86,7 +86,7 @@ public struct GateCheckRequiredView: View {
                     .accessibilityIdentifier("moderation.gate_required.retry_result")
             }
             if reason == .reidentificationRequired, let makeDeviceRecoveryFlow {
-                SettingsPrimaryButton(action: {
+                PrimaryButton(action: {
                     Task { @MainActor in
                         activeSheet = .deviceRecovery(await makeDeviceRecoveryFlow())
                     }
@@ -221,7 +221,7 @@ private struct RecoveryAppealView: View {
                         .font(OnymType.font(size: 14))
                         .foregroundStyle(OnymTokens.text2)
                 } else {
-                    SettingsCard {
+                    Card {
                         VStack(spacing: 0) {
                             ForEach(caseIDs, id: \.self) { caseID in
                                 Button { openCase(caseID) } label: {

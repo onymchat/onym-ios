@@ -26,7 +26,7 @@ public struct ModerationCaseView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    SettingsLargeTitle("Moderation case")
+                    LargeTitle("Moderation case")
 
                     statusSection
                     // Receipts render OUTSIDE the composer gates: a
@@ -81,8 +81,8 @@ public struct ModerationCaseView: View {
 
     private var statusSection: some View {
         Group {
-            SettingsSectionLabel("STATUS")
-            SettingsCard {
+            SectionLabel("STATUS")
+            Card {
                 VStack(alignment: .leading, spacing: 8) {
                     if let status = flow.state.status {
                         row("Case", status.caseId, monospaced: true)
@@ -126,7 +126,7 @@ public struct ModerationCaseView: View {
                 .padding(16)
             }
             if let fetchedAt = flow.state.snapshotFetchedAt {
-                SettingsFootnote("Shown as of \(fetchedAt.formatted(date: .abbreviated, time: .shortened)) — the authority couldn't be reached for a newer status.")
+                Footnote("Shown as of \(fetchedAt.formatted(date: .abbreviated, time: .shortened)) — the authority couldn't be reached for a newer status.")
             }
             if let message = flow.state.statusErrorMessage {
                 errorText(message, id: "moderation.case.status_error")
@@ -158,8 +158,8 @@ public struct ModerationCaseView: View {
 
     private var receiptsSection: some View {
         Group {
-            SettingsSectionLabel("FILED")
-            SettingsCard {
+            SectionLabel("FILED")
+            Card {
                 VStack(alignment: .leading, spacing: 10) {
                     if let receipt = flow.state.responseReceipt {
                         Label(
@@ -189,8 +189,8 @@ public struct ModerationCaseView: View {
 
     private func eventsSection(_ events: [CaseEvent]) -> some View {
         Group {
-            SettingsSectionLabel("HISTORY")
-            SettingsCard {
+            SectionLabel("HISTORY")
+            Card {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(Array(events.enumerated()), id: \.offset) { _, event in
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -213,8 +213,8 @@ public struct ModerationCaseView: View {
 
     private var responseSection: some View {
         Group {
-            SettingsSectionLabel("YOUR RESPONSE")
-            SettingsCard {
+            SectionLabel("YOUR RESPONSE")
+            Card {
                 VStack(alignment: .leading, spacing: 10) {
                     if flow.state.responseReceipt != nil {
                         Text("You can file additional statements while the case is open; they attach to the same case.")
@@ -237,7 +237,7 @@ public struct ModerationCaseView: View {
                     if let message = flow.state.responseErrorMessage {
                         inlineError(message, id: "moderation.case.response_error")
                     }
-                    SettingsPrimaryButton(action: {
+                    PrimaryButton(action: {
                         let statement = responseText
                         Task {
                             await flow.submitResponse(statement)
@@ -255,7 +255,7 @@ public struct ModerationCaseView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(16)
             }
-            SettingsFootnote("Your statement is signed with your identity key and disclosed to your authority in full. Not responding doesn't concede the case; it proceeds on the record.")
+            Footnote("Your statement is signed with your identity key and disclosed to your authority in full. Not responding doesn't concede the case; it proceeds on the record.")
         }
     }
 
@@ -263,8 +263,8 @@ public struct ModerationCaseView: View {
 
     private var appealSection: some View {
         Group {
-            SettingsSectionLabel("APPEAL")
-            SettingsCard {
+            SectionLabel("APPEAL")
+            Card {
                 VStack(alignment: .leading, spacing: 10) {
                     TextEditor(text: $appealText)
                         .frame(minHeight: 80)
@@ -282,7 +282,7 @@ public struct ModerationCaseView: View {
                     if let message = flow.state.appealErrorMessage {
                         inlineError(message, id: "moderation.case.appeal_error")
                     }
-                    SettingsPrimaryButton(action: {
+                    PrimaryButton(action: {
                         let statement = appealText
                         Task {
                             await flow.submitAppeal(kind: .appeal, statement: statement)
@@ -300,7 +300,7 @@ public struct ModerationCaseView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(16)
             }
-            SettingsFootnote("Filing an appeal does not suspend the ban unless the consented terms say so.")
+            Footnote("Filing an appeal does not suspend the ban unless the consented terms say so.")
         }
     }
 
@@ -308,8 +308,8 @@ public struct ModerationCaseView: View {
 
     private var newHolderSection: some View {
         Group {
-            SettingsSectionLabel("DEVICE CHANGED HANDS?")
-            SettingsCard {
+            SectionLabel("DEVICE CHANGED HANDS?")
+            Card {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("If you acquired this device after the ban, you can file a new-holder claim. A human reviews it on an expedited basis — a device is not a person.")
                         .font(OnymType.font(size: 13))

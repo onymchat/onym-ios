@@ -334,7 +334,7 @@ private struct OnboardingRestoreSheet: View {
                     .foregroundStyle(OnymTokens.text2)
                     .lineSpacing(2)
 
-                SettingsCard {
+                Card {
                     TextField("word word word …", text: $phrase, axis: .vertical)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
@@ -359,7 +359,7 @@ private struct OnboardingRestoreSheet: View {
 
                 Spacer(minLength: 0)
 
-                SettingsPrimaryButton(isRestoring ? "Restoring…" : "Restore identity") {
+                PrimaryButton(isRestoring ? "Restoring…" : "Restore identity") {
                     Task { await submit() }
                 }
                 .disabled(!canRestore || isRestoring)
@@ -622,7 +622,7 @@ struct OnboardingServicesContent: View {
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(OnymTokens.text)
                     if !usingCustom {
-                        SettingsChip(
+                        Chip(
                             text: String(localized: "Selected"),
                             fg: OnymTokens.onAccent,
                             bg: OnymAccent.blue.color
@@ -668,7 +668,7 @@ struct OnboardingServicesContent: View {
                             .font(.system(size: 17, weight: .semibold))
                             .foregroundStyle(OnymTokens.text)
                         if usingCustom {
-                            SettingsChip(
+                            Chip(
                                 text: String(localized: "Selected"),
                                 fg: OnymTokens.onAccent,
                                 bg: OnymAccent.blue.color
@@ -1013,7 +1013,7 @@ struct OnboardingDiscoveryContent: View {
             .accessibilityIdentifier("onboarding.services.directory.source")
 
             if status.source.pinnedOperatorKeyHex == nil {
-                SettingsPrimaryButton("Verify & Confirm") {
+                PrimaryButton("Verify & Confirm") {
                     flow.tappedConfirmSource(providerId: status.source.providerId)
                 }
                 .padding(.top, 12)
@@ -1122,7 +1122,7 @@ struct OnboardingDiscoveryContent: View {
                     in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .padding(.top, 8)
 
-        SettingsPrimaryButton("Pin Key & Confirm") {
+        PrimaryButton("Pin Key & Confirm") {
             flow.tappedConfirmAdd()
         }
         .padding(.top, 12)
@@ -1617,7 +1617,7 @@ struct OnboardingNotaryContent: View {
                                 Spacer(minLength: 4)
                                 HStack(spacing: 4) {
                                     ForEach(endpoint.networks, id: \.self) { net in
-                                        SettingsChip(
+                                        Chip(
                                             text: net.uppercased(),
                                             fg: net == "public" ? OnymTokens.red : OnymTokens.green,
                                             bg: (net == "public" ? OnymTokens.red : OnymTokens.green).opacity(0.15)
@@ -1792,7 +1792,7 @@ struct OnboardingRecoveryContent: View {
                         in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .accessibilityIdentifier("onboarding.recoveryPhrase.status")
 
-            SettingsPrimaryButton(sawPhrase || backedUp ? "View it again" : "Reveal my recovery phrase") {
+            PrimaryButton(sawPhrase || backedUp ? "View it again" : "Reveal my recovery phrase") {
                 flow = makeBackupFlow()
                 showBackup = true
             }

@@ -11,7 +11,7 @@ struct IdentitiesView: View {
     @Bindable var flow: IdentitiesFlow
     @State private var showAddSheet = false
     /// Per-row height, scaled with Dynamic Type via `UIFontMetrics`.
-    /// 64 is the baseline at default size (matches `SettingsRow`'s
+    /// 64 is the baseline at default size (matches `Row`'s
     /// padding + dual-line label); AX1+/XL settings scale it up
     /// automatically so the inner List frame grows in step.
     @ScaledMetric private var rowHeight: CGFloat = 64
@@ -19,10 +19,10 @@ struct IdentitiesView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                SettingsLargeTitle("Identities")
-                SettingsFootnote("Tap an identity to open it. Each identity has its own keys, chats, and recovery phrase.")
+                LargeTitle("Identities")
+                Footnote("Tap an identity to open it. Each identity has its own keys, chats, and recovery phrase.")
 
-                SettingsSectionLabel("YOUR IDENTITIES")
+                SectionLabel("YOUR IDENTITIES")
                 identitiesList
 
                 Button {
@@ -48,7 +48,7 @@ struct IdentitiesView: View {
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("identities.add_button")
 
-                SettingsFootnote("Only the active identity’s chats are visible. Switch between identities to see different inboxes.")
+                Footnote("Only the active identity’s chats are visible. Switch between identities to see different inboxes.")
             }
             .padding(.bottom, 32)
         }
@@ -74,8 +74,8 @@ struct IdentitiesView: View {
     // MARK: - Identities list
 
     /// SwiftUI `.swipeActions` is a List-only modifier — applying it to a
-    /// `VStack`/`SettingsCard` row is silently inert. We want both the
-    /// SettingsCard look (rounded card, custom hairlines) and native
+    /// `VStack`/`Card` row is silently inert. We want both the
+    /// Card look (rounded card, custom hairlines) and native
     /// swipe-to-Remove, so the rows live inside a `List` with system
     /// chrome suppressed: `.listStyle(.plain)`, transparent
     /// `scrollContentBackground`, hidden separators (we draw our own),
@@ -96,7 +96,7 @@ struct IdentitiesView: View {
                     NavigationLink {
                         IdentityDetailView(flow: flow, summary: summary)
                     } label: {
-                        SettingsRow(
+                        Row(
                             title: LocalizedStringKey(summary.name),
                             subtitle: "BLS \(flow.blsPrefix(of: summary))…",
                             subtitleMono: true,
@@ -165,8 +165,8 @@ private struct AddIdentitySheet: View {
                         .padding(.top, 16)
                         .padding(.bottom, 24)
 
-                    SettingsSectionLabel("NAME")
-                    SettingsCard {
+                    SectionLabel("NAME")
+                    Card {
                         TextField("Identity name", text: $flow.pendingName)
                             .textInputAutocapitalization(.words)
                             .autocorrectionDisabled()
@@ -175,10 +175,10 @@ private struct AddIdentitySheet: View {
                             .padding(.vertical, 12)
                             .accessibilityIdentifier("add_identity.name_field")
                     }
-                    SettingsFootnote("Defaults to “Identity N” if left blank.")
+                    Footnote("Defaults to “Identity N” if left blank.")
 
-                    SettingsSectionLabel("RESTORE FROM RECOVERY PHRASE")
-                    SettingsCard {
+                    SectionLabel("RESTORE FROM RECOVERY PHRASE")
+                    Card {
                         TextEditor(text: $flow.pendingMnemonic)
                             .frame(minHeight: 96)
                             .font(OnymType.mono(size: 15))
@@ -190,7 +190,7 @@ private struct AddIdentitySheet: View {
                             .padding(.vertical, 8)
                             .accessibilityIdentifier("add_identity.mnemonic_field")
                     }
-                    SettingsFootnote("Leave blank to mint a fresh BIP-39 identity. Paste a 12 or 24-word phrase to restore.")
+                    Footnote("Leave blank to mint a fresh BIP-39 identity. Paste a 12 or 24-word phrase to restore.")
 
                     if let error = flow.addError {
                         Text(error)
@@ -246,7 +246,7 @@ public struct RemoveIdentitySheet: View {
                         .padding(.horizontal, 20)
                         .padding(.top, 16)
 
-                    SettingsCard {
+                    Card {
                         TextField("Type \"\(summary.name)\" to confirm",
                                   text: $flow.pendingRemovalConfirmText)
                             .autocorrectionDisabled()

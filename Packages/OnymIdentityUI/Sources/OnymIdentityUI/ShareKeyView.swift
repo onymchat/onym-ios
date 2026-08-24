@@ -93,7 +93,7 @@ public struct ShareKeyView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 14)
 
-                SettingsFootnote("Anyone who scans this code with Onym can start a private, end-to-end encrypted chat with \(identity.name). The invite key contains your inbox X25519 public key only — no contact info.")
+                Footnote("Anyone who scans this code with Onym can start a private, end-to-end encrypted chat with \(identity.name). The invite key contains your inbox X25519 public key only — no contact info.")
             }
             .padding(.bottom, 24)
         }

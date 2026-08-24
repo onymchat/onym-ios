@@ -111,7 +111,7 @@ public struct ModerationConsentContent: View {
 
     @ViewBuilder
     private var picker: some View {
-        SettingsLargeTitle(pickerTitle)
+        LargeTitle(pickerTitle)
         Text(pickerBlurb)
             .font(OnymType.font(size: 14))
             .foregroundStyle(OnymTokens.text2)
@@ -123,7 +123,7 @@ public struct ModerationConsentContent: View {
 
         switch flow.state.fetchStatus {
         case .failed(let message):
-            SettingsCard {
+            Card {
                 VStack(spacing: 10) {
                     Text(message)
                         .font(OnymType.font(size: 14))
@@ -135,13 +135,13 @@ public struct ModerationConsentContent: View {
                 .padding(16)
             }
         case .fetching, .idle:
-            SettingsCard {
+            Card {
                 ProgressView()
                     .frame(maxWidth: .infinity)
                     .padding(16)
             }
         case .success where flow.state.authorities.isEmpty:
-            SettingsCard {
+            Card {
                 Text("No authorities are published yet.")
                     .font(OnymType.font(size: 14))
                     .foregroundStyle(OnymTokens.text3)
@@ -149,10 +149,10 @@ public struct ModerationConsentContent: View {
                     .padding(16)
             }
         case .success:
-            SettingsCard {
+            Card {
                 ForEach(Array(flow.state.authorities.enumerated()), id: \.element.componentId) { idx, listing in
                     Button { flow.selectedAuthority(listing) } label: {
-                        SettingsRow(
+                        Row(
                             titleText: listing.name,
                             subtitle: rowSubtitle(for: listing),
                             // The re-consent marker is prepended to the
@@ -161,7 +161,7 @@ public struct ModerationConsentContent: View {
                             subtitleLineLimit: 2,
                             last: idx == flow.state.authorities.count - 1
                         ) {
-                            SettingsIconTile(symbol: "checkmark.shield", bg: OnymTile.indigo)
+                            IconTile(symbol: "checkmark.shield", bg: OnymTile.indigo)
                         }
                     }
                     .buttonStyle(.plain)
@@ -171,7 +171,7 @@ public struct ModerationConsentContent: View {
         }
 
         if let error = flow.state.errorMessage {
-            SettingsFootnote(verbatim: error)
+            Footnote(verbatim: error)
         }
     }
 
@@ -183,8 +183,8 @@ public struct ModerationConsentContent: View {
         if case .reconsent(.termsChanged) = flow.mode,
            let pinned = flow.state.pinnedManifestHash,
            let published = flow.state.publishedManifestHash {
-            SettingsSectionLabel("WHAT CHANGED")
-            SettingsCard {
+            SectionLabel("WHAT CHANGED")
+            Card {
                 VStack(alignment: .leading, spacing: 10) {
                     hashRow("Terms you signed", pinned)
                     hashRow("Published now", published)
@@ -246,7 +246,7 @@ public struct ModerationConsentContent: View {
     @ViewBuilder
     private var review: some View {
         if let reviewing = flow.state.reviewingManifest?.signedManifest {
-            SettingsLargeTitle(verbatim: flow.state.selectedListing?.name ?? String(localized: "Terms"))
+            LargeTitle(verbatim: flow.state.selectedListing?.name ?? String(localized: "Terms"))
 
             Text("These are the exact terms you're consenting to. A case can only ever reach you under a violation class listed here, with these windows and this appeal path.")
                 .font(OnymType.font(size: 14))
@@ -261,8 +261,8 @@ public struct ModerationConsentContent: View {
 
             proceduralCard(reviewing)
 
-            SettingsSectionLabel("WHAT YOU'RE SIGNING")
-            SettingsCard {
+            SectionLabel("WHAT YOU'RE SIGNING")
+            Card {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Manifest hash")
                         .font(OnymType.font(size: 13, weight: .semibold))
@@ -275,14 +275,14 @@ public struct ModerationConsentContent: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(16)
             }
-            SettingsFootnote("Your consent binds to this hash of these exact terms. The authority cannot edit them under your mandate — changed terms bind only new consents.")
+            Footnote("Your consent binds to this hash of these exact terms. The authority cannot edit them under your mandate — changed terms bind only new consents.")
 
             if let error = flow.state.errorMessage {
-                SettingsFootnote(verbatim: error)
+                Footnote(verbatim: error)
             }
 
             VStack(spacing: 10) {
-                SettingsPrimaryButton(action: { flow.tappedAgree() }) {
+                PrimaryButton(action: { flow.tappedAgree() }) {
                     if flow.state.step == .signing {
                         ProgressView().tint(OnymTokens.onAccent)
                     } else {
@@ -322,8 +322,8 @@ public struct ModerationConsentContent: View {
     /// One violation class with all five mandatory terms visible.
     private func classCard(_ violationClass: ViolationClass) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionLabel(verbatim: violationClass.classId.replacingOccurrences(of: "-", with: " ").uppercased())
-            SettingsCard {
+            SectionLabel(verbatim: violationClass.classId.replacingOccurrences(of: "-", with: " ").uppercased())
+            Card {
                 VStack(alignment: .leading, spacing: 8) {
                     termRow("Response window", violationClass.responseWindow.display)
                     termRow("Decision deadline", violationClass.decisionDeadline.display)
@@ -352,8 +352,8 @@ public struct ModerationConsentContent: View {
     /// terms shared by all classes.
     private func proceduralCard(_ reviewing: SignedManifest) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionLabel("PROCEDURE")
-            SettingsCard {
+            SectionLabel("PROCEDURE")
+            Card {
                 VStack(alignment: .leading, spacing: 8) {
                     if let appellate = reviewing.manifest.appellate {
                         termRow("Appeals heard by", appellate)

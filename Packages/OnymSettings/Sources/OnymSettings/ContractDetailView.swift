@@ -41,9 +41,9 @@ struct ContractDetailView: View {
             VStack(alignment: .leading, spacing: 0) {
                 hero
 
-                SettingsSectionLabel("ON-CHAIN")
-                SettingsCard {
-                    SettingsRow(
+                SectionLabel("ON-CHAIN")
+                Card {
+                    Row(
                         title: "Stellar Expert",
                         subtitle: explorerSubtitle,
                         subtitleMono: true,
@@ -59,27 +59,27 @@ struct ContractDetailView: View {
                     }
                     .accessibilityIdentifier("contract_detail.stellar_expert")
 
-                    SettingsRow(
+                    Row(
                         title: "Copy contract address",
                         hasChevron: false,
                         last: true,
                         onTap: entry.map { e in { UIPasteboard.general.string = e.id } }
                     ) {
-                        SettingsIconTile(symbol: "doc.on.doc.fill", bg: OnymTile.gray)
+                        IconTile(symbol: "doc.on.doc.fill", bg: OnymTile.gray)
                     }
                     .accessibilityIdentifier("contract_detail.copy_address")
                 }
 
-                SettingsSectionLabel("SOURCE")
-                SettingsCard {
-                    SettingsRow(
+                SectionLabel("SOURCE")
+                Card {
+                    Row(
                         title: "View source on GitHub",
                         subtitle: "onymchat/onym-contracts @ \(release.release)",
                         subtitleMono: true,
                         hasChevron: false,
                         onTap: { open(Self.contractsRepoURL.absoluteString + "/releases/tag/\(release.release)") }
                     ) {
-                        SettingsIconTile(symbol: "chevron.left.forwardslash.chevron.right",
+                        IconTile(symbol: "chevron.left.forwardslash.chevron.right",
                                          bg: OnymTokens.text)
                     } right: {
                         Image(systemName: "arrow.up.right.square")
@@ -87,21 +87,21 @@ struct ContractDetailView: View {
                     }
                     .accessibilityIdentifier("contract_detail.github")
 
-                    SettingsRow(
+                    Row(
                         title: "Audit report",
                         subtitle: auditLabel,
                         hasChevron: false,
                         last: true
                     ) {
-                        SettingsIconTile(symbol: "exclamationmark.circle.fill",
+                        IconTile(symbol: "exclamationmark.circle.fill",
                                          bg: OnymTile.amber)
                     }
                     .accessibilityIdentifier("contract_detail.audit")
                 }
 
-                SettingsFootnote("This is the contract that anchors \(key.type.displayName.lowercased()) groups created on \(key.network.displayName.lowercased()). Existing chats keep the contract they were created with — picking a different version only affects new chats.")
+                Footnote("This is the contract that anchors \(key.type.displayName.lowercased()) groups created on \(key.network.displayName.lowercased()). Existing chats keep the contract they were created with — picking a different version only affects new chats.")
 
-                SettingsPrimaryButton(
+                PrimaryButton(
                     isCurrentSelection ? "Currently selected" : "Use this version",
                     disabled: isCurrentSelection
                 ) {

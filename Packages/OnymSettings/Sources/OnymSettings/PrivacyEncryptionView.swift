@@ -28,44 +28,44 @@ struct PrivacyEncryptionView: View {
             VStack(alignment: .leading, spacing: 0) {
                 heroCard.padding(.top, 8)
 
-                SettingsSectionLabel("HOW IT WORKS")
-                SettingsCard {
-                    SettingsRow(
+                SectionLabel("HOW IT WORKS")
+                Card {
+                    Row(
                         title: "End-to-end encryption",
                         subtitle: "MLS · forward secrecy",
                         hasChevron: false
                     ) {
-                        SettingsIconTile(symbol: "key.fill", bg: OnymTile.purple)
+                        IconTile(symbol: "key.fill", bg: OnymTile.purple)
                     } right: {
                         Image(systemName: "arrow.up.right.square")
                             .foregroundStyle(OnymTokens.text3)
                     }
-                    SettingsRow(
+                    Row(
                         title: "Anonymous on-chain",
                         subtitle: "No phone, no email, no IP",
                         hasChevron: false
                     ) {
-                        SettingsIconTile(symbol: "sparkles", bg: OnymTile.indigo)
+                        IconTile(symbol: "sparkles", bg: OnymTile.indigo)
                     } right: {
                         Image(systemName: "arrow.up.right.square")
                             .foregroundStyle(OnymTokens.text3)
                     }
-                    SettingsRow(
+                    Row(
                         title: "Verifiable by anyone",
                         subtitle: "Group state anchored on Stellar",
                         hasChevron: false,
                         last: true
                     ) {
-                        SettingsIconTile(symbol: "shield.fill", bg: OnymTile.green)
+                        IconTile(symbol: "shield.fill", bg: OnymTile.green)
                     } right: {
                         Image(systemName: "arrow.up.right.square")
                             .foregroundStyle(OnymTokens.text3)
                     }
                 }
 
-                SettingsSectionLabel("YOUR KEYS")
-                SettingsCard {
-                    SettingsRow(
+                SectionLabel("YOUR KEYS")
+                Card {
+                    Row(
                         title: "Active identity",
                         subtitle: activeName,
                         hasChevron: false
@@ -76,19 +76,19 @@ struct PrivacyEncryptionView: View {
                             .foregroundStyle(OnymTokens.green)
                             .font(OnymType.font(size: 13.5))
                     }
-                    SettingsRow(title: "BIP-39 wordlist", hasChevron: false) {
-                        SettingsIconTile(symbol: "checkmark", bg: OnymTile.gray)
+                    Row(title: "BIP-39 wordlist", hasChevron: false) {
+                        IconTile(symbol: "checkmark", bg: OnymTile.gray)
                     } right: {
                         Text("English").foregroundStyle(OnymTokens.text2).font(OnymType.font(size: 14))
                     }
-                    SettingsRow(title: "Identity key", hasChevron: false) {
+                    Row(title: "Identity key", hasChevron: false) {
                         SettingsContentTile(bg: OnymTile.indigo) {
                             Text("npub").font(OnymType.font(size: 9, weight: .bold)).foregroundStyle(.white)
                         }
                     } right: {
                         Text("Nostr (npub)").foregroundStyle(OnymTokens.text2).font(OnymType.font(size: 14))
                     }
-                    SettingsRow(title: "Signature scheme", hasChevron: false, last: true) {
+                    Row(title: "Signature scheme", hasChevron: false, last: true) {
                         SettingsContentTile(bg: OnymTile.gray) {
                             Text("BLS").font(OnymType.font(size: 9.5, weight: .bold)).foregroundStyle(.white)
                         }
@@ -96,23 +96,23 @@ struct PrivacyEncryptionView: View {
                         Text("BLS12-381").foregroundStyle(OnymTokens.text2).font(OnymType.font(size: 14))
                     }
                 }
-                SettingsFootnote("Your recovery phrase generates a master seed. Onym derives a Nostr keypair (your public identity, shown as npub1…), a Stellar keypair (for anchoring), and a BLS key (for group signatures).")
+                Footnote("Your recovery phrase generates a master seed. Onym derives a Nostr keypair (your public identity, shown as npub1…), a Stellar keypair (for anchoring), and a BLS key (for group signatures).")
 
-                SettingsSectionLabel("APP LOCK")
-                SettingsCard {
-                    SettingsRow(
+                SectionLabel("APP LOCK")
+                Card {
+                    Row(
                         title: "Require Face ID",
                         subtitle: "Unlock Onym with biometrics",
                         hasChevron: false
                     ) {
-                        SettingsIconTile(symbol: "faceid", bg: OnymTile.gray)
+                        IconTile(symbol: "faceid", bg: OnymTile.gray)
                     } right: {
                         Toggle("", isOn: $appLock)
                             .labelsHidden()
                             .tint(OnymTokens.green)
                             .accessibilityIdentifier("privacy.app_lock")
                     }
-                    SettingsRow(
+                    Row(
                         title: "Auto-lock",
                         inset: 16,
                         last: true,
@@ -129,15 +129,15 @@ struct PrivacyEncryptionView: View {
                     }
                 }
 
-                SettingsSectionLabel("METADATA")
-                SettingsCard {
-                    SettingsRow(
+                SectionLabel("METADATA")
+                Card {
+                    Row(
                         title: "Send read receipts",
                         subtitle: "Show others when you’ve read their messages",
                         hasChevron: false,
                         last: true
                     ) {
-                        SettingsIconTile(symbol: "checkmark.circle.fill", bg: OnymTile.blue)
+                        IconTile(symbol: "checkmark.circle.fill", bg: OnymTile.blue)
                     } right: {
                         Toggle("", isOn: $readReceipts)
                             .labelsHidden()
@@ -145,7 +145,7 @@ struct PrivacyEncryptionView: View {
                             .accessibilityIdentifier("privacy.read_receipts")
                     }
                 }
-                SettingsFootnote("Read receipts are end-to-end encrypted, but they reveal you’re online. Turn off for stricter privacy.")
+                Footnote("Read receipts are end-to-end encrypted, but they reveal you’re online. Turn off for stricter privacy.")
                 // The DATA section (Clear local message cache) moved to the
                 // Settings home, above About, where it does real work.
             }

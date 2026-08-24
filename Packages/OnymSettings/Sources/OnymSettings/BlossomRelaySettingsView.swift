@@ -22,9 +22,9 @@ struct BlossomRelaySettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                SettingsLargeTitle("Blossom Relays")
+                LargeTitle("Blossom Relays")
 
-                SettingsSectionLabel(
+                SectionLabel(
                     "CONFIGURED · \(flow.state.snapshot.endpoints.count)"
                 )
                 configuredCard
@@ -38,28 +38,28 @@ struct BlossomRelaySettingsView: View {
                     onSelect: { consentEntry = $0 }
                 )
 
-                SettingsSectionLabel("ADD CUSTOM URL")
+                SectionLabel("ADD CUSTOM URL")
                 customURLCard
-                SettingsFootnote(
+                Footnote(
                     "Blossom servers store your media blobs (images, video, voice). Use Onym's, a private deployment, or any Blossom server you trust. URLs must use the https:// (or http://) scheme."
                 )
 
                 resetCard
-                SettingsFootnote(
+                Footnote(
                     "Uploads and downloads use the active server. Changes apply to the next upload or download."
                 )
 
-                SettingsSectionLabel("SELF-HOST")
-                SettingsCard {
+                SectionLabel("SELF-HOST")
+                Card {
                     NavigationLink {
                         SelfHostGuideView.blossom
                     } label: {
-                        SettingsRow(
+                        Row(
                             title: "Run your own server",
                             subtitle: "Deploy a Blossom server with Docker",
                             last: true
                         ) {
-                            SettingsIconTile(symbol: "server.rack",
+                            IconTile(symbol: "server.rack",
                                              bg: OnymTerminal.surface)
                         }
                     }
@@ -93,7 +93,7 @@ struct BlossomRelaySettingsView: View {
     private var configuredCard: some View {
         let endpoints = flow.state.snapshot.endpoints
         if endpoints.isEmpty {
-            SettingsCard {
+            Card {
                 Text("No servers configured. Media can't be sent or received.")
                     .font(OnymType.font(size: 14))
                     .foregroundStyle(OnymTokens.text3)
@@ -102,7 +102,7 @@ struct BlossomRelaySettingsView: View {
                     .accessibilityIdentifier("blossom.configured.empty")
             }
         } else {
-            // Clipped rounded stack (not SettingsCard) so each row can
+            // Clipped rounded stack (not Card) so each row can
             // swipe left to reveal a Delete action masked to the card's
             // corners. Rows carry the card surface so the reveal stays
             // hidden until slid.
@@ -114,7 +114,7 @@ struct BlossomRelaySettingsView: View {
                     ) {
                         VStack(spacing: 0) {
                             HStack(spacing: 12) {
-                                SettingsIconTile(
+                                IconTile(
                                     symbol: "photo.on.rectangle.angled",
                                     bg: OnymTile.indigo
                                 )
@@ -201,7 +201,7 @@ struct BlossomRelaySettingsView: View {
     // MARK: - Custom URL add
 
     private var customURLCard: some View {
-        SettingsCard {
+        Card {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
                     TextField(
@@ -253,12 +253,12 @@ struct BlossomRelaySettingsView: View {
     // MARK: - Reset
 
     private var resetCard: some View {
-        SettingsCard {
+        Card {
             Button {
                 flow.tappedResetToDefault()
             } label: {
                 HStack {
-                    SettingsIconTile(
+                    IconTile(
                         symbol: "arrow.counterclockwise",
                         bg: OnymTile.gray
                     )

@@ -13,7 +13,7 @@ import OnymDesignTokens
 // OnymDesignTokens — it was a token family sitting in a component file.
 
 /// Square-rounded coloured tile. SF symbol over the fill colour.
-public struct SettingsIconTile: View {
+public struct IconTile: View {
     let symbol: String
     let bg: Color
     var size: CGFloat = 30
@@ -68,9 +68,9 @@ public struct SettingsContentTile<Content: View>: View {
 }
 
 /// Section label above a card. All-caps, mid-grey, small letterspacing.
-public struct SettingsSectionLabel<Trailing: View>: View {
+public struct SectionLabel<Trailing: View>: View {
     let text: LocalizedStringKey
-    /// Runtime data rather than UI copy — see `SettingsRow.verbatimTitle`.
+    /// Runtime data rather than UI copy — see `Row.verbatimTitle`.
     var verbatimText: String? = nil
     @ViewBuilder var trailing: () -> Trailing
 
@@ -101,7 +101,7 @@ public struct SettingsSectionLabel<Trailing: View>: View {
     }
 }
 
-extension SettingsSectionLabel where Trailing == EmptyView {
+extension SectionLabel where Trailing == EmptyView {
     public init(_ text: LocalizedStringKey) {
         self.init(text, trailing: { EmptyView() })
     }
@@ -114,9 +114,9 @@ extension SettingsSectionLabel where Trailing == EmptyView {
 
 /// Footnote text beneath a card — italic-equivalent grey copy used as
 /// section explanations.
-public struct SettingsFootnote: View {
+public struct Footnote: View {
     let text: LocalizedStringKey
-    /// Runtime data rather than UI copy — see `SettingsRow.verbatimTitle`.
+    /// Runtime data rather than UI copy — see `Row.verbatimTitle`.
     var verbatimText: String? = nil
     public init(_ text: LocalizedStringKey) { self.text = text }
     /// Footnote from runtime data (e.g. an already-localized error
@@ -138,9 +138,9 @@ public struct SettingsFootnote: View {
 
 /// Settings large title. Renders the same 34pt bold heading the design
 /// shows beneath the nav bar on each top-level screen.
-public struct SettingsLargeTitle: View {
+public struct LargeTitle: View {
     let text: LocalizedStringKey
-    /// Runtime data rather than UI copy — see `SettingsRow.verbatimTitle`.
+    /// Runtime data rather than UI copy — see `Row.verbatimTitle`.
     var verbatimText: String? = nil
     public init(_ text: LocalizedStringKey) { self.text = text }
     /// Title from runtime data (e.g. an authority's published name).
@@ -162,7 +162,7 @@ public struct SettingsLargeTitle: View {
 
 /// White rounded card surface used for grouped rows. 14pt corner
 /// radius, full-bleed inside the page's 16pt horizontal padding.
-public struct SettingsCard<Content: View>: View {
+public struct Card<Content: View>: View {
     @ViewBuilder var content: () -> Content
     public init(@ViewBuilder content: @escaping () -> Content) {
         self.content = content
@@ -273,7 +273,7 @@ public struct SettingsRowDivider: View {
 /// Button. The chevron renders whenever `hasChevron` is true,
 /// independent of `onTap`, because the wrapping `NavigationLink`
 /// itself owns the tap.
-public struct SettingsRow<Tile: View, Right: View>: View {
+public struct Row<Tile: View, Right: View>: View {
     let title: LocalizedStringKey
     /// Set instead of `title` when the text is runtime data (a name
     /// fetched from the network, an identifier) rather than UI copy.
@@ -408,7 +408,7 @@ public struct SettingsRow<Tile: View, Right: View>: View {
     }
 }
 
-extension SettingsRow where Right == EmptyView {
+extension Row where Right == EmptyView {
     public init(
         title: LocalizedStringKey,
         titleColor: Color = OnymTokens.text,
@@ -437,7 +437,7 @@ extension SettingsRow where Right == EmptyView {
     }
 
     /// Tile-only row whose title is runtime data — see the
-    /// `titleText:` initializer on `SettingsRow`.
+    /// `titleText:` initializer on `Row`.
     public init(
         titleText: String,
         titleColor: Color = OnymTokens.text,
@@ -468,7 +468,7 @@ extension SettingsRow where Right == EmptyView {
 }
 
 /// Small uppercase chip used for TESTNET / PUBLIC etc. on relayer rows.
-public struct SettingsChip: View {
+public struct Chip: View {
     let text: String
     let fg: Color
     let bg: Color
@@ -491,7 +491,7 @@ public struct SettingsChip: View {
 }
 
 /// Pill button used for the in-card Copy/Share split actions.
-public struct SettingsTextButton: View {
+public struct TextButton: View {
     let title: LocalizedStringKey
     let systemImage: String
     var foreground: Color = OnymTokens.text
@@ -523,7 +523,7 @@ public struct SettingsTextButton: View {
 
 /// Primary CTA used for Continue / Build & Deploy / Verify etc. Same
 /// dimensions as the design's `PrimaryButton`.
-public struct SettingsPrimaryButton<Label: View>: View {
+public struct PrimaryButton<Label: View>: View {
     var disabled: Bool = false
     let action: () -> Void
     @ViewBuilder var label: () -> Label
@@ -553,7 +553,7 @@ public struct SettingsPrimaryButton<Label: View>: View {
     }
 }
 
-extension SettingsPrimaryButton where Label == Text {
+extension PrimaryButton where Label == Text {
     public init(_ text: LocalizedStringKey, disabled: Bool = false, action: @escaping () -> Void) {
         self.disabled = disabled
         self.action = action
@@ -563,7 +563,7 @@ extension SettingsPrimaryButton where Label == Text {
 
 /// Step indicator for multi-step flows (backup, onboarding). Active
 /// dot expands into a 22pt capsule; visited dots stay filled at 6pt.
-public struct SettingsStepIndicator: View {
+public struct StepIndicator: View {
     let step: Int
     var count: Int = 3
 

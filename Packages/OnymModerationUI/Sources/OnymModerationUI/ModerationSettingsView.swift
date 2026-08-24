@@ -26,7 +26,7 @@ public struct ModerationSettingsView: View {
     public var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                SettingsLargeTitle("Moderation")
+                LargeTitle("Moderation")
 
                 if !flow.state.openCases.isEmpty {
                     OpenCaseBanner(notices: flow.state.openCases, makeCaseFlow: makeCaseFlow)
@@ -40,8 +40,8 @@ public struct ModerationSettingsView: View {
                 }
 
                 if !flow.pendingRegistrations.isEmpty {
-                    SettingsSectionLabel("PENDING REGISTRATION")
-                    SettingsCard {
+                    SectionLabel("PENDING REGISTRATION")
+                    Card {
                         ForEach(
                             Array(flow.pendingRegistrations.enumerated()),
                             id: \.element.historyRowID
@@ -49,12 +49,12 @@ public struct ModerationSettingsView: View {
                             Button {
                                 Task { await flow.retryRegistration(record) }
                             } label: {
-                                SettingsRow(
+                                Row(
                                     titleText: record.authorityName,
                                     subtitle: pendingRegistrationSubtitle(record),
                                     last: idx == flow.pendingRegistrations.count - 1
                                 ) {
-                                    SettingsIconTile(
+                                    IconTile(
                                         symbol: "clock.arrow.circlepath",
                                         bg: OnymTile.indigo
                                     )
@@ -66,29 +66,29 @@ public struct ModerationSettingsView: View {
                         }
                     }
                     if let message = flow.state.registrationErrorMessage {
-                        SettingsFootnote(verbatim: message)
+                        Footnote(verbatim: message)
                     } else {
-                        SettingsFootnote(
+                        Footnote(
                             "These signed mandates are not active. Tap one to retry delivery of the exact persisted artifact; no new consent is created."
                         )
                     }
                 }
 
                 if !flow.previousMandates.isEmpty {
-                    SettingsSectionLabel("PREVIOUS MANDATES")
-                    SettingsCard {
+                    SectionLabel("PREVIOUS MANDATES")
+                    Card {
                         ForEach(Array(flow.previousMandates.enumerated()), id: \.element.historyRowID) { idx, record in
-                            SettingsRow(
+                            Row(
                                 titleText: record.authorityName,
                                 subtitle: "Consented \(record.mandate.acceptedAt.formatted(date: .abbreviated, time: .omitted)) · \(String(record.mandate.manifestHash.prefix(16)))…",
                                 hasChevron: false,
                                 last: idx == flow.previousMandates.count - 1
                             ) {
-                                SettingsIconTile(symbol: "doc.text", bg: OnymTile.gray)
+                                IconTile(symbol: "doc.text", bg: OnymTile.gray)
                             }
                         }
                     }
-                    SettingsFootnote("Old mandates stay bound to the exact terms they consented to. Switching authorities never rewrites them.")
+                    Footnote("Old mandates stay bound to the exact terms they consented to. Switching authorities never rewrites them.")
                 }
             }
             .padding(.bottom, 32)
@@ -107,8 +107,8 @@ public struct ModerationSettingsView: View {
 
     private func activeCard(_ record: MandateRecord) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionLabel("CURRENT AUTHORITY")
-            SettingsCard {
+            SectionLabel("CURRENT AUTHORITY")
+            Card {
                 VStack(alignment: .leading, spacing: 8) {
                     row("Authority", record.authorityName)
                     row("Component", record.mandate.authority, monospaced: true)
@@ -128,32 +128,32 @@ public struct ModerationSettingsView: View {
                 SettingsRowDivider()
 
                 Button { showSwitchConsent = true } label: {
-                    SettingsRow(
+                    Row(
                         title: "Switch authority",
                         subtitle: "Signs a fresh mandate under the new authority's terms",
                         last: true
                     ) {
-                        SettingsIconTile(symbol: "arrow.triangle.2.circlepath", bg: OnymTile.indigo)
+                        IconTile(symbol: "arrow.triangle.2.circlepath", bg: OnymTile.indigo)
                     }
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("moderation.settings.switch")
             }
-            SettingsFootnote("Your consent is the authority's entire jurisdiction: it can only decide cases against you under the classes and terms you signed, and its verdicts must be reasoned, expiring, and appealable.")
+            Footnote("Your consent is the authority's entire jurisdiction: it can only decide cases against you under the classes and terms you signed, and its verdicts must be reasoned, expiring, and appealable.")
         }
     }
 
     private var noMandateCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionLabel("CURRENT AUTHORITY")
-            SettingsCard {
+            SectionLabel("CURRENT AUTHORITY")
+            Card {
                 Button { showSwitchConsent = true } label: {
-                    SettingsRow(
+                    Row(
                         title: "Choose a moderation authority",
                         subtitle: "No mandate signed on this device yet",
                         last: true
                     ) {
-                        SettingsIconTile(symbol: "checkmark.shield", bg: OnymTile.indigo)
+                        IconTile(symbol: "checkmark.shield", bg: OnymTile.indigo)
                     }
                 }
                 .buttonStyle(.plain)

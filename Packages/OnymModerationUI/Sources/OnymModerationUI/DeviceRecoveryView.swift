@@ -81,7 +81,7 @@ public struct DeviceRecoveryView: View {
                 .foregroundStyle(OnymTokens.text2)
                 .lineSpacing(3)
 
-            SettingsCard {
+            Card {
                 VStack(alignment: .leading, spacing: 12) {
                     TextField(String(localized: "Contact — email or phone", comment: "Recovery claim contact field"), text: $contact)
                         .textInputAutocapitalization(.never)
@@ -99,7 +99,7 @@ public struct DeviceRecoveryView: View {
                 .padding(16)
             }
 
-            SettingsPrimaryButton(action: submit) {
+            PrimaryButton(action: submit) {
                 if case .filing = flow.phase {
                     ProgressView().tint(OnymTokens.onAccent)
                 } else {
@@ -121,7 +121,7 @@ public struct DeviceRecoveryView: View {
             Text(claimId)
                 .font(OnymType.mono(size: 12))
                 .foregroundStyle(OnymTokens.text3)
-            SettingsPrimaryButton(action: check) {
+            PrimaryButton(action: check) {
                 if isChecking {
                     ProgressView().tint(OnymTokens.onAccent)
                 } else {
@@ -169,7 +169,7 @@ public struct DeviceRecoveryView: View {
                 title: String(localized: "A moderation record still bans this device"),
                 detail: String(localized: "The grant stays valid, but nothing moves while a ban stands. Resolve the case with the authority, then check again.")
             )
-            SettingsCard {
+            Card {
                 VStack(alignment: .leading, spacing: 10) {
                     Text(contact)
                         .font(OnymType.font(size: 13))
@@ -189,7 +189,7 @@ public struct DeviceRecoveryView: View {
                 }
                 .padding(16)
             }
-            SettingsPrimaryButton(action: check) {
+            PrimaryButton(action: check) {
                 Text("Check again", comment: "Recovery mark-in-force re-check button")
             }
         }

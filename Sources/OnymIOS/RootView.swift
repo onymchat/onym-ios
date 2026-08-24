@@ -230,7 +230,7 @@ struct RootView: View {
                         { step in make(flow, step) }
                     },
                     stepIndicator: { index, count in
-                        AnyView(SettingsStepIndicator(step: index, count: count))
+                        AnyView(StepIndicator(step: index, count: count))
                     }
                 )
                 .interactiveDismissDisabled(true)
