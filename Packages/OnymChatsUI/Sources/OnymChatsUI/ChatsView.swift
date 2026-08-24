@@ -721,7 +721,7 @@ private struct ChatsRow: View {
             } else if group.isPublishedOnChain {
                 Image(systemName: "checkmark.seal.fill")
                     .font(.caption)
-                    .foregroundStyle(Color.green)
+                    .foregroundStyle(OnymTokens.green)
                     .accessibilityLabel("Published on chain")
             }
         }
@@ -803,7 +803,7 @@ private struct UnreadBadge: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 6)
             .frame(minWidth: 20, minHeight: 20)
-            .background(Color.red, in: Capsule())
+            .background(OnymTokens.red, in: Capsule())
             .accessibilityLabel("\(count) unread")
     }
 }

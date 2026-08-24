@@ -155,7 +155,7 @@ struct RelayerSettingsView: View {
                             Button { flow.tappedSetPrimary(url: endpoint.url) } label: {
                                 Image(systemName: flow.isPrimary(endpoint) ? "star.fill" : "star")
                                     .font(OnymType.font(size: 17))
-                                    .foregroundStyle(flow.isPrimary(endpoint) ? SettingsTile.amber : OnymTokens.text3)
+                                    .foregroundStyle(flow.isPrimary(endpoint) ? OnymTile.amber : OnymTokens.text3)
                                     .frame(width: 30, height: 30)
                             }
                             .buttonStyle(.plain)
@@ -185,7 +185,7 @@ struct RelayerSettingsView: View {
         switch network {
         case "public":  return OnymTokens.red
         case "testnet": return OnymTokens.green
-        default:        return SettingsTile.gray
+        default:        return OnymTile.gray
         }
     }
 
@@ -349,8 +349,8 @@ struct RelayerSettingsView: View {
                     .foregroundStyle(.white.opacity(0.5))
             }
             .padding(18)
-            .background(LinearGradient(colors: [Color(red: 0.106, green: 0.122, blue: 0.141),
-                                                  Color(red: 0.051, green: 0.067, blue: 0.090)],
+            .background(LinearGradient(colors: [OnymTerminal.surface,
+                                                  OnymTerminal.surfaceDeep],
                                         startPoint: .topLeading, endPoint: .bottomTrailing),
                          in: RoundedRectangle(cornerRadius: OnymRadius.panel, style: .continuous))
             .padding(.horizontal, 16)

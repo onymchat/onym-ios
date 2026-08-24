@@ -60,7 +60,7 @@ struct BlossomRelaySettingsView: View {
                             last: true
                         ) {
                             SettingsIconTile(symbol: "server.rack",
-                                             bg: Color(red: 0.106, green: 0.122, blue: 0.141))
+                                             bg: OnymTerminal.surface)
                         }
                     }
                     .buttonStyle(.plain)
@@ -116,7 +116,7 @@ struct BlossomRelaySettingsView: View {
                             HStack(spacing: 12) {
                                 SettingsIconTile(
                                     symbol: "photo.on.rectangle.angled",
-                                    bg: SettingsTile.indigo
+                                    bg: OnymTile.indigo
                                 )
                                 VStack(alignment: .leading, spacing: 2) {
                                     HStack(spacing: 6) {
@@ -260,7 +260,7 @@ struct BlossomRelaySettingsView: View {
                 HStack {
                     SettingsIconTile(
                         symbol: "arrow.counterclockwise",
-                        bg: SettingsTile.gray
+                        bg: OnymTile.gray
                     )
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Restore default")

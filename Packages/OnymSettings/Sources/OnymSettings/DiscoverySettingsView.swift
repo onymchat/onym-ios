@@ -121,7 +121,7 @@ struct DiscoverySettingsView: View {
     private func sourceRow(_ status: DiscoverySourceStatus, last: Bool) -> some View {
         VStack(spacing: 0) {
             HStack(alignment: .top, spacing: 12) {
-                SettingsIconTile(symbol: "antenna.radiowaves.left.and.right", bg: SettingsTile.purple)
+                SettingsIconTile(symbol: "antenna.radiowaves.left.and.right", bg: OnymTile.purple)
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
                         Text(verbatim: status.source.userLabel)
@@ -155,7 +155,7 @@ struct DiscoverySettingsView: View {
                     ForEach(status.notes, id: \.self) { note in
                         Text(verbatim: note)
                             .font(OnymType.font(size: 12))
-                            .foregroundStyle(SettingsTile.amber)
+                            .foregroundStyle(OnymTile.amber)
                             .lineLimit(3)
                     }
                     if let error = status.lastError {
@@ -210,13 +210,13 @@ struct DiscoverySettingsView: View {
                          fg: OnymTokens.red, bg: OnymTokens.red.opacity(0.15))
         } else if status.lastError != nil {
             SettingsChip(text: String(localized: "FAILED").uppercased(),
-                         fg: SettingsTile.amber, bg: SettingsTile.amber.opacity(0.15))
+                         fg: OnymTile.amber, bg: OnymTile.amber.opacity(0.15))
         } else if flow.state.fetchStatus == .fetching {
             SettingsChip(text: String(localized: "FETCHING").uppercased(),
-                         fg: SettingsTile.gray, bg: SettingsTile.gray.opacity(0.15))
+                         fg: OnymTile.gray, bg: OnymTile.gray.opacity(0.15))
         } else if status.source.pinnedOperatorKeyHex == nil {
             SettingsChip(text: String(localized: "UNCONFIRMED").uppercased(),
-                         fg: SettingsTile.gray, bg: SettingsTile.gray.opacity(0.15))
+                         fg: OnymTile.gray, bg: OnymTile.gray.opacity(0.15))
         } else {
             SettingsChip(text: String(localized: "OK").uppercased(),
                          fg: OnymTokens.green, bg: OnymTokens.green.opacity(0.15))

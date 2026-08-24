@@ -114,7 +114,7 @@ struct UseExistingContractView: View {
                             open("https://stellar.expert/explorer/\(net)")
                         }
                     ) {
-                        SettingsContentTile(bg: SettingsTile.indigo) {
+                        SettingsContentTile(bg: OnymTile.indigo) {
                             Text("SX").font(OnymType.font(size: 11, weight: .bold)).foregroundStyle(.white)
                         }
                     } right: {
@@ -129,7 +129,7 @@ struct UseExistingContractView: View {
                         last: true,
                         onTap: { open("https://developers.stellar.org/docs/build/smart-contracts/getting-started/setup") }
                     ) {
-                        SettingsIconTile(symbol: "terminal.fill", bg: SettingsTile.gray)
+                        SettingsIconTile(symbol: "terminal.fill", bg: OnymTile.gray)
                     }
                 }
             }
@@ -143,12 +143,12 @@ struct UseExistingContractView: View {
     private var heroCard: some View {
         HStack(spacing: 14) {
             RoundedRectangle(cornerRadius: OnymRadius.inset, style: .continuous)
-                .fill(LinearGradient(colors: [Color(red: 0.898, green: 0.898, blue: 0.996),
-                                                Color(red: 0.78, green: 0.78, blue: 0.957)],
+                .fill(LinearGradient(colors: [OnymTint.indigoSoft,
+                                                OnymTint.indigoSoft2],
                                       startPoint: .topLeading, endPoint: .bottomTrailing))
                 .frame(width: 52, height: 52)
                 .overlay(Image(systemName: "shippingbox.fill")
-                    .foregroundStyle(SettingsTile.indigo))
+                    .foregroundStyle(OnymTile.indigo))
             VStack(alignment: .leading, spacing: 3) {
                 Text("Bring your own contract")
                     .font(OnymType.font(size: 16.5, weight: .semibold))
@@ -176,10 +176,10 @@ struct UseExistingContractView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Address format looks valid")
                     .font(OnymType.font(size: 13.5, weight: .semibold))
-                    .foregroundStyle(Color(red: 0.09, green: 0.37, blue: 0.18))
+                    .foregroundStyle(OnymTint.greenInkDeep)
                 Text("This checks the address shape only, not the on-chain contract. Tap “Use this contract” to anchor new \(key.type.displayName.lowercased()) chats here; existing chats keep their current contract.")
                     .font(OnymType.font(size: 12))
-                    .foregroundStyle(Color(red: 0.19, green: 0.43, blue: 0.28))
+                    .foregroundStyle(OnymTint.greenInkMid)
                     .lineSpacing(2)
             }
             Spacer(minLength: 0)

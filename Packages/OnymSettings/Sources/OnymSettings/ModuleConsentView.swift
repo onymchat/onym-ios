@@ -153,7 +153,7 @@ public struct ModuleConsentView: View {
                             subtitleMono: true,
                             last: true
                         ) {
-                            SettingsIconTile(symbol: "doc.text", bg: SettingsTile.gray)
+                            SettingsIconTile(symbol: "doc.text", bg: OnymTile.gray)
                         }
                     }
                     .buttonStyle(.plain)
@@ -214,8 +214,8 @@ public struct ModuleConsentView: View {
                     text: (status.state == "warning"
                         ? String(localized: "WARNING")
                         : String(localized: "UNDER REVIEW")).uppercased(),
-                    fg: SettingsTile.amber,
-                    bg: SettingsTile.amber.opacity(0.15)
+                    fg: OnymTile.amber,
+                    bg: OnymTile.amber.opacity(0.15)
                 )
                 Text(status.state == "warning"
                      ? "The listing provider has attached a warning to this service."
@@ -237,7 +237,7 @@ public struct ModuleConsentView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(SettingsTile.amber.opacity(0.1),
+        .background(OnymTile.amber.opacity(0.1),
                     in: RoundedRectangle(cornerRadius: OnymRadius.inset, style: .continuous))
         .padding(.horizontal, 16)
         .padding(.top, 8)

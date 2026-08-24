@@ -34,7 +34,7 @@ public struct DeviceBackupVendorsView: View {
                 SettingsSectionLabel("STATUS")
                 SettingsCard {
                     SettingsRow(title: statusTitle, subtitle: statusSubtitle, last: true) {
-                        SettingsIconTile(symbol: statusSymbol, bg: SettingsTile.blue)
+                        SettingsIconTile(symbol: statusSymbol, bg: OnymTile.blue)
                     }
                     .accessibilityIdentifier("backup.status_row")
                 }
@@ -50,7 +50,7 @@ public struct DeviceBackupVendorsView: View {
                                 subtitle: backUpSubtitle,
                                 last: true
                             ) {
-                                SettingsIconTile(symbol: "arrow.up.circle", bg: SettingsTile.blue)
+                                SettingsIconTile(symbol: "arrow.up.circle", bg: OnymTile.blue)
                             }
                         }
                         .buttonStyle(.plain)
@@ -79,7 +79,7 @@ public struct DeviceBackupVendorsView: View {
                             subtitle: "Adds messages and chats — nothing is deleted",
                             last: true
                         ) {
-                            SettingsIconTile(symbol: "arrow.down.circle", bg: SettingsTile.green)
+                            SettingsIconTile(symbol: "arrow.down.circle", bg: OnymTile.green)
                         }
                     }
                     .buttonStyle(.plain)
@@ -131,7 +131,7 @@ public struct DeviceBackupVendorsView: View {
                         subtitle: purchaseRestoreSubtitle,
                         last: true
                     ) {
-                        SettingsIconTile(symbol: "arrow.clockwise.circle", bg: SettingsTile.gray)
+                        SettingsIconTile(symbol: "arrow.clockwise.circle", bg: OnymTile.gray)
                     }
                 }
                 .buttonStyle(.plain)
@@ -269,13 +269,13 @@ public struct DeviceBackupVendorsView: View {
     /// never turned on.
     private static func tint(for status: DeviceBackupSettingsFlow.Status) -> Color {
         switch status {
-        case .idle, .running: SettingsTile.green
-        case .off: SettingsTile.gray
-        case .failed: SettingsTile.red
-        case .stale, .paymentRequired, .checkingEarlierBackup: SettingsTile.amber
+        case .idle, .running: OnymTile.green
+        case .off: OnymTile.gray
+        case .failed: OnymTile.red
+        case .stale, .paymentRequired, .checkingEarlierBackup: OnymTile.amber
         // Set up, and no longer accepting uploads until somebody reads
         // something. Not a failure, and not "off" either.
-        case .termsChanged, .operatorChanged: SettingsTile.orange
+        case .termsChanged, .operatorChanged: OnymTile.orange
         }
     }
 

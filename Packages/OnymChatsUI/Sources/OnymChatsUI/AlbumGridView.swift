@@ -119,7 +119,7 @@ final class AlbumGridView: UIView {
             overflowLabel.font = .systemFont(ofSize: 22, weight: .semibold)
             overflowLabel.textColor = .white
             overflowLabel.textAlignment = .center
-            overflowLabel.backgroundColor = UIColor.black.withAlphaComponent(0.45)
+            overflowLabel.backgroundColor = OnymTokens.scrimUI.withAlphaComponent(0.45)
             overflowLabel.isHidden = true
             addSubview(overflowLabel)
 

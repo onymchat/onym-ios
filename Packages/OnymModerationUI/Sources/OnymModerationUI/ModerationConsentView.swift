@@ -161,7 +161,7 @@ public struct ModerationConsentContent: View {
                             subtitleLineLimit: 2,
                             last: idx == flow.state.authorities.count - 1
                         ) {
-                            SettingsIconTile(symbol: "checkmark.shield", bg: SettingsTile.indigo)
+                            SettingsIconTile(symbol: "checkmark.shield", bg: OnymTile.indigo)
                         }
                     }
                     .buttonStyle(.plain)

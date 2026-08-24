@@ -338,7 +338,7 @@ public struct ChatThreadView: View {
         .overlay {
             if preparingReportFor != nil {
                 ZStack {
-                    Color.black.opacity(0.2).ignoresSafeArea()
+                    OnymTokens.scrim.opacity(0.2).ignoresSafeArea()
                     ProgressView("Preparing report…")
                         .padding(20)
                         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: OnymRadius.card))
@@ -772,7 +772,7 @@ private struct FullScreenGalleryView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            OnymTokens.lightbox.ignoresSafeArea()
             TabView(selection: $selection) {
                 ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                     Group {
@@ -881,7 +881,7 @@ private struct FullScreenVideoView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            OnymTokens.lightbox.ignoresSafeArea()
             if let player {
                 DismissibleVideoPlayer(
                     player: player,
@@ -1000,7 +1000,7 @@ private struct FullScreenImageView: View {
 
     var body: some View {
         ZStack {
-            Color.black.opacity(1 - dragProgress * 0.7).ignoresSafeArea()
+            OnymTokens.scrim.opacity(1 - dragProgress * 0.7).ignoresSafeArea()
             if let image {
                 Image(uiImage: image)
                     .resizable()

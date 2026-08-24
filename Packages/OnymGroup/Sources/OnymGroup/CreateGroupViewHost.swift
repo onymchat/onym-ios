@@ -1,4 +1,5 @@
 import SwiftUI
+import OnymDesign
 
 /// Host view that constructs the `CreateGroupFlow` exactly once on
 /// first render and wires its `onClose` callback to the parent's
@@ -30,7 +31,7 @@ public struct CreateGroupViewHost: View {
             if let flow {
                 CreateGroupView(flow: flow, makeShareInviteFlow: makeShareInviteFlow)
             } else {
-                Color.black.ignoresSafeArea()
+                OnymTokens.lightbox.ignoresSafeArea()
             }
         }
         .onAppear {
