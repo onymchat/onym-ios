@@ -7,7 +7,16 @@ let package = Package(
     products: [
         .library(name: "OnymDesign", targets: ["OnymDesign"])
     ],
+    dependencies: [
+        // The swappable token layer. Adopters who want a differently
+        // styled build repoint this one dependency at their own module
+        // named `OnymDesignTokens` — see that package's README.
+        .package(path: "../OnymDesignTokens")
+    ],
     targets: [
-        .target(name: "OnymDesign")
+        .target(
+            name: "OnymDesign",
+            dependencies: [.product(name: "OnymDesignTokens", package: "OnymDesignTokens")]
+        )
     ]
 )
