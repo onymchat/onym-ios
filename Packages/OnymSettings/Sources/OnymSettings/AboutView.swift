@@ -42,7 +42,7 @@ struct AboutView: View {
                         last: true,
                         onTap: { open(Self.sourceURL.absoluteString + "/releases") }
                     ) {
-                        SettingsIconTile(symbol: "arrow.up.circle.fill", bg: SettingsTile.blue)
+                        SettingsIconTile(symbol: "arrow.up.circle.fill", bg: OnymTile.blue)
                     }
                 }
 
@@ -69,7 +69,7 @@ struct AboutView: View {
                         hasChevron: false,
                         onTap: { open(Self.docsURL.absoluteString) }
                     ) {
-                        SettingsIconTile(symbol: "doc.text.fill", bg: SettingsTile.indigo)
+                        SettingsIconTile(symbol: "doc.text.fill", bg: OnymTile.indigo)
                     } right: {
                         Image(systemName: "arrow.up.right.square")
                             .foregroundStyle(OnymTokens.text3)
@@ -81,7 +81,7 @@ struct AboutView: View {
                         hasChevron: false,
                         onTap: { open("https://onym.app/whitepaper") }
                     ) {
-                        SettingsIconTile(symbol: "sparkles", bg: SettingsTile.green)
+                        SettingsIconTile(symbol: "sparkles", bg: OnymTile.green)
                     } right: {
                         Image(systemName: "arrow.up.right.square")
                             .foregroundStyle(OnymTokens.text3)
@@ -93,7 +93,7 @@ struct AboutView: View {
                         last: true,
                         onTap: { open(Self.sourceURL.absoluteString + "/releases") }
                     ) {
-                        SettingsIconTile(symbol: "list.star", bg: SettingsTile.purple)
+                        SettingsIconTile(symbol: "list.star", bg: OnymTile.purple)
                     }
                 }
 
@@ -105,7 +105,7 @@ struct AboutView: View {
                         onTap: { open(Self.docsURL.absoluteString + "/faq") }
                     ) {
                         SettingsIconTile(symbol: "questionmark.circle.fill",
-                                         bg: SettingsTile.blue)
+                                         bg: OnymTile.blue)
                     } right: {
                         Image(systemName: "arrow.up.right.square")
                             .foregroundStyle(OnymTokens.text3)
@@ -116,7 +116,7 @@ struct AboutView: View {
                         hasChevron: false,
                         onTap: { open("https://onym.app/community") }
                     ) {
-                        SettingsIconTile(symbol: "bubble.left.fill", bg: SettingsTile.green)
+                        SettingsIconTile(symbol: "bubble.left.fill", bg: OnymTile.green)
                     } right: {
                         Image(systemName: "arrow.up.right.square")
                             .foregroundStyle(OnymTokens.text3)
@@ -128,7 +128,7 @@ struct AboutView: View {
                         last: true,
                         onTap: { open(Self.supportURL.absoluteString) }
                     ) {
-                        SettingsIconTile(symbol: "envelope.fill", bg: SettingsTile.orange)
+                        SettingsIconTile(symbol: "envelope.fill", bg: OnymTile.orange)
                     } right: {
                         Image(systemName: "arrow.up.right.square")
                             .foregroundStyle(OnymTokens.text3)
@@ -196,8 +196,8 @@ struct AboutView: View {
         VStack(spacing: 4) {
             Button { taps += 1 } label: {
                 RoundedRectangle(cornerRadius: OnymRadius.hero, style: .continuous)
-                    .fill(LinearGradient(colors: [Color(red: 0.106, green: 0.122, blue: 0.141),
-                                                    Color(red: 0.051, green: 0.067, blue: 0.090)],
+                    .fill(LinearGradient(colors: [OnymTerminal.surface,
+                                                    OnymTerminal.surfaceDeep],
                                           startPoint: .topLeading, endPoint: .bottomTrailing))
                     .frame(width: 104, height: 104)
                     .overlay(OnymMark(size: 64, color: .white, spinning: taps >= 5))

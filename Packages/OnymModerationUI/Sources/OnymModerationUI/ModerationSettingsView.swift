@@ -56,7 +56,7 @@ public struct ModerationSettingsView: View {
                                 ) {
                                     SettingsIconTile(
                                         symbol: "clock.arrow.circlepath",
-                                        bg: SettingsTile.indigo
+                                        bg: OnymTile.indigo
                                     )
                                 }
                             }
@@ -84,7 +84,7 @@ public struct ModerationSettingsView: View {
                                 hasChevron: false,
                                 last: idx == flow.previousMandates.count - 1
                             ) {
-                                SettingsIconTile(symbol: "doc.text", bg: SettingsTile.gray)
+                                SettingsIconTile(symbol: "doc.text", bg: OnymTile.gray)
                             }
                         }
                     }
@@ -133,7 +133,7 @@ public struct ModerationSettingsView: View {
                         subtitle: "Signs a fresh mandate under the new authority's terms",
                         last: true
                     ) {
-                        SettingsIconTile(symbol: "arrow.triangle.2.circlepath", bg: SettingsTile.indigo)
+                        SettingsIconTile(symbol: "arrow.triangle.2.circlepath", bg: OnymTile.indigo)
                     }
                 }
                 .buttonStyle(.plain)
@@ -153,7 +153,7 @@ public struct ModerationSettingsView: View {
                         subtitle: "No mandate signed on this device yet",
                         last: true
                     ) {
-                        SettingsIconTile(symbol: "checkmark.shield", bg: SettingsTile.indigo)
+                        SettingsIconTile(symbol: "checkmark.shield", bg: OnymTile.indigo)
                     }
                 }
                 .buttonStyle(.plain)

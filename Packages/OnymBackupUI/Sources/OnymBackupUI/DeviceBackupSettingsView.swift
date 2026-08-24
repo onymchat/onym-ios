@@ -36,7 +36,7 @@ public struct DeviceBackupSettingsView: View {
                         subtitleLineLimit: 3,
                         last: true
                     ) {
-                        SettingsIconTile(symbol: statusSymbol, bg: SettingsTile.blue)
+                        SettingsIconTile(symbol: statusSymbol, bg: OnymTile.blue)
                     }
                     .accessibilityIdentifier("backup.status_row")
                 }
@@ -58,7 +58,7 @@ public struct DeviceBackupSettingsView: View {
                                     last: true
                                 ) {
                                     SettingsIconTile(symbol: "externaldrive.badge.plus",
-                                                     bg: SettingsTile.green)
+                                                     bg: OnymTile.green)
                                 }
                             }
                             .buttonStyle(.plain)
@@ -76,7 +76,7 @@ public struct DeviceBackupSettingsView: View {
                                 subtitle: "Uploads your whole history to this operator",
                                 last: true
                             ) {
-                                SettingsIconTile(symbol: "arrow.up.circle", bg: SettingsTile.blue)
+                                SettingsIconTile(symbol: "arrow.up.circle", bg: OnymTile.blue)
                             }
                         }
                         .buttonStyle(.plain)
@@ -153,7 +153,7 @@ public struct DeviceBackupSettingsView: View {
                         subtitle: "Ends this operator's copy and stops paying for it",
                         last: true
                     ) {
-                        SettingsIconTile(symbol: "xmark.bin", bg: SettingsTile.red)
+                        SettingsIconTile(symbol: "xmark.bin", bg: OnymTile.red)
                     }
                 }
                 .buttonStyle(.plain)
@@ -179,7 +179,7 @@ public struct DeviceBackupSettingsView: View {
                         subtitle: "Nothing has been accepted by the operator",
                         last: true
                     ) {
-                        SettingsIconTile(symbol: "tray", bg: SettingsTile.gray)
+                        SettingsIconTile(symbol: "tray", bg: OnymTile.gray)
                     }
                 } else {
                     ForEach(Array(flow.state.snapshots.enumerated()), id: \.element.snapshotReference) {
@@ -193,7 +193,7 @@ public struct DeviceBackupSettingsView: View {
                             subtitle: Self.subtitle(for: snapshot),
                             last: index == flow.state.snapshots.count - 1
                         ) {
-                            SettingsIconTile(symbol: "shippingbox", bg: SettingsTile.gray)
+                            SettingsIconTile(symbol: "shippingbox", bg: OnymTile.gray)
                         }
                         .accessibilityIdentifier("backup.snapshot.\(snapshot.snapshotReference.digestHex)")
                     }

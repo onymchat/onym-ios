@@ -933,7 +933,7 @@ final class ChatBubbleCell: UITableViewCell {
         )
         playOverlay.isHidden = true
         // Soft shadow so the glyph reads over a bright poster.
-        playOverlay.layer.shadowColor = UIColor.black.cgColor
+        playOverlay.layer.shadowColor = OnymTokens.scrimUI.cgColor
         playOverlay.layer.shadowOpacity = 0.4
         playOverlay.layer.shadowRadius = 4
         playOverlay.layer.shadowOffset = .zero
@@ -943,7 +943,7 @@ final class ChatBubbleCell: UITableViewCell {
         durationLabel.font = .systemFont(ofSize: 11, weight: .semibold)
         durationLabel.textColor = .white
         durationLabel.textAlignment = .center
-        durationLabel.backgroundColor = UIColor.black.withAlphaComponent(0.55)
+        durationLabel.backgroundColor = OnymTokens.scrimUI.withAlphaComponent(0.55)
         durationLabel.layer.cornerRadius = 4
         durationLabel.layer.cornerCurve = .continuous
         durationLabel.clipsToBounds = true
@@ -965,7 +965,7 @@ final class ChatBubbleCell: UITableViewCell {
             withConfiguration: UIImage.SymbolConfiguration(pointSize: 40, weight: .regular)
         )
         attachmentFailedBadge.isHidden = true
-        attachmentFailedBadge.layer.shadowColor = UIColor.black.cgColor
+        attachmentFailedBadge.layer.shadowColor = OnymTokens.scrimUI.cgColor
         attachmentFailedBadge.layer.shadowOpacity = 0.4
         attachmentFailedBadge.layer.shadowRadius = 4
         attachmentFailedBadge.layer.shadowOffset = .zero

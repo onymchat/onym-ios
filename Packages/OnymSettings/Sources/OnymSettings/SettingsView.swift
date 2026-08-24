@@ -158,7 +158,7 @@ public struct SettingsView: View {
                                 last: true
                             ) {
                                 SettingsIconTile(symbol: "sparkle.magnifyingglass",
-                                                 bg: SettingsTile.purple)
+                                                 bg: OnymTile.purple)
                             }
                         }
                         .buttonStyle(.plain)
@@ -176,7 +176,7 @@ public struct SettingsView: View {
                             title: "Anchors",
                             subtitle: useMainnet ? "Stellar · Mainnet" : "Stellar · Testnet"
                         ) {
-                            SettingsIconTile(symbol: "link", bg: SettingsTile.orange)
+                            SettingsIconTile(symbol: "link", bg: OnymTile.orange)
                         }
                     }
                     .buttonStyle(.plain)
@@ -195,7 +195,7 @@ public struct SettingsView: View {
                             last: true
                         ) {
                             SettingsIconTile(symbol: "antenna.radiowaves.left.and.right",
-                                             bg: SettingsTile.indigo)
+                                             bg: OnymTile.indigo)
                         }
                     }
                     .buttonStyle(.plain)
@@ -214,7 +214,7 @@ public struct SettingsView: View {
                         ) {
                             SettingsIconTile(
                                 symbol: "antenna.radiowaves.left.and.right.circle.fill",
-                                bg: SettingsTile.indigo
+                                bg: OnymTile.indigo
                             )
                         }
                     }
@@ -231,7 +231,7 @@ public struct SettingsView: View {
                         ) {
                             SettingsIconTile(
                                 symbol: "photo.on.rectangle.angled",
-                                bg: SettingsTile.indigo
+                                bg: OnymTile.indigo
                             )
                         }
                     }
@@ -255,7 +255,7 @@ public struct SettingsView: View {
                             ) {
                                 SettingsIconTile(
                                     symbol: "bell.badge.fill",
-                                    bg: SettingsTile.indigo
+                                    bg: OnymTile.indigo
                                 )
                             }
                         }
@@ -292,7 +292,7 @@ public struct SettingsView: View {
                                 ) {
                                     SettingsIconTile(
                                         symbol: "externaldrive.badge.timemachine",
-                                        bg: SettingsTile.blue)
+                                        bg: OnymTile.blue)
                                 }
                             }
                             .buttonStyle(.plain)
@@ -315,7 +315,7 @@ public struct SettingsView: View {
                                 ) {
                                     SettingsIconTile(
                                         symbol: "externaldrive.badge.plus",
-                                        bg: SettingsTile.blue)
+                                        bg: OnymTile.blue)
                                 }
                             }
                             .buttonStyle(.plain)
@@ -344,7 +344,7 @@ public struct SettingsView: View {
                                 subtitle: "Your consented authority and its terms",
                                 last: true
                             ) {
-                                SettingsIconTile(symbol: "checkmark.shield", bg: SettingsTile.green)
+                                SettingsIconTile(symbol: "checkmark.shield", bg: OnymTile.green)
                             }
                         }
                         .buttonStyle(.plain)
@@ -364,7 +364,7 @@ public struct SettingsView: View {
                                 last: true
                             ) {
                                 SettingsIconTile(symbol: "arrow.counterclockwise.circle.fill",
-                                                 bg: SettingsTile.blue)
+                                                 bg: OnymTile.blue)
                             }
                         }
                         .buttonStyle(.plain)
@@ -383,7 +383,7 @@ public struct SettingsView: View {
                     ) {
                         SettingsIconTile(
                             symbol: sendReadReceipts ? "checkmark.message.fill" : "message",
-                            bg: sendReadReceipts ? SettingsTile.indigo : SettingsTile.gray
+                            bg: sendReadReceipts ? OnymTile.indigo : OnymTile.gray
                         )
                     } right: {
                         Toggle("", isOn: $sendReadReceipts)
@@ -400,7 +400,7 @@ public struct SettingsView: View {
                             hasChevron: false,
                             last: true
                         ) {
-                            SettingsIconTile(symbol: "trash.fill", bg: SettingsTile.red)
+                            SettingsIconTile(symbol: "trash.fill", bg: OnymTile.red)
                         }
                     }
                     .buttonStyle(.plain)
@@ -457,7 +457,7 @@ public struct SettingsView: View {
     private func notBackedUpBanner(count: Int) -> some View {
         Button { showRecoveryPhrase = true } label: {
             HStack(spacing: 10) {
-                Circle().fill(SettingsTile.amber).frame(width: 22, height: 22)
+                Circle().fill(OnymTile.amber).frame(width: 22, height: 22)
                     .overlay(Image(systemName: "exclamationmark")
                         .font(OnymType.font(size: 12, weight: .bold))
                         .foregroundStyle(.white))
@@ -465,18 +465,18 @@ public struct SettingsView: View {
                      ? "1 identity hasn’t been backed up yet."
                      : "\(count) identities haven’t been backed up yet.")
                     .font(OnymType.font(size: 13))
-                    .foregroundStyle(Color(red: 0.36, green: 0.227, blue: 0))
+                    .foregroundStyle(OnymTint.amberInk)
                 Spacer(minLength: 4)
                 Image(systemName: "chevron.right")
                     .font(OnymType.font(size: 12, weight: .semibold))
-                    .foregroundStyle(Color(red: 0.36, green: 0.227, blue: 0))
+                    .foregroundStyle(OnymTint.amberInk)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .background(Color(red: 1, green: 0.965, blue: 0.898),
+            .background(OnymTint.amberSoft,
                         in: RoundedRectangle(cornerRadius: OnymRadius.inset, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: OnymRadius.inset, style: .continuous)
-                .stroke(Color(red: 1, green: 0.847, blue: 0.627), lineWidth: 0.5))
+                .stroke(OnymTint.amberSoft2, lineWidth: 0.5))
             .padding(.horizontal, 16)
             .padding(.top, 12)
         }

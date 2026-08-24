@@ -50,7 +50,7 @@ struct ContractDetailView: View {
                         hasChevron: false,
                         onTap: explorerURL.map { url in { open(url.absoluteString) } }
                     ) {
-                        SettingsContentTile(bg: SettingsTile.indigo) {
+                        SettingsContentTile(bg: OnymTile.indigo) {
                             Text("SX").font(OnymType.font(size: 11, weight: .bold)).foregroundStyle(.white)
                         }
                     } right: {
@@ -65,7 +65,7 @@ struct ContractDetailView: View {
                         last: true,
                         onTap: entry.map { e in { UIPasteboard.general.string = e.id } }
                     ) {
-                        SettingsIconTile(symbol: "doc.on.doc.fill", bg: SettingsTile.gray)
+                        SettingsIconTile(symbol: "doc.on.doc.fill", bg: OnymTile.gray)
                     }
                     .accessibilityIdentifier("contract_detail.copy_address")
                 }
@@ -94,7 +94,7 @@ struct ContractDetailView: View {
                         last: true
                     ) {
                         SettingsIconTile(symbol: "exclamationmark.circle.fill",
-                                         bg: SettingsTile.amber)
+                                         bg: OnymTile.amber)
                     }
                     .accessibilityIdentifier("contract_detail.audit")
                 }
@@ -124,11 +124,11 @@ struct ContractDetailView: View {
     private var hero: some View {
         HStack(spacing: 14) {
             RoundedRectangle(cornerRadius: OnymRadius.inset, style: .continuous)
-                .fill(LinearGradient(colors: [Color(red: 0.996, green: 0.941, blue: 0.878),
-                                                Color(red: 1.0, green: 0.878, blue: 0.753)],
+                .fill(LinearGradient(colors: [OnymTint.orangeSoft,
+                                                OnymTint.orangeSoft2],
                                       startPoint: .topLeading, endPoint: .bottomTrailing))
                 .frame(width: 56, height: 56)
-                .overlay(OnymMark(size: 32, color: Color(red: 0.82, green: 0.29, blue: 0)))
+                .overlay(OnymMark(size: 32, color: OnymTint.orangeInk))
             VStack(alignment: .leading, spacing: 2) {
                 Text("CONTRACT · \(key.type.displayName.uppercased())")
                     .font(OnymType.font(size: 11.5, weight: .medium))

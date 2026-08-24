@@ -160,7 +160,7 @@ private struct AddIdentitySheet: View {
                 VStack(alignment: .leading, spacing: 0) {
                     Circle().fill(OnymTokens.surface3)
                         .frame(width: 80, height: 80)
-                        .overlay(OnymMark(size: 46, color: SettingsTile.gray))
+                        .overlay(OnymMark(size: 46, color: OnymTile.gray))
                         .frame(maxWidth: .infinity)
                         .padding(.top, 16)
                         .padding(.bottom, 24)

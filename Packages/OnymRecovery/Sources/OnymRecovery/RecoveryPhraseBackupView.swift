@@ -147,7 +147,7 @@ private struct IntroScreen: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
-                    .foregroundStyle(Color.white)
+                    .foregroundStyle(OnymTokens.onTile)
                     .background(Color.accentColor, in: RoundedRectangle(cornerRadius: OnymRadius.card, style: .continuous))
                 }
                 .disabled(!isReady)
@@ -166,7 +166,7 @@ private struct IntroScreen: View {
             ZStack {
                 RoundedRectangle(cornerRadius: OnymRadius.hero, style: .continuous)
                     .fill(LinearGradient(
-                        colors: [Color.accentColor, Color.purple],
+                        colors: [Color.accentColor, OnymAccent.purple.color],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ))
@@ -278,7 +278,7 @@ private struct RevealScreen: View {
                         .fontWeight(.semibold)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
-                        .foregroundStyle(Color.white)
+                        .foregroundStyle(OnymTokens.onTile)
                         .background(Color.accentColor, in: RoundedRectangle(cornerRadius: OnymRadius.card, style: .continuous))
                 }
                 .disabled(!revealed)
@@ -442,7 +442,7 @@ private struct VerifyOption: View {
                 if isCorrect {
                     ZStack {
                         Circle()
-                            .fill(Color.green)
+                            .fill(OnymTokens.green)
                             .frame(width: 22, height: 22)
                         Image(systemName: "checkmark")
                             .font(OnymType.font(size: 12, weight: .bold))
@@ -465,20 +465,20 @@ private struct VerifyOption: View {
     }
 
     private var background: Color {
-        if isCorrect { return Color.green.opacity(0.14) }
-        if isWrong { return Color.red.opacity(0.12) }
+        if isCorrect { return OnymTokens.green.opacity(0.14) }
+        if isWrong { return OnymTokens.red.opacity(0.12) }
         return Color(UIColor.secondarySystemGroupedBackground)
     }
 
     private var border: Color {
-        if isCorrect { return Color.green }
-        if isWrong { return Color.red }
+        if isCorrect { return OnymTokens.green }
+        if isWrong { return OnymTokens.red }
         return Color.clear
     }
 
     private var foreground: Color {
-        if isCorrect { return Color.green }
-        if isWrong { return Color.red }
+        if isCorrect { return OnymTokens.green }
+        if isWrong { return OnymTokens.red }
         return Color.primary
     }
 }
@@ -510,12 +510,12 @@ private struct DoneScreen: View {
             ZStack {
                 Circle()
                     .fill(LinearGradient(
-                        colors: [Color.green, Color(red: 0.2, green: 0.78, blue: 0.35)],
+                        colors: [OnymTokens.green, OnymTint.sealTo],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ))
                     .frame(width: 96, height: 96)
-                    .shadow(color: Color.green.opacity(0.4), radius: 16, x: 0, y: 12)
+                    .shadow(color: OnymTokens.green.opacity(0.4), radius: 16, x: 0, y: 12)
                 Image(systemName: "checkmark")
                     .font(OnymType.font(size: 44, weight: .bold))
                     .foregroundStyle(.white)

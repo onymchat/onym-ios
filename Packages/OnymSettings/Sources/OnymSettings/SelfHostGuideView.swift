@@ -65,7 +65,7 @@ struct SelfHostGuideView: View {
             }
             .foregroundStyle(.white)
             .padding(.horizontal, 10).padding(.vertical, 6)
-            .background(Color.white.opacity(0.14),
+            .background(OnymTerminal.overlayStrong,
                         in: Capsule())
 
             Text(heroTitle)
@@ -79,8 +79,8 @@ struct SelfHostGuideView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(20)
-        .background(LinearGradient(colors: [Color(red: 0.106, green: 0.122, blue: 0.141),
-                                            Color(red: 0.051, green: 0.067, blue: 0.090)],
+        .background(LinearGradient(colors: [OnymTerminal.surface,
+                                            OnymTerminal.surfaceDeep],
                                    startPoint: .topLeading, endPoint: .bottomTrailing),
                     in: RoundedRectangle(cornerRadius: OnymRadius.panel, style: .continuous))
         .padding(.horizontal, 16)
@@ -117,12 +117,12 @@ struct SelfHostGuideView: View {
         ZStack(alignment: .topTrailing) {
             Text(text)
                 .font(OnymType.mono(size: 12))
-                .foregroundStyle(Color(red: 0.65, green: 1.0, blue: 0.6))
+                .foregroundStyle(OnymTerminal.text)
                 .lineSpacing(3)
                 .padding(.horizontal, 12).padding(.vertical, 12)
                 .padding(.trailing, 36)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(red: 0.051, green: 0.067, blue: 0.090),
+                .background(OnymTerminal.surfaceDeep,
                             in: RoundedRectangle(cornerRadius: OnymRadius.control, style: .continuous))
             Button {
                 UIPasteboard.general.string = text
@@ -134,10 +134,10 @@ struct SelfHostGuideView: View {
                 Image(systemName: copied == label ? "checkmark" : "doc.on.doc")
                     .font(OnymType.font(size: 12, weight: .semibold))
                     .foregroundStyle(copied == label
-                                     ? Color(red: 0.65, green: 1.0, blue: 0.6)
+                                     ? OnymTerminal.text
                                      : .white)
                     .frame(width: 26, height: 26)
-                    .background(Color.white.opacity(0.08),
+                    .background(OnymTerminal.overlay,
                                 in: RoundedRectangle(cornerRadius: OnymRadius.tile))
             }
             .buttonStyle(.plain)

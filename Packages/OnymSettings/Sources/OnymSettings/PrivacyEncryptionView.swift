@@ -35,7 +35,7 @@ struct PrivacyEncryptionView: View {
                         subtitle: "MLS · forward secrecy",
                         hasChevron: false
                     ) {
-                        SettingsIconTile(symbol: "key.fill", bg: SettingsTile.purple)
+                        SettingsIconTile(symbol: "key.fill", bg: OnymTile.purple)
                     } right: {
                         Image(systemName: "arrow.up.right.square")
                             .foregroundStyle(OnymTokens.text3)
@@ -45,7 +45,7 @@ struct PrivacyEncryptionView: View {
                         subtitle: "No phone, no email, no IP",
                         hasChevron: false
                     ) {
-                        SettingsIconTile(symbol: "sparkles", bg: SettingsTile.indigo)
+                        SettingsIconTile(symbol: "sparkles", bg: OnymTile.indigo)
                     } right: {
                         Image(systemName: "arrow.up.right.square")
                             .foregroundStyle(OnymTokens.text3)
@@ -56,7 +56,7 @@ struct PrivacyEncryptionView: View {
                         hasChevron: false,
                         last: true
                     ) {
-                        SettingsIconTile(symbol: "shield.fill", bg: SettingsTile.green)
+                        SettingsIconTile(symbol: "shield.fill", bg: OnymTile.green)
                     } right: {
                         Image(systemName: "arrow.up.right.square")
                             .foregroundStyle(OnymTokens.text3)
@@ -77,19 +77,19 @@ struct PrivacyEncryptionView: View {
                             .font(OnymType.font(size: 13.5))
                     }
                     SettingsRow(title: "BIP-39 wordlist", hasChevron: false) {
-                        SettingsIconTile(symbol: "checkmark", bg: SettingsTile.gray)
+                        SettingsIconTile(symbol: "checkmark", bg: OnymTile.gray)
                     } right: {
                         Text("English").foregroundStyle(OnymTokens.text2).font(OnymType.font(size: 14))
                     }
                     SettingsRow(title: "Identity key", hasChevron: false) {
-                        SettingsContentTile(bg: SettingsTile.indigo) {
+                        SettingsContentTile(bg: OnymTile.indigo) {
                             Text("npub").font(OnymType.font(size: 9, weight: .bold)).foregroundStyle(.white)
                         }
                     } right: {
                         Text("Nostr (npub)").foregroundStyle(OnymTokens.text2).font(OnymType.font(size: 14))
                     }
                     SettingsRow(title: "Signature scheme", hasChevron: false, last: true) {
-                        SettingsContentTile(bg: SettingsTile.gray) {
+                        SettingsContentTile(bg: OnymTile.gray) {
                             Text("BLS").font(OnymType.font(size: 9.5, weight: .bold)).foregroundStyle(.white)
                         }
                     } right: {
@@ -105,7 +105,7 @@ struct PrivacyEncryptionView: View {
                         subtitle: "Unlock Onym with biometrics",
                         hasChevron: false
                     ) {
-                        SettingsIconTile(symbol: "faceid", bg: SettingsTile.gray)
+                        SettingsIconTile(symbol: "faceid", bg: OnymTile.gray)
                     } right: {
                         Toggle("", isOn: $appLock)
                             .labelsHidden()
@@ -137,7 +137,7 @@ struct PrivacyEncryptionView: View {
                         hasChevron: false,
                         last: true
                     ) {
-                        SettingsIconTile(symbol: "checkmark.circle.fill", bg: SettingsTile.blue)
+                        SettingsIconTile(symbol: "checkmark.circle.fill", bg: OnymTile.blue)
                     } right: {
                         Toggle("", isOn: $readReceipts)
                             .labelsHidden()
@@ -168,8 +168,8 @@ struct PrivacyEncryptionView: View {
     private var heroCard: some View {
         HStack(spacing: 14) {
             RoundedRectangle(cornerRadius: OnymRadius.card, style: .continuous)
-                .fill(LinearGradient(colors: [Color(red: 0.875, green: 0.98, blue: 0.918),
-                                                Color(red: 0.71, green: 0.94, blue: 0.804)],
+                .fill(LinearGradient(colors: [OnymTint.greenSoft,
+                                                OnymTint.greenSoft2],
                                       startPoint: .topLeading, endPoint: .bottomTrailing))
                 .frame(width: 56, height: 56)
                 .overlay(RoundedRectangle(cornerRadius: OnymRadius.card, style: .continuous)

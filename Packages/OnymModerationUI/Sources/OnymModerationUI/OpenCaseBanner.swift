@@ -29,7 +29,7 @@ public struct OpenCaseBanner: View {
         if let first = notices.first {
             Button { presented = first } label: {
                 HStack(spacing: 10) {
-                    Circle().fill(SettingsTile.amber).frame(width: 22, height: 22)
+                    Circle().fill(OnymTile.amber).frame(width: 22, height: 22)
                         .overlay(Image(systemName: "exclamationmark")
                             .font(OnymType.font(size: 12, weight: .bold))
                             .foregroundStyle(.white))

@@ -40,7 +40,7 @@ struct IdentityDetailView: View {
                         hasChevron: !isActive,
                         onTap: isActive ? nil : { flow.select(summary.id) }
                     ) {
-                        SettingsIconTile(symbol: "checkmark.circle.fill", bg: SettingsTile.green)
+                        SettingsIconTile(symbol: "checkmark.circle.fill", bg: OnymTile.green)
                     } right: {
                         if isActive {
                             Text("Active")
@@ -55,7 +55,7 @@ struct IdentityDetailView: View {
                             subtitle: "QR code or link",
                             last: true
                         ) {
-                            SettingsIconTile(symbol: "square.and.arrow.up", bg: SettingsTile.indigo)
+                            SettingsIconTile(symbol: "square.and.arrow.up", bg: OnymTile.indigo)
                         }
                     }
                     .buttonStyle(.plain)
@@ -74,7 +74,7 @@ struct IdentityDetailView: View {
                                 .map { String(format: "%02x", $0) }.joined()
                         }
                     ) {
-                        SettingsIconTile(symbol: "doc.on.doc.fill", bg: SettingsTile.gray)
+                        SettingsIconTile(symbol: "doc.on.doc.fill", bg: OnymTile.gray)
                     }
                     SettingsRow(
                         title: "Delete identity",
@@ -83,7 +83,7 @@ struct IdentityDetailView: View {
                         last: true,
                         onTap: { flow.startRemoval(of: summary) }
                     ) {
-                        SettingsIconTile(symbol: "trash.fill", bg: SettingsTile.red)
+                        SettingsIconTile(symbol: "trash.fill", bg: OnymTile.red)
                     }
                 }
 
@@ -108,18 +108,13 @@ struct IdentityDetailView: View {
                 Circle()
                     .fill(isActive
                           ? AnyShapeStyle(LinearGradient(
-                              colors: [
-                                  Color.dynamic(light: Color(red: 0.933, green: 0.961, blue: 1.0),
-                                                dark: OnymAccent.blue.color.opacity(0.20)),
-                                  Color.dynamic(light: Color(red: 0.835, green: 0.910, blue: 0.996),
-                                                dark: OnymAccent.blue.color.opacity(0.10))
-                              ],
+                              colors: [OnymTint.identityActive, OnymTint.identityActive2],
                               startPoint: .topLeading, endPoint: .bottomTrailing))
                           : AnyShapeStyle(OnymTokens.surface3))
                     .frame(width: 96, height: 96)
                     .overlay(Circle().stroke(isActive ? OnymAccent.blue.color : .clear, lineWidth: 2))
                     .overlay(OnymMark(size: 64,
-                                       color: isActive ? OnymAccent.blue.color : SettingsTile.gray))
+                                       color: isActive ? OnymAccent.blue.color : OnymTile.gray))
             }
             .padding(.top, 8)
 

@@ -1775,7 +1775,7 @@ struct OnboardingRecoveryContent: View {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: backedUp ? "checkmark.seal.fill" : "key.viewfinder")
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(backedUp ? OnymTokens.green : SettingsTile.amber)
+                    .foregroundStyle(backedUp ? OnymTokens.green : OnymTile.amber)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(backedUp ? "Backed up" : (sawPhrase ? "Revealed — write it down" : "Not backed up yet"))
                         .font(.system(size: 14, weight: .semibold))
@@ -1788,7 +1788,7 @@ struct OnboardingRecoveryContent: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background((backedUp ? OnymTokens.green : SettingsTile.amber).opacity(0.10),
+            .background((backedUp ? OnymTokens.green : OnymTile.amber).opacity(0.10),
                         in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .accessibilityIdentifier("onboarding.recoveryPhrase.status")
 
@@ -1962,7 +1962,7 @@ struct OnboardingDoneContent: View {
                 HStack(alignment: .top, spacing: 12) {
                     Image(systemName: "key.viewfinder")
                         .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(SettingsTile.amber)
+                        .foregroundStyle(OnymTile.amber)
                     VStack(alignment: .leading, spacing: 3) {
                         Text(recoveryBackupState == .revealed
                              ? "Finish verifying your recovery phrase"
@@ -1979,7 +1979,7 @@ struct OnboardingDoneContent: View {
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(SettingsTile.amber.opacity(0.10),
+                .background(OnymTile.amber.opacity(0.10),
                             in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .padding(.top, 12)
                 .accessibilityIdentifier("onboarding.done.backup_nudge")

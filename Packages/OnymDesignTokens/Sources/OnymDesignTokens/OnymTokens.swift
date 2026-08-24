@@ -43,6 +43,28 @@ public enum OnymTokens {
     /// view code theme-agnostic.
     public static let onAccent        = Color.dynamic(light: .white,         dark: .black)
 
+    /// Reads on a saturated tile or gradient fill — the icon tiles, the
+    /// recovery key hero, the success seal.
+    ///
+    /// Distinct from `onAccent`, which flips with the appearance. A
+    /// tile carries its own contrast in both themes, so black text on
+    /// it in dark mode would be wrong. If a theme's tiles are pale,
+    /// this is the one to change.
+    public static let onTile          = Color.white
+
+    /// Opaque ground behind a camera viewfinder or a full-screen photo.
+    /// Black because a lightbox is black, not because the theme is.
+    public static let lightbox        = Color.black
+
+    /// Veil over media — the sheet dim, the swipe-to-dismiss fade, the
+    /// plate behind a duration label on a thumbnail. Callers set their
+    /// own alpha.
+    public static let scrim           = Color.black
+
+    /// `scrim` for the UIKit half of the chat thread, which draws its
+    /// media cells in layers rather than views.
+    public static let scrimUI         = UIColor.black
+
     /// Hex literal helper. Optional alpha multiplies sRGB opacity in
     /// place — saves the per-call `.opacity(...)` modifier when
     /// declaring text2 / text3 style tokens.

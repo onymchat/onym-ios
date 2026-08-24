@@ -11,8 +11,8 @@ struct OfferBadge: View {
     var body: some View {
         SettingsChip(
             text: Self.modelDisplayName(offer.model).uppercased(),
-            fg: offer.isFree ? OnymTokens.green : SettingsTile.gray,
-            bg: (offer.isFree ? OnymTokens.green : SettingsTile.gray).opacity(0.15)
+            fg: offer.isFree ? OnymTokens.green : OnymTile.gray,
+            bg: (offer.isFree ? OnymTokens.green : OnymTile.gray).opacity(0.15)
         )
     }
 

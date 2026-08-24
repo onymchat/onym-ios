@@ -12,8 +12,11 @@ touching a line of app code.
 
 | Symbol | What it is |
 | --- | --- |
-| `OnymTokens` | 13 theme-adaptive colors: surfaces, text ramp, hairlines, semantic green/red/amber, `onAccent` |
+| `OnymTokens` | 17 colors: surfaces, text ramp, hairlines, semantic green/red/amber, `onAccent`, `onTile`, `lightbox`, `scrim`(`UI`) |
 | `OnymAccent` | The 6-case identity accent palette, `.color` per case |
+| `OnymTile` | The 9 icon-tile hues — the design system's `--on-tile-*` family |
+| `OnymTerminal` | The pinned-dark console block: surface, deep, phosphor text, ink, two overlays |
+| `OnymTint` | Pastel fills and the deep inks that read on them — hero tiles, the amber notice, governance badges |
 | `OnymRadius` | 10 corner steps — `card` `field` `panel` `hero` `inset` `control` `badge` `tile` `chip` `pill` — plus `shape(_:)` |
 | `OnymType` | `font(size:weight:)` and `mono(size:weight:)` — the text and mono faces |
 | `Color.dynamic(light:dark:)` | Helper for declaring a color that follows the system trait collection |
@@ -29,6 +32,10 @@ Anything else — `OnymMark`, `OnymGovIcon`, the `Settings*` components,
 `OnymAccent.forSender(blsPubkeyHex:)` — lives in `OnymDesign` and is
 **not** yours to reimplement. Sender-to-accent mapping in particular is
 policy, not a token: adopters inherit it unchanged.
+
+One colour in the app is still not from here: `Color.accentColor`, the
+system tint, which comes from the app's asset catalog. It is already
+adopter-controlled, just through a different door.
 
 ## How to ship a differently styled build
 

@@ -74,7 +74,7 @@ public struct DiscoveryCatalogSection: View {
             last: last,
             onTap: { onSelect(entry) }
         ) {
-            SettingsIconTile(symbol: tileSymbol, bg: SettingsTile.purple)
+            SettingsIconTile(symbol: tileSymbol, bg: OnymTile.purple)
         } right: {
             HStack(spacing: 4) {
                 if let status = entry.entry.status {
@@ -97,8 +97,8 @@ public struct DiscoveryCatalogSection: View {
             text: (status.state == "warning"
                 ? String(localized: "WARNING")
                 : String(localized: "UNDER REVIEW")).uppercased(),
-            fg: SettingsTile.amber,
-            bg: SettingsTile.amber.opacity(0.15)
+            fg: OnymTile.amber,
+            bg: OnymTile.amber.opacity(0.15)
         )
     }
 
@@ -118,10 +118,10 @@ public struct DiscoveryCatalogSection: View {
                          fg: OnymTokens.green, bg: OnymTokens.green.opacity(0.15))
         } else if record != nil {
             SettingsChip(text: String(localized: "TERMS CHANGED").uppercased(),
-                         fg: SettingsTile.amber, bg: SettingsTile.amber.opacity(0.15))
+                         fg: OnymTile.amber, bg: OnymTile.amber.opacity(0.15))
         } else {
             SettingsChip(text: String(localized: "REVIEW").uppercased(),
-                         fg: SettingsTile.gray, bg: SettingsTile.gray.opacity(0.15))
+                         fg: OnymTile.gray, bg: OnymTile.gray.opacity(0.15))
         }
     }
 

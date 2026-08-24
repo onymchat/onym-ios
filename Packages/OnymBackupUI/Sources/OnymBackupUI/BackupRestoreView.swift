@@ -138,7 +138,7 @@ public struct BackupRestoreView: View {
                             subtitle: Self.subtitle(for: row),
                             last: index == snapshots.count - 1
                         ) {
-                            SettingsIconTile(symbol: "shippingbox", bg: SettingsTile.blue)
+                            SettingsIconTile(symbol: "shippingbox", bg: OnymTile.blue)
                         }
                     }
                     .buttonStyle(.plain)

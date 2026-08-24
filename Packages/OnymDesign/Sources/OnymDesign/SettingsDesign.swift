@@ -8,20 +8,9 @@ import OnymDesignTokens
 // shape the design calls for: rounded white card, square coloured icon
 // tile, label/value rows separated by an inset hairline, big bold large
 // title with a `.ultraThinMaterial` condensed bar on scroll.
-
-public enum SettingsTile {
-    /// Apple-Settings palette used for the icon tiles. Each maps to a
-    /// pinned RGB value from the design's `S.tile.*` table.
-    public static let purple = Color(red: 160/255, green: 76/255,  blue: 224/255) // #A04CE0
-    public static let blue   = Color(red: 10/255,  green: 132/255, blue: 255/255) // #0A84FF
-    public static let indigo = Color(red: 91/255,  green: 91/255,  blue: 226/255) // #5B5BE2
-    public static let orange = Color(red: 255/255, green: 122/255, blue: 45/255)  // #FF7A2D
-    public static let green  = Color(red: 48/255,  green: 180/255, blue: 90/255)  // #30B45A
-    public static let gray   = Color(red: 142/255, green: 142/255, blue: 147/255) // #8E8E93
-    public static let red    = Color(red: 229/255, green: 57/255,  blue: 46/255)  // #E5392E
-    static let teal   = Color(red: 43/255,  green: 179/255, blue: 207/255) // #2BB3CF — no external consumer today; kept internal
-    public static let amber  = Color(red: 255/255, green: 149/255, blue: 0/255)   // #FF9500
-}
+//
+// The tile palette that used to live here is now `OnymTile` in
+// OnymDesignTokens — it was a token family sitting in a component file.
 
 /// Square-rounded coloured tile. SF symbol over the fill colour.
 public struct SettingsIconTile: View {
@@ -44,11 +33,11 @@ public struct SettingsIconTile: View {
             .overlay(
                 Image(systemName: symbol)
                     .font(OnymType.font(size: size * 0.5, weight: weight))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(OnymTokens.onTile)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: OnymRadius.tile, style: .continuous)
-                    .stroke(.white.opacity(0.18), lineWidth: 0.5)
+                    .stroke(OnymTokens.onTile.opacity(0.18), lineWidth: 0.5)
             )
     }
 }
@@ -70,10 +59,10 @@ public struct SettingsContentTile<Content: View>: View {
         RoundedRectangle(cornerRadius: OnymRadius.tile, style: .continuous)
             .fill(bg)
             .frame(width: size, height: size)
-            .overlay(content().foregroundStyle(.white))
+            .overlay(content().foregroundStyle(OnymTokens.onTile))
             .overlay(
                 RoundedRectangle(cornerRadius: OnymRadius.tile, style: .continuous)
-                    .stroke(.white.opacity(0.18), lineWidth: 0.5)
+                    .stroke(OnymTokens.onTile.opacity(0.18), lineWidth: 0.5)
             )
     }
 }
@@ -225,7 +214,7 @@ public struct SwipeToDeleteRow<Content: View>: View {
                     Image(systemName: "trash.fill").font(OnymType.font(size: 16, weight: .semibold))
                     Text(deleteLabel).font(OnymType.font(size: 11, weight: .semibold))
                 }
-                .foregroundStyle(.white)
+                .foregroundStyle(OnymTokens.onTile)
                 .frame(width: revealWidth)
                 .frame(maxHeight: .infinity)
                 .background(OnymTokens.red)
@@ -609,13 +598,10 @@ public struct IdentityRingTile: View {
 
     public var body: some View {
         Circle()
-            .fill(active
-                  ? Color.dynamic(light: Color(red: 0.878, green: 0.933, blue: 0.996),
-                                   dark: Color(red: 10/255, green: 132/255, blue: 255/255).opacity(0.18))
-                  : OnymTokens.surface3)
+            .fill(active ? OnymTint.stepActive : OnymTokens.surface3)
             .frame(width: size, height: size)
             .overlay(OnymMark(size: size * 0.55,
-                               color: active ? OnymAccent.blue.color : SettingsTile.gray,
+                               color: active ? OnymAccent.blue.color : OnymTile.gray,
                                strokeRatio: 0.18))
             .overlay(Circle().stroke(active ? OnymAccent.blue.color : .clear, lineWidth: 1.5))
     }

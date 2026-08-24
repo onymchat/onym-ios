@@ -25,7 +25,7 @@ public struct QRCodeScannerView: View {
 
     public var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            OnymTokens.lightbox.ignoresSafeArea()
 
             if let failure {
                 VStack(spacing: 14) {
@@ -79,7 +79,7 @@ public struct QRCodeScannerView: View {
             let side = min(geo.size.width, geo.size.height) * 0.65
             ZStack {
                 RoundedRectangle(cornerRadius: OnymRadius.panel, style: .continuous)
-                    .stroke(Color.white.opacity(0.85), lineWidth: 2)
+                    .stroke(OnymTokens.onTile.opacity(0.85), lineWidth: 2)
                     .frame(width: side, height: side)
             }
             .frame(width: geo.size.width, height: geo.size.height)

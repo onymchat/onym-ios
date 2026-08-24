@@ -61,7 +61,7 @@ struct NostrRelaySettingsView: View {
                             last: true
                         ) {
                             SettingsIconTile(symbol: "server.rack",
-                                             bg: Color(red: 0.106, green: 0.122, blue: 0.141))
+                                             bg: OnymTerminal.surface)
                         }
                     }
                     .buttonStyle(.plain)
@@ -117,7 +117,7 @@ struct NostrRelaySettingsView: View {
                             HStack(spacing: 12) {
                                 SettingsIconTile(
                                     symbol: "antenna.radiowaves.left.and.right",
-                                    bg: SettingsTile.indigo
+                                    bg: OnymTile.indigo
                                 )
                                 VStack(alignment: .leading, spacing: 2) {
                                     HStack(spacing: 6) {
@@ -223,7 +223,7 @@ struct NostrRelaySettingsView: View {
                 HStack {
                     SettingsIconTile(
                         symbol: "arrow.counterclockwise",
-                        bg: SettingsTile.gray
+                        bg: OnymTile.gray
                     )
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Restore default")

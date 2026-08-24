@@ -58,7 +58,7 @@ struct AnchorsView: View {
         let hasContracts = flow.hasAnyContracts(network: network)
         let isActive = network == activeNetwork
         let letter = network == .testnet ? "T" : "M"
-        let bg = hasContracts ? SettingsTile.green : SettingsTile.gray
+        let bg = hasContracts ? OnymTile.green : OnymTile.gray
 
         Button {
             useMainnet = (network == .public)
@@ -211,9 +211,9 @@ private struct GovernanceTypeTile: View {
 
     private var palette: (bg: Color, fg: Color) {
         switch type {
-        case .anarchy:   return (SettingsTile.orange.opacity(0.16), Color(red: 0.82, green: 0.29, blue: 0))
-        case .democracy: return (OnymTokens.green.opacity(0.16),    Color(red: 0.10, green: 0.51, blue: 0.28))
-        case .oligarchy: return (SettingsTile.indigo.opacity(0.16), Color(red: 0.24, green: 0.24, blue: 0.79))
+        case .anarchy:   return (OnymTile.orange.opacity(0.16), OnymTint.orangeInk)
+        case .democracy: return (OnymTokens.green.opacity(0.16),    OnymTint.greenInk)
+        case .oligarchy: return (OnymTile.indigo.opacity(0.16), OnymTint.indigoInk)
         case .oneonone:  return (OnymAccent.blue.color.opacity(0.16), OnymAccent.blue.color)
         case .tyranny:   return (OnymTokens.red.opacity(0.16),      OnymTokens.red)
         }
@@ -282,7 +282,7 @@ struct AnchorsVersionView: View {
                             // which goes near-white in dark mode and hid the
                             // white glyph). Matches the deploy guide's hero.
                             SettingsIconTile(symbol: "chevron.left.forwardslash.chevron.right",
-                                             bg: Color(red: 0.106, green: 0.122, blue: 0.141))
+                                             bg: OnymTerminal.surface)
                         }
                     }
                     .buttonStyle(.plain)
@@ -297,7 +297,7 @@ struct AnchorsVersionView: View {
                             last: true
                         ) {
                             SettingsIconTile(symbol: "shippingbox.fill",
-                                             bg: SettingsTile.indigo)
+                                             bg: OnymTile.indigo)
                         }
                     }
                     .buttonStyle(.plain)
