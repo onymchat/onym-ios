@@ -17,6 +17,10 @@ let package = Package(
         .target(
             name: "OnymDesign",
             dependencies: [.product(name: "OnymDesignTokens", package: "OnymDesignTokens")]
+        ),
+        .testTarget(
+            name: "OnymDesignTests",
+            dependencies: ["OnymDesign"]
         )
     ]
 )

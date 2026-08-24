@@ -57,6 +57,23 @@ adopter-controlled, just through a different door.
    `--replace-scm-with-local` / a `.package(name:path:)` override.
 4. Build. That is the whole swap.
 
+### Checking your copy before you wire it in
+
+`OnymDesignTokensTests` exercises the whole contract and can be run
+against a replacement module directly:
+
+```
+cd YourTokensPackage
+xcodebuild test -scheme OnymDesignTokens \
+  -destination 'platform=iOS Simulator,name=iPhone 17'
+```
+
+It checks that every token resolves in both appearances, that the
+surface ramp does not collapse, that no two accents come out the same
+colour, that the radius scale stays ordered, and that the palette clears
+its contrast floors. That last one is the point: a theme that fails it
+is not a theme, it is an accessibility regression.
+
 ### The completeness guarantee
 
 There is no protocol to conform to and no registration call, because
@@ -76,11 +93,30 @@ runtime, as before — that is inside each token, not across modules.
 ## Keeping in step with the design system
 
 Values here mirror the `Onym Design System` project on claude.ai.
-Two divergences are intentional and should survive any resync:
+These divergences are intentional and should survive any resync — the
+contrast tests will fail if a resync undoes one:
 
 - **`amber` light variant is `#B25E00`,** not the system orange
   `#FF9500`. The original fails WCAG AA (~2.1:1) at the caption size it
   is used on, and it is used on lines a founder is most expected to
   read.
+- **`OnymTint.orangeInk` is `#BE4300`,** not `#D14A00`. The original
+  measured 4.00:1 on its own pastel and 3.85:1 on the 16% tint — the
+  same failure as amber, found by the contrast suite rather than by
+  hand.
 - **`text3` dark is 0.40 alpha** against light's 0.42 — the darker
   ground needs slightly less fade to hold the same apparent contrast.
+- **The radius scale has ten steps, not the design system's five.** The
+  app was already spending fifteen distinct corners and `inset` (12) is
+  its single most common; the system had no word for it.
+
+### One known shortfall
+
+White glyphs on four of the nine `OnymTile` hues sit below WCAG
+1.4.11's 3:1 for non-text contrast — amber 2.20, teal 2.48, orange
+2.60, green 2.69. This is Apple's Settings palette drawn the way
+Settings draws it, and every tile sits beside a `Row` whose title
+carries the same meaning in text, so nothing is knowable only from the
+tile. `testOnTileStaysLegibleOnEveryTile` holds a regression floor
+rather than claiming conformance. If a tile ever becomes the only cue
+for something, raise that floor and darken the palette to meet it.

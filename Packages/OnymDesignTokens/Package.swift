@@ -8,6 +8,10 @@ let package = Package(
         .library(name: "OnymDesignTokens", targets: ["OnymDesignTokens"])
     ],
     targets: [
-        .target(name: "OnymDesignTokens")
+        .target(name: "OnymDesignTokens"),
+        .testTarget(
+            name: "OnymDesignTokensTests",
+            dependencies: ["OnymDesignTokens"]
+        )
     ]
 )
