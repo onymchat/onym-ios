@@ -173,7 +173,7 @@ private struct IntroScreen: View {
                     .frame(width: 72, height: 72)
                     .shadow(color: Color.accentColor.opacity(0.25), radius: 10, x: 0, y: 8)
                 Image(systemName: "key.fill")
-                    .font(OnymType.font(size: 30, weight: .semibold))
+                    .font(OnymType.fixed(size: 30, weight: .semibold))
                     .foregroundStyle(.white)
             }
             Text("Your identity, in 12 words")
@@ -342,7 +342,7 @@ private struct RevealScreen: View {
                                 .fill(Color.primary.opacity(0.08))
                                 .frame(width: 44, height: 44)
                             Image(systemName: "eye.slash")
-                                .font(OnymType.font(size: 18, weight: .semibold))
+                                .font(OnymType.fixed(size: 18, weight: .semibold))
                                 .foregroundStyle(Color.primary)
                         }
                         Text("Tap to reveal")
@@ -445,7 +445,7 @@ private struct VerifyOption: View {
                             .fill(OnymTokens.green)
                             .frame(width: 22, height: 22)
                         Image(systemName: "checkmark")
-                            .font(OnymType.font(size: 12, weight: .bold))
+                            .font(OnymType.fixed(size: 12, weight: .bold))
                             .foregroundStyle(.white)
                     }
                 }
@@ -517,7 +517,7 @@ private struct DoneScreen: View {
                     .frame(width: 96, height: 96)
                     .shadow(color: OnymTokens.green.opacity(0.4), radius: 16, x: 0, y: 12)
                 Image(systemName: "checkmark")
-                    .font(OnymType.font(size: 44, weight: .bold))
+                    .font(OnymType.fixed(size: 44, weight: .bold))
                     .foregroundStyle(.white)
             }
             .padding(.bottom, 24)
@@ -577,7 +577,7 @@ private struct RoundedIcon: View {
                 .fill(background)
                 .frame(width: 30, height: 30)
             Image(systemName: systemImage)
-                .font(OnymType.font(size: 15, weight: .semibold))
+                .font(OnymType.fixed(size: 15, weight: .semibold))
                 .foregroundStyle(.white)
         }
     }

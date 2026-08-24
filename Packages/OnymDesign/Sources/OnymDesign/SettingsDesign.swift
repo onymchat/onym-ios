@@ -16,11 +16,20 @@ import OnymDesignTokens
 public struct IconTile: View {
     let symbol: String
     let bg: Color
-    var size: CGFloat = 30
     var weight: Font.Weight = .semibold
 
-    // `size`/`weight` have no external consumer today, so the public
-    // init omits them (they keep their internal defaults).
+    /// The tile grows with the reader's text size, but not all the way.
+    ///
+    /// A tile pinned at 30pt beside 46pt type looks like a bug — the row
+    /// stops reading as one thing. Growing it on the full curve is worse
+    /// the other way: a 2.8× tile is 85pt of decoration crowding out the
+    /// words it decorates. `@ScaledMetric` moves it with the text and
+    /// the cap keeps it a tile.
+    @ScaledMetric(relativeTo: .body) private var scaledSize: CGFloat = 30
+    private var size: CGFloat { min(scaledSize, 46) }
+
+    // `weight` has no external consumer today, so the public init omits
+    // it (it keeps its internal default).
     public init(symbol: String, bg: Color) {
         self.symbol = symbol
         self.bg = bg
@@ -31,8 +40,10 @@ public struct IconTile: View {
             .fill(bg)
             .frame(width: size, height: size)
             .overlay(
+                // Sized off the tile, so the glyph tracks whatever the
+                // tile settled on rather than the reader's setting.
                 Image(systemName: symbol)
-                    .font(OnymType.font(size: size * 0.5, weight: weight))
+                    .font(OnymType.fixed(size: size * 0.5, weight: weight))
                     .foregroundStyle(OnymTokens.onTile)
             )
             .overlay(
@@ -46,10 +57,12 @@ public struct IconTile: View {
 /// code, a star button, etc.) over the same coloured fill.
 public struct SettingsContentTile<Content: View>: View {
     let bg: Color
-    var size: CGFloat = 30
     @ViewBuilder var content: () -> Content
 
-    // `size` has no external consumer today; the public init omits it.
+    /// Tracks `IconTile` — same tile, arbitrary content inside it.
+    @ScaledMetric(relativeTo: .body) private var scaledSize: CGFloat = 30
+    private var size: CGFloat { min(scaledSize, 46) }
+
     public init(bg: Color, @ViewBuilder content: @escaping () -> Content) {
         self.bg = bg
         self.content = content
@@ -153,6 +166,19 @@ public struct LargeTitle: View {
             .font(OnymType.font(size: 34, weight: .bold))
             .foregroundStyle(OnymTokens.text)
             .tracking(-0.75)
+            // At the largest sizes 34pt becomes 96pt and a single word
+            // like "Settings" is wider than the screen, so it breaks
+            // mid-word — "Setting" above a lonely "s". Shrinking a title
+            // that is already enormous costs the reader nothing;
+            // hyphenating their own app's name costs them a moment of
+            // confusion every time they open it.
+            //
+            // The line limit is what makes the scale factor work at all:
+            // given unlimited lines SwiftUI wraps rather than shrinks,
+            // and wrapping is the thing being avoided. Two lines leaves
+            // room for a longer title to breathe before it scales.
+            .lineLimit(2)
+            .minimumScaleFactor(0.55)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 20)
             .padding(.top, 4)
@@ -211,8 +237,8 @@ public struct SwipeToDeleteRow<Content: View>: View {
         ZStack(alignment: .trailing) {
             Button(role: .destructive, action: confirmDelete) {
                 VStack(spacing: 3) {
-                    Image(systemName: "trash.fill").font(OnymType.font(size: 16, weight: .semibold))
-                    Text(deleteLabel).font(OnymType.font(size: 11, weight: .semibold))
+                    Image(systemName: "trash.fill").font(OnymType.fixed(size: 16, weight: .semibold))
+                    Text(deleteLabel).font(OnymType.fixed(size: 11, weight: .semibold))
                 }
                 .foregroundStyle(OnymTokens.onTile)
                 .frame(width: revealWidth)
@@ -378,7 +404,10 @@ public struct Row<Tile: View, Right: View>: View {
                               ? OnymType.mono(size: 16.5)
                               : OnymType.font(size: 16.5))
                         .foregroundStyle(titleColor)
-                        .lineLimit(1)
+                        // A mono title is a key or a URL and truncates
+                        // on purpose. A prose one is a label the reader
+                        // came for, and gives way at accessibility sizes.
+                        .onymLineLimit(1, relaxing: !titleMono)
                     if let subtitle {
                         Text(subtitle)
                             .font(subtitleMono

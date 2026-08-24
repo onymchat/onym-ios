@@ -91,7 +91,7 @@ struct ChatEmptyStateView: View {
     private func benefit(icon: String, title: LocalizedStringKey, detail: LocalizedStringKey) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: icon)
-                .font(OnymType.font(size: 16, weight: .semibold))
+                .font(OnymType.fixed(size: 16, weight: .semibold))
                 .foregroundStyle(OnymAccent.blue.color)
                 .frame(width: 24, height: 22)
             VStack(alignment: .leading, spacing: 2) {

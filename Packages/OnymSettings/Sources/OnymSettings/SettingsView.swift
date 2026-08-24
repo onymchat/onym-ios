@@ -459,7 +459,7 @@ public struct SettingsView: View {
             HStack(spacing: 10) {
                 Circle().fill(OnymTile.amber).frame(width: 22, height: 22)
                     .overlay(Image(systemName: "exclamationmark")
-                        .font(OnymType.font(size: 12, weight: .bold))
+                        .font(OnymType.fixed(size: 12, weight: .bold))
                         .foregroundStyle(.white))
                 Text(count == 1
                      ? "1 identity hasn’t been backed up yet."

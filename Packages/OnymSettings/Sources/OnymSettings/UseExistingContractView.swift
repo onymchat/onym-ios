@@ -170,7 +170,7 @@ struct UseExistingContractView: View {
         HStack(alignment: .top, spacing: 10) {
             Circle().fill(OnymTokens.green).frame(width: 22, height: 22)
                 .overlay(Image(systemName: "checkmark")
-                    .font(OnymType.font(size: 11, weight: .bold))
+                    .font(OnymType.fixed(size: 11, weight: .bold))
                     .foregroundStyle(.white))
                 .padding(.top, 1)
             VStack(alignment: .leading, spacing: 2) {

@@ -262,7 +262,7 @@ struct ChatMembersView: View {
                         Text(group.name)
                             .font(OnymType.font(size: 18, weight: .semibold))
                             .foregroundStyle(OnymTokens.text)
-                            .lineLimit(1)
+                            .onymLineLimit(1)
                         Image(systemName: "pencil")
                             .font(OnymType.font(size: 13, weight: .semibold))
                             .foregroundStyle(OnymTokens.text3)
@@ -274,7 +274,7 @@ struct ChatMembersView: View {
                 Text(group.name)
                     .font(OnymType.font(size: 18, weight: .semibold))
                     .foregroundStyle(OnymTokens.text)
-                    .lineLimit(1)
+                    .onymLineLimit(1)
             }
         }
         .padding(.top, 16)

@@ -1918,7 +1918,7 @@ struct OnboardingDoneContent: View {
                                 Text(verbatim: row.value)
                                     .font(.system(size: 12))
                                     .foregroundStyle(OnymTokens.text2)
-                                    .lineLimit(1)
+                                    .onymLineLimit(1)
                                     .truncationMode(.tail)
                                 // The checkable claim: URL / key
                                 // fingerprint / manifest hash on its

@@ -195,7 +195,7 @@ struct WelcomeStepContent: View {
     private func bullet(symbol: String, text: LocalizedStringKey) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: symbol)
-                .font(OnymType.font(size: 15, weight: .semibold))
+                .font(OnymType.fixed(size: 15, weight: .semibold))
                 .foregroundStyle(.tint)
                 .frame(width: 24)
             Text(text)

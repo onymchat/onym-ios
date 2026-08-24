@@ -31,7 +31,7 @@ struct IdentitiesView: View {
                     HStack(spacing: 10) {
                         Circle().fill(OnymAccent.blue.color).frame(width: 22, height: 22)
                             .overlay(Image(systemName: "plus")
-                                .font(OnymType.font(size: 13, weight: .bold))
+                                .font(OnymType.fixed(size: 13, weight: .bold))
                                 .foregroundStyle(OnymTokens.onAccent))
                         Text("Add Identity")
                             .font(OnymType.font(size: 16, weight: .medium))

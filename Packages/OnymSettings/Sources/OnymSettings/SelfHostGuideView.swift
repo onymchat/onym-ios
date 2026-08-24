@@ -132,7 +132,7 @@ struct SelfHostGuideView: View {
                 }
             } label: {
                 Image(systemName: copied == label ? "checkmark" : "doc.on.doc")
-                    .font(OnymType.font(size: 12, weight: .semibold))
+                    .font(OnymType.fixed(size: 12, weight: .semibold))
                     .foregroundStyle(copied == label
                                      ? OnymTerminal.text
                                      : .white)
