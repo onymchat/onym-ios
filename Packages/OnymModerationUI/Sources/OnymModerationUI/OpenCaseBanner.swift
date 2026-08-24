@@ -31,23 +31,23 @@ public struct OpenCaseBanner: View {
                 HStack(spacing: 10) {
                     Circle().fill(SettingsTile.amber).frame(width: 22, height: 22)
                         .overlay(Image(systemName: "exclamationmark")
-                            .font(.system(size: 12, weight: .bold))
+                            .font(OnymType.font(size: 12, weight: .bold))
                             .foregroundStyle(.white))
                     Text(notices.count == 1
                          ? "A moderation case is open against this device."
                          : "\(notices.count) moderation cases are open against this device.")
-                        .font(.system(size: 13))
+                        .font(OnymType.font(size: 13))
                         .foregroundStyle(OnymTokens.text)
                     Spacer(minLength: 4)
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(OnymType.font(size: 12, weight: .semibold))
                         .foregroundStyle(OnymTokens.text2)
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
                 .background(OnymTokens.surface2,
-                            in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            in: RoundedRectangle(cornerRadius: OnymRadius.inset, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: OnymRadius.inset, style: .continuous)
                     .stroke(OnymTokens.hairlineStrong, lineWidth: 0.5))
                 .padding(.horizontal, 16)
             }
@@ -110,15 +110,15 @@ public struct CaseNoticeDetailView: View {
                             HStack {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text("Review and respond")
-                                        .font(.system(size: 14, weight: .semibold))
+                                        .font(OnymType.font(size: 14, weight: .semibold))
                                         .foregroundStyle(OnymTokens.text)
                                     Text("Fetch the case's current status, file your signed response, and follow the decision.")
-                                        .font(.system(size: 13))
+                                        .font(OnymType.font(size: 13))
                                         .foregroundStyle(OnymTokens.text2)
                                 }
                                 Spacer(minLength: 4)
                                 Image(systemName: "chevron.right")
-                                    .font(.system(size: 12, weight: .semibold))
+                                    .font(OnymType.font(size: 12, weight: .semibold))
                                     .foregroundStyle(OnymTokens.text2)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -131,7 +131,7 @@ public struct CaseNoticeDetailView: View {
                 } else {
                     SettingsCard {
                         Text("Responding from this surface isn't wired up. Use the authority's contact channel to respond before the deadline.")
-                            .font(.system(size: 14))
+                            .font(OnymType.font(size: 14))
                             .foregroundStyle(OnymTokens.text2)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(16)
@@ -149,10 +149,10 @@ public struct CaseNoticeDetailView: View {
     private func row(_ label: LocalizedStringKey, _ value: String, monospaced: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label)
-                .font(.system(size: 13, weight: .semibold))
+                .font(OnymType.font(size: 13, weight: .semibold))
                 .foregroundStyle(OnymTokens.text)
             Text(value)
-                .font(monospaced ? .system(size: 12, design: .monospaced) : .system(size: 13))
+                .font(monospaced ? OnymType.mono(size: 12) : OnymType.font(size: 13))
                 .foregroundStyle(OnymTokens.text2)
                 .textSelection(.enabled)
         }

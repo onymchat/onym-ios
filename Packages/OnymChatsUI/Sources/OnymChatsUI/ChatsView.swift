@@ -286,7 +286,7 @@ public struct ChatsView: View {
                     .fill(Color.accentColor.opacity(0.10))
                     .frame(width: 96, height: 96)
                 Image(systemName: "lock.shield.fill")
-                    .font(.system(size: 42, weight: .regular))
+                    .font(OnymType.font(size: 42))
                     .foregroundStyle(Color.accentColor)
             }
             .padding(.bottom, 20)
@@ -354,7 +354,7 @@ public struct ChatsView: View {
     private func benefitRow(icon: String, title: LocalizedStringKey, detail: LocalizedStringKey) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: icon)
-                .font(.system(size: 16, weight: .semibold))
+                .font(OnymType.font(size: 16, weight: .semibold))
                 .foregroundStyle(Color.accentColor)
                 .frame(width: 24, height: 22)
             VStack(alignment: .leading, spacing: 2) {
@@ -582,7 +582,7 @@ private struct PendingChatsRow: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(row.name?.isEmpty == false ? row.name! : String(localized: "(Unnamed)"))
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(OnymType.font(size: 16, weight: .semibold))
                     .lineLimit(1)
                     .foregroundStyle(.secondary)
                 HStack(spacing: 6) {
@@ -667,7 +667,7 @@ private struct ChatsRow: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(group.name.isEmpty ? "(Unnamed)" : group.name)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(OnymType.font(size: 16, weight: .semibold))
                     .lineLimit(1)
                 // The join hint leads, because it is the only line in the
                 // row that needs an action and a badge alone was what
@@ -774,10 +774,10 @@ private struct JoinRequestBadge: View {
         // beside it has always carried its count.
         HStack(spacing: 3) {
             Image(systemName: "person.crop.circle.badge.plus")
-                .font(.system(size: 12, weight: .semibold))
+                .font(OnymType.font(size: 12, weight: .semibold))
             if count > 1 {
                 Text(count > 99 ? "99+" : "\(count)")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(OnymType.font(size: 13, weight: .semibold))
                     .monospacedDigit()
             }
         }
@@ -799,7 +799,7 @@ private struct UnreadBadge: View {
 
     var body: some View {
         Text(count > 99 ? "99+" : "\(count)")
-            .font(.system(size: 12, weight: .semibold))
+            .font(OnymType.font(size: 12, weight: .semibold))
             .foregroundStyle(.white)
             .padding(.horizontal, 6)
             .frame(minWidth: 20, minHeight: 20)

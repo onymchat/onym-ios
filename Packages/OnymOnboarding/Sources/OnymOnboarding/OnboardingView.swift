@@ -1,4 +1,5 @@
 import SwiftUI
+import OnymDesignTokens
 
 /// The first-launch onboarding cover: one scaffolded screen per
 /// `OnboardingStep`, driven by `OnboardingFlow`.
@@ -178,7 +179,7 @@ struct WelcomeStepContent: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Image(systemName: "key.horizontal")
-                .font(.system(size: 44))
+                .font(OnymType.font(size: 44))
                 .foregroundStyle(.tint)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 24)
@@ -194,7 +195,7 @@ struct WelcomeStepContent: View {
     private func bullet(symbol: String, text: LocalizedStringKey) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: symbol)
-                .font(.system(size: 15, weight: .semibold))
+                .font(OnymType.font(size: 15, weight: .semibold))
                 .foregroundStyle(.tint)
                 .frame(width: 24)
             Text(text)
@@ -236,7 +237,7 @@ struct DoneStepContent: View {
         }
         .padding(16)
         .background(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: OnymRadius.inset)
                 .fill(Color(.secondarySystemBackground))
         )
     }
@@ -280,7 +281,7 @@ struct PlaceholderStepContent: View {
     var body: some View {
         VStack(spacing: 10) {
             Image(systemName: "square.dashed")
-                .font(.system(size: 28))
+                .font(OnymType.font(size: 28))
                 .foregroundStyle(.secondary)
             Text(verbatim: OnboardingView.title(for: step))
                 .font(.callout)
@@ -289,7 +290,7 @@ struct PlaceholderStepContent: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 40)
         .background(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: OnymRadius.inset)
                 .fill(Color(.secondarySystemBackground))
         )
     }

@@ -96,12 +96,12 @@ public struct JoinConfirmView: View {
                 imageData: nil
             )
             Text(displayName)
-                .font(.system(size: 20, weight: .bold))
+                .font(OnymType.font(size: 20, weight: .bold))
                 .foregroundStyle(OnymTokens.text)
             let alias = confirmation.inviterAlias.trimmingCharacters(in: .whitespacesAndNewlines)
             if !alias.isEmpty {
                 Text("\(alias) invited you")
-                    .font(.system(size: 13))
+                    .font(OnymType.font(size: 13))
                     .foregroundStyle(OnymTokens.text2)
             }
         }
@@ -109,12 +109,12 @@ public struct JoinConfirmView: View {
 
     private func invitationCard(_ message: String) -> some View {
         Text(message)
-            .font(.system(size: 14))
+            .font(OnymType.font(size: 14))
             .foregroundStyle(OnymTokens.text)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
             .background(OnymTokens.surface2)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .clipShape(RoundedRectangle(cornerRadius: OnymRadius.inset))
             .textSelection(.enabled)
             .accessibilityIdentifier("join_confirm.invitation_message")
     }
@@ -129,10 +129,10 @@ public struct JoinConfirmView: View {
     private func rulesCard(_ rules: String) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Group rules")
-                .font(.system(size: 12, weight: .semibold))
+                .font(OnymType.font(size: 12, weight: .semibold))
                 .foregroundStyle(OnymTokens.text3)
             Text(rules)
-                .font(.system(size: 14))
+                .font(OnymType.font(size: 14))
                 .foregroundStyle(OnymTokens.text)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .textSelection(.enabled)
@@ -140,7 +140,7 @@ public struct JoinConfirmView: View {
             Divider().overlay(OnymTokens.hairline)
             Toggle(isOn: $agreedToRules) {
                 Text("I agree to these rules")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(OnymType.font(size: 13, weight: .medium))
                     .foregroundStyle(OnymTokens.text)
             }
             .tint(OnymAccent.blue.color)
@@ -148,14 +148,14 @@ public struct JoinConfirmView: View {
             // Said plainly, because it is the part that outlives the
             // tap: the founder keeps this, and can show it.
             Text("Your agreement is signed with this identity\u{2019}s key and sent with your request.")
-                .font(.system(size: 11))
+                .font(OnymType.font(size: 11))
                 .foregroundStyle(OnymTokens.text2)
         }
         .padding(14)
         .background(OnymTokens.surface2)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: OnymRadius.inset))
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: OnymRadius.inset)
                 .stroke(OnymTokens.hairline, lineWidth: 1)
         )
         .accessibilityIdentifier("join_confirm.rules")
@@ -168,7 +168,7 @@ public struct JoinConfirmView: View {
     private var nameField: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Ask to join as")
-                .font(.system(size: 12, weight: .semibold))
+                .font(OnymType.font(size: 12, weight: .semibold))
                 .foregroundStyle(OnymTokens.text3)
             TextField("Your name in this chat", text: $label)
                 .textInputAutocapitalization(.words)
@@ -176,16 +176,16 @@ public struct JoinConfirmView: View {
                 .padding(12)
                 .background(OnymTokens.surface2)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 12)
+                    RoundedRectangle(cornerRadius: OnymRadius.inset)
                         .stroke(OnymTokens.hairline, lineWidth: 1)
                 )
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .clipShape(RoundedRectangle(cornerRadius: OnymRadius.inset))
                 .accessibilityIdentifier("join_confirm.name_field")
             // The name rides with this join only. One identity can be
             // "Sam" in a book club and "S." in a tenants' group without
             // either being a second identity.
             Text("Only this chat sees this name. It doesn\u{2019}t rename your identity.")
-                .font(.system(size: 11))
+                .font(OnymType.font(size: 11))
                 .foregroundStyle(OnymTokens.text2)
         }
     }
@@ -196,21 +196,21 @@ public struct JoinConfirmView: View {
         VStack(alignment: .leading, spacing: 8) {
             Label {
                 Text("Sending shares your name and this identity\u{2019}s public keys with whoever holds this invite.")
-                    .font(.system(size: 12))
+                    .font(OnymType.font(size: 12))
                     .foregroundStyle(OnymTokens.text2)
             } icon: {
                 Image(systemName: "person.badge.key")
-                    .font(.system(size: 12))
+                    .font(OnymType.font(size: 12))
                     .foregroundStyle(OnymTokens.text2)
             }
             if confirmation.rules != nil {
                 Label {
                     Text("Your signed agreement to the rules goes with it.")
-                        .font(.system(size: 12))
+                        .font(OnymType.font(size: 12))
                         .foregroundStyle(OnymTokens.text2)
                 } icon: {
                     Image(systemName: "signature")
-                        .font(.system(size: 12))
+                        .font(OnymType.font(size: 12))
                         .foregroundStyle(OnymTokens.text2)
                 }
             }
@@ -220,7 +220,7 @@ public struct JoinConfirmView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
         .background(OnymTokens.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: OnymRadius.inset))
         .accessibilityIdentifier("join_confirm.disclosure")
     }
 
@@ -234,12 +234,12 @@ public struct JoinConfirmView: View {
                  : confirmation.rules == nil
                     ? String(localized: "Send join request")
                     : String(localized: "Agree and send request"))
-                .font(.system(size: 15, weight: .semibold))
+                .font(OnymType.font(size: 15, weight: .semibold))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
                 .background(OnymAccent.blue.color.opacity(canSend ? 1.0 : 0.5))
                 .foregroundStyle(OnymTokens.onAccent)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .clipShape(RoundedRectangle(cornerRadius: OnymRadius.inset))
         }
         .disabled(!canSend)
         .accessibilityIdentifier("join_confirm.send")
@@ -268,11 +268,11 @@ public struct JoinConfirmView: View {
     private func row(_ key: LocalizedStringKey, value: String) -> some View {
         HStack {
             Text(key)
-                .font(.system(size: 11, weight: .semibold))
+                .font(OnymType.font(size: 11, weight: .semibold))
                 .foregroundStyle(OnymTokens.text3)
             Spacer()
             Text(value)
-                .font(.system(size: 12, weight: .regular, design: .monospaced))
+                .font(OnymType.mono(size: 12))
                 .foregroundStyle(OnymTokens.text2)
         }
     }

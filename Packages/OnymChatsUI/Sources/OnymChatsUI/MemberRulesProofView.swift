@@ -85,10 +85,10 @@ struct MemberRulesProofView: View {
     private var nothingToShow: some View {
         VStack(spacing: 8) {
             Image(systemName: "doc.text.magnifyingglass")
-                .font(.system(size: 34))
+                .font(OnymType.font(size: 34))
                 .foregroundStyle(OnymTokens.text3)
             Text("There\u{2019}s nothing to show about this member\u{2019}s agreement any more.")
-                .font(.system(size: 15))
+                .font(OnymType.font(size: 15))
                 .foregroundStyle(OnymTokens.text)
                 .multilineTextAlignment(.center)
         }
@@ -101,15 +101,15 @@ struct MemberRulesProofView: View {
         VStack(spacing: 8) {
             if let mark = GroupRulesMark(proof.standing) {
                 Image(systemName: mark.symbol)
-                    .font(.system(size: 34))
+                    .font(OnymType.font(size: 34))
                     .foregroundStyle(mark.color)
                 Text(mark.text)
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(OnymType.font(size: 17, weight: .semibold))
                     .foregroundStyle(OnymTokens.text)
                     .accessibilityIdentifier("rules_proof.standing")
             }
             Text(explanation)
-                .font(.system(size: 13))
+                .font(OnymType.font(size: 13))
                 .foregroundStyle(OnymTokens.text2)
                 .multilineTextAlignment(.center)
         }
@@ -160,10 +160,10 @@ struct MemberRulesProofView: View {
             // contradiction by routing the author through `note`; the
             // screen has to vary the heading.
             Text(proof.standing == .author ? "THE RULES THEY SET" : "WHAT THEY SIGNED")
-                .font(.system(size: 12, weight: .semibold))
+                .font(OnymType.font(size: 12, weight: .semibold))
                 .foregroundStyle(OnymTokens.text3)
             Text(rules)
-                .font(.system(size: 14))
+                .font(OnymType.font(size: 14))
                 .foregroundStyle(OnymTokens.text)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .textSelection(.enabled)
@@ -179,15 +179,15 @@ struct MemberRulesProofView: View {
                     String(localized: "The group\u{2019}s rules have changed since. This is the wording that was agreed to."),
                     systemImage: "clock.arrow.circlepath"
                 )
-                .font(.system(size: 12))
+                .font(OnymType.font(size: 12))
                 .foregroundStyle(OnymTokens.text2)
             }
         }
         .padding(14)
         .background(OnymTokens.surface2)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: OnymRadius.inset))
         .overlay(
-            RoundedRectangle(cornerRadius: 12).stroke(OnymTokens.hairline, lineWidth: 1)
+            RoundedRectangle(cornerRadius: OnymRadius.inset).stroke(OnymTokens.hairline, lineWidth: 1)
         )
         .accessibilityIdentifier("rules_proof.rules")
     }
@@ -210,7 +210,7 @@ struct MemberRulesProofView: View {
         }
         .padding(14)
         .background(OnymTokens.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: OnymRadius.inset))
         .accessibilityIdentifier("rules_proof.bytes")
     }
 
@@ -236,7 +236,7 @@ struct MemberRulesProofView: View {
             Text(proof.standing.isProven
                  ? String(localized: "A file anyone can check with any Ed25519 tool \u{2014} it explains how inside.")
                  : String(localized: "The file records what this device knows. There is no signature in it to check."))
-                .font(.system(size: 11))
+                .font(OnymType.font(size: 11))
                 .foregroundStyle(OnymTokens.text2)
                 .multilineTextAlignment(.center)
         }
@@ -244,22 +244,22 @@ struct MemberRulesProofView: View {
 
     private func exportLabel(enabled: Bool) -> some View {
         Text("Export proof")
-            .font(.system(size: 15, weight: .semibold))
+            .font(OnymType.font(size: 15, weight: .semibold))
             .frame(maxWidth: .infinity)
             .padding(.vertical, 14)
             .background(OnymAccent.blue.color.opacity(enabled ? 1.0 : 0.5))
             .foregroundStyle(OnymTokens.onAccent)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .clipShape(RoundedRectangle(cornerRadius: OnymRadius.inset))
     }
 
     private func row(_ key: String, value: String) -> some View {
         HStack {
             Text(key)
-                .font(.system(size: 11, weight: .semibold))
+                .font(OnymType.font(size: 11, weight: .semibold))
                 .foregroundStyle(OnymTokens.text3)
             Spacer()
             Text(value)
-                .font(.system(size: 12, weight: .regular, design: .monospaced))
+                .font(OnymType.mono(size: 12))
                 .foregroundStyle(OnymTokens.text2)
         }
     }
@@ -432,10 +432,10 @@ struct MemberGoneView: View {
         NavigationStack {
             VStack(spacing: 12) {
                 Image(systemName: "person.crop.circle.badge.questionmark")
-                    .font(.system(size: 34))
+                    .font(OnymType.font(size: 34))
                     .foregroundStyle(OnymTokens.text3)
                 Text("This member is no longer in the group.")
-                    .font(.system(size: 15))
+                    .font(OnymType.font(size: 15))
                     .foregroundStyle(OnymTokens.text)
                     .multilineTextAlignment(.center)
             }

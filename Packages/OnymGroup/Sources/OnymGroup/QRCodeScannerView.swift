@@ -1,5 +1,6 @@
 import AVFoundation
 import SwiftUI
+import OnymDesign
 
 /// Sheet-presented camera surface that scans QR codes and reports the
 /// decoded payload via `onScanned`. Wraps an `AVCaptureSession` with a
@@ -29,10 +30,10 @@ public struct QRCodeScannerView: View {
             if let failure {
                 VStack(spacing: 14) {
                     Image(systemName: "video.slash.fill")
-                        .font(.system(size: 36))
+                        .font(OnymType.font(size: 36))
                         .foregroundStyle(.white.opacity(0.85))
                     Text(failure)
-                        .font(.system(size: 14, weight: .medium))
+                        .font(OnymType.font(size: 14, weight: .medium))
                         .foregroundStyle(.white)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 32)
@@ -56,7 +57,7 @@ public struct QRCodeScannerView: View {
                         Image(systemName: "xmark.circle.fill")
                             .symbolRenderingMode(.palette)
                             .foregroundStyle(.white, .black.opacity(0.45))
-                            .font(.system(size: 32))
+                            .font(OnymType.font(size: 32))
                             .padding(20)
                     }
                     .accessibilityIdentifier("qr_scanner.cancel_button")
@@ -64,7 +65,7 @@ public struct QRCodeScannerView: View {
                 }
                 Spacer()
                 Text("Point your camera at an Onym invite QR code.")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(OnymType.font(size: 14, weight: .semibold))
                     .foregroundStyle(.white)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
@@ -77,7 +78,7 @@ public struct QRCodeScannerView: View {
         GeometryReader { geo in
             let side = min(geo.size.width, geo.size.height) * 0.65
             ZStack {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: OnymRadius.panel, style: .continuous)
                     .stroke(Color.white.opacity(0.85), lineWidth: 2)
                     .frame(width: side, height: side)
             }

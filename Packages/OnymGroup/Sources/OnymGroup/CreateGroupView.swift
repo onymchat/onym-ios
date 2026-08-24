@@ -92,11 +92,11 @@ private struct OnymNavTitle: View {
     var body: some View {
         VStack(spacing: 1) {
             Text(title)
-                .font(.system(size: 16, weight: .semibold))
+                .font(OnymType.font(size: 16, weight: .semibold))
                 .foregroundStyle(OnymTokens.text)
             if let subtitle {
                 Text(subtitle)
-                    .font(.system(size: 11))
+                    .font(OnymType.font(size: 11))
                     .foregroundStyle(OnymTokens.text3)
             }
         }
@@ -110,7 +110,7 @@ private struct OnymSectionLabel: View {
     let text: String
     var body: some View {
         Text(text.uppercased())
-            .font(.system(size: 11, weight: .semibold))
+            .font(OnymType.font(size: 11, weight: .semibold))
             .tracking(0.88)
             .foregroundStyle(OnymTokens.text3)
             .padding(.horizontal, 4)
@@ -130,13 +130,13 @@ private struct OnymPrimaryButton: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 16, weight: .bold))
+                .font(OnymType.font(size: 16, weight: .bold))
                 .tracking(-0.16)
                 .frame(maxWidth: .infinity)
                 .frame(height: 52)
                 .foregroundStyle(enabled ? OnymTokens.onAccent : OnymTokens.text3)
                 .background(enabled ? accent : OnymTokens.surface3)
-                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .clipShape(RoundedRectangle(cornerRadius: OnymRadius.card))
                 .shadow(color: enabled ? accent.opacity(0.30) : .clear, radius: 12, y: 8)
         }
         .buttonStyle(.plain)
@@ -152,7 +152,7 @@ private struct OnymQuietButton: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 14.5, weight: .semibold))
+                .font(OnymType.font(size: 14.5, weight: .semibold))
                 .frame(maxWidth: .infinity)
                 .frame(height: 44)
                 .foregroundStyle(OnymTokens.text2)
@@ -209,7 +209,7 @@ private struct CreateGroupStep1View: View {
                 text: $flow.name,
                 prompt: Text(flow.generatedName).foregroundColor(OnymTokens.text3)
             )
-                .font(.system(size: 17, weight: .medium))
+                .font(OnymType.font(size: 17, weight: .medium))
                 .foregroundStyle(OnymTokens.text)
                 .tint(accentColor)
                 .textInputAutocapitalization(.sentences)
@@ -234,14 +234,14 @@ private struct CreateGroupStep1View: View {
         .padding(.vertical, 12)
         .background(OnymTokens.surface2)
         .overlay(
-            RoundedRectangle(cornerRadius: 14).stroke(OnymTokens.hairline, lineWidth: 1)
+            RoundedRectangle(cornerRadius: OnymRadius.field).stroke(OnymTokens.hairline, lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .clipShape(RoundedRectangle(cornerRadius: OnymRadius.field))
     }
 
     private var nameFootnote: some View {
         Text("Visible to members. You can change this anytime.")
-            .font(.system(size: 11.5))
+            .font(OnymType.font(size: 11.5))
             .foregroundStyle(OnymTokens.text3)
             .padding(.horizontal, 4)
             .padding(.top, 6)
@@ -256,7 +256,7 @@ private struct CreateGroupStep1View: View {
                 .foregroundColor(OnymTokens.text3),
             axis: .vertical
         )
-        .font(.system(size: 15))
+        .font(OnymType.font(size: 15))
         .foregroundStyle(OnymTokens.text)
         .tint(accentColor)
         .lineLimit(3...12)
@@ -272,9 +272,9 @@ private struct CreateGroupStep1View: View {
         .padding(.vertical, 12)
         .background(OnymTokens.surface2)
         .overlay(
-            RoundedRectangle(cornerRadius: 14).stroke(OnymTokens.hairline, lineWidth: 1)
+            RoundedRectangle(cornerRadius: OnymRadius.field).stroke(OnymTokens.hairline, lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .clipShape(RoundedRectangle(cornerRadius: OnymRadius.field))
     }
 
     private var invitationFootnote: some View {
@@ -292,7 +292,7 @@ private struct CreateGroupStep1View: View {
                     .accessibilityLabel("\(flow.rulesRemaining) characters left")
             }
         }
-        .font(.system(size: 11.5))
+        .font(OnymType.font(size: 11.5))
         .foregroundStyle(OnymTokens.text3)
         .padding(.horizontal, 4)
         .padding(.top, 6)
@@ -306,14 +306,14 @@ private struct CreateGroupStep1View: View {
             OnymGovIcon(type: .tyranny, accent: accentColor, size: 34, dimmed: false)
                 .frame(width: 44, height: 44)
                 .background(accentColor.opacity(0.14))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .clipShape(RoundedRectangle(cornerRadius: OnymRadius.inset))
 
             VStack(alignment: .leading, spacing: 3) {
                 Text("Founder")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(OnymType.font(size: 15, weight: .semibold))
                     .foregroundStyle(OnymTokens.text)
                 Text("You're the founder — you decide who joins and manage the group's settings. Everyone can chat and share; only you control membership.")
-                    .font(.system(size: 12.5))
+                    .font(OnymType.font(size: 12.5))
                     .foregroundStyle(OnymTokens.text2)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -322,9 +322,9 @@ private struct CreateGroupStep1View: View {
         .padding(14)
         .background(OnymTokens.surface2)
         .overlay(
-            RoundedRectangle(cornerRadius: 18).stroke(OnymTokens.hairline, lineWidth: 1)
+            RoundedRectangle(cornerRadius: OnymRadius.panel).stroke(OnymTokens.hairline, lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .clipShape(RoundedRectangle(cornerRadius: OnymRadius.panel))
         .accessibilityIdentifier("create_group.step1.founder_explanation")
     }
 
@@ -384,16 +384,16 @@ private struct CreateGroupStep2View: View {
             OnymGovIcon(type: flow.governance, accent: accentColor, size: 28)
             (
                 Text("\(flow.governance.label). ")
-                    .font(.system(size: 12.5, weight: .semibold))
+                    .font(OnymType.font(size: 12.5, weight: .semibold))
                     .foregroundColor(OnymTokens.text)
                 + Text(typeBannerSub)
-                    .font(.system(size: 12.5))
+                    .font(OnymType.font(size: 12.5))
                     .foregroundColor(OnymTokens.text2)
             )
             .lineSpacing(1.35)
             Spacer(minLength: 0)
             Text("\(flow.invitees.count)")
-                .font(.system(size: 11.5, weight: .semibold))
+                .font(OnymType.font(size: 11.5, weight: .semibold))
                 .foregroundStyle(OnymTokens.text)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
@@ -405,23 +405,23 @@ private struct CreateGroupStep2View: View {
         .background(accentColor.opacity(0.10))
         .background(OnymTokens.surface2)
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: OnymRadius.inset)
                 .stroke(accentColor.opacity(0.20), lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: OnymRadius.inset))
     }
 
     private var emptyState: some View {
         VStack(spacing: 8) {
             Image(systemName: "person.crop.circle.badge.plus")
-                .font(.system(size: 36, weight: .light))
+                .font(OnymType.font(size: 36, weight: .light))
                 .foregroundStyle(OnymTokens.text3)
                 .padding(.top, 28)
             Text(emptyStateTitle)
-                .font(.system(size: 15, weight: .semibold))
+                .font(OnymType.font(size: 15, weight: .semibold))
                 .foregroundStyle(OnymTokens.text)
             Text(emptyStateSubtitle)
-                .font(.system(size: 12.5))
+                .font(OnymType.font(size: 12.5))
                 .foregroundStyle(OnymTokens.text2)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 24)
@@ -465,9 +465,9 @@ private struct CreateGroupStep2View: View {
         }
         .background(OnymTokens.surface2)
         .overlay(
-            RoundedRectangle(cornerRadius: 14).stroke(OnymTokens.hairline, lineWidth: 1)
+            RoundedRectangle(cornerRadius: OnymRadius.card).stroke(OnymTokens.hairline, lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .clipShape(RoundedRectangle(cornerRadius: OnymRadius.card))
         .padding(.top, 14)
     }
 
@@ -476,17 +476,17 @@ private struct CreateGroupStep2View: View {
             ZStack {
                 Circle().fill(OnymTokens.surface3)
                 Image(systemName: "key.fill")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(OnymType.font(size: 14, weight: .semibold))
                     .foregroundStyle(accentColor)
             }
             .frame(width: 40, height: 40)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text("Inbox \(invitee.displayLabel)")
-                    .font(.system(size: 14.5, weight: .semibold))
+                    .font(OnymType.font(size: 14.5, weight: .semibold))
                     .foregroundStyle(OnymTokens.text)
                 Text("Direct inbox key")
-                    .font(.system(size: 12))
+                    .font(OnymType.font(size: 12))
                     .foregroundStyle(OnymTokens.text2)
             }
             .lineLimit(1)
@@ -498,7 +498,7 @@ private struct CreateGroupStep2View: View {
                 flow.removeInvitee(at: index)
             } label: {
                 Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 18))
+                    .font(OnymType.font(size: 18))
                     .foregroundStyle(OnymTokens.text3)
             }
             .buttonStyle(.plain)
@@ -515,30 +515,30 @@ private struct CreateGroupStep2View: View {
                         ZStack {
                             Circle().fill(accentColor.opacity(0.22))
                             Image(systemName: "key.fill")
-                                .font(.system(size: 12, weight: .semibold))
+                                .font(OnymType.font(size: 12, weight: .semibold))
                                 .foregroundStyle(accentColor)
                         }
                         .frame(width: 30, height: 30)
                         VStack(alignment: .leading, spacing: 1) {
                             Text("Invite by inbox key")
-                                .font(.system(size: 13.5, weight: .semibold))
+                                .font(OnymType.font(size: 13.5, weight: .semibold))
                                 .foregroundStyle(OnymTokens.text)
                             Text("Paste or scan a QR")
-                                .font(.system(size: 11.5))
+                                .font(OnymType.font(size: 11.5))
                                 .foregroundStyle(OnymTokens.text2)
                         }
                         Spacer(minLength: 0)
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(OnymType.font(size: 12, weight: .semibold))
                             .foregroundStyle(OnymTokens.text3)
                     }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .background(OnymTokens.surface2)
                     .overlay(
-                        RoundedRectangle(cornerRadius: 12).stroke(OnymTokens.hairlineStrong, lineWidth: 1)
+                        RoundedRectangle(cornerRadius: OnymRadius.inset).stroke(OnymTokens.hairlineStrong, lineWidth: 1)
                     )
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .clipShape(RoundedRectangle(cornerRadius: OnymRadius.inset))
                 }
                 .buttonStyle(.plain)
             }
@@ -612,12 +612,12 @@ private struct CreateGroupInviteByKeyView: View {
     private var explanation: some View {
         (
             Text("Ask for their ").foregroundColor(OnymTokens.text2)
-            + Text("inbox key").font(.system(size: 13, weight: .semibold)).foregroundColor(OnymTokens.text)
+            + Text("inbox key").font(OnymType.font(size: 13, weight: .semibold)).foregroundColor(OnymTokens.text)
             + Text(" \u{2014} they can find it in ").foregroundColor(OnymTokens.text2)
-            + Text("Settings \u{2192} Advanced").font(.system(size: 13, weight: .semibold)).foregroundColor(OnymTokens.text)
+            + Text("Settings \u{2192} Advanced").font(OnymType.font(size: 13, weight: .semibold)).foregroundColor(OnymTokens.text)
             + Text(", or share a QR code from there.").foregroundColor(OnymTokens.text2)
         )
-        .font(.system(size: 13))
+        .font(OnymType.font(size: 13))
         .lineSpacing(1.5)
         .padding(.horizontal, 4)
         .padding(.top, 4)
@@ -643,7 +643,7 @@ private struct CreateGroupInviteByKeyView: View {
                 axis: .vertical
             )
             .lineLimit(3, reservesSpace: true)
-            .font(.system(size: 14, design: .monospaced))
+            .font(OnymType.mono(size: 14))
             .foregroundStyle(OnymTokens.text)
             .tint(accentColor)
             .textInputAutocapitalization(.never)
@@ -657,7 +657,7 @@ private struct CreateGroupInviteByKeyView: View {
 
             HStack {
                 Text("\(cleanedLength)/64")
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .font(OnymType.mono(size: 11, weight: .semibold))
                     .foregroundStyle(tooLong ? OnymTokens.red : (isValid ? accentColor : OnymTokens.text3))
                 Spacer()
                 if cleanedLength > 0 {
@@ -666,7 +666,7 @@ private struct CreateGroupInviteByKeyView: View {
                         flow.inviteeError = nil
                     } label: {
                         Text("Clear")
-                            .font(.system(size: 12))
+                            .font(OnymType.font(size: 12))
                             .foregroundStyle(OnymTokens.text2)
                     }
                     .buttonStyle(.plain)
@@ -677,14 +677,14 @@ private struct CreateGroupInviteByKeyView: View {
         .padding(.vertical, 12)
         .background(OnymTokens.surface2)
         .overlay(
-            RoundedRectangle(cornerRadius: 14).stroke(borderColor, lineWidth: 1)
+            RoundedRectangle(cornerRadius: OnymRadius.card).stroke(borderColor, lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .clipShape(RoundedRectangle(cornerRadius: OnymRadius.card))
     }
 
     private func errorPill(_ message: String) -> some View {
         Text(message)
-            .font(.system(size: 12.5))
+            .font(OnymType.font(size: 12.5))
             .foregroundStyle(OnymTokens.red)
             .lineSpacing(1.4)
             .padding(.horizontal, 12)
@@ -692,9 +692,9 @@ private struct CreateGroupInviteByKeyView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(OnymTokens.red.opacity(0.10))
             .overlay(
-                RoundedRectangle(cornerRadius: 12).stroke(OnymTokens.red.opacity(0.30), lineWidth: 1)
+                RoundedRectangle(cornerRadius: OnymRadius.inset).stroke(OnymTokens.red.opacity(0.30), lineWidth: 1)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .clipShape(RoundedRectangle(cornerRadius: OnymRadius.inset))
             .padding(.top, 10)
     }
 
@@ -709,17 +709,17 @@ private struct CreateGroupInviteByKeyView: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "doc.on.clipboard")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(OnymType.font(size: 13, weight: .semibold))
                 Text("Paste")
-                    .font(.system(size: 14.5, weight: .semibold))
+                    .font(OnymType.font(size: 14.5, weight: .semibold))
             }
             .frame(maxWidth: .infinity, minHeight: 46)
             .foregroundStyle(accentColor)
             .background(OnymTokens.surface2)
             .overlay(
-                RoundedRectangle(cornerRadius: 14).stroke(OnymTokens.hairlineStrong, lineWidth: 1)
+                RoundedRectangle(cornerRadius: OnymRadius.card).stroke(OnymTokens.hairlineStrong, lineWidth: 1)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .clipShape(RoundedRectangle(cornerRadius: OnymRadius.card))
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("invite_by_key.paste_button")
@@ -731,17 +731,17 @@ private struct CreateGroupInviteByKeyView: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "qrcode.viewfinder")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(OnymType.font(size: 13, weight: .semibold))
                 Text("Scan QR")
-                    .font(.system(size: 14.5, weight: .semibold))
+                    .font(OnymType.font(size: 14.5, weight: .semibold))
             }
             .frame(maxWidth: .infinity, minHeight: 46)
             .foregroundStyle(accentColor)
             .background(OnymTokens.surface2)
             .overlay(
-                RoundedRectangle(cornerRadius: 14).stroke(OnymTokens.hairlineStrong, lineWidth: 1)
+                RoundedRectangle(cornerRadius: OnymRadius.card).stroke(OnymTokens.hairlineStrong, lineWidth: 1)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .clipShape(RoundedRectangle(cornerRadius: OnymRadius.card))
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("invite_by_key.scan_button")
@@ -752,7 +752,7 @@ private struct CreateGroupInviteByKeyView: View {
             ZStack {
                 Circle().fill(OnymTokens.surface3)
                 Text("i")
-                    .font(.system(size: 11, weight: .bold))
+                    .font(OnymType.font(size: 11, weight: .bold))
                     .foregroundStyle(OnymTokens.text2)
             }
             .frame(width: 18, height: 18)
@@ -762,7 +762,7 @@ private struct CreateGroupInviteByKeyView: View {
                 Text("Don\u{2019}t have their key? ").foregroundColor(OnymTokens.text)
                 + Text("Create the group, then share the invite link \u{2014} they can join later without sharing any keys.").foregroundColor(OnymTokens.text2)
             )
-            .font(.system(size: 12))
+            .font(OnymType.font(size: 12))
             .lineSpacing(1.5)
 
             Spacer(minLength: 0)
@@ -771,9 +771,9 @@ private struct CreateGroupInviteByKeyView: View {
         .padding(.vertical, 12)
         .background(OnymTokens.surface)
         .overlay(
-            RoundedRectangle(cornerRadius: 14).stroke(OnymTokens.hairline, lineWidth: 1)
+            RoundedRectangle(cornerRadius: OnymRadius.card).stroke(OnymTokens.hairline, lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .clipShape(RoundedRectangle(cornerRadius: OnymRadius.card))
         .padding(.top, 16)
     }
 
@@ -805,7 +805,7 @@ private struct CreateGroupCreatingView: View {
     var body: some View {
         VStack(spacing: 0) {
             Text("Creating \(flow.name.isEmpty ? "Group" : flow.name)")
-                .font(.system(size: 16, weight: .semibold))
+                .font(OnymType.font(size: 16, weight: .semibold))
                 .foregroundStyle(OnymTokens.text)
                 .frame(maxWidth: .infinity)
                 .padding(.top, 20)
@@ -827,7 +827,7 @@ private struct CreateGroupCreatingView: View {
                     .padding(.top, 12)
             } else {
                 Text("This usually takes a few seconds. It\u{2019}s safe to close this \u{2014} we\u{2019}ll finish in the background.")
-                    .font(.system(size: 12))
+                    .font(OnymType.font(size: 12))
                     .foregroundStyle(OnymTokens.text3)
                     .lineSpacing(1.45)
                     .multilineTextAlignment(.center)
@@ -851,9 +851,9 @@ private struct CreateGroupCreatingView: View {
         }
         .background(OnymTokens.surface2)
         .overlay(
-            RoundedRectangle(cornerRadius: 14).stroke(OnymTokens.hairline, lineWidth: 1)
+            RoundedRectangle(cornerRadius: OnymRadius.card).stroke(OnymTokens.hairline, lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .clipShape(RoundedRectangle(cornerRadius: OnymRadius.card))
     }
 
     private func stepRow(_ step: CreateGroupCreatingStep, status: StepStatus) -> some View {
@@ -863,7 +863,7 @@ private struct CreateGroupCreatingView: View {
                 case .done:
                     Circle().fill(OnymTokens.green)
                     Image(systemName: "checkmark")
-                        .font(.system(size: 11, weight: .bold))
+                        .font(OnymType.font(size: 11, weight: .bold))
                         .foregroundStyle(OnymTokens.onAccent)
                 case .active:
                     Circle()
@@ -886,10 +886,10 @@ private struct CreateGroupCreatingView: View {
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(step.label)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(OnymType.font(size: 14, weight: .semibold))
                     .foregroundStyle(OnymTokens.text)
                 Text(step.sub)
-                    .font(.system(size: 12))
+                    .font(OnymType.font(size: 12))
                     .foregroundStyle(OnymTokens.text2)
             }
             .lineLimit(1)
@@ -912,7 +912,7 @@ private struct CreateGroupCreatingView: View {
             // error for bug reports.
             ScrollView(.vertical, showsIndicators: true) {
                 Text(error.localizedDescription)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(OnymType.mono(size: 12))
                     .foregroundStyle(OnymTokens.red)
                     .multilineTextAlignment(.leading)
                     .textSelection(.enabled)
@@ -927,7 +927,7 @@ private struct CreateGroupCreatingView: View {
                     flow.tappedCancelFromError()
                 } label: {
                     Text("Cancel")
-                        .font(.system(size: 14.5, weight: .semibold))
+                        .font(OnymType.font(size: 14.5, weight: .semibold))
                         .foregroundStyle(OnymTokens.text2)
                         .padding(.horizontal, 18)
                         .padding(.vertical, 8)
@@ -940,7 +940,7 @@ private struct CreateGroupCreatingView: View {
                     flow.tappedDismissError()
                 } label: {
                     Text("Try again")
-                        .font(.system(size: 14.5, weight: .semibold))
+                        .font(OnymType.font(size: 14.5, weight: .semibold))
                         .foregroundStyle(OnymAccent.blue.color)
                         .padding(.horizontal, 18)
                         .padding(.vertical, 8)
@@ -953,9 +953,9 @@ private struct CreateGroupCreatingView: View {
         .padding(14)
         .background(OnymTokens.red.opacity(0.10))
         .overlay(
-            RoundedRectangle(cornerRadius: 14).stroke(OnymTokens.red.opacity(0.30), lineWidth: 1)
+            RoundedRectangle(cornerRadius: OnymRadius.card).stroke(OnymTokens.red.opacity(0.30), lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .clipShape(RoundedRectangle(cornerRadius: OnymRadius.card))
     }
 
     // MARK: - Step plan
@@ -1044,7 +1044,7 @@ private struct CreateGroupSuccessView: View {
             Spacer().frame(width: 60)
             Spacer()
             Text("\(groupName) is live")
-                .font(.system(size: 15, weight: .semibold))
+                .font(OnymType.font(size: 15, weight: .semibold))
                 .foregroundStyle(OnymTokens.text)
             Spacer()
             Spacer().frame(width: 60)
@@ -1066,7 +1066,7 @@ private struct CreateGroupSuccessView: View {
                     Circle().fill(OnymTokens.green)
                         .overlay(Circle().stroke(OnymTokens.bg, lineWidth: 2))
                     Image(systemName: "checkmark")
-                        .font(.system(size: 12, weight: .bold))
+                        .font(OnymType.font(size: 12, weight: .bold))
                         .foregroundStyle(OnymTokens.onAccent)
                 }
                 .frame(width: 28, height: 28)
@@ -1075,16 +1075,16 @@ private struct CreateGroupSuccessView: View {
             .padding(.top, 14)
 
             Text(groupName)
-                .font(.system(size: 22, weight: .bold))
+                .font(OnymType.font(size: 22, weight: .bold))
                 .tracking(-0.22)
                 .foregroundStyle(OnymTokens.text)
                 .padding(.top, 14)
 
             HStack(spacing: 6) {
                 Image(systemName: "lock.fill")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(OnymType.font(size: 11, weight: .semibold))
                 Text("End-to-end encrypted")
-                    .font(.system(size: 12.5))
+                    .font(OnymType.font(size: 12.5))
             }
             .foregroundStyle(OnymTokens.text2)
             .padding(.top, 4)
@@ -1093,8 +1093,8 @@ private struct CreateGroupSuccessView: View {
             HStack(spacing: 8) {
                 OnymGovIcon(type: flow.governance, accent: accentColor, size: 20)
                 (
-                    Text("\(flow.governance.label) \u{00B7} ").foregroundColor(OnymTokens.text).font(.system(size: 12.5, weight: .semibold))
-                    + Text(typeChipSummary).foregroundColor(OnymTokens.text2).font(.system(size: 12.5))
+                    Text("\(flow.governance.label) \u{00B7} ").foregroundColor(OnymTokens.text).font(OnymType.font(size: 12.5, weight: .semibold))
+                    + Text(typeChipSummary).foregroundColor(OnymTokens.text2).font(OnymType.font(size: 12.5))
                 )
             }
             .padding(.leading, 8)
@@ -1110,9 +1110,9 @@ private struct CreateGroupSuccessView: View {
 
             HStack(spacing: 6) {
                 Image(systemName: "checkmark.seal.fill")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(OnymType.font(size: 11, weight: .semibold))
                 Text("Published on-chain")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(OnymType.font(size: 12, weight: .semibold))
             }
             .foregroundStyle(OnymTokens.green)
             .padding(.horizontal, 10)
@@ -1135,15 +1135,15 @@ private struct CreateGroupSuccessView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Members")
-                        .font(.system(size: 13.5, weight: .semibold))
+                        .font(OnymType.font(size: 13.5, weight: .semibold))
                         .foregroundStyle(OnymTokens.text)
                     Text("\(flow.invitees.count + 1) \(flow.invitees.count == 0 ? "person" : "people") so far")
-                        .font(.system(size: 11.5))
+                        .font(OnymType.font(size: 11.5))
                         .foregroundStyle(OnymTokens.text2)
                 }
                 Spacer()
                 Text("You \u{00B7} admin")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(OnymType.font(size: 11, weight: .semibold))
                     .foregroundStyle(accentColor)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
@@ -1178,9 +1178,9 @@ private struct CreateGroupSuccessView: View {
         }
         .background(OnymTokens.surface2)
         .overlay(
-            RoundedRectangle(cornerRadius: 18).stroke(OnymTokens.hairline, lineWidth: 1)
+            RoundedRectangle(cornerRadius: OnymRadius.panel).stroke(OnymTokens.hairline, lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .clipShape(RoundedRectangle(cornerRadius: OnymRadius.panel))
     }
 
     private func memberRow(
@@ -1194,17 +1194,17 @@ private struct CreateGroupSuccessView: View {
             ZStack {
                 Circle().fill(badgeColor)
                 Text(badge)
-                    .font(.system(size: 12, weight: .bold))
+                    .font(OnymType.font(size: 12, weight: .bold))
                     .foregroundStyle(.white)
             }
             .frame(width: 36, height: 36)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(name)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(OnymType.font(size: 14, weight: .semibold))
                     .foregroundStyle(OnymTokens.text)
                 Text(sub)
-                    .font(.system(size: 12))
+                    .font(OnymType.font(size: 12))
                     .foregroundStyle(OnymTokens.text2)
             }
             .lineLimit(1)
@@ -1213,7 +1213,7 @@ private struct CreateGroupSuccessView: View {
 
             if let trailing {
                 Text(trailing)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(OnymType.font(size: 11, weight: .semibold))
                     .foregroundStyle(accentColor)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
@@ -1240,7 +1240,7 @@ private struct CreateGroupSuccessView: View {
             .accessibilityIdentifier("create_group.share_invite_button")
             Button(action: flow.tappedDone) {
                 Text("Done")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(OnymType.font(size: 14, weight: .semibold))
                     .foregroundStyle(OnymTokens.text2)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)

@@ -10,6 +10,7 @@ let package = Package(
     dependencies: [
         .package(path: "../OnymModeration"),
         .package(path: "../OnymDesign"),
+        .package(path: "../OnymDesignTokens"),
     ],
     targets: [
         .target(
@@ -17,6 +18,7 @@ let package = Package(
             dependencies: [
                 "OnymModeration",
                 "OnymDesign",
+                .product(name: "OnymDesignTokens", package: "OnymDesignTokens"),
             ]
         ),
     ]

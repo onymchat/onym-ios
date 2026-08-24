@@ -48,7 +48,7 @@ struct AddDiscoveryProviderView: View {
     private var urlEntry: some View {
         SettingsLargeTitle("Add Discovery Provider")
         Text("Paste the provider's manifest URL. Its manifest and catalogs are signed — you'll review the operator key fingerprint before this app trusts anything it publishes.")
-            .font(.system(size: 14))
+            .font(OnymType.font(size: 14))
             .foregroundStyle(OnymTokens.text2)
             .lineSpacing(3)
             .padding(.horizontal, 16)
@@ -60,7 +60,7 @@ struct AddDiscoveryProviderView: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .keyboardType(.URL)
-                .font(.system(size: 15, design: .monospaced))
+                .font(OnymType.mono(size: 15))
                 .padding(.horizontal, 16).padding(.vertical, 12)
                 .accessibilityIdentifier("settings.discovery.add.field")
         }
@@ -94,7 +94,7 @@ struct AddDiscoveryProviderView: View {
         SettingsLargeTitle("Confirm Operator Key")
 
         Text("This fingerprint identifies the provider's operator key. Verify it out-of-band — the provider's website, documentation, or the operator directly — before confirming. It's pinned on confirm: a later manifest signed by any other key will be rejected.")
-            .font(.system(size: 14))
+            .font(OnymType.font(size: 14))
             .foregroundStyle(OnymTokens.text2)
             .lineSpacing(3)
             .padding(.horizontal, 16)
@@ -103,7 +103,7 @@ struct AddDiscoveryProviderView: View {
         SettingsSectionLabel("OPERATOR KEY FINGERPRINT")
         SettingsCard {
             Text(verbatim: preview.operatorKeyFingerprint)
-                .font(.system(size: 28, weight: .semibold, design: .monospaced))
+                .font(OnymType.mono(size: 28, weight: .semibold))
                 .foregroundStyle(OnymTokens.text)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity)
@@ -130,7 +130,7 @@ struct AddDiscoveryProviderView: View {
             .accessibilityIdentifier("settings.discovery.add.confirm")
 
             Button("Back") { flow.tappedCancelPreview() }
-                .font(.system(size: 14))
+                .font(OnymType.font(size: 14))
                 .foregroundStyle(OnymTokens.text2)
                 .accessibilityIdentifier("settings.discovery.add.back")
         }
@@ -142,10 +142,10 @@ struct AddDiscoveryProviderView: View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(label)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(OnymType.font(size: 13, weight: .semibold))
                     .foregroundStyle(OnymTokens.text)
                 Text(verbatim: value)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(OnymType.mono(size: 12))
                     .foregroundStyle(OnymTokens.text2)
                     .textSelection(.enabled)
             }
@@ -159,11 +159,11 @@ struct AddDiscoveryProviderView: View {
     private func catalogsRow(_ preview: DiscoveryProviderPreview, last: Bool) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text("Catalogs")
-                .font(.system(size: 13, weight: .semibold))
+                .font(OnymType.font(size: 13, weight: .semibold))
                 .foregroundStyle(OnymTokens.text)
             ForEach(preview.signed.manifest.catalogs, id: \.catalogId) { catalog in
                 Text(verbatim: "\(catalog.catalogId) · \(catalog.seatTypes.joined(separator: ", "))")
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(OnymType.mono(size: 12))
                     .foregroundStyle(OnymTokens.text2)
             }
         }
@@ -178,13 +178,13 @@ struct AddDiscoveryProviderView: View {
     private var done: some View {
         VStack(spacing: 12) {
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 44))
+                .font(OnymType.font(size: 44))
                 .foregroundStyle(OnymTokens.green)
             Text("Provider added")
-                .font(.system(size: 17, weight: .semibold))
+                .font(OnymType.font(size: 17, weight: .semibold))
                 .foregroundStyle(OnymTokens.text)
             Text("Its catalogs are being fetched and verified now.")
-                .font(.system(size: 13))
+                .font(OnymType.font(size: 13))
                 .foregroundStyle(OnymTokens.text2)
         }
         .frame(maxWidth: .infinity)

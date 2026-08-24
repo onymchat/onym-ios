@@ -28,35 +28,35 @@ public struct ShareKeyView: View {
                     SettingsQRCode(value: inviteURL, size: 260)
                         .padding(14)
                         .background(OnymTokens.surface2,
-                                    in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                    in: RoundedRectangle(cornerRadius: OnymRadius.panel, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: OnymRadius.panel, style: .continuous)
                             .stroke(OnymTokens.hairline, lineWidth: 1))
                         .shadow(color: .black.opacity(0.06), radius: 8, y: 2)
 
                     HStack(spacing: 8) {
                         IdentityRingTile(active: true, size: 28)
                         Text(identity.name)
-                            .font(.system(size: 17, weight: .semibold))
+                            .font(OnymType.font(size: 17, weight: .semibold))
                             .foregroundStyle(OnymTokens.text)
                     }
 
                     Text("BLS \(blsPrefix)…")
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(OnymType.mono(size: 12))
                         .foregroundStyle(OnymTokens.text2)
 
                     Text(inviteURL)
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(OnymType.mono(size: 12))
                         .foregroundStyle(OnymTokens.text2)
                         .lineLimit(1).truncationMode(.middle)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
                         .background(OnymTokens.surface3,
-                                    in: RoundedRectangle(cornerRadius: 10))
+                                    in: RoundedRectangle(cornerRadius: OnymRadius.control))
                 }
                 .frame(maxWidth: .infinity)
                 .padding(24)
                 .background(OnymTokens.surface2,
-                            in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                            in: RoundedRectangle(cornerRadius: OnymRadius.panel, style: .continuous))
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
 
@@ -67,12 +67,12 @@ public struct ShareKeyView: View {
                         HStack(spacing: 6) {
                             Image(systemName: "doc.on.doc")
                             Text("Copy link")
-                                .font(.system(size: 15, weight: .semibold))
+                                .font(OnymType.font(size: 15, weight: .semibold))
                         }
                         .foregroundStyle(OnymAccent.blue.color)
                         .frame(maxWidth: .infinity, minHeight: 48)
                         .background(OnymAccent.blue.color.opacity(0.12),
-                                    in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                    in: RoundedRectangle(cornerRadius: OnymRadius.card, style: .continuous))
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("share_key.copy_button")
@@ -81,12 +81,12 @@ public struct ShareKeyView: View {
                         HStack(spacing: 6) {
                             Image(systemName: "square.and.arrow.up")
                             Text("Share")
-                                .font(.system(size: 15, weight: .semibold))
+                                .font(OnymType.font(size: 15, weight: .semibold))
                         }
                         .foregroundStyle(OnymTokens.onAccent)
                         .frame(maxWidth: .infinity, minHeight: 48)
                         .background(OnymAccent.blue.color,
-                                    in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                    in: RoundedRectangle(cornerRadius: OnymRadius.card, style: .continuous))
                     }
                     .accessibilityIdentifier("share_key.share_button")
                 }

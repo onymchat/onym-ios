@@ -86,7 +86,7 @@ public struct GroupAvatarPickerButton: View {
                     .frame(width: 28, height: 28)
                     .overlay(Circle().stroke(OnymTokens.bg, lineWidth: 2))
                 Image(systemName: "camera.fill")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(OnymType.font(size: 12, weight: .semibold))
                     .foregroundStyle(OnymTokens.onAccent)
             }
             .offset(x: 4, y: 4)

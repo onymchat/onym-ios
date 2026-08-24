@@ -8,13 +8,17 @@ let package = Package(
         .library(name: "OnymRecovery", targets: ["OnymRecovery"])
     ],
     dependencies: [
-        .package(path: "../OnymIdentity")
+        .package(path: "../OnymIdentity"),
+        // Tokens only — this package draws with the design's colors and
+        // radii but uses none of OnymDesign's components.
+        .package(path: "../OnymDesignTokens")
     ],
     targets: [
         .target(
             name: "OnymRecovery",
             dependencies: [
-                "OnymIdentity"
+                "OnymIdentity",
+                .product(name: "OnymDesignTokens", package: "OnymDesignTokens")
             ]
         )
     ]

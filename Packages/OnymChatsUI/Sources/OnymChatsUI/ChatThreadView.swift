@@ -341,7 +341,7 @@ public struct ChatThreadView: View {
                     Color.black.opacity(0.2).ignoresSafeArea()
                     ProgressView("Preparing report…")
                         .padding(20)
-                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: OnymRadius.card))
                 }
                 .accessibilityIdentifier("chat.report.preparing")
             }
@@ -361,12 +361,12 @@ public struct ChatThreadView: View {
             ToolbarItem(placement: .principal) {
                 VStack(spacing: 1) {
                     Text(currentGroupName)
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(OnymType.font(size: 16, weight: .semibold))
                         .foregroundStyle(OnymTokens.text)
                         .lineLimit(1)
                     if currentMemberCount > 1 {
                         Text("\(currentMemberCount) members")
-                            .font(.system(size: 11))
+                            .font(OnymType.font(size: 11))
                             .foregroundStyle(OnymTokens.text3)
                     }
                 }
@@ -793,7 +793,7 @@ private struct FullScreenGalleryView: View {
                 onDismiss()
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(OnymType.font(size: 16, weight: .semibold))
                     .foregroundStyle(.white)
                     .padding(12)
                     .background(.black.opacity(0.4), in: Circle())

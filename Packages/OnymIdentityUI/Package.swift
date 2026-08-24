@@ -9,12 +9,17 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../OnymIdentity"),
-        .package(path: "../OnymDesign")
+        .package(path: "../OnymDesign"),
+        .package(path: "../OnymDesignTokens")
     ],
     targets: [
         .target(
             name: "OnymIdentityUI",
-            dependencies: ["OnymIdentity", "OnymDesign"]
+            dependencies: [
+                "OnymIdentity",
+                "OnymDesign",
+                .product(name: "OnymDesignTokens", package: "OnymDesignTokens"),
+            ]
         )
     ]
 )

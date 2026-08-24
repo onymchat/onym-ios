@@ -68,7 +68,7 @@ public struct DeviceRecoveryView: View {
         }
         if let errorMessage = flow.errorMessage {
             Text(errorMessage)
-                .font(.system(size: 13))
+                .font(OnymType.font(size: 13))
                 .foregroundStyle(OnymTokens.red)
                 .accessibilityIdentifier("moderation.device_recovery.error")
         }
@@ -77,7 +77,7 @@ public struct DeviceRecoveryView: View {
     private var claimForm: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("A person at the moderation authority reviews device-recovery claims. Say how this device came to you and leave a real way to reach you — the moderator may need to verify your account before deciding.", comment: "Device recovery claim form intro")
-                .font(.system(size: 14))
+                .font(OnymType.font(size: 14))
                 .foregroundStyle(OnymTokens.text2)
                 .lineSpacing(3)
 
@@ -119,7 +119,7 @@ public struct DeviceRecoveryView: View {
                 detail: String(localized: "The moderator may contact you before deciding. This can take a while — you can close this screen and check back later.")
             )
             Text(claimId)
-                .font(.system(size: 12, design: .monospaced))
+                .font(OnymType.mono(size: 12))
                 .foregroundStyle(OnymTokens.text3)
             SettingsPrimaryButton(action: check) {
                 if isChecking {
@@ -138,7 +138,7 @@ public struct DeviceRecoveryView: View {
                     flow.startOver()
                 } label: {
                     Text("File a new claim", comment: "Recovery claim start over button")
-                        .font(.system(size: 14, weight: .medium))
+                        .font(OnymType.font(size: 14, weight: .medium))
                 }
                 .accessibilityIdentifier("moderation.device_recovery.start_over")
             }
@@ -156,7 +156,7 @@ public struct DeviceRecoveryView: View {
                 flow.startOver()
             } label: {
                 Text("File a new claim", comment: "Recovery claim start over button")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(OnymType.font(size: 14, weight: .medium))
             }
             .accessibilityIdentifier("moderation.device_recovery.start_over")
         }
@@ -172,7 +172,7 @@ public struct DeviceRecoveryView: View {
             SettingsCard {
                 VStack(alignment: .leading, spacing: 10) {
                     Text(contact)
-                        .font(.system(size: 13))
+                        .font(OnymType.font(size: 13))
                         .foregroundStyle(OnymTokens.text)
                     if let appealURL {
                         Link(destination: appealURL) {
@@ -198,13 +198,13 @@ public struct DeviceRecoveryView: View {
     private func statusBlock(icon: String, title: String, detail: String) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Image(systemName: icon)
-                .font(.system(size: 28))
+                .font(OnymType.font(size: 28))
                 .foregroundStyle(OnymTokens.text2)
             Text(title)
-                .font(.system(size: 17, weight: .semibold))
+                .font(OnymType.font(size: 17, weight: .semibold))
                 .foregroundStyle(OnymTokens.text)
             Text(detail)
-                .font(.system(size: 14))
+                .font(OnymType.font(size: 14))
                 .foregroundStyle(OnymTokens.text2)
                 .lineSpacing(3)
         }

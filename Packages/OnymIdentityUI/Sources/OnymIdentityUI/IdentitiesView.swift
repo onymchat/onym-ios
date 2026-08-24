@@ -31,17 +31,17 @@ struct IdentitiesView: View {
                     HStack(spacing: 10) {
                         Circle().fill(OnymAccent.blue.color).frame(width: 22, height: 22)
                             .overlay(Image(systemName: "plus")
-                                .font(.system(size: 13, weight: .bold))
+                                .font(OnymType.font(size: 13, weight: .bold))
                                 .foregroundStyle(OnymTokens.onAccent))
                         Text("Add Identity")
-                            .font(.system(size: 16, weight: .medium))
+                            .font(OnymType.font(size: 16, weight: .medium))
                             .foregroundStyle(OnymAccent.blue.color)
                         Spacer()
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 13)
                     .background(OnymTokens.surface2,
-                                in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                in: RoundedRectangle(cornerRadius: OnymRadius.card, style: .continuous))
                     .padding(.horizontal, 16)
                     .padding(.top, 12)
                 }
@@ -107,7 +107,7 @@ struct IdentitiesView: View {
                         } right: {
                             if summary.id == flow.currentID {
                                 Text("Active")
-                                    .font(.system(size: 11, weight: .semibold))
+                                    .font(OnymType.font(size: 11, weight: .semibold))
                                     .padding(.horizontal, 8)
                                     .padding(.vertical, 3)
                                     .background(OnymTokens.green.opacity(0.18),
@@ -142,7 +142,7 @@ struct IdentitiesView: View {
             .scrollContentBackground(.hidden)
             .scrollDisabled(true)
             .frame(height: CGFloat(summaries.count) * rowHeight)
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: OnymRadius.card, style: .continuous))
             .padding(.horizontal, 16)
         }
     }
@@ -170,7 +170,7 @@ private struct AddIdentitySheet: View {
                         TextField("Identity name", text: $flow.pendingName)
                             .textInputAutocapitalization(.words)
                             .autocorrectionDisabled()
-                            .font(.system(size: 16.5))
+                            .font(OnymType.font(size: 16.5))
                             .padding(.horizontal, 16)
                             .padding(.vertical, 12)
                             .accessibilityIdentifier("add_identity.name_field")
@@ -181,7 +181,7 @@ private struct AddIdentitySheet: View {
                     SettingsCard {
                         TextEditor(text: $flow.pendingMnemonic)
                             .frame(minHeight: 96)
-                            .font(.system(size: 15, design: .monospaced))
+                            .font(OnymType.mono(size: 15))
                             .autocorrectionDisabled()
                             .textInputAutocapitalization(.never)
                             .scrollContentBackground(.hidden)
@@ -194,7 +194,7 @@ private struct AddIdentitySheet: View {
 
                     if let error = flow.addError {
                         Text(error)
-                            .font(.system(size: 13))
+                            .font(OnymType.font(size: 13))
                             .foregroundStyle(.red)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 20)
@@ -251,7 +251,7 @@ public struct RemoveIdentitySheet: View {
                                   text: $flow.pendingRemovalConfirmText)
                             .autocorrectionDisabled()
                             .textInputAutocapitalization(.never)
-                            .font(.system(size: 16.5))
+                            .font(OnymType.font(size: 16.5))
                             .padding(.horizontal, 16)
                             .padding(.vertical, 12)
                             .accessibilityIdentifier("remove_identity.confirm_field")
@@ -261,11 +261,11 @@ public struct RemoveIdentitySheet: View {
                         flow.confirmRemoval()
                     } label: {
                         Text("Remove identity")
-                            .font(.system(size: 16, weight: .semibold))
+                            .font(OnymType.font(size: 16, weight: .semibold))
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity, minHeight: 50)
                             .background(OnymTokens.red,
-                                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                        in: RoundedRectangle(cornerRadius: OnymRadius.field, style: .continuous))
                     }
                     .buttonStyle(.plain)
                     .disabled(!flow.canConfirmRemoval)

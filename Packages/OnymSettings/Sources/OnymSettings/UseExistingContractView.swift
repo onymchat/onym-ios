@@ -38,7 +38,7 @@ struct UseExistingContractView: View {
                 SettingsCard {
                     VStack(alignment: .leading, spacing: 4) {
                         TextEditor(text: $addr)
-                            .font(.system(size: 14, design: .monospaced))
+                            .font(OnymType.mono(size: 14))
                             .frame(minHeight: 72)
                             .scrollContentBackground(.hidden)
                             .background(Color.clear)
@@ -61,7 +61,7 @@ struct UseExistingContractView: View {
                                         : OnymTokens.red.opacity(0.14)
                                 )
                                 Text("Stellar Soroban contract ID")
-                                    .font(.system(size: 11))
+                                    .font(OnymType.font(size: 11))
                                     .foregroundStyle(OnymTokens.text3)
                             }
                         }
@@ -72,7 +72,7 @@ struct UseExistingContractView: View {
                 SettingsSectionLabel("LABEL")
                 SettingsCard {
                     TextField("My fork v0.0.5", text: $label)
-                        .font(.system(size: 16))
+                        .font(OnymType.font(size: 16))
                         .padding(.horizontal, 16).padding(.vertical, 12)
                         .accessibilityIdentifier("anchors.use_existing.label_field")
                         .onChange(of: label) { _, v in
@@ -96,7 +96,7 @@ struct UseExistingContractView: View {
                 if verdict == .ok { verifiedBanner }
                 if verdict == .bad {
                     Text("Address format invalid. Expected 56 chars starting with C.")
-                        .font(.system(size: 13))
+                        .font(OnymType.font(size: 13))
                         .foregroundStyle(OnymTokens.red)
                         .frame(maxWidth: .infinity)
                         .padding(.top, 12)
@@ -115,7 +115,7 @@ struct UseExistingContractView: View {
                         }
                     ) {
                         SettingsContentTile(bg: SettingsTile.indigo) {
-                            Text("SX").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                            Text("SX").font(OnymType.font(size: 11, weight: .bold)).foregroundStyle(.white)
                         }
                     } right: {
                         Image(systemName: "arrow.up.right.square")
@@ -142,7 +142,7 @@ struct UseExistingContractView: View {
 
     private var heroCard: some View {
         HStack(spacing: 14) {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: OnymRadius.inset, style: .continuous)
                 .fill(LinearGradient(colors: [Color(red: 0.898, green: 0.898, blue: 0.996),
                                                 Color(red: 0.78, green: 0.78, blue: 0.957)],
                                       startPoint: .topLeading, endPoint: .bottomTrailing))
@@ -151,17 +151,17 @@ struct UseExistingContractView: View {
                     .foregroundStyle(SettingsTile.indigo))
             VStack(alignment: .leading, spacing: 3) {
                 Text("Bring your own contract")
-                    .font(.system(size: 16.5, weight: .semibold))
+                    .font(OnymType.font(size: 16.5, weight: .semibold))
                     .foregroundStyle(OnymTokens.text)
                 Text("Anchor new \(key.type.displayName.lowercased()) chats on a Stellar contract you’ve already deployed.")
-                    .font(.system(size: 13))
+                    .font(OnymType.font(size: 13))
                     .foregroundStyle(OnymTokens.text2)
                     .lineSpacing(2)
             }
         }
         .padding(18)
         .background(OnymTokens.surface2,
-                    in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    in: RoundedRectangle(cornerRadius: OnymRadius.panel, style: .continuous))
         .padding(.horizontal, 16)
         .padding(.top, 8)
     }
@@ -170,15 +170,15 @@ struct UseExistingContractView: View {
         HStack(alignment: .top, spacing: 10) {
             Circle().fill(OnymTokens.green).frame(width: 22, height: 22)
                 .overlay(Image(systemName: "checkmark")
-                    .font(.system(size: 11, weight: .bold))
+                    .font(OnymType.font(size: 11, weight: .bold))
                     .foregroundStyle(.white))
                 .padding(.top, 1)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Address format looks valid")
-                    .font(.system(size: 13.5, weight: .semibold))
+                    .font(OnymType.font(size: 13.5, weight: .semibold))
                     .foregroundStyle(Color(red: 0.09, green: 0.37, blue: 0.18))
                 Text("This checks the address shape only, not the on-chain contract. Tap “Use this contract” to anchor new \(key.type.displayName.lowercased()) chats here; existing chats keep their current contract.")
-                    .font(.system(size: 12))
+                    .font(OnymType.font(size: 12))
                     .foregroundStyle(Color(red: 0.19, green: 0.43, blue: 0.28))
                     .lineSpacing(2)
             }
@@ -186,7 +186,7 @@ struct UseExistingContractView: View {
         }
         .padding(14)
         .background(OnymTokens.green.opacity(0.10),
-                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    in: RoundedRectangle(cornerRadius: OnymRadius.inset, style: .continuous))
         .padding(.horizontal, 16)
         .padding(.top, 12)
     }

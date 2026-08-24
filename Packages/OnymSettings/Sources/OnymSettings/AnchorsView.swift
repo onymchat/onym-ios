@@ -70,18 +70,18 @@ struct AnchorsView: View {
                 last: last
             ) {
                 SettingsContentTile(bg: bg) {
-                    Text(letter).font(.system(size: 11, weight: .bold))
+                    Text(letter).font(OnymType.font(size: 11, weight: .bold))
                         .foregroundStyle(.white)
                 }
             } right: {
                 if isActive {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(OnymType.font(size: 15, weight: .semibold))
                         .foregroundStyle(OnymAccent.blue.color)
                 } else if !hasContracts {
                     Text("Soon")
                         .foregroundStyle(OnymTokens.text3)
-                        .font(.system(size: 14))
+                        .font(OnymType.font(size: 14))
                 }
             }
         }
@@ -134,7 +134,7 @@ struct AnchorsView: View {
             } right: {
                 Text("—")
                     .foregroundStyle(OnymTokens.text3)
-                    .font(.system(size: 14))
+                    .font(OnymType.font(size: 14))
             }
             .accessibilityIdentifier("anchors.type.\(type.rawValue).disabled")
         }
@@ -198,7 +198,7 @@ struct AnchorsNetworkView: View {
             } right: {
                 Text("—")
                     .foregroundStyle(OnymTokens.text3)
-                    .font(.system(size: 14))
+                    .font(OnymType.font(size: 14))
             }
             .accessibilityIdentifier("anchors.type.\(type.rawValue).disabled")
         }
@@ -231,12 +231,12 @@ private struct GovernanceTypeTile: View {
 
     var body: some View {
         let p = palette
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
+        RoundedRectangle(cornerRadius: OnymRadius.badge, style: .continuous)
             .fill(dimmed ? OnymTokens.surface3 : p.bg)
             .frame(width: 30, height: 30)
             .overlay(
                 Text(letters)
-                    .font(.system(size: 11, weight: .bold))
+                    .font(OnymType.font(size: 11, weight: .bold))
                     .foregroundStyle(dimmed ? OnymTokens.text3 : p.fg)
             )
     }
@@ -349,16 +349,16 @@ struct AnchorsVersionView: View {
                 HStack(spacing: 8) {
                     if isLatest {
                         Text("LATEST")
-                            .font(.system(size: 10.5, weight: .bold))
+                            .font(OnymType.font(size: 10.5, weight: .bold))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(OnymTokens.green.opacity(0.16),
-                                        in: RoundedRectangle(cornerRadius: 4))
+                                        in: RoundedRectangle(cornerRadius: OnymRadius.chip))
                             .foregroundStyle(OnymTokens.green)
                     }
                     if isSelected {
                         Image(systemName: "checkmark")
-                            .font(.system(size: 14, weight: .bold))
+                            .font(OnymType.font(size: 14, weight: .bold))
                             .foregroundStyle(OnymAccent.blue.color)
                     }
                 }

@@ -19,7 +19,7 @@ struct ChatEmptyStateView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 Text("No messages yet. Say hi.")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(OnymType.font(size: 15, weight: .semibold))
                     .foregroundStyle(OnymTokens.text)
                     .frame(maxWidth: .infinity, alignment: .center)
 
@@ -35,20 +35,20 @@ struct ChatEmptyStateView: View {
                     // trouble to avoid elsewhere.
                     section("GROUP RULES") {
                         Text(invitation)
-                            .font(.system(size: 14))
+                            .font(OnymType.font(size: 14))
                             .foregroundStyle(OnymTokens.text)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .textSelection(.enabled)
                             .padding(14)
                             .background(OnymTokens.surface2)
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .clipShape(RoundedRectangle(cornerRadius: OnymRadius.inset, style: .continuous))
                     }
                 }
 
                 if memberNames.count > 1 {
                     section("MEMBERS") {
                         Text(memberNames.joined(separator: ", "))
-                            .font(.system(size: 14))
+                            .font(OnymType.font(size: 14))
                             .foregroundStyle(OnymTokens.text)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -82,7 +82,7 @@ struct ChatEmptyStateView: View {
     private func section(_ label: LocalizedStringKey, @ViewBuilder content: () -> some View) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(label)
-                .font(.system(size: 12, weight: .semibold))
+                .font(OnymType.font(size: 12, weight: .semibold))
                 .foregroundStyle(OnymTokens.text3)
             content()
         }
@@ -91,15 +91,15 @@ struct ChatEmptyStateView: View {
     private func benefit(icon: String, title: LocalizedStringKey, detail: LocalizedStringKey) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: icon)
-                .font(.system(size: 16, weight: .semibold))
+                .font(OnymType.font(size: 16, weight: .semibold))
                 .foregroundStyle(OnymAccent.blue.color)
                 .frame(width: 24, height: 22)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(OnymType.font(size: 14, weight: .semibold))
                     .foregroundStyle(OnymTokens.text)
                 Text(detail)
-                    .font(.system(size: 13))
+                    .font(OnymType.font(size: 13))
                     .foregroundStyle(OnymTokens.text2)
                     .fixedSize(horizontal: false, vertical: true)
             }

@@ -51,7 +51,7 @@ struct ContractDetailView: View {
                         onTap: explorerURL.map { url in { open(url.absoluteString) } }
                     ) {
                         SettingsContentTile(bg: SettingsTile.indigo) {
-                            Text("SX").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                            Text("SX").font(OnymType.font(size: 11, weight: .bold)).foregroundStyle(.white)
                         }
                     } right: {
                         Image(systemName: "arrow.up.right.square")
@@ -123,7 +123,7 @@ struct ContractDetailView: View {
 
     private var hero: some View {
         HStack(spacing: 14) {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: OnymRadius.inset, style: .continuous)
                 .fill(LinearGradient(colors: [Color(red: 0.996, green: 0.941, blue: 0.878),
                                                 Color(red: 1.0, green: 0.878, blue: 0.753)],
                                       startPoint: .topLeading, endPoint: .bottomTrailing))
@@ -131,22 +131,22 @@ struct ContractDetailView: View {
                 .overlay(OnymMark(size: 32, color: Color(red: 0.82, green: 0.29, blue: 0)))
             VStack(alignment: .leading, spacing: 2) {
                 Text("CONTRACT · \(key.type.displayName.uppercased())")
-                    .font(.system(size: 11.5, weight: .medium))
+                    .font(OnymType.font(size: 11.5, weight: .medium))
                     .tracking(0.46)
                     .foregroundStyle(OnymTokens.text2)
                 Text(release.release)
-                    .font(.system(size: 22, weight: .bold, design: .monospaced))
+                    .font(OnymType.mono(size: 22, weight: .bold))
                     .tracking(-0.26)
                     .foregroundStyle(OnymTokens.text)
                 Text("Deployed \(release.publishedAt.formatted(date: .abbreviated, time: .omitted)) · \(auditLabel)")
-                    .font(.system(size: 12.5))
+                    .font(OnymType.font(size: 12.5))
                     .foregroundStyle(OnymTokens.text2)
             }
             Spacer(minLength: 0)
         }
         .padding(18)
         .background(OnymTokens.surface2,
-                    in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    in: RoundedRectangle(cornerRadius: OnymRadius.panel, style: .continuous))
         .padding(.horizontal, 16)
         .padding(.top, 8)
     }

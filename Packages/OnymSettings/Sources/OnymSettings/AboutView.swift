@@ -34,7 +34,7 @@ struct AboutView: View {
                         EmptyView()
                     } right: {
                         Text(build)
-                            .font(.system(size: 13.5, design: .monospaced))
+                            .font(OnymType.mono(size: 13.5))
                             .foregroundStyle(OnymTokens.text2)
                     }
                     SettingsRow(
@@ -163,22 +163,22 @@ struct AboutView: View {
                 VStack(spacing: 12) {
                     OnymMark(size: 22, color: OnymTokens.text3)
                     Text("Built by people who think privacy is a right.\nReleased under the MIT license.")
-                        .font(.system(size: 11.5))
+                        .font(OnymType.font(size: 11.5))
                         .foregroundStyle(OnymTokens.text3)
                         .multilineTextAlignment(.center)
                         .lineSpacing(4)
                     Text("© 2026 · Onym Foundation")
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(OnymType.mono(size: 11))
                         .foregroundStyle(OnymTokens.text3.opacity(0.6))
                     if taps >= 5 {
                         Text("🎉 Hello, builder. Want to contribute?")
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(OnymType.font(size: 12, weight: .semibold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 12).padding(.vertical, 8)
                             .background(LinearGradient(colors: [OnymAccent.purple.color,
                                                                   OnymAccent.blue.color],
                                                         startPoint: .leading, endPoint: .trailing),
-                                         in: RoundedRectangle(cornerRadius: 10))
+                                         in: RoundedRectangle(cornerRadius: OnymRadius.control))
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -195,7 +195,7 @@ struct AboutView: View {
     private var hero: some View {
         VStack(spacing: 4) {
             Button { taps += 1 } label: {
-                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                RoundedRectangle(cornerRadius: OnymRadius.hero, style: .continuous)
                     .fill(LinearGradient(colors: [Color(red: 0.106, green: 0.122, blue: 0.141),
                                                     Color(red: 0.051, green: 0.067, blue: 0.090)],
                                           startPoint: .topLeading, endPoint: .bottomTrailing))
@@ -208,24 +208,24 @@ struct AboutView: View {
             .accessibilityIdentifier("about.mark")
 
             Text("Onym")
-                .font(.system(size: 30, weight: .bold))
+                .font(OnymType.font(size: 30, weight: .bold))
                 .tracking(-0.6)
                 .foregroundStyle(OnymTokens.text)
                 .padding(.top, 18)
             Text("open · anonymous · onchain")
-                .font(.system(size: 13))
+                .font(OnymType.font(size: 13))
                 .foregroundStyle(OnymTokens.text2)
                 .tracking(0.26)
                 .padding(.top, 4)
             HStack(spacing: 6) {
                 Text("Up to date")
-                    .font(.system(size: 11.5, weight: .semibold))
+                    .font(OnymType.font(size: 11.5, weight: .semibold))
                     .padding(.horizontal, 8).padding(.vertical, 3)
                     .background(OnymTokens.green.opacity(0.14), in: Capsule())
                     .foregroundStyle(OnymTokens.green)
-                Text("·").font(.system(size: 12)).foregroundStyle(OnymTokens.text3)
+                Text("·").font(OnymType.font(size: 12)).foregroundStyle(OnymTokens.text3)
                 Text("\(version) (\(build))")
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(OnymType.mono(size: 12))
                     .foregroundStyle(OnymTokens.text2)
             }
             .padding(.top, 12)

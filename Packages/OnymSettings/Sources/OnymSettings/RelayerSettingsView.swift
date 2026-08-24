@@ -79,14 +79,14 @@ struct RelayerSettingsView: View {
                 ForEach(RelayerStrategy.allCases, id: \.self) { s in
                     Button { flow.tappedStrategy(s) } label: {
                         Text(s.displayName)
-                            .font(.system(size: 13.5,
-                                          weight: current == s ? .semibold : .medium))
+                            .font(OnymType.font(size: 13.5,
+                                                weight: current == s ? .semibold : .medium))
                             .foregroundStyle(OnymTokens.text)
                             .frame(maxWidth: .infinity, minHeight: 32)
                             .background(current == s
                                         ? AnyShapeStyle(OnymTokens.surface2)
                                         : AnyShapeStyle(Color.clear),
-                                        in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                                        in: RoundedRectangle(cornerRadius: OnymRadius.tile, style: .continuous))
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("relayer.strategy.\(s.rawValue)")
@@ -98,12 +98,12 @@ struct RelayerSettingsView: View {
             }
             .padding(2)
             .background(OnymTokens.surface3,
-                        in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                        in: RoundedRectangle(cornerRadius: OnymRadius.control, style: .continuous))
             .padding(.horizontal, 16)
             .accessibilityIdentifier("relayer.strategy.picker")
 
             Text(strategyFooter(current))
-                .font(.system(size: 12.5))
+                .font(OnymType.font(size: 12.5))
                 .foregroundStyle(OnymTokens.text2)
                 .lineSpacing(2)
                 .padding(.horizontal, 20)
@@ -128,7 +128,7 @@ struct RelayerSettingsView: View {
         if endpoints.isEmpty {
             SettingsCard {
                 Text("No relayers configured. Add one below.")
-                    .font(.system(size: 14))
+                    .font(OnymType.font(size: 14))
                     .foregroundStyle(OnymTokens.text3)
                     .frame(maxWidth: .infinity)
                     .padding(.horizontal, 16).padding(.vertical, 14)
@@ -154,7 +154,7 @@ struct RelayerSettingsView: View {
                         ) {
                             Button { flow.tappedSetPrimary(url: endpoint.url) } label: {
                                 Image(systemName: flow.isPrimary(endpoint) ? "star.fill" : "star")
-                                    .font(.system(size: 17))
+                                    .font(OnymType.font(size: 17))
                                     .foregroundStyle(flow.isPrimary(endpoint) ? SettingsTile.amber : OnymTokens.text3)
                                     .frame(width: 30, height: 30)
                             }
@@ -176,7 +176,7 @@ struct RelayerSettingsView: View {
                     }
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: OnymRadius.card, style: .continuous))
             .padding(.horizontal, 16)
         }
     }
@@ -205,10 +205,10 @@ struct RelayerSettingsView: View {
             case .failed(let message):
                 VStack(alignment: .leading, spacing: 8) {
                     Text(message)
-                        .font(.system(size: 14))
+                        .font(OnymType.font(size: 14))
                         .foregroundStyle(OnymTokens.text2)
                     Button("Try Again") { flow.tappedRetryFetch() }
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(OnymType.font(size: 14, weight: .semibold))
                         .foregroundStyle(OnymAccent.blue.color)
                         .accessibilityIdentifier("relayer.add.known.retry")
                 }
@@ -216,14 +216,14 @@ struct RelayerSettingsView: View {
             case .success:
                 if snapshot.knownList.isEmpty {
                     Text("No published relayers yet.")
-                        .font(.system(size: 14))
+                        .font(OnymType.font(size: 14))
                         .foregroundStyle(OnymTokens.text3)
                         .frame(maxWidth: .infinity)
                         .padding(.horizontal, 16).padding(.vertical, 14)
                         .accessibilityIdentifier("relayer.add.known.empty")
                 } else if unconfigured.isEmpty {
                     Text("All published relayers added.")
-                        .font(.system(size: 14))
+                        .font(OnymType.font(size: 14))
                         .foregroundStyle(OnymTokens.text3)
                         .frame(maxWidth: .infinity)
                         .padding(.horizontal, 16).padding(.vertical, 14)
@@ -239,7 +239,7 @@ struct RelayerSettingsView: View {
         HStack(spacing: 8) {
             ProgressView()
             Text("Fetching list…")
-                .font(.system(size: 14))
+                .font(OnymType.font(size: 14))
                 .foregroundStyle(OnymTokens.text2)
         }
         .padding(.horizontal, 16).padding(.vertical, 14)
@@ -261,7 +261,7 @@ struct RelayerSettingsView: View {
                 Circle().fill(OnymAccent.blue.color)
                     .frame(width: 30, height: 30)
                     .overlay(Image(systemName: "plus")
-                        .font(.system(size: 14, weight: .bold))
+                        .font(OnymType.font(size: 14, weight: .bold))
                         .foregroundStyle(OnymTokens.onAccent))
             } right: {
                 HStack(spacing: 4) {
@@ -290,13 +290,13 @@ struct RelayerSettingsView: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .keyboardType(.URL)
-                .font(.system(size: 16, design: .monospaced))
+                .font(OnymType.mono(size: 16))
                 .padding(.horizontal, 16).padding(.vertical, 12)
                 .accessibilityIdentifier("relayer.add.custom.field")
 
             if let error = flow.state.customDraftError {
                 Text(error)
-                    .font(.system(size: 13))
+                    .font(OnymType.font(size: 13))
                     .foregroundStyle(.red)
                     .padding(.horizontal, 16).padding(.vertical, 8)
             }
@@ -313,7 +313,7 @@ struct RelayerSettingsView: View {
                 Circle().fill(OnymAccent.blue.color)
                     .frame(width: 22, height: 22)
                     .overlay(Image(systemName: "plus")
-                        .font(.system(size: 13, weight: .bold))
+                        .font(OnymType.font(size: 13, weight: .bold))
                         .foregroundStyle(OnymTokens.onAccent))
             }
             .accessibilityIdentifier("relayer.add.custom.button")
@@ -328,31 +328,31 @@ struct RelayerSettingsView: View {
         } label: {
             HStack(spacing: 14) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(cornerRadius: OnymRadius.control, style: .continuous)
                         .fill(.white.opacity(0.08))
                         .frame(width: 44, height: 44)
                     Image(systemName: "chevron.left.forwardslash.chevron.right")
-                        .font(.system(size: 18))
+                        .font(OnymType.font(size: 18))
                         .foregroundStyle(.white)
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Run your own relayer")
-                        .font(.system(size: 15.5, weight: .semibold))
+                        .font(OnymType.font(size: 15.5, weight: .semibold))
                         .foregroundStyle(.white)
                     Text("Deploy onym-relayer from GitHub in 5 minutes")
-                        .font(.system(size: 12.5))
+                        .font(OnymType.font(size: 12.5))
                         .foregroundStyle(.white.opacity(0.65))
                 }
                 Spacer(minLength: 4)
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(OnymType.font(size: 13, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.5))
             }
             .padding(18)
             .background(LinearGradient(colors: [Color(red: 0.106, green: 0.122, blue: 0.141),
                                                   Color(red: 0.051, green: 0.067, blue: 0.090)],
                                         startPoint: .topLeading, endPoint: .bottomTrailing),
-                         in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                         in: RoundedRectangle(cornerRadius: OnymRadius.panel, style: .continuous))
             .padding(.horizontal, 16)
             .padding(.top, 24)
         }

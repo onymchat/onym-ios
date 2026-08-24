@@ -1,8 +1,8 @@
 # OnymDesignTokens
 
 The swappable look of the Onym app. This package holds token *values*
-only — colors today, radii and type in the next step. It has no
-dependencies, defines no components, and knows nothing about the app.
+only: color, corner radius, typeface. It has no dependencies, defines
+no components, and knows nothing about the app.
 
 Everything visual in `OnymDesign` and the eight UI packages reads from
 here, so replacing this one module restyles the whole app without
@@ -14,7 +14,16 @@ touching a line of app code.
 | --- | --- |
 | `OnymTokens` | 13 theme-adaptive colors: surfaces, text ramp, hairlines, semantic green/red/amber, `onAccent` |
 | `OnymAccent` | The 6-case identity accent palette, `.color` per case |
+| `OnymRadius` | 10 corner steps — `card` `field` `panel` `hero` `inset` `control` `badge` `tile` `chip` `pill` — plus `shape(_:)` |
+| `OnymType` | `font(size:weight:)` and `mono(size:weight:)` — the text and mono faces |
 | `Color.dynamic(light:dark:)` | Helper for declaring a color that follows the system trait collection |
+
+Radius steps are named for what they wrap, not what they measure. An
+adopter setting `inset` to 16 should not need to know it used to be 12.
+
+`OnymType` carries no size scale on purpose — sizes still arrive from
+the call site. Swapping the typeface is two function bodies; imposing a
+scale on 465 call sites is a design decision, not a packaging one.
 
 Anything else — `OnymMark`, `OnymGovIcon`, the `Settings*` components,
 `OnymAccent.forSender(blsPubkeyHex:)` — lives in `OnymDesign` and is

@@ -74,26 +74,26 @@ struct PrivacyEncryptionView: View {
                     } right: {
                         Text("Backed up")
                             .foregroundStyle(OnymTokens.green)
-                            .font(.system(size: 13.5))
+                            .font(OnymType.font(size: 13.5))
                     }
                     SettingsRow(title: "BIP-39 wordlist", hasChevron: false) {
                         SettingsIconTile(symbol: "checkmark", bg: SettingsTile.gray)
                     } right: {
-                        Text("English").foregroundStyle(OnymTokens.text2).font(.system(size: 14))
+                        Text("English").foregroundStyle(OnymTokens.text2).font(OnymType.font(size: 14))
                     }
                     SettingsRow(title: "Identity key", hasChevron: false) {
                         SettingsContentTile(bg: SettingsTile.indigo) {
-                            Text("npub").font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
+                            Text("npub").font(OnymType.font(size: 9, weight: .bold)).foregroundStyle(.white)
                         }
                     } right: {
-                        Text("Nostr (npub)").foregroundStyle(OnymTokens.text2).font(.system(size: 14))
+                        Text("Nostr (npub)").foregroundStyle(OnymTokens.text2).font(OnymType.font(size: 14))
                     }
                     SettingsRow(title: "Signature scheme", hasChevron: false, last: true) {
                         SettingsContentTile(bg: SettingsTile.gray) {
-                            Text("BLS").font(.system(size: 9.5, weight: .bold)).foregroundStyle(.white)
+                            Text("BLS").font(OnymType.font(size: 9.5, weight: .bold)).foregroundStyle(.white)
                         }
                     } right: {
-                        Text("BLS12-381").foregroundStyle(OnymTokens.text2).font(.system(size: 14))
+                        Text("BLS12-381").foregroundStyle(OnymTokens.text2).font(OnymType.font(size: 14))
                     }
                 }
                 SettingsFootnote("Your recovery phrase generates a master seed. Onym derives a Nostr keypair (your public identity, shown as npub1…), a Stellar keypair (for anchoring), and a BLS key (for group signatures).")
@@ -125,7 +125,7 @@ struct PrivacyEncryptionView: View {
                     } right: {
                         Text(autoLockLabel(autoLockMin))
                             .foregroundStyle(OnymTokens.text2)
-                            .font(.system(size: 14))
+                            .font(OnymType.font(size: 14))
                     }
                 }
 
@@ -167,29 +167,29 @@ struct PrivacyEncryptionView: View {
 
     private var heroCard: some View {
         HStack(spacing: 14) {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: OnymRadius.card, style: .continuous)
                 .fill(LinearGradient(colors: [Color(red: 0.875, green: 0.98, blue: 0.918),
                                                 Color(red: 0.71, green: 0.94, blue: 0.804)],
                                       startPoint: .topLeading, endPoint: .bottomTrailing))
                 .frame(width: 56, height: 56)
-                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .overlay(RoundedRectangle(cornerRadius: OnymRadius.card, style: .continuous)
                     .stroke(OnymTokens.green.opacity(0.35), lineWidth: 1.5))
                 .overlay(Image(systemName: "lock.shield.fill")
-                    .font(.system(size: 28))
+                    .font(OnymType.font(size: 28))
                     .foregroundStyle(OnymTokens.green))
             VStack(alignment: .leading, spacing: 3) {
                 Text("Everything is encrypted")
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(OnymType.font(size: 17, weight: .semibold))
                     .foregroundStyle(OnymTokens.text)
                 Text("Messages, group state, and keys are encrypted on this device. No one — not even Onym — can read your chats.")
-                    .font(.system(size: 13))
+                    .font(OnymType.font(size: 13))
                     .foregroundStyle(OnymTokens.text2)
                     .lineSpacing(2)
             }
         }
         .padding(18)
         .background(OnymTokens.surface2,
-                    in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    in: RoundedRectangle(cornerRadius: OnymRadius.panel, style: .continuous))
         .padding(.horizontal, 16)
     }
 }

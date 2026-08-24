@@ -59,7 +59,7 @@ public struct ModuleConsentView: View {
             SettingsCard {
                 VStack(spacing: 10) {
                     Text(verbatim: error)
-                        .font(.system(size: 14))
+                        .font(OnymType.font(size: 14))
                         .foregroundStyle(OnymTokens.text2)
                     Button("Retry") { flow.tappedRetry() }
                         .accessibilityIdentifier("settings.module_consent.retry")
@@ -72,7 +72,7 @@ public struct ModuleConsentView: View {
             VStack(spacing: 12) {
                 ProgressView()
                 Text("Fetching and verifying the service's manifest…")
-                    .font(.system(size: 14))
+                    .font(OnymType.font(size: 14))
                     .foregroundStyle(OnymTokens.text2)
             }
             .frame(maxWidth: .infinity)
@@ -91,10 +91,10 @@ public struct ModuleConsentView: View {
         SettingsCard {
             VStack(spacing: 10) {
                 Image(systemName: "xmark.octagon")
-                    .font(.system(size: 28))
+                    .font(OnymType.font(size: 28))
                     .foregroundStyle(OnymTokens.text3)
                 Text(verbatim: flow.errorMessage ?? String(localized: "This entry can't be added."))
-                    .font(.system(size: 14))
+                    .font(OnymType.font(size: 14))
                     .foregroundStyle(OnymTokens.text2)
                     .multilineTextAlignment(.center)
             }
@@ -165,10 +165,10 @@ public struct ModuleConsentView: View {
             SettingsCard {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Manifest hash")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(OnymType.font(size: 13, weight: .semibold))
                         .foregroundStyle(OnymTokens.text)
                     Text(verbatim: manifest.manifestHash)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(OnymType.mono(size: 11))
                         .foregroundStyle(OnymTokens.text2)
                         .textSelection(.enabled)
                 }
@@ -220,13 +220,13 @@ public struct ModuleConsentView: View {
                 Text(status.state == "warning"
                      ? "The listing provider has attached a warning to this service."
                      : "The listing provider has this service under review.")
-                    .font(.system(size: 13))
+                    .font(OnymType.font(size: 13))
                     .foregroundStyle(OnymTokens.text)
             }
             if let uri = status.uri, let url = URL(string: uri) {
                 Link(destination: url) {
                     Text(verbatim: uri)
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(OnymType.mono(size: 12))
                         .foregroundStyle(OnymAccent.blue.color)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -238,7 +238,7 @@ public struct ModuleConsentView: View {
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(SettingsTile.amber.opacity(0.1),
-                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    in: RoundedRectangle(cornerRadius: OnymRadius.inset, style: .continuous))
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .accessibilityIdentifier("settings.module_consent.status")
@@ -248,14 +248,14 @@ public struct ModuleConsentView: View {
     /// text, not color, so the disclosure survives every rendering.
     private var attributionBanner: some View {
         Text(verbatim: attributionText)
-            .font(.system(size: 13))
+            .font(OnymType.font(size: 13))
             .foregroundStyle(OnymTokens.text2)
             .lineSpacing(2)
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(OnymTokens.surface2,
-                        in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        in: RoundedRectangle(cornerRadius: OnymRadius.inset, style: .continuous))
             .padding(.horizontal, 16)
             .accessibilityIdentifier("settings.module_consent.attribution")
     }
@@ -304,7 +304,7 @@ public struct ModuleConsentView: View {
                 } label: {
                     Image(systemName: flow.selectedOfferId == offer.offerId
                           ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 20))
+                        .font(OnymType.font(size: 20))
                         .foregroundStyle(isEntitled
                                          ? (flow.selectedOfferId == offer.offerId
                                             ? OnymTokens.green : OnymTokens.text3)
@@ -320,18 +320,18 @@ public struct ModuleConsentView: View {
                     HStack(spacing: 8) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(verbatim: offer.offerId)
-                                .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                                .font(OnymType.mono(size: 14, weight: .semibold))
                                 .foregroundStyle(isEntitled ? OnymTokens.text : OnymTokens.text3)
                             if let period = offer.period {
                                 Text(verbatim: period)
-                                    .font(.system(size: 12))
+                                    .font(OnymType.font(size: 12))
                                     .foregroundStyle(OnymTokens.text3)
                             }
                         }
                         Spacer(minLength: 4)
                         OfferBadge(offer: offer)
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(OnymType.font(size: 12, weight: .semibold))
                             .foregroundStyle(OnymTokens.text3)
                     }
                 }
@@ -349,10 +349,10 @@ public struct ModuleConsentView: View {
     private func termRow(_ label: LocalizedStringKey, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label)
-                .font(.system(size: 13, weight: .semibold))
+                .font(OnymType.font(size: 13, weight: .semibold))
                 .foregroundStyle(OnymTokens.text)
             Text(verbatim: value)
-                .font(.system(size: 13, design: .monospaced))
+                .font(OnymType.mono(size: 13))
                 .foregroundStyle(OnymTokens.text2)
                 .textSelection(.enabled)
         }
@@ -363,13 +363,13 @@ public struct ModuleConsentView: View {
     private var done: some View {
         VStack(spacing: 12) {
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 44))
+                .font(OnymType.font(size: 44))
                 .foregroundStyle(OnymTokens.green)
             Text("Service added")
-                .font(.system(size: 17, weight: .semibold))
+                .font(OnymType.font(size: 17, weight: .semibold))
                 .foregroundStyle(OnymTokens.text)
             Text("Its endpoint is now in your configured list.")
-                .font(.system(size: 13))
+                .font(OnymType.font(size: 13))
                 .foregroundStyle(OnymTokens.text2)
         }
         .frame(maxWidth: .infinity)
