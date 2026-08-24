@@ -39,7 +39,7 @@ struct DiscoverySettingsView: View {
                         Circle().fill(OnymAccent.blue.color)
                             .frame(width: 30, height: 30)
                             .overlay(Image(systemName: "plus")
-                                .font(OnymType.font(size: 14, weight: .bold))
+                                .font(OnymType.fixed(size: 14, weight: .bold))
                                 .foregroundStyle(OnymTokens.onAccent))
                     }
                     .accessibilityIdentifier("settings.discovery.add")

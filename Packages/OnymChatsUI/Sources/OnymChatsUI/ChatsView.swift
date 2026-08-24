@@ -286,7 +286,7 @@ public struct ChatsView: View {
                     .fill(Color.accentColor.opacity(0.10))
                     .frame(width: 96, height: 96)
                 Image(systemName: "lock.shield.fill")
-                    .font(OnymType.font(size: 42))
+                    .font(OnymType.fixed(size: 42))
                     .foregroundStyle(Color.accentColor)
             }
             .padding(.bottom, 20)
@@ -354,7 +354,7 @@ public struct ChatsView: View {
     private func benefitRow(icon: String, title: LocalizedStringKey, detail: LocalizedStringKey) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: icon)
-                .font(OnymType.font(size: 16, weight: .semibold))
+                .font(OnymType.fixed(size: 16, weight: .semibold))
                 .foregroundStyle(Color.accentColor)
                 .frame(width: 24, height: 22)
             VStack(alignment: .leading, spacing: 2) {
@@ -583,7 +583,7 @@ private struct PendingChatsRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(row.name?.isEmpty == false ? row.name! : String(localized: "(Unnamed)"))
                     .font(OnymType.font(size: 16, weight: .semibold))
-                    .lineLimit(1)
+                    .onymLineLimit(1)
                     .foregroundStyle(.secondary)
                 HStack(spacing: 6) {
                     Image(systemName: icon)
@@ -592,7 +592,7 @@ private struct PendingChatsRow: View {
                     Text(subtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .onymLineLimit(1)
                         .accessibilityIdentifier("chats.pending.subtitle.\(row.id)")
                 }
             }
@@ -668,7 +668,7 @@ private struct ChatsRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(group.name.isEmpty ? "(Unnamed)" : group.name)
                     .font(OnymType.font(size: 16, weight: .semibold))
-                    .lineLimit(1)
+                    .onymLineLimit(1)
                 // The join hint leads, because it is the only line in the
                 // row that needs an action and a badge alone was what
                 // nobody noticed on the toolbar. It no longer *replaces*
@@ -683,7 +683,7 @@ private struct ChatsRow: View {
                         Text(joinRequestSubtitle)
                             .font(.caption)
                             .foregroundStyle(OnymAccent.blue.color)
-                            .lineLimit(1)
+                            .onymLineLimit(1)
                             .layoutPriority(1)
                             .accessibilityIdentifier("chats.row.join_request.\(group.id)")
                         Text("·")
@@ -699,7 +699,7 @@ private struct ChatsRow: View {
                         // Unread rows read a touch stronger than the muted
                         // "no messages / metadata" line.
                         .foregroundStyle(item.unreadCount > 0 ? .primary : .secondary)
-                        .lineLimit(1)
+                        .onymLineLimit(1)
                         .accessibilityIdentifier("chats.row.subtitle.\(group.id)")
                 }
             }

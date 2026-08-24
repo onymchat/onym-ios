@@ -31,7 +31,7 @@ public struct OpenCaseBanner: View {
                 HStack(spacing: 10) {
                     Circle().fill(OnymTile.amber).frame(width: 22, height: 22)
                         .overlay(Image(systemName: "exclamationmark")
-                            .font(OnymType.font(size: 12, weight: .bold))
+                            .font(OnymType.fixed(size: 12, weight: .bold))
                             .foregroundStyle(.white))
                     Text(notices.count == 1
                          ? "A moderation case is open against this device."

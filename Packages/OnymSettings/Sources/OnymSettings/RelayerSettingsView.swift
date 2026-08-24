@@ -154,7 +154,7 @@ struct RelayerSettingsView: View {
                         ) {
                             Button { flow.tappedSetPrimary(url: endpoint.url) } label: {
                                 Image(systemName: flow.isPrimary(endpoint) ? "star.fill" : "star")
-                                    .font(OnymType.font(size: 17))
+                                    .font(OnymType.fixed(size: 17))
                                     .foregroundStyle(flow.isPrimary(endpoint) ? OnymTile.amber : OnymTokens.text3)
                                     .frame(width: 30, height: 30)
                             }
@@ -261,7 +261,7 @@ struct RelayerSettingsView: View {
                 Circle().fill(OnymAccent.blue.color)
                     .frame(width: 30, height: 30)
                     .overlay(Image(systemName: "plus")
-                        .font(OnymType.font(size: 14, weight: .bold))
+                        .font(OnymType.fixed(size: 14, weight: .bold))
                         .foregroundStyle(OnymTokens.onAccent))
             } right: {
                 HStack(spacing: 4) {
@@ -313,7 +313,7 @@ struct RelayerSettingsView: View {
                 Circle().fill(OnymAccent.blue.color)
                     .frame(width: 22, height: 22)
                     .overlay(Image(systemName: "plus")
-                        .font(OnymType.font(size: 13, weight: .bold))
+                        .font(OnymType.fixed(size: 13, weight: .bold))
                         .foregroundStyle(OnymTokens.onAccent))
             }
             .accessibilityIdentifier("relayer.add.custom.button")
@@ -332,7 +332,7 @@ struct RelayerSettingsView: View {
                         .fill(.white.opacity(0.08))
                         .frame(width: 44, height: 44)
                     Image(systemName: "chevron.left.forwardslash.chevron.right")
-                        .font(OnymType.font(size: 18))
+                        .font(OnymType.fixed(size: 18))
                         .foregroundStyle(.white)
                 }
                 VStack(alignment: .leading, spacing: 2) {

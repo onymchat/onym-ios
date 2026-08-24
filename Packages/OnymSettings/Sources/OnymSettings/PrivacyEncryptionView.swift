@@ -175,7 +175,7 @@ struct PrivacyEncryptionView: View {
                 .overlay(RoundedRectangle(cornerRadius: OnymRadius.card, style: .continuous)
                     .stroke(OnymTokens.green.opacity(0.35), lineWidth: 1.5))
                 .overlay(Image(systemName: "lock.shield.fill")
-                    .font(OnymType.font(size: 28))
+                    .font(OnymType.fixed(size: 28))
                     .foregroundStyle(OnymTokens.green))
             VStack(alignment: .leading, spacing: 3) {
                 Text("Everything is encrypted")

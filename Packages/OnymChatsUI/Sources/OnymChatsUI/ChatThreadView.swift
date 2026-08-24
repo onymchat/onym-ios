@@ -363,7 +363,7 @@ public struct ChatThreadView: View {
                     Text(currentGroupName)
                         .font(OnymType.font(size: 16, weight: .semibold))
                         .foregroundStyle(OnymTokens.text)
-                        .lineLimit(1)
+                        .onymLineLimit(1)
                     if currentMemberCount > 1 {
                         Text("\(currentMemberCount) members")
                             .font(OnymType.font(size: 11))

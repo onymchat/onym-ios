@@ -1,0 +1,14 @@
+{
+  "pins" : [
+    {
+      "identity" : "onym-sdk-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/onymchat/onym-sdk-swift.git",
+      "state" : {
+        "revision" : "b24a3be023f7445777598ce280a84907b32f7452",
+        "version" : "0.0.2"
+      }
+    }
+  ],
+  "version" : 2
+}

@@ -132,8 +132,13 @@ private struct OnymPrimaryButton: View {
             Text(title)
                 .font(OnymType.font(size: 16, weight: .bold))
                 .tracking(-0.16)
+                .multilineTextAlignment(.center)
+                .padding(.vertical, 14)
                 .frame(maxWidth: .infinity)
-                .frame(height: 52)
+                // 52pt is the design's height, not a ceiling. At the
+                // largest accessibility size this label is 45pt tall and
+                // the button has to grow around it.
+                .frame(minHeight: 52)
                 .foregroundStyle(enabled ? OnymTokens.onAccent : OnymTokens.text3)
                 .background(enabled ? accent : OnymTokens.surface3)
                 .clipShape(RoundedRectangle(cornerRadius: OnymRadius.card))
@@ -153,8 +158,10 @@ private struct OnymQuietButton: View {
         Button(action: action) {
             Text(title)
                 .font(OnymType.font(size: 14.5, weight: .semibold))
+                .multilineTextAlignment(.center)
+                .padding(.vertical, 12)
                 .frame(maxWidth: .infinity)
-                .frame(height: 44)
+                .frame(minHeight: 44)
                 .foregroundStyle(OnymTokens.text2)
         }
         .buttonStyle(.plain)
@@ -476,7 +483,7 @@ private struct CreateGroupStep2View: View {
             ZStack {
                 Circle().fill(OnymTokens.surface3)
                 Image(systemName: "key.fill")
-                    .font(OnymType.font(size: 14, weight: .semibold))
+                    .font(OnymType.fixed(size: 14, weight: .semibold))
                     .foregroundStyle(accentColor)
             }
             .frame(width: 40, height: 40)
@@ -515,7 +522,7 @@ private struct CreateGroupStep2View: View {
                         ZStack {
                             Circle().fill(accentColor.opacity(0.22))
                             Image(systemName: "key.fill")
-                                .font(OnymType.font(size: 12, weight: .semibold))
+                                .font(OnymType.fixed(size: 12, weight: .semibold))
                                 .foregroundStyle(accentColor)
                         }
                         .frame(width: 30, height: 30)
@@ -892,7 +899,7 @@ private struct CreateGroupCreatingView: View {
                     .font(OnymType.font(size: 12))
                     .foregroundStyle(OnymTokens.text2)
             }
-            .lineLimit(1)
+            .onymLineLimit(1)
             .truncationMode(.tail)
 
             Spacer(minLength: 0)
@@ -1066,7 +1073,7 @@ private struct CreateGroupSuccessView: View {
                     Circle().fill(OnymTokens.green)
                         .overlay(Circle().stroke(OnymTokens.bg, lineWidth: 2))
                     Image(systemName: "checkmark")
-                        .font(OnymType.font(size: 12, weight: .bold))
+                        .font(OnymType.fixed(size: 12, weight: .bold))
                         .foregroundStyle(OnymTokens.onAccent)
                 }
                 .frame(width: 28, height: 28)
@@ -1207,7 +1214,7 @@ private struct CreateGroupSuccessView: View {
                     .font(OnymType.font(size: 12))
                     .foregroundStyle(OnymTokens.text2)
             }
-            .lineLimit(1)
+            .onymLineLimit(1)
 
             Spacer(minLength: 0)
 

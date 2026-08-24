@@ -174,7 +174,7 @@ struct IdentityCarouselCard: View {
                             .font(OnymType.font(size: 20, weight: .bold))
                             .tracking(-0.2)
                             .foregroundStyle(isActive ? OnymAccent.blue.color : OnymTokens.text)
-                            .lineLimit(1)
+                            .onymLineLimit(1)
                         Image(systemName: "pencil")
                             .font(OnymType.font(size: 13, weight: .semibold))
                             .foregroundStyle(OnymTokens.text3)
