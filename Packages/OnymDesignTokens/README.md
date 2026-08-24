@@ -18,15 +18,25 @@ touching a line of app code.
 | `OnymTerminal` | The pinned-dark console block: surface, deep, phosphor text, ink, two overlays |
 | `OnymTint` | Pastel fills and the deep inks that read on them — hero tiles, the amber notice, governance badges |
 | `OnymRadius` | 10 corner steps — `card` `field` `panel` `hero` `inset` `control` `badge` `tile` `chip` `pill` — plus `shape(_:)` |
-| `OnymType` | `font(size:weight:)` and `mono(size:weight:)` — the text and mono faces |
+| `OnymType` | `font(size:weight:)`, `mono(size:weight:)`, `fixed(size:weight:)`, `scale(_:)` — the text and mono faces, and the reader's size setting |
 | `Color.dynamic(light:dark:)` | Helper for declaring a color that follows the system trait collection |
 
 Radius steps are named for what they wrap, not what they measure. An
 adopter setting `inset` to 16 should not need to know it used to be 12.
 
 `OnymType` carries no size scale on purpose — sizes still arrive from
-the call site. Swapping the typeface is two function bodies; imposing a
-scale on 465 call sites is a design decision, not a packaging one.
+the call site. Swapping the typeface is three function bodies; imposing
+a scale on 470 call sites is a design decision, not a packaging one.
+
+`font` and `mono` honour Dynamic Type; `fixed` deliberately does not,
+and is for SF Symbols used as artwork inside boxes drawn at a set size.
+If you replace the bodies, keep the scaling — dropping it turns Dynamic
+Type off for the whole app.
+
+One trap worth inheriting the answer to: the scaling is applied as a
+**ratio**, not by passing the size to `UIFontMetrics.scaledFont(for:)`.
+That method rounds to whole points *at the default text size* — 11.5pt
+comes back 12pt — and the app spends around sixty half-point sizes.
 
 Anything else — `OnymMark`, `OnymGovIcon`, the `Settings*` components,
 `OnymAccent.forSender(blsPubkeyHex:)` — lives in `OnymDesign` and is
