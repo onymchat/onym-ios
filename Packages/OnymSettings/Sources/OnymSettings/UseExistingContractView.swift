@@ -34,8 +34,8 @@ struct UseExistingContractView: View {
             VStack(alignment: .leading, spacing: 0) {
                 heroCard
 
-                SettingsSectionLabel("STELLAR CONTRACT ADDRESS")
-                SettingsCard {
+                SectionLabel("STELLAR CONTRACT ADDRESS")
+                Card {
                     VStack(alignment: .leading, spacing: 4) {
                         TextEditor(text: $addr)
                             .font(OnymType.mono(size: 14))
@@ -53,7 +53,7 @@ struct UseExistingContractView: View {
 
                         if !addr.isEmpty {
                             HStack(spacing: 8) {
-                                SettingsChip(
+                                Chip(
                                     text: looksValid ? "Valid format" : "\(addr.count)/56 chars",
                                     fg: looksValid ? OnymTokens.green : OnymTokens.red,
                                     bg: looksValid
@@ -69,8 +69,8 @@ struct UseExistingContractView: View {
                     .padding(.horizontal, 16).padding(.vertical, 12)
                 }
 
-                SettingsSectionLabel("LABEL")
-                SettingsCard {
+                SectionLabel("LABEL")
+                Card {
                     TextField("My fork v0.0.5", text: $label)
                         .font(OnymType.font(size: 16))
                         .padding(.horizontal, 16).padding(.vertical, 12)
@@ -79,9 +79,9 @@ struct UseExistingContractView: View {
                             if v.count > 30 { label = String(v.prefix(30)) }
                         }
                 }
-                SettingsFootnote("Shown alongside the contract address in chats and on the Anchors list.")
+                Footnote("Shown alongside the contract address in chats and on the Anchors list.")
 
-                SettingsPrimaryButton(
+                PrimaryButton(
                     disabled: !looksValid,
                     action: {
                         if verdict == .ok { dismiss() } else { verify() }
@@ -102,9 +102,9 @@ struct UseExistingContractView: View {
                         .padding(.top, 12)
                 }
 
-                SettingsSectionLabel("HOW TO FIND IT")
-                SettingsCard {
-                    SettingsRow(
+                SectionLabel("HOW TO FIND IT")
+                Card {
+                    Row(
                         title: "Browse on Stellar Expert",
                         subtitle: "stellar.expert",
                         hasChevron: false,
@@ -121,7 +121,7 @@ struct UseExistingContractView: View {
                         Image(systemName: "arrow.up.right.square")
                             .foregroundStyle(OnymTokens.text3)
                     }
-                    SettingsRow(
+                    Row(
                         title: "Soroban CLI",
                         subtitle: "soroban contract id …",
                         subtitleMono: true,
@@ -129,7 +129,7 @@ struct UseExistingContractView: View {
                         last: true,
                         onTap: { open("https://developers.stellar.org/docs/build/smart-contracts/getting-started/setup") }
                     ) {
-                        SettingsIconTile(symbol: "terminal.fill", bg: OnymTile.gray)
+                        IconTile(symbol: "terminal.fill", bg: OnymTile.gray)
                     }
                 }
             }

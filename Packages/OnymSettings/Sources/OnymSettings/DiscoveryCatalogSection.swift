@@ -52,20 +52,20 @@ public struct DiscoveryCatalogSection: View {
     public var body: some View {
         if !entries.isEmpty {
             if let label {
-                SettingsSectionLabel(label)
+                SectionLabel(label)
             }
-            SettingsCard {
+            Card {
                 ForEach(Array(entries.enumerated()), id: \.element.id) { idx, entry in
                     row(entry, last: idx == entries.count - 1)
                 }
             }
-            SettingsFootnote("Published by the discovery providers you trust. Tapping an entry shows the operator's manifest and terms — nothing is added without your explicit acceptance.")
+            Footnote("Published by the discovery providers you trust. Tapping an entry shows the operator's manifest and terms — nothing is added without your explicit acceptance.")
         }
     }
 
     private func row(_ entry: AttributedCatalogEntry, last: Bool) -> some View {
         let record = activeConsent(entry)
-        return SettingsRow(
+        return Row(
             titleText: ModuleConsentFlow.shortComponentId(entry.entry.componentId),
             subtitle: subtitle(for: entry),
             subtitleLineLimit: 2,
@@ -74,7 +74,7 @@ public struct DiscoveryCatalogSection: View {
             last: last,
             onTap: { onSelect(entry) }
         ) {
-            SettingsIconTile(symbol: tileSymbol, bg: OnymTile.purple)
+            IconTile(symbol: tileSymbol, bg: OnymTile.purple)
         } right: {
             HStack(spacing: 4) {
                 if let status = entry.entry.status {
@@ -93,7 +93,7 @@ public struct DiscoveryCatalogSection: View {
     /// text — the field exists precisely so a warned entry never
     /// renders indistinguishable from a clean one.
     private func statusChip(_ status: EntryStatus) -> some View {
-        SettingsChip(
+        Chip(
             text: (status.state == "warning"
                 ? String(localized: "WARNING")
                 : String(localized: "UNDER REVIEW")).uppercased(),
@@ -114,13 +114,13 @@ public struct DiscoveryCatalogSection: View {
     @ViewBuilder
     private func consentChip(for entry: AttributedCatalogEntry, record: PinnedConsentRecord?) -> some View {
         if let record, record.manifestHash == entry.entry.manifest.digest {
-            SettingsChip(text: String(localized: "CONSENTED").uppercased(),
+            Chip(text: String(localized: "CONSENTED").uppercased(),
                          fg: OnymTokens.green, bg: OnymTokens.green.opacity(0.15))
         } else if record != nil {
-            SettingsChip(text: String(localized: "TERMS CHANGED").uppercased(),
+            Chip(text: String(localized: "TERMS CHANGED").uppercased(),
                          fg: OnymTile.amber, bg: OnymTile.amber.opacity(0.15))
         } else {
-            SettingsChip(text: String(localized: "REVIEW").uppercased(),
+            Chip(text: String(localized: "REVIEW").uppercased(),
                          fg: OnymTile.gray, bg: OnymTile.gray.opacity(0.15))
         }
     }

@@ -46,7 +46,7 @@ struct AddDiscoveryProviderView: View {
 
     @ViewBuilder
     private var urlEntry: some View {
-        SettingsLargeTitle("Add Discovery Provider")
+        LargeTitle("Add Discovery Provider")
         Text("Paste the provider's manifest URL. Its manifest and catalogs are signed — you'll review the operator key fingerprint before this app trusts anything it publishes.")
             .font(OnymType.font(size: 14))
             .foregroundStyle(OnymTokens.text2)
@@ -54,7 +54,7 @@ struct AddDiscoveryProviderView: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 16)
 
-        SettingsCard {
+        Card {
             TextField("https://discovery.example.com/manifest.json",
                       text: $flow.addDraft)
                 .textInputAutocapitalization(.never)
@@ -66,10 +66,10 @@ struct AddDiscoveryProviderView: View {
         }
 
         if let error = flow.addError {
-            SettingsFootnote(verbatim: error)
+            Footnote(verbatim: error)
         }
 
-        SettingsPrimaryButton(action: { flow.tappedFetchProvider() }) {
+        PrimaryButton(action: { flow.tappedFetchProvider() }) {
             if case .fetching = flow.addPhase {
                 ProgressView().tint(OnymTokens.onAccent)
             } else {
@@ -91,7 +91,7 @@ struct AddDiscoveryProviderView: View {
 
     @ViewBuilder
     private func confirm(_ preview: DiscoveryProviderPreview) -> some View {
-        SettingsLargeTitle("Confirm Operator Key")
+        LargeTitle("Confirm Operator Key")
 
         Text("This fingerprint identifies the provider's operator key. Verify it out-of-band — the provider's website, documentation, or the operator directly — before confirming. It's pinned on confirm: a later manifest signed by any other key will be rejected.")
             .font(OnymType.font(size: 14))
@@ -100,8 +100,8 @@ struct AddDiscoveryProviderView: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 12)
 
-        SettingsSectionLabel("OPERATOR KEY FINGERPRINT")
-        SettingsCard {
+        SectionLabel("OPERATOR KEY FINGERPRINT")
+        Card {
             Text(verbatim: preview.operatorKeyFingerprint)
                 .font(OnymType.mono(size: 28, weight: .semibold))
                 .foregroundStyle(OnymTokens.text)
@@ -110,10 +110,10 @@ struct AddDiscoveryProviderView: View {
                 .padding(.vertical, 20)
                 .accessibilityIdentifier("settings.discovery.add.fingerprint")
         }
-        SettingsFootnote("First 16 characters of the operator's Ed25519 public key.")
+        Footnote("First 16 characters of the operator's Ed25519 public key.")
 
-        SettingsSectionLabel("PROVIDER")
-        SettingsCard {
+        SectionLabel("PROVIDER")
+        Card {
             summaryRow("Provider", preview.providerId)
             summaryRow("Manifest URL", preview.manifestURL.absoluteString)
             summaryRow(
@@ -124,7 +124,7 @@ struct AddDiscoveryProviderView: View {
         }
 
         VStack(spacing: 10) {
-            SettingsPrimaryButton("Pin Key & Add Provider") {
+            PrimaryButton("Pin Key & Add Provider") {
                 flow.tappedConfirmAdd()
             }
             .accessibilityIdentifier("settings.discovery.add.confirm")

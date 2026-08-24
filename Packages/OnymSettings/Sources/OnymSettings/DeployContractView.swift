@@ -75,7 +75,7 @@ struct DeployContractView: View {
                     }
                 }
 
-                SettingsFootnote("Deployment runs on your computer, not on the phone — the app can't build wasm or submit a deploy transaction directly.")
+                Footnote("Deployment runs on your computer, not on the phone — the app can't build wasm or submit a deploy transaction directly.")
             }
             .padding(.bottom, 24)
         }

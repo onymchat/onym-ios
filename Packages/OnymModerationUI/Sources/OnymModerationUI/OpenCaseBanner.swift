@@ -84,10 +84,10 @@ public struct CaseNoticeDetailView: View {
     public var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                SettingsLargeTitle("Moderation case")
+                LargeTitle("Moderation case")
 
-                SettingsSectionLabel("NOTICE")
-                SettingsCard {
+                SectionLabel("NOTICE")
+                Card {
                     VStack(alignment: .leading, spacing: 8) {
                         row("Case", notice.caseId, monospaced: true)
                         row("Authority", notice.authority)
@@ -99,11 +99,11 @@ public struct CaseNoticeDetailView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(16)
                 }
-                SettingsFootnote("If the authority doesn't decide by the deadline, the case is dismissed automatically — silence never bans anyone. Not responding doesn't concede the case; it proceeds on the record.")
+                Footnote("If the authority doesn't decide by the deadline, the case is dismissed automatically — silence never bans anyone. Not responding doesn't concede the case; it proceeds on the record.")
 
-                SettingsSectionLabel("RESPONSE")
+                SectionLabel("RESPONSE")
                 if let makeCaseFlow {
-                    SettingsCard {
+                    Card {
                         NavigationLink {
                             ModerationCaseView(flow: makeCaseFlow(notice))
                         } label: {
@@ -129,7 +129,7 @@ public struct CaseNoticeDetailView: View {
                         .accessibilityIdentifier("moderation.case_detail.open_case")
                     }
                 } else {
-                    SettingsCard {
+                    Card {
                         Text("Responding from this surface isn't wired up. Use the authority's contact channel to respond before the deadline.")
                             .font(OnymType.font(size: 14))
                             .foregroundStyle(OnymTokens.text2)

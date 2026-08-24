@@ -24,18 +24,18 @@ struct AnchorsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                SettingsLargeTitle("Anchors")
-                SettingsFootnote("Pick the active network and the contract version used to anchor on-chain group state. The active network applies to new chats; existing chats keep the contract they were created with.")
+                LargeTitle("Anchors")
+                Footnote("Pick the active network and the contract version used to anchor on-chain group state. The active network applies to new chats; existing chats keep the contract they were created with.")
 
-                SettingsSectionLabel("ACTIVE NETWORK")
-                SettingsCard {
+                SectionLabel("ACTIVE NETWORK")
+                Card {
                     networkRow(.testnet, last: false)
                     networkRow(.public, last: true)
                 }
 
                 if flow.hasAnyContracts(network: activeNetwork) {
-                    SettingsSectionLabel("CONTRACT VERSIONS · \(activeNetwork.displayName.uppercased())")
-                    SettingsCard {
+                    SectionLabel("CONTRACT VERSIONS · \(activeNetwork.displayName.uppercased())")
+                    Card {
                         let types = GovernanceType.allCases
                         ForEach(Array(types.enumerated()), id: \.element.self) { idx, type in
                             govRow(type, last: idx == types.count - 1)
@@ -63,7 +63,7 @@ struct AnchorsView: View {
         Button {
             useMainnet = (network == .public)
         } label: {
-            SettingsRow(
+            Row(
                 title: LocalizedStringKey(network.displayName),
                 subtitle: hasContracts ? networkSubtitle(network) : "No contracts yet",
                 hasChevron: false,
@@ -111,7 +111,7 @@ struct AnchorsView: View {
             NavigationLink {
                 AnchorsVersionView(flow: flow, key: key)
             } label: {
-                SettingsRow(
+                Row(
                     title: LocalizedStringKey(type.displayName),
                     subtitle: "\(binding.release) " + (isExplicit ? "(selected)" : "(latest)"),
                     inset: 56,
@@ -123,7 +123,7 @@ struct AnchorsView: View {
             .buttonStyle(.plain)
             .accessibilityIdentifier("anchors.type.\(type.rawValue)")
         } else {
-            SettingsRow(
+            Row(
                 title: LocalizedStringKey(type.displayName),
                 subtitle: "No contract",
                 hasChevron: false,
@@ -150,8 +150,8 @@ struct AnchorsNetworkView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                SettingsSectionLabel("GOVERNANCE TYPES")
-                SettingsCard {
+                SectionLabel("GOVERNANCE TYPES")
+                Card {
                     let types = GovernanceType.allCases
                     ForEach(Array(types.enumerated()), id: \.element.self) { idx, type in
                         govRow(type, last: idx == types.count - 1)
@@ -175,7 +175,7 @@ struct AnchorsNetworkView: View {
             NavigationLink {
                 AnchorsVersionView(flow: flow, key: key)
             } label: {
-                SettingsRow(
+                Row(
                     title: LocalizedStringKey(type.displayName),
                     subtitle: "\(binding.release) " + (isExplicit ? "(selected)" : "(latest)"),
                     inset: 56,
@@ -187,7 +187,7 @@ struct AnchorsNetworkView: View {
             .buttonStyle(.plain)
             .accessibilityIdentifier("anchors.type.\(type.rawValue)")
         } else {
-            SettingsRow(
+            Row(
                 title: LocalizedStringKey(type.displayName),
                 subtitle: "No contract",
                 hasChevron: false,
@@ -253,8 +253,8 @@ struct AnchorsVersionView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                SettingsSectionLabel("CONTRACT VERSION")
-                SettingsCard {
+                SectionLabel("CONTRACT VERSION")
+                Card {
                     let releases = flow.availableReleases(for: key)
                     let selectedTag = flow.binding(for: key)?.release
                     let latestTag = releases.first?.release
@@ -267,21 +267,21 @@ struct AnchorsVersionView: View {
                         )
                     }
                 }
-                SettingsFootnote("Tap a version to view the contract, source code, and audit report.")
+                Footnote("Tap a version to view the contract, source code, and audit report.")
 
-                SettingsSectionLabel("CUSTOM")
-                SettingsCard {
+                SectionLabel("CUSTOM")
+                Card {
                     NavigationLink {
                         DeployContractView(key: key)
                     } label: {
-                        SettingsRow(
+                        Row(
                             title: "Deploy from source",
                             subtitle: "Build & publish your own contract"
                         ) {
                             // Fixed dark slate (not adaptive OnymTokens.text,
                             // which goes near-white in dark mode and hid the
                             // white glyph). Matches the deploy guide's hero.
-                            SettingsIconTile(symbol: "chevron.left.forwardslash.chevron.right",
+                            IconTile(symbol: "chevron.left.forwardslash.chevron.right",
                                              bg: OnymTerminal.surface)
                         }
                     }
@@ -291,24 +291,24 @@ struct AnchorsVersionView: View {
                     NavigationLink {
                         UseExistingContractView(key: key)
                     } label: {
-                        SettingsRow(
+                        Row(
                             title: "Use existing address",
                             subtitle: "Point to a deployed contract",
                             last: true
                         ) {
-                            SettingsIconTile(symbol: "shippingbox.fill",
+                            IconTile(symbol: "shippingbox.fill",
                                              bg: OnymTile.indigo)
                         }
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("anchors.use_existing")
                 }
-                SettingsFootnote("Onym only ships audited (or pending-audit) contracts. If you’ve forked or deployed your own, point new chats at it here. Existing chats keep the contract they were created with.")
+                Footnote("Onym only ships audited (or pending-audit) contracts. If you’ve forked or deployed your own, point new chats at it here. Existing chats keep the contract they were created with.")
 
                 if flow.hasExplicitSelection(for: key) {
-                    SettingsSectionLabel("RESET")
-                    SettingsCard {
-                        SettingsRow(
+                    SectionLabel("RESET")
+                    Card {
+                        Row(
                             title: "Reset to default (latest)",
                             titleColor: OnymAccent.blue.color,
                             hasChevron: false,
@@ -337,7 +337,7 @@ struct AnchorsVersionView: View {
         NavigationLink {
             ContractDetailView(flow: flow, key: key, release: release)
         } label: {
-            SettingsRow(
+            Row(
                 title: LocalizedStringKey(release.release),
                 titleMono: true,
                 subtitle: release.publishedAt.formatted(date: .abbreviated, time: .omitted),

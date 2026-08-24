@@ -31,16 +31,16 @@ struct IdentityDetailView: View {
                 hero
 
                 inviteCard
-                SettingsFootnote("Anyone with this code can start a chat with you. The chat itself is end-to-end encrypted.")
+                Footnote("Anyone with this code can start a chat with you. The chat itself is end-to-end encrypted.")
 
-                SettingsSectionLabel("STATE")
-                SettingsCard {
-                    SettingsRow(
+                SectionLabel("STATE")
+                Card {
+                    Row(
                         title: "Set as active",
                         hasChevron: !isActive,
                         onTap: isActive ? nil : { flow.select(summary.id) }
                     ) {
-                        SettingsIconTile(symbol: "checkmark.circle.fill", bg: OnymTile.green)
+                        IconTile(symbol: "checkmark.circle.fill", bg: OnymTile.green)
                     } right: {
                         if isActive {
                             Text("Active")
@@ -50,21 +50,21 @@ struct IdentityDetailView: View {
                     }
 
                     Button { showShare = true } label: {
-                        SettingsRow(
+                        Row(
                             title: "Share invite key",
                             subtitle: "QR code or link",
                             last: true
                         ) {
-                            SettingsIconTile(symbol: "square.and.arrow.up", bg: OnymTile.indigo)
+                            IconTile(symbol: "square.and.arrow.up", bg: OnymTile.indigo)
                         }
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("identity.share_row.\(summary.id)")
                 }
 
-                SettingsSectionLabel("ADVANCED")
-                SettingsCard {
-                    SettingsRow(
+                SectionLabel("ADVANCED")
+                Card {
+                    Row(
                         title: "Copy public key",
                         subtitle: "BLS \(flow.blsPrefix(of: summary))…",
                         subtitleMono: true,
@@ -74,20 +74,20 @@ struct IdentityDetailView: View {
                                 .map { String(format: "%02x", $0) }.joined()
                         }
                     ) {
-                        SettingsIconTile(symbol: "doc.on.doc.fill", bg: OnymTile.gray)
+                        IconTile(symbol: "doc.on.doc.fill", bg: OnymTile.gray)
                     }
-                    SettingsRow(
+                    Row(
                         title: "Delete identity",
                         titleColor: OnymTokens.red,
                         hasChevron: false,
                         last: true,
                         onTap: { flow.startRemoval(of: summary) }
                     ) {
-                        SettingsIconTile(symbol: "trash.fill", bg: OnymTile.red)
+                        IconTile(symbol: "trash.fill", bg: OnymTile.red)
                     }
                 }
 
-                SettingsFootnote("Deleting an identity removes its keys from this device. If you’ve backed up the recovery phrase, you can restore it later.")
+                Footnote("Deleting an identity removes its keys from this device. If you’ve backed up the recovery phrase, you can restore it later.")
             }
             .padding(.bottom, 32)
         }
@@ -145,8 +145,8 @@ struct IdentityDetailView: View {
 
     private var inviteCard: some View {
         Group {
-            SettingsSectionLabel("INVITE KEY")
-            SettingsCard {
+            SectionLabel("INVITE KEY")
+            Card {
                 VStack(spacing: 14) {
                     SettingsQRCode(
                         value: settingsInviteURL(blsPublicKey: summary.inboxPublicKey),
@@ -181,7 +181,7 @@ struct IdentityDetailView: View {
                 SettingsRowDivider(inset: 16)
 
                 HStack(spacing: 0) {
-                    SettingsTextButton(
+                    TextButton(
                         title: "Copy link",
                         systemImage: "doc.on.doc",
                         foreground: OnymAccent.blue.color

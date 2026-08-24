@@ -21,15 +21,15 @@ struct DiscoverySettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                SettingsLargeTitle("Discovery")
+                LargeTitle("Discovery")
 
-                SettingsSectionLabel("PROVIDERS · \(flow.state.sources.count)")
+                SectionLabel("PROVIDERS · \(flow.state.sources.count)")
                 sourcesCard
-                SettingsFootnote("Providers publish signed catalogs of relays and services this app can adopt. Every catalog is verified against the operator key you pinned when you added the provider.")
+                Footnote("Providers publish signed catalogs of relays and services this app can adopt. Every catalog is verified against the operator key you pinned when you added the provider.")
 
-                SettingsSectionLabel("ADD")
-                SettingsCard {
-                    SettingsRow(
+                SectionLabel("ADD")
+                Card {
+                    Row(
                         title: "Add Discovery Provider",
                         subtitle: "Fetch a provider manifest by URL",
                         hasChevron: false,
@@ -44,7 +44,7 @@ struct DiscoverySettingsView: View {
                     }
                     .accessibilityIdentifier("settings.discovery.add")
                 }
-                SettingsFootnote("You'll see the provider's operator key fingerprint before anything is trusted. Verify it out-of-band — the fingerprint is pinned on first use.")
+                Footnote("You'll see the provider's operator key fingerprint before anything is trusted. Verify it out-of-band — the fingerprint is pinned on first use.")
             }
             .padding(.bottom, 32)
         }
@@ -85,7 +85,7 @@ struct DiscoverySettingsView: View {
     private var sourcesCard: some View {
         let sources = flow.state.sources
         if sources.isEmpty {
-            SettingsCard {
+            Card {
                 Text("No discovery providers configured. Add one below.")
                     .font(OnymType.font(size: 14))
                     .foregroundStyle(OnymTokens.text3)
@@ -94,7 +94,7 @@ struct DiscoverySettingsView: View {
                     .accessibilityIdentifier("settings.discovery.empty")
             }
         } else {
-            // Clipped rounded stack (not SettingsCard) so each row can
+            // Clipped rounded stack (not Card) so each row can
             // swipe left to reveal a Delete action masked to the card's
             // corners — same construction as the relayer / nostr lists.
             VStack(spacing: 0) {
@@ -121,7 +121,7 @@ struct DiscoverySettingsView: View {
     private func sourceRow(_ status: DiscoverySourceStatus, last: Bool) -> some View {
         VStack(spacing: 0) {
             HStack(alignment: .top, spacing: 12) {
-                SettingsIconTile(symbol: "antenna.radiowaves.left.and.right", bg: OnymTile.purple)
+                IconTile(symbol: "antenna.radiowaves.left.and.right", bg: OnymTile.purple)
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
                         Text(verbatim: status.source.userLabel)
@@ -206,19 +206,19 @@ struct DiscoverySettingsView: View {
     @ViewBuilder
     private func statusChip(for status: DiscoverySourceStatus) -> some View {
         if status.lastError != nil, status.lastErrorIsIntegrity {
-            SettingsChip(text: String(localized: "INTEGRITY").uppercased(),
+            Chip(text: String(localized: "INTEGRITY").uppercased(),
                          fg: OnymTokens.red, bg: OnymTokens.red.opacity(0.15))
         } else if status.lastError != nil {
-            SettingsChip(text: String(localized: "FAILED").uppercased(),
+            Chip(text: String(localized: "FAILED").uppercased(),
                          fg: OnymTile.amber, bg: OnymTile.amber.opacity(0.15))
         } else if flow.state.fetchStatus == .fetching {
-            SettingsChip(text: String(localized: "FETCHING").uppercased(),
+            Chip(text: String(localized: "FETCHING").uppercased(),
                          fg: OnymTile.gray, bg: OnymTile.gray.opacity(0.15))
         } else if status.source.pinnedOperatorKeyHex == nil {
-            SettingsChip(text: String(localized: "UNCONFIRMED").uppercased(),
+            Chip(text: String(localized: "UNCONFIRMED").uppercased(),
                          fg: OnymTile.gray, bg: OnymTile.gray.opacity(0.15))
         } else {
-            SettingsChip(text: String(localized: "OK").uppercased(),
+            Chip(text: String(localized: "OK").uppercased(),
                          fg: OnymTokens.green, bg: OnymTokens.green.opacity(0.15))
         }
     }

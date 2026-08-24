@@ -43,7 +43,7 @@ struct SelfHostGuideView: View {
                             .padding(.leading, 30)
                     }
                 }
-                SettingsFootnote(footnote)
+                Footnote(footnote)
             }
             .padding(.bottom, 24)
         }

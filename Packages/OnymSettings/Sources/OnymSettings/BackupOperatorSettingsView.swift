@@ -27,7 +27,7 @@ struct BackupOperatorSettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                SettingsLargeTitle("Backup Operators")
+                LargeTitle("Backup Operators")
 
                 if flow.catalogEntries.isEmpty {
                     emptyCard
@@ -42,7 +42,7 @@ struct BackupOperatorSettingsView: View {
                     )
                 }
 
-                SettingsFootnote("A backup operator stores sealed copies of this phone's history. The copy is sealed here, before it leaves — the operator keeps bytes it cannot read, and only your recovery phrase can open them. You can back up to more than one operator, and each one holds its own copy under its own terms.")
+                Footnote("A backup operator stores sealed copies of this phone's history. The copy is sealed here, before it leaves — the operator keeps bytes it cannot read, and only your recovery phrase can open them. You can back up to more than one operator, and each one holds its own copy under its own terms.")
             }
             .padding(.bottom, 32)
         }
@@ -68,7 +68,7 @@ struct BackupOperatorSettingsView: View {
     /// backup operator. Say why nothing is on offer rather than
     /// leaving a screen that looks like it is still loading.
     private var emptyCard: some View {
-        SettingsCard {
+        Card {
             Text("No backup operators are listed by the discovery providers you trust. Add a provider that lists one, and it will appear here.")
                 .font(OnymType.font(size: 14))
                 .foregroundStyle(OnymTokens.text3)

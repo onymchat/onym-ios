@@ -26,9 +26,9 @@ public struct DeviceBackupSettingsView: View {
     public var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                SettingsSectionLabel("STATUS")
-                SettingsCard {
-                    SettingsRow(
+                SectionLabel("STATUS")
+                Card {
+                    Row(
                         title: statusTitle,
                         subtitle: statusSubtitle,
                         // A failure message renders here, and one line
@@ -36,28 +36,28 @@ public struct DeviceBackupSettingsView: View {
                         subtitleLineLimit: 3,
                         last: true
                     ) {
-                        SettingsIconTile(symbol: statusSymbol, bg: OnymTile.blue)
+                        IconTile(symbol: statusSymbol, bg: OnymTile.blue)
                     }
                     .accessibilityIdentifier("backup.status_row")
                 }
-                SettingsFootnote(verbatim: statusFootnote)
+                Footnote(verbatim: statusFootnote)
 
                 if flow.attachmentsWithheld {
-                    SettingsFootnote(
+                    Footnote(
                         "You set this operator up with attachments included, but another operator you back up to was not. One backup is made for all of them, so attachments are currently left out of every one — including this operator's.")
                         .accessibilityIdentifier("backup.attachments_withheld")
                 }
 
                 if flow.needsEnrolment {
                     if let enrolment = makeEnrolment() {
-                        SettingsCard {
+                        Card {
                             NavigationLink { enrolment } label: {
-                                SettingsRow(
+                                Row(
                                     title: enrolmentRowTitle,
                                     subtitle: "Read what it does before turning it on",
                                     last: true
                                 ) {
-                                    SettingsIconTile(symbol: "externaldrive.badge.plus",
+                                    IconTile(symbol: "externaldrive.badge.plus",
                                                      bg: OnymTile.green)
                                 }
                             }
@@ -67,23 +67,23 @@ public struct DeviceBackupSettingsView: View {
                     }
                 }
                 if !flow.needsEnrolment {
-                    SettingsCard {
+                    Card {
                         Button {
                             Task { await flow.backUpNow() }
                         } label: {
-                            SettingsRow(
+                            Row(
                                 title: "Back Up Now",
                                 subtitle: "Uploads your whole history to this operator",
                                 last: true
                             ) {
-                                SettingsIconTile(symbol: "arrow.up.circle", bg: OnymTile.blue)
+                                IconTile(symbol: "arrow.up.circle", bg: OnymTile.blue)
                             }
                         }
                         .buttonStyle(.plain)
                         .disabled(flow.state.status == .running)
                         .accessibilityIdentifier("backup.back_up_now_row")
                     }
-                    SettingsFootnote(
+                    Footnote(
                         "Each backup uploads everything, not just what changed — there is no incremental upload yet.")
 
                     snapshotsSection
@@ -144,26 +144,26 @@ public struct DeviceBackupSettingsView: View {
     @ViewBuilder
     private var stopSection: some View {
         if flow.canStopBackingUp {
-            SettingsCard {
+            Card {
                 Button(role: .destructive) {
                     confirmingStop = true
                 } label: {
-                    SettingsRow(
+                    Row(
                         title: "Stop Backing Up Here",
                         subtitle: "Ends this operator's copy and stops paying for it",
                         last: true
                     ) {
-                        SettingsIconTile(symbol: "xmark.bin", bg: OnymTile.red)
+                        IconTile(symbol: "xmark.bin", bg: OnymTile.red)
                     }
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("backup.stop_row")
             }
             if let failure = flow.stopFailure {
-                SettingsFootnote(verbatim: failure)
+                Footnote(verbatim: failure)
                     .accessibilityIdentifier("backup.stop_failed")
             } else {
-                SettingsFootnote(
+                Footnote(
                     "Your other operators are not affected. Erasing asks this operator to destroy what it holds and keeps its signed receipt; stopping without erasing leaves what it has until its own retention period ends.")
             }
         }
@@ -171,35 +171,35 @@ public struct DeviceBackupSettingsView: View {
 
     private var snapshotsSection: some View {
         Group {
-            SettingsSectionLabel("SNAPSHOTS")
-            SettingsCard {
+            SectionLabel("SNAPSHOTS")
+            Card {
                 if flow.state.snapshots.isEmpty {
-                    SettingsRow(
+                    Row(
                         title: "None yet",
                         subtitle: "Nothing has been accepted by the operator",
                         last: true
                     ) {
-                        SettingsIconTile(symbol: "tray", bg: OnymTile.gray)
+                        IconTile(symbol: "tray", bg: OnymTile.gray)
                     }
                 } else {
                     ForEach(Array(flow.state.snapshots.enumerated()), id: \.element.snapshotReference) {
                         index, snapshot in
                         // The digest lives in the subtitle rather than
-                        // the title: `SettingsRow` takes a localization
+                        // the title: `Row` takes a localization
                         // key for its title, and runtime data must never
                         // be looked up as one.
-                        SettingsRow(
+                        Row(
                             title: "Snapshot",
                             subtitle: Self.subtitle(for: snapshot),
                             last: index == flow.state.snapshots.count - 1
                         ) {
-                            SettingsIconTile(symbol: "shippingbox", bg: OnymTile.gray)
+                            IconTile(symbol: "shippingbox", bg: OnymTile.gray)
                         }
                         .accessibilityIdentifier("backup.snapshot.\(snapshot.snapshotReference.digestHex)")
                     }
                 }
             }
-            SettingsFootnote(
+            Footnote(
                 "Sizes are rounded into buckets before upload, so what the operator sees does not measure your history.")
         }
     }

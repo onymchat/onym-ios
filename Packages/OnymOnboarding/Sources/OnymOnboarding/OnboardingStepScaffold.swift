@@ -6,7 +6,7 @@ import SwiftUI
 /// builder slot.
 ///
 /// Deliberately styled with plain SwiftUI — this package does not
-/// depend on OnymDesign. PR 3 supplies `SettingsStepIndicator` (made
+/// depend on OnymDesign. PR 3 supplies `StepIndicator` (made
 /// public there) through the `indicator` slot and can restyle the
 /// buttons via the content it injects; the scaffold's own chrome stays
 /// system-styled.

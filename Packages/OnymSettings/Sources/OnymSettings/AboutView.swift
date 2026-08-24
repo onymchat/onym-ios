@@ -23,39 +23,39 @@ struct AboutView: View {
             VStack(alignment: .leading, spacing: 0) {
                 hero
 
-                SettingsSectionLabel("VERSION")
-                SettingsCard {
-                    SettingsRow(title: "Version", hasChevron: false, inset: 16) {
+                SectionLabel("VERSION")
+                Card {
+                    Row(title: "Version", hasChevron: false, inset: 16) {
                         EmptyView()
                     } right: {
                         Text(version).foregroundStyle(OnymTokens.text2)
                     }
-                    SettingsRow(title: "Build", hasChevron: false, inset: 16) {
+                    Row(title: "Build", hasChevron: false, inset: 16) {
                         EmptyView()
                     } right: {
                         Text(build)
                             .font(OnymType.mono(size: 13.5))
                             .foregroundStyle(OnymTokens.text2)
                     }
-                    SettingsRow(
+                    Row(
                         title: "Check for updates",
                         last: true,
                         onTap: { open(Self.sourceURL.absoluteString + "/releases") }
                     ) {
-                        SettingsIconTile(symbol: "arrow.up.circle.fill", bg: OnymTile.blue)
+                        IconTile(symbol: "arrow.up.circle.fill", bg: OnymTile.blue)
                     }
                 }
 
-                SettingsSectionLabel("RESOURCES")
-                SettingsCard {
-                    SettingsRow(
+                SectionLabel("RESOURCES")
+                Card {
+                    Row(
                         title: "Source code",
                         subtitle: "github.com/onymchat/onym-ios",
                         subtitleMono: true,
                         hasChevron: false,
                         onTap: { open(Self.sourceURL.absoluteString) }
                     ) {
-                        SettingsIconTile(symbol: "chevron.left.forwardslash.chevron.right",
+                        IconTile(symbol: "chevron.left.forwardslash.chevron.right",
                                          bg: OnymTokens.text)
                     } right: {
                         Image(systemName: "arrow.up.right.square")
@@ -63,81 +63,81 @@ struct AboutView: View {
                     }
                     .accessibilityIdentifier("about.source_row")
 
-                    SettingsRow(
+                    Row(
                         title: "Documentation",
                         subtitle: "docs.onym.app",
                         hasChevron: false,
                         onTap: { open(Self.docsURL.absoluteString) }
                     ) {
-                        SettingsIconTile(symbol: "doc.text.fill", bg: OnymTile.indigo)
+                        IconTile(symbol: "doc.text.fill", bg: OnymTile.indigo)
                     } right: {
                         Image(systemName: "arrow.up.right.square")
                             .foregroundStyle(OnymTokens.text3)
                     }
 
-                    SettingsRow(
+                    Row(
                         title: "Whitepaper",
                         subtitle: "The Onym protocol",
                         hasChevron: false,
                         onTap: { open("https://onym.app/whitepaper") }
                     ) {
-                        SettingsIconTile(symbol: "sparkles", bg: OnymTile.green)
+                        IconTile(symbol: "sparkles", bg: OnymTile.green)
                     } right: {
                         Image(systemName: "arrow.up.right.square")
                             .foregroundStyle(OnymTokens.text3)
                     }
 
-                    SettingsRow(
+                    Row(
                         title: "Changelog",
                         subtitle: "What’s new",
                         last: true,
                         onTap: { open(Self.sourceURL.absoluteString + "/releases") }
                     ) {
-                        SettingsIconTile(symbol: "list.star", bg: OnymTile.purple)
+                        IconTile(symbol: "list.star", bg: OnymTile.purple)
                     }
                 }
 
-                SettingsSectionLabel("HELP")
-                SettingsCard {
-                    SettingsRow(
+                SectionLabel("HELP")
+                Card {
+                    Row(
                         title: "FAQ",
                         hasChevron: false,
                         onTap: { open(Self.docsURL.absoluteString + "/faq") }
                     ) {
-                        SettingsIconTile(symbol: "questionmark.circle.fill",
+                        IconTile(symbol: "questionmark.circle.fill",
                                          bg: OnymTile.blue)
                     } right: {
                         Image(systemName: "arrow.up.right.square")
                             .foregroundStyle(OnymTokens.text3)
                     }
-                    SettingsRow(
+                    Row(
                         title: "Community chat",
                         subtitle: "Join the dev group on Onym",
                         hasChevron: false,
                         onTap: { open("https://onym.app/community") }
                     ) {
-                        SettingsIconTile(symbol: "bubble.left.fill", bg: OnymTile.green)
+                        IconTile(symbol: "bubble.left.fill", bg: OnymTile.green)
                     } right: {
                         Image(systemName: "arrow.up.right.square")
                             .foregroundStyle(OnymTokens.text3)
                     }
-                    SettingsRow(
+                    Row(
                         title: "Contact support",
                         subtitle: "hello@onym.app",
                         hasChevron: false,
                         last: true,
                         onTap: { open(Self.supportURL.absoluteString) }
                     ) {
-                        SettingsIconTile(symbol: "envelope.fill", bg: OnymTile.orange)
+                        IconTile(symbol: "envelope.fill", bg: OnymTile.orange)
                     } right: {
                         Image(systemName: "arrow.up.right.square")
                             .foregroundStyle(OnymTokens.text3)
                     }
                 }
 
-                SettingsSectionLabel("LEGAL")
-                SettingsCard {
-                    SettingsRow(title: "Privacy policy",
+                SectionLabel("LEGAL")
+                Card {
+                    Row(title: "Privacy policy",
                                 hasChevron: false, inset: 16,
                                 onTap: { open("https://onym.app/privacy") }) {
                         EmptyView()
@@ -145,7 +145,7 @@ struct AboutView: View {
                         Image(systemName: "arrow.up.right.square")
                             .foregroundStyle(OnymTokens.text3)
                     }
-                    SettingsRow(title: "Terms of service",
+                    Row(title: "Terms of service",
                                 hasChevron: false, inset: 16,
                                 onTap: { open("https://onym.app/terms") }) {
                         EmptyView()
@@ -153,7 +153,7 @@ struct AboutView: View {
                         Image(systemName: "arrow.up.right.square")
                             .foregroundStyle(OnymTokens.text3)
                     }
-                    SettingsRow(title: "Open source licenses",
+                    Row(title: "Open source licenses",
                                 inset: 16, last: true,
                                 onTap: { open(Self.sourceURL.absoluteString + "/blob/main/LICENSE") }) {
                         EmptyView()

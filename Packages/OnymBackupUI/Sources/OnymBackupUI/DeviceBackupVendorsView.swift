@@ -31,33 +31,33 @@ public struct DeviceBackupVendorsView: View {
     public var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                SettingsSectionLabel("STATUS")
-                SettingsCard {
-                    SettingsRow(title: statusTitle, subtitle: statusSubtitle, last: true) {
-                        SettingsIconTile(symbol: statusSymbol, bg: OnymTile.blue)
+                SectionLabel("STATUS")
+                Card {
+                    Row(title: statusTitle, subtitle: statusSubtitle, last: true) {
+                        IconTile(symbol: statusSymbol, bg: OnymTile.blue)
                     }
                     .accessibilityIdentifier("backup.status_row")
                 }
-                SettingsFootnote(verbatim: statusFootnote)
+                Footnote(verbatim: statusFootnote)
 
                 if flow.enrolledCount > 0 {
-                    SettingsCard {
+                    Card {
                         Button {
                             Task { await flow.backUpAllNow() }
                         } label: {
-                            SettingsRow(
+                            Row(
                                 title: flow.enrolledCount > 1 ? "Back Up To All" : "Back Up Now",
                                 subtitle: backUpSubtitle,
                                 last: true
                             ) {
-                                SettingsIconTile(symbol: "arrow.up.circle", bg: OnymTile.blue)
+                                IconTile(symbol: "arrow.up.circle", bg: OnymTile.blue)
                             }
                         }
                         .buttonStyle(.plain)
                         .disabled(flow.isRunning)
                         .accessibilityIdentifier("backup.back_up_now_row")
                     }
-                    SettingsFootnote(
+                    Footnote(
                         "Each backup uploads everything, not just what changed — there is no incremental upload yet.")
                 }
 
@@ -72,14 +72,14 @@ public struct DeviceBackupVendorsView: View {
                 // Hiding restore until someone agrees to *store* a
                 // backup asks them to take on a new obligation before
                 // they may read what they already have.
-                SettingsCard {
+                Card {
                     NavigationLink { makeRestore() } label: {
-                        SettingsRow(
+                        Row(
                             title: "Restore From Backup",
                             subtitle: "Adds messages and chats — nothing is deleted",
                             last: true
                         ) {
-                            SettingsIconTile(symbol: "arrow.down.circle", bg: OnymTile.green)
+                            IconTile(symbol: "arrow.down.circle", bg: OnymTile.green)
                         }
                     }
                     .buttonStyle(.plain)
@@ -122,23 +122,23 @@ public struct DeviceBackupVendorsView: View {
     @ViewBuilder
     private var restorePurchases: some View {
         if flow.canRestorePurchases {
-            SettingsCard {
+            Card {
                 Button {
                     Task { await flow.restorePurchases() }
                 } label: {
-                    SettingsRow(
+                    Row(
                         title: "Restore Purchases",
                         subtitle: purchaseRestoreSubtitle,
                         last: true
                     ) {
-                        SettingsIconTile(symbol: "arrow.clockwise.circle", bg: OnymTile.gray)
+                        IconTile(symbol: "arrow.clockwise.circle", bg: OnymTile.gray)
                     }
                 }
                 .buttonStyle(.plain)
                 .disabled(flow.purchaseRestore == .running)
                 .accessibilityIdentifier("backup.restore_purchases_row")
             }
-            SettingsFootnote(
+            Footnote(
                 "If you paid for storage on another phone, this brings that purchase to this one. You are not charged again.")
         }
     }
@@ -194,8 +194,8 @@ public struct DeviceBackupVendorsView: View {
     /// problem.
     private var operators: some View {
         Group {
-            SettingsSectionLabel("OPERATORS")
-            SettingsCard {
+            SectionLabel("OPERATORS")
+            Card {
                 ForEach(Array(flow.vendors.enumerated()), id: \.element.id) { index, vendor in
                     NavigationLink {
                         DeviceBackupSettingsView(
@@ -203,7 +203,7 @@ public struct DeviceBackupVendorsView: View {
                             makeEnrolment: { makeEnrolment(vendor.id) }
                         )
                     } label: {
-                        SettingsRow(
+                        Row(
                             title: "Operator",
                             subtitle: Self.subtitle(for: vendor),
                             // Two lines, because the thing worth reading
@@ -213,7 +213,7 @@ public struct DeviceBackupVendorsView: View {
                             subtitleLineLimit: 2,
                             last: index == flow.vendors.count - 1
                         ) {
-                            SettingsIconTile(
+                            IconTile(
                                 symbol: Self.symbol(for: vendor.flow.state.status),
                                 bg: Self.tint(for: vendor.flow.state.status))
                         }
@@ -222,13 +222,13 @@ public struct DeviceBackupVendorsView: View {
                     .accessibilityIdentifier("backup.operator_row.\(vendor.id)")
                 }
             }
-            SettingsFootnote(
+            Footnote(
                 "Every operator you set up keeps its own separate copy, sealed with its own key and paid for separately. One of them shutting down or losing your data does not take the others with it — and each one extends the life of this history for everyone in it, under its own jurisdiction.")
         }
     }
 
     /// The operator's name, then what it is actually doing. The name is
-    /// runtime data, so it lives in the subtitle: `SettingsRow` takes a
+    /// runtime data, so it lives in the subtitle: `Row` takes a
     /// localization key for its title, and looking up user-facing data
     /// as one would be a bug waiting for a translator.
     /// The note comes from the operator's own flow rather than from the

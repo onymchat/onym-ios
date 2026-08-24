@@ -14,7 +14,7 @@ public struct BackupRestoreView: View {
     public var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                SettingsFootnote(
+                Footnote(
                     "Restoring adds this backup's messages and groups to what is already on this phone. Nothing is deleted, and your identity is not touched.")
 
                 switch flow.state {
@@ -108,7 +108,7 @@ public struct BackupRestoreView: View {
     @ViewBuilder
     private var unreachableNote: some View {
         if !flow.unreachableOperators.isEmpty {
-            SettingsFootnote(
+            Footnote(
                 verbatim: "Could not reach \(flow.unreachableOperators.joined(separator: ", ")). Anything held there is not in this list.")
                 .accessibilityIdentifier("backup.restore.unreachable")
         }
@@ -116,13 +116,13 @@ public struct BackupRestoreView: View {
 
     private func list(_ snapshots: [RestorableSnapshot]) -> some View {
         Group {
-            SettingsSectionLabel("BACKUPS")
-            SettingsCard {
+            SectionLabel("BACKUPS")
+            Card {
                 ForEach(Array(snapshots.enumerated()), id: \.element.id) { index, row in
                     Button {
                         confirming = row
                     } label: {
-                        SettingsRow(
+                        Row(
                             // Per operator, not per list. These rows come
                             // from independent operators now: the newest
                             // row overall might be one operator's copy
@@ -138,7 +138,7 @@ public struct BackupRestoreView: View {
                             subtitle: Self.subtitle(for: row),
                             last: index == snapshots.count - 1
                         ) {
-                            SettingsIconTile(symbol: "shippingbox", bg: OnymTile.blue)
+                            IconTile(symbol: "shippingbox", bg: OnymTile.blue)
                         }
                     }
                     .buttonStyle(.plain)
@@ -146,7 +146,7 @@ public struct BackupRestoreView: View {
                         "backup.restore.snapshot.\(row.snapshot.snapshotReference.digestHex)")
                 }
             }
-            SettingsFootnote(
+            Footnote(
                 "Sizes are rounded into buckets, so they do not tell you how much history a backup holds.")
         }
     }

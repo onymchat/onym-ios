@@ -56,7 +56,7 @@ public struct ModuleConsentView: View {
     @ViewBuilder
     private var loading: some View {
         if let error = flow.errorMessage {
-            SettingsCard {
+            Card {
                 VStack(spacing: 10) {
                     Text(verbatim: error)
                         .font(OnymType.font(size: 14))
@@ -88,7 +88,7 @@ public struct ModuleConsentView: View {
     /// — retrying could never succeed, so offering the button would be
     /// a lie. Cancel in the toolbar remains the way out.
     private var failed: some View {
-        SettingsCard {
+        Card {
             VStack(spacing: 10) {
                 Image(systemName: "xmark.octagon")
                     .font(OnymType.font(size: 28))
@@ -112,7 +112,7 @@ public struct ModuleConsentView: View {
         if let reviewed = flow.reviewed {
             let manifest = reviewed.signedManifest
 
-            SettingsLargeTitle(verbatim: flow.displayName)
+            LargeTitle(verbatim: flow.displayName)
 
             attributionBanner
 
@@ -123,8 +123,8 @@ public struct ModuleConsentView: View {
                 statusBanner(status)
             }
 
-            SettingsSectionLabel("SERVICE")
-            SettingsCard {
+            SectionLabel("SERVICE")
+            Card {
                 VStack(alignment: .leading, spacing: 8) {
                     termRow("Seat", manifest.seat)
                     termRow("Component", manifest.componentId)
@@ -142,18 +142,18 @@ public struct ModuleConsentView: View {
             }
 
             if let termsURL = flow.termsURL {
-                SettingsSectionLabel("TERMS")
-                SettingsCard {
+                SectionLabel("TERMS")
+                Card {
                     NavigationLink {
                         MarkdownDocumentView(title: String(localized: "Terms"), url: termsURL)
                     } label: {
-                        SettingsRow(
+                        Row(
                             title: "Linked terms",
                             subtitle: termsURL.absoluteString,
                             subtitleMono: true,
                             last: true
                         ) {
-                            SettingsIconTile(symbol: "doc.text", bg: OnymTile.gray)
+                            IconTile(symbol: "doc.text", bg: OnymTile.gray)
                         }
                     }
                     .buttonStyle(.plain)
@@ -161,8 +161,8 @@ public struct ModuleConsentView: View {
                 }
             }
 
-            SettingsSectionLabel("WHAT YOU'RE ACCEPTING")
-            SettingsCard {
+            SectionLabel("WHAT YOU'RE ACCEPTING")
+            Card {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Manifest hash")
                         .font(OnymType.font(size: 13, weight: .semibold))
@@ -175,14 +175,14 @@ public struct ModuleConsentView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(16)
             }
-            SettingsFootnote("Your acceptance pins this hash of these exact bytes and adds the service's endpoint to your configuration. Nothing is signed and nothing leaves this device — you can remove the endpoint at any time.")
+            Footnote("Your acceptance pins this hash of these exact bytes and adds the service's endpoint to your configuration. Nothing is signed and nothing leaves this device — you can remove the endpoint at any time.")
 
             if let error = flow.errorMessage {
-                SettingsFootnote(verbatim: error)
+                Footnote(verbatim: error)
             }
 
             VStack(spacing: 10) {
-                SettingsPrimaryButton(action: { flow.tappedAccept() }) {
+                PrimaryButton(action: { flow.tappedAccept() }) {
                     if flow.step == .applying {
                         ProgressView().tint(OnymTokens.onAccent)
                     } else {
@@ -199,7 +199,7 @@ public struct ModuleConsentView: View {
                 // Paid-only manifest (no entitled offer to select):
                 // Accept stays disabled, and the screen says why
                 // instead of leaving a dead button.
-                SettingsFootnote("None of this service's offers can be selected yet — purchasing is not yet available in this app, so this service can't be added.")
+                Footnote("None of this service's offers can be selected yet — purchasing is not yet available in this app, so this service can't be added.")
             }
         }
     }
@@ -210,7 +210,7 @@ public struct ModuleConsentView: View {
     private func statusBanner(_ status: EntryStatus) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                SettingsChip(
+                Chip(
                     text: (status.state == "warning"
                         ? String(localized: "WARNING")
                         : String(localized: "UNDER REVIEW")).uppercased(),
@@ -280,8 +280,8 @@ public struct ModuleConsentView: View {
 
     @ViewBuilder
     private func offersSection(_ manifest: SignedServiceManifest) -> some View {
-        SettingsSectionLabel("OFFERS")
-        SettingsCard {
+        SectionLabel("OFFERS")
+        Card {
             ForEach(Array(manifest.offers.enumerated()), id: \.element.offerId) { idx, offer in
                 offerRow(
                     offer,
@@ -291,7 +291,7 @@ public struct ModuleConsentView: View {
             }
         }
         if manifest.offers.contains(where: { !flow.entitledOfferIds.contains($0.offerId) }) {
-            SettingsFootnote("Paid offers can't be selected yet — purchasing is not yet available in this app.")
+            Footnote("Paid offers can't be selected yet — purchasing is not yet available in this app.")
         }
     }
 

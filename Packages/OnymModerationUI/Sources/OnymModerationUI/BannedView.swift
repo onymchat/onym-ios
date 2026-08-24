@@ -77,7 +77,7 @@ public struct BannedView: View {
                 // verdict details can be long, but a banned user must not
                 // have to discover the appeal action by scrolling.
                 if let builder = caseFlowBuilder {
-                    SettingsPrimaryButton(action: { caseSheet = .appeal }) {
+                    PrimaryButton(action: { caseSheet = .appeal }) {
                         Text("Review case and appeal")
                     }
                     .accessibilityIdentifier("moderation.banned.appeal")
@@ -91,15 +91,15 @@ public struct BannedView: View {
                         }
                     }
                 } else if let appealURL = state.appealURL {
-                    SettingsPrimaryButton(action: { openURL(appealURL) }) {
+                    PrimaryButton(action: { openURL(appealURL) }) {
                         Text("Appeal this ban")
                     }
                     .accessibilityIdentifier("moderation.banned.appeal")
                     .padding(.horizontal, 16)
                 }
 
-                SettingsSectionLabel("VERDICT")
-                SettingsCard {
+                SectionLabel("VERDICT")
+                Card {
                     VStack(alignment: .leading, spacing: 8) {
                         detailRow("Reference", state.verdictRef, monospaced: true)
                         if let verdict = state.verdict {
@@ -115,7 +115,7 @@ public struct BannedView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(16)
                 }
-                SettingsFootnote("The ban covers this device on this app only. The Onym protocol itself remains open.")
+                Footnote("The ban covers this device on this app only. The Onym protocol itself remains open.")
 
                 VStack(spacing: 10) {
                     // In-app appeal is primary — the flow retains the
@@ -199,7 +199,7 @@ public struct BannedView: View {
                 .padding(.top, 16)
 
                 if !hasNewHolderPath {
-                    SettingsFootnote("If you're this device's new owner, contact the authority above — device bans survive a change of hands, and the authority runs an expedited procedure for it.")
+                    Footnote("If you're this device's new owner, contact the authority above — device bans survive a change of hands, and the authority runs an expedited procedure for it.")
                 }
             }
             .padding(.bottom, 32)

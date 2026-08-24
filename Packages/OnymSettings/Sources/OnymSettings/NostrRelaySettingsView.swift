@@ -23,9 +23,9 @@ struct NostrRelaySettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                SettingsLargeTitle("Nostr Relays")
+                LargeTitle("Nostr Relays")
 
-                SettingsSectionLabel(
+                SectionLabel(
                     "CONFIGURED · \(flow.state.snapshot.endpoints.count)"
                 )
                 configuredCard
@@ -39,28 +39,28 @@ struct NostrRelaySettingsView: View {
                     onSelect: { consentEntry = $0 }
                 )
 
-                SettingsSectionLabel("ADD CUSTOM URL")
+                SectionLabel("ADD CUSTOM URL")
                 customURLCard
-                SettingsFootnote(
+                Footnote(
                     "Use a private deployment, localhost, or any Nostr relay you trust. URLs must use the wss:// (or ws://) scheme."
                 )
 
                 resetCard
-                SettingsFootnote(
+                Footnote(
                     "Changes apply on the next app launch. The inbox transport reads relays once at boot."
                 )
 
-                SettingsSectionLabel("SELF-HOST")
-                SettingsCard {
+                SectionLabel("SELF-HOST")
+                Card {
                     NavigationLink {
                         SelfHostGuideView.nostr
                     } label: {
-                        SettingsRow(
+                        Row(
                             title: "Run your own relay",
                             subtitle: "Deploy a Nostr relay with Docker",
                             last: true
                         ) {
-                            SettingsIconTile(symbol: "server.rack",
+                            IconTile(symbol: "server.rack",
                                              bg: OnymTerminal.surface)
                         }
                     }
@@ -94,7 +94,7 @@ struct NostrRelaySettingsView: View {
     private var configuredCard: some View {
         let endpoints = flow.state.snapshot.endpoints
         if endpoints.isEmpty {
-            SettingsCard {
+            Card {
                 Text("No relays configured. Inbox transport is offline.")
                     .font(OnymType.font(size: 14))
                     .foregroundStyle(OnymTokens.text3)
@@ -103,7 +103,7 @@ struct NostrRelaySettingsView: View {
                     .accessibilityIdentifier("nostr.configured.empty")
             }
         } else {
-            // Clipped rounded stack (not SettingsCard) so each row can
+            // Clipped rounded stack (not Card) so each row can
             // swipe left to reveal a Delete action masked to the card's
             // corners. Rows carry the card surface so the reveal stays
             // hidden until slid.
@@ -115,7 +115,7 @@ struct NostrRelaySettingsView: View {
                     ) {
                         VStack(spacing: 0) {
                             HStack(spacing: 12) {
-                                SettingsIconTile(
+                                IconTile(
                                     symbol: "antenna.radiowaves.left.and.right",
                                     bg: OnymTile.indigo
                                 )
@@ -164,7 +164,7 @@ struct NostrRelaySettingsView: View {
     // MARK: - Custom URL add
 
     private var customURLCard: some View {
-        SettingsCard {
+        Card {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
                     TextField(
@@ -216,12 +216,12 @@ struct NostrRelaySettingsView: View {
     // MARK: - Reset
 
     private var resetCard: some View {
-        SettingsCard {
+        Card {
             Button {
                 flow.tappedResetToDefault()
             } label: {
                 HStack {
-                    SettingsIconTile(
+                    IconTile(
                         symbol: "arrow.counterclockwise",
                         bg: OnymTile.gray
                     )

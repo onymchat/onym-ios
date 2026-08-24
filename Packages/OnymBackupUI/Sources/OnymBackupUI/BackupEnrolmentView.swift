@@ -113,8 +113,8 @@ public struct BackupEnrolmentView: View {
                     symbol: "clock.arrow.circlepath",
                     identifier: "backup.enrolment.schedule")
 
-                SettingsSectionLabel("WHAT THE OPERATOR PROMISES")
-                SettingsCard {
+                SectionLabel("WHAT THE OPERATOR PROMISES")
+                Card {
                     ForEach(Array(disclosure.items.enumerated()), id: \.element.id) { index, item in
                         VStack(alignment: .leading, spacing: 4) {
                             // `verbatim` throughout: these are the
@@ -140,7 +140,7 @@ public struct BackupEnrolmentView: View {
                     }
                 }
 
-                SettingsFootnote(
+                Footnote(
                     "These terms are pinned to every backup you make under them. If the operator publishes different terms later, backups stop until you have seen them.")
 
             }

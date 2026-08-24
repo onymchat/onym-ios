@@ -147,36 +147,36 @@ public struct SettingsView: View {
                 // action), and the informational Privacy screen is gone.
 
                 if let makeDiscoverySettingsFlow {
-                    SettingsSectionLabel("DISCOVERY")
-                    SettingsCard {
+                    SectionLabel("DISCOVERY")
+                    Card {
                         NavigationLink {
                             DiscoverySettingsView(flow: makeDiscoverySettingsFlow())
                         } label: {
-                            SettingsRow(
+                            Row(
                                 title: "Discovery Providers",
                                 subtitle: "Catalogs of relays and services",
                                 last: true
                             ) {
-                                SettingsIconTile(symbol: "sparkle.magnifyingglass",
+                                IconTile(symbol: "sparkle.magnifyingglass",
                                                  bg: OnymTile.purple)
                             }
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("settings.discovery_row")
                     }
-                    SettingsFootnote("Discovery providers publish signed catalogs of services you can adopt. You choose which providers to trust — each one's key is pinned when you add it.")
+                    Footnote("Discovery providers publish signed catalogs of services you can adopt. You choose which providers to trust — each one's key is pinned when you add it.")
                 }
 
-                SettingsSectionLabel("ANCHORS")
-                SettingsCard {
+                SectionLabel("ANCHORS")
+                Card {
                     NavigationLink {
                         AnchorsView(flow: makeAnchorsPickerFlow())
                     } label: {
-                        SettingsRow(
+                        Row(
                             title: "Anchors",
                             subtitle: useMainnet ? "Stellar · Mainnet" : "Stellar · Testnet"
                         ) {
-                            SettingsIconTile(symbol: "link", bg: OnymTile.orange)
+                            IconTile(symbol: "link", bg: OnymTile.orange)
                         }
                     }
                     .buttonStyle(.plain)
@@ -189,30 +189,30 @@ public struct SettingsView: View {
                     NavigationLink {
                         RelayerSettingsView(flow: makeRelayerSettingsFlow())
                     } label: {
-                        SettingsRow(
+                        Row(
                             title: "Relayer",
                             subtitle: "Stellar Soroban",
                             last: true
                         ) {
-                            SettingsIconTile(symbol: "antenna.radiowaves.left.and.right",
+                            IconTile(symbol: "antenna.radiowaves.left.and.right",
                                              bg: OnymTile.indigo)
                         }
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("settings.relayer_row")
                 }
-                SettingsFootnote("Anchors and the relayer default to Onym-run instances. Replace them with your own deployments for maximum privacy.")
+                Footnote("Anchors and the relayer default to Onym-run instances. Replace them with your own deployments for maximum privacy.")
 
-                SettingsSectionLabel("TRANSPORT")
-                SettingsCard {
+                SectionLabel("TRANSPORT")
+                Card {
                     NavigationLink {
                         NostrRelaySettingsView(flow: makeNostrRelaySettingsFlow())
                     } label: {
-                        SettingsRow(
+                        Row(
                             title: "Nostr Relays",
                             subtitle: "Inbox + invitation transport"
                         ) {
-                            SettingsIconTile(
+                            IconTile(
                                 symbol: "antenna.radiowaves.left.and.right.circle.fill",
                                 bg: OnymTile.indigo
                             )
@@ -224,12 +224,12 @@ public struct SettingsView: View {
                     NavigationLink {
                         BlossomRelaySettingsView(flow: makeBlossomRelaySettingsFlow())
                     } label: {
-                        SettingsRow(
+                        Row(
                             title: "Blossom Relays",
                             subtitle: "Media storage servers",
                             last: true
                         ) {
-                            SettingsIconTile(
+                            IconTile(
                                 symbol: "photo.on.rectangle.angled",
                                 bg: OnymTile.indigo
                             )
@@ -238,22 +238,22 @@ public struct SettingsView: View {
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("settings.blossom_relays_row")
                 }
-                SettingsFootnote("Nostr relays and Blossom servers carry your messages and media. Replace them with your own instances for maximum privacy.")
+                Footnote("Nostr relays and Blossom servers carry your messages and media. Replace them with your own instances for maximum privacy.")
 
                 // Hidden until the app wires the push stack, like the
                 // other optional sections.
                 if let makeNotificationsSettingsFlow {
-                    SettingsSectionLabel("NOTIFICATIONS")
-                    SettingsCard {
+                    SectionLabel("NOTIFICATIONS")
+                    Card {
                         NavigationLink {
                             NotificationsSettingsView(flow: makeNotificationsSettingsFlow())
                         } label: {
-                            SettingsRow(
+                            Row(
                                 title: "Notifications",
                                 subtitle: "Content-free wakes, off by default",
                                 last: true
                             ) {
-                                SettingsIconTile(
+                                IconTile(
                                     symbol: "bell.badge.fill",
                                     bg: OnymTile.indigo
                                 )
@@ -262,7 +262,7 @@ public struct SettingsView: View {
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("settings.notifications_row")
                     }
-                    SettingsFootnote("Off means no third party ever learns this device wants waking. On hands Onym's push server your inbox codes and Apple a content-free alert — never message content.")
+                    Footnote("Off means no third party ever learns this device wants waking. On hands Onym's push server your inbox codes and Apple a content-free alert — never message content.")
                 }
 
                 // Absent until the app supplies it, like every other
@@ -276,13 +276,13 @@ public struct SettingsView: View {
                 // in: no consent, therefore no section, therefore
                 // nowhere to consent.
                 if makeDeviceBackupView != nil || makeBackupOperatorSettingsFlow != nil {
-                    SettingsSectionLabel("BACKUP")
-                    SettingsCard {
+                    SectionLabel("BACKUP")
+                    Card {
                         if let makeDeviceBackupView {
                             NavigationLink {
                                 makeDeviceBackupView()
                             } label: {
-                                SettingsRow(
+                                Row(
                                     title: "Device Backup",
                                     subtitle: "Sealed copies of this phone's history",
                                     // Last only when the picker row is
@@ -290,7 +290,7 @@ public struct SettingsView: View {
                                     // divider under its final row.
                                     last: makeBackupOperatorSettingsFlow == nil
                                 ) {
-                                    SettingsIconTile(
+                                    IconTile(
                                         symbol: "externaldrive.badge.timemachine",
                                         bg: OnymTile.blue)
                                 }
@@ -302,7 +302,7 @@ public struct SettingsView: View {
                             NavigationLink {
                                 BackupOperatorSettingsView(flow: makeBackupOperatorSettingsFlow())
                             } label: {
-                                SettingsRow(
+                                Row(
                                     title: "Backup Operators",
                                     // Names the second copy on purpose:
                                     // consenting to another operator
@@ -313,7 +313,7 @@ public struct SettingsView: View {
                                     subtitle: "Find an operator to hold a copy",
                                     last: true
                                 ) {
-                                    SettingsIconTile(
+                                    IconTile(
                                         symbol: "externaldrive.badge.plus",
                                         bg: OnymTile.blue)
                                 }
@@ -322,7 +322,7 @@ public struct SettingsView: View {
                             .accessibilityIdentifier("settings.backup_operators_row")
                         }
                     }
-                    SettingsFootnote("A backup is sealed on this phone before it leaves. The operator keeps bytes it cannot read, and only your recovery phrase can open them.")
+                    Footnote("A backup is sealed on this phone before it leaves. The operator keeps bytes it cannot read, and only your recovery phrase can open them.")
                 }
 
                 // The section gates on the two original factories; the
@@ -330,8 +330,8 @@ public struct SettingsView: View {
                 // must not make the whole MODERATION entry vanish for
                 // callers that don't supply it.
                 if let makeModerationSettingsFlow, let makeModerationConsentFlow {
-                    SettingsSectionLabel("MODERATION")
-                    SettingsCard {
+                    SectionLabel("MODERATION")
+                    Card {
                         NavigationLink {
                             ModerationSettingsView(
                                 flow: makeModerationSettingsFlow(),
@@ -339,49 +339,49 @@ public struct SettingsView: View {
                                 makeCaseFlow: makeModerationCaseFlow
                             )
                         } label: {
-                            SettingsRow(
+                            Row(
                                 title: "Moderation",
                                 subtitle: "Your consented authority and its terms",
                                 last: true
                             ) {
-                                SettingsIconTile(symbol: "checkmark.shield", bg: OnymTile.green)
+                                IconTile(symbol: "checkmark.shield", bg: OnymTile.green)
                             }
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("settings.moderation_row")
                     }
-                    SettingsFootnote("The moderation authority handles reports of prohibited content under terms you consented to. You can switch to a different authority at any time.")
+                    Footnote("The moderation authority handles reports of prohibited content under terms you consented to. You can switch to a different authority at any time.")
                 }
 
                 if onRestartOnboarding != nil {
-                    SettingsSectionLabel("SETUP")
-                    SettingsCard {
+                    SectionLabel("SETUP")
+                    Card {
                         Button { showRestartOnboardingConfirm = true } label: {
-                            SettingsRow(
+                            Row(
                                 title: "Restart Onboarding",
                                 subtitle: "Review your service choices again",
                                 hasChevron: false,
                                 last: true
                             ) {
-                                SettingsIconTile(symbol: "arrow.counterclockwise.circle.fill",
+                                IconTile(symbol: "arrow.counterclockwise.circle.fill",
                                                  bg: OnymTile.blue)
                             }
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("settings.restart_onboarding_row")
                     }
-                    SettingsFootnote("Runs the first-launch setup again: message transport, file storage, notary, and moderation. Your identity, chats, and messages are kept, and your current choices stay until you change them.")
+                    Footnote("Runs the first-launch setup again: message transport, file storage, notary, and moderation. Your identity, chats, and messages are kept, and your current choices stay until you change them.")
                 }
 
-                SettingsSectionLabel("DATA")
-                SettingsCard {
-                    SettingsRow(
+                SectionLabel("DATA")
+                Card {
+                    Row(
                         title: "Send read receipts",
                         subtitle: "You'll only see others' read status if this is on",
                         subtitleLineLimit: nil,
                         hasChevron: false
                     ) {
-                        SettingsIconTile(
+                        IconTile(
                             symbol: sendReadReceipts ? "checkmark.message.fill" : "message",
                             bg: sendReadReceipts ? OnymTile.indigo : OnymTile.gray
                         )
@@ -393,20 +393,20 @@ public struct SettingsView: View {
                     }
 
                     Button { showClearConfirm1 = true } label: {
-                        SettingsRow(
+                        Row(
                             title: "Clear Local Message Cache",
                             titleColor: OnymTokens.red,
                             subtitle: "Delete every message on this device. Your chats stay.",
                             hasChevron: false,
                             last: true
                         ) {
-                            SettingsIconTile(symbol: "trash.fill", bg: OnymTile.red)
+                            IconTile(symbol: "trash.fill", bg: OnymTile.red)
                         }
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("settings.clear_messages_row")
                 }
-                SettingsFootnote("Onym keeps no copy of your messages on any server — this device is the only place they live. Cleared messages can’t be downloaded again: relays hold them only briefly and may already have dropped them.")
+                Footnote("Onym keeps no copy of your messages on any server — this device is the only place they live. Cleared messages can’t be downloaded again: relays hold them only briefly and may already have dropped them.")
 
                 watermark
             }
