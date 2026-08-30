@@ -1241,6 +1241,7 @@ struct OnymIOSApp: App {
         // only under the UI-test harness without `--ui-onboarding`.
         let makeOnboardingFlow: (@MainActor () -> OnboardingFlow)?
         let makeOnboardingStepContent: (@MainActor (OnboardingFlow, OnboardingStep) -> AnyView?)?
+        let makeOnboardingStepSecondaryAction: (@MainActor (OnboardingFlow, OnboardingStep) -> AnyView?)?
         let onboardingRestartController: OnboardingRestartController?
         if onboardingAvailable {
             onboardingRestartController = OnboardingRestartController(store: onboardingStore)
@@ -1381,9 +1382,13 @@ struct OnymIOSApp: App {
             makeOnboardingStepContent = { @MainActor flow, step in
                 builder.content(for: step, flow: flow)
             }
+            makeOnboardingStepSecondaryAction = { @MainActor flow, step in
+                builder.secondaryAction(for: step, flow: flow)
+            }
         } else {
             makeOnboardingFlow = nil
             makeOnboardingStepContent = nil
+            makeOnboardingStepSecondaryAction = nil
             onboardingRestartController = nil
         }
 
@@ -1562,7 +1567,8 @@ struct OnymIOSApp: App {
             makeOnboardingFlow: makeOnboardingFlow,
             presentOnboardingAtLaunch: shouldOnboard,
             onboardingRestart: onboardingRestartController,
-            makeOnboardingStepContent: makeOnboardingStepContent
+            makeOnboardingStepContent: makeOnboardingStepContent,
+            makeOnboardingStepSecondaryAction: makeOnboardingStepSecondaryAction
         )
     }
 

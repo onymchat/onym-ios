@@ -229,6 +229,9 @@ struct RootView: View {
                     stepContent: dependencies.makeOnboardingStepContent.map { make in
                         { step in make(flow, step) }
                     },
+                    stepSecondaryAction: dependencies.makeOnboardingStepSecondaryAction.map { make in
+                        { step in make(flow, step) }
+                    },
                     stepIndicator: { index, count in
                         AnyView(StepIndicator(step: index, count: count))
                     }
@@ -378,7 +381,8 @@ struct RootView: View {
                         groupNameForID: { groupID in
                             chatsFlow.groups.first(where: { $0.id == groupID })?.name
                         },
-                        startChats: { chatsFlow.start() }
+                        startChats: { chatsFlow.start() },
+                        onBackToChats: { selectedTab = .chats }
                     )
                     .navigationDestination(for: MessageSearchResult.self) { result in
                         ChatThreadView(

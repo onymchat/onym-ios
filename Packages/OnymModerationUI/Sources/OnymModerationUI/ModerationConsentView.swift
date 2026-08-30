@@ -76,9 +76,17 @@ public struct ModerationConsentView: View {
 /// `ModerationConsentView` does.
 public struct ModerationConsentContent: View {
     private let flow: ModerationConsentFlow
+    /// False where the embedder already carries a title and a sentence
+    /// of its own — the onboarding step's scaffold states "Reports &
+    /// safety" and what an authority is before this view is reached,
+    /// and repeating both here stacked two large titles and two
+    /// paragraphs above the fold, leaving the authorities themselves
+    /// entirely below it.
+    private let showsPickerHeader: Bool
 
-    public init(flow: ModerationConsentFlow) {
+    public init(flow: ModerationConsentFlow, showsPickerHeader: Bool = true) {
         self.flow = flow
+        self.showsPickerHeader = showsPickerHeader
     }
 
     public var body: some View {
@@ -111,13 +119,15 @@ public struct ModerationConsentContent: View {
 
     @ViewBuilder
     private var picker: some View {
-        LargeTitle(pickerTitle)
-        Text(pickerBlurb)
-            .font(OnymType.font(size: 14))
-            .foregroundStyle(OnymTokens.text2)
-            .lineSpacing(3)
-            .padding(.horizontal, 16)
-            .padding(.bottom, 16)
+        if showsPickerHeader {
+            LargeTitle(pickerTitle)
+            Text(pickerBlurb)
+                .font(OnymType.font(size: 14))
+                .foregroundStyle(OnymTokens.text2)
+                .lineSpacing(3)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 16)
+        }
 
         supersededHashes
 

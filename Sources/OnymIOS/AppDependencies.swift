@@ -167,4 +167,9 @@ struct AppDependencies {
     /// the Settings screens use. nil falls back to the package's
     /// built-in step bodies.
     let makeOnboardingStepContent: (@MainActor (OnboardingFlow, OnboardingStep) -> AnyView?)?
+    /// Secondary-action slot for `OnboardingView`: a step's alternative
+    /// to its primary button (today only Welcome's "I have a recovery
+    /// phrase"), rendered in the button stack rather than the scrolling
+    /// body. nil alongside `makeOnboardingStepContent`.
+    let makeOnboardingStepSecondaryAction: (@MainActor (OnboardingFlow, OnboardingStep) -> AnyView?)?
 }

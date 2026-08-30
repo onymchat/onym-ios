@@ -15,6 +15,7 @@ public struct ShareInviteView: View {
     let onDone: () -> Void
 
     @State private var copied = false
+    @Environment(\.colorScheme) private var colorScheme
 
     public init(groupID: String, flow: ShareInviteFlow, onDone: @escaping () -> Void) {
         self.groupID = groupID
@@ -137,21 +138,29 @@ public struct ShareInviteView: View {
     }
 
     private var topBar: some View {
-        HStack {
-            Spacer().frame(width: 60)
-            Spacer()
+        // The title is centred on the bar, not balanced against a
+        // guessed-at 60pt spacer on one side and a Done button of
+        // whatever width on the other — that arrangement put "Invite"
+        // left of centre, and moved it again in any language where Done
+        // is a longer word. Overlaying the two lets each sit where it
+        // belongs.
+        ZStack {
             Text("Invite")
                 .font(OnymType.font(size: 15, weight: .semibold))
                 .foregroundStyle(OnymTokens.text)
-            Spacer()
-            Button("Done", action: onDone)
-                .font(OnymType.font(size: 14, weight: .semibold))
-                .foregroundStyle(OnymTokens.text2)
-                .accessibilityIdentifier("share_invite.done_button")
+            HStack {
+                Spacer()
+                Button("Done", action: onDone)
+                    .font(OnymType.font(size: 14, weight: .semibold))
+                    .foregroundStyle(OnymTokens.text2)
+                    .accessibilityIdentifier("share_invite.done_button")
+            }
         }
         .padding(.horizontal, 16)
-        .padding(.top, 6)
-        .padding(.bottom, 8)
+        // Clear of the sheet's grabber, which sat right on top of the
+        // old 6pt.
+        .padding(.top, 14)
+        .padding(.bottom, 10)
     }
 
     @ViewBuilder
@@ -248,9 +257,28 @@ public struct ShareInviteView: View {
             }
             .accessibilityIdentifier("share_invite.skip_button")
         }
+        // Full width, or the bar is only as wide as the words in it —
+        // which the old same-colour background hid and a shadow does
+        // not: it drew a floating panel around "I'll do this later".
+        .frame(maxWidth: .infinity)
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 22)
-        .background(OnymTokens.bg)
+        // Opaque, with a soft shadow cast upward: the QR and the share
+        // button scroll under this bar, and without an edge the button
+        // simply ended mid-stroke as though it had been cropped.
+        .background {
+            Rectangle()
+                .fill(OnymTokens.bg)
+                .shadow(color: footerShadow, radius: 5, y: -2)
+                .ignoresSafeArea(edges: .bottom)
+        }
+    }
+
+    /// A dark shadow separates nothing on a dark page — the footer's
+    /// fill and the page behind it are the same token — so the edge is
+    /// lifted with light there instead.
+    private var footerShadow: Color {
+        colorScheme == .dark ? .white.opacity(0.18) : .black.opacity(0.10)
     }
 }

@@ -278,6 +278,39 @@ public struct ChatsView: View {
     // MARK: - Empty state
 
     private var emptyState: some View {
+        // Centred when it fits, scrollable when it doesn't. Laid out
+        // flat, this pitch is taller than a short screen: the subtitle
+        // truncated mid-sentence and "Scan a QR to join" ended up
+        // underneath the tab bar, unreadable and unreachable, with no
+        // way to scroll to it. The min-height keeps the centring on a
+        // roomy screen — the content only starts scrolling once it has
+        // more to say than the screen can hold.
+        GeometryReader { proxy in
+            ScrollView {
+                emptyStateContent
+                    .frame(
+                        maxWidth: .infinity,
+                        minHeight: max(0, proxy.size.height - Self.tabBarAllowance)
+                    )
+                    // Real padding, not a content margin: the margin
+                    // left the content the same height, so a pitch that
+                    // reached the bar had nothing to scroll into.
+                    .padding(.bottom, Self.tabBarAllowance)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+        }
+    }
+
+    /// Room to leave under this screen's content for the floating tab
+    /// bar. The bar overlays the tab's content without narrowing it —
+    /// nothing here is inset for it, and a scroll view left to itself
+    /// runs its last control underneath the glass, visible through it
+    /// but untappable. Measured off the bar's own frame (≈109pt on a
+    /// 468×834 canvas, less on a phone); rounded down, since a little
+    /// of the gap above the bar is fair game.
+    private static let tabBarAllowance: CGFloat = 96
+
+    private var emptyStateContent: some View {
         VStack(spacing: 0) {
             Spacer(minLength: 0)
 
@@ -289,7 +322,7 @@ public struct ChatsView: View {
                     .font(OnymType.fixed(size: 42))
                     .foregroundStyle(Color.accentColor)
             }
-            .padding(.bottom, 20)
+            .padding(.bottom, 10)
 
             // Lead with the value, not "you have nothing" — turn the empty
             // state into a pitch for starting the first chat.
@@ -320,7 +353,7 @@ public struct ChatsView: View {
                 )
             }
             .padding(.horizontal, 32)
-            .padding(.top, 28)
+            .padding(.top, 16)
 
             Button {
                 showCreateGroup = true
@@ -331,7 +364,7 @@ public struct ChatsView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            .padding(.top, 32)
+            .padding(.top, 18)
             .accessibilityIdentifier("chats.create_group_empty_cta")
 
             Button {
@@ -341,12 +374,12 @@ public struct ChatsView: View {
                     .font(.subheadline.weight(.medium))
             }
             .buttonStyle(.borderless)
-            .padding(.top, 18)
+            .padding(.top, 14)
             .accessibilityIdentifier("chats.scan_join_empty_cta")
 
             Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity)
     }
 
     /// One privacy-benefit line in the empty state: accent icon + a bold

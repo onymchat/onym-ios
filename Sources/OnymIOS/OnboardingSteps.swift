@@ -62,11 +62,7 @@ struct OnboardingStepContentBuilder {
     func content(for step: OnboardingStep, flow: OnboardingFlow) -> AnyView? {
         switch step {
         case .welcome:
-            return AnyView(OnboardingWelcomeContent(
-                onboarding: flow,
-                identityRestore: identityRestore,
-                identityRestoreAllowed: identityRestoreAllowed
-            ))
+            return AnyView(OnboardingWelcomeContent())
         case .identity:
             return AnyView(OnboardingIdentityContent(
                 onboarding: flow,
@@ -93,6 +89,24 @@ struct OnboardingStepContentBuilder {
                 loadSummary: loadSummary
             ))
         }
+    }
+
+    /// A step's alternative action, rendered by the scaffold under the
+    /// primary button. Only Welcome has one: restoring from a phrase
+    /// is the genuine second answer to "Create my identity", and it
+    /// belongs beside that button rather than at the end of the
+    /// scrolling body — on an iPad the body ends well above the fold,
+    /// leaving the link clumped against the last card.
+    func secondaryAction(for step: OnboardingStep, flow: OnboardingFlow) -> AnyView? {
+        // Hidden on a Settings → Restart Onboarding walk: that path
+        // keeps identity/chats/messages by design, and
+        // `restore(mnemonic:)` wipes all of it — this affordance must
+        // only ever be reachable where nothing is at stake.
+        guard step == .welcome, identityRestoreAllowed else { return nil }
+        return AnyView(OnboardingRestoreButton(
+            onboarding: flow,
+            identityRestore: identityRestore
+        ))
     }
 }
 
@@ -237,10 +251,6 @@ private struct OnboardingSectionLabel: View {
 /// subtitle. The identity bootstrap stays silent — it already runs in
 /// the WindowGroup task; nothing here mentions or blocks on it.
 struct OnboardingWelcomeContent: View {
-    let onboarding: OnboardingFlow
-    let identityRestore: @MainActor (String) async throws -> Void
-    let identityRestoreAllowed: Bool
-    @State private var showRestore = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -265,29 +275,6 @@ struct OnboardingWelcomeContent: View {
             .padding(16)
             .background(OnymTokens.surface2,
                         in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-
-            // Hidden on a Settings → Restart Onboarding walk: that
-            // path keeps identity/chats/messages by design, and
-            // `restore(mnemonic:)` wipes all of it — this affordance
-            // must only ever be reachable where nothing is at stake.
-            if identityRestoreAllowed {
-                Button {
-                    showRestore = true
-                } label: {
-                    Text("I have a recovery phrase")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(OnymAccent.blue.color)
-                }
-                .padding(.top, 18)
-                .accessibilityIdentifier("onboarding.welcome.restore")
-            }
-        }
-        .sheet(isPresented: $showRestore) {
-            OnboardingRestoreSheet(identityRestore: identityRestore) {
-                showRestore = false
-                onboarding.identityOrigin = .restored
-                onboarding.advance()
-            }
         }
     }
 
@@ -301,6 +288,35 @@ struct OnboardingWelcomeContent: View {
                 .font(.system(size: 14))
                 .foregroundStyle(OnymTokens.text2)
                 .lineSpacing(2)
+        }
+    }
+}
+
+/// The welcome step's "I have a recovery phrase" affordance, handed
+/// to the scaffold's secondary slot so it sits under "Create my
+/// identity" instead of trailing the scrolling body. Owns the sheet
+/// it presents, and advances the flow only once the restore lands.
+private struct OnboardingRestoreButton: View {
+    let onboarding: OnboardingFlow
+    let identityRestore: @MainActor (String) async throws -> Void
+    @State private var showRestore = false
+
+    var body: some View {
+        Button {
+            showRestore = true
+        } label: {
+            // The scaffold's own secondary look, so this button and
+            // the Skip/Back it stacks with are one family.
+            Text("I have a recovery phrase").onboardingSecondaryLabel()
+        }
+        .buttonStyle(.bordered)
+        .accessibilityIdentifier("onboarding.welcome.restore")
+        .sheet(isPresented: $showRestore) {
+            OnboardingRestoreSheet(identityRestore: identityRestore) {
+                showRestore = false
+                onboarding.identityOrigin = .restored
+                onboarding.advance()
+            }
         }
     }
 }
@@ -1688,7 +1704,9 @@ struct OnboardingModerationContent: View {
                     .padding(.bottom, 8)
             }
 
-            ModerationConsentContent(flow: flow)
+            // Header suppressed: the scaffold above already reads
+            // "Reports & safety" and explains what an authority does.
+            ModerationConsentContent(flow: flow, showsPickerHeader: false)
                 // The content carries the Settings pages' own
                 // horizontal insets; pull them back to the scaffold's.
                 .padding(.horizontal, -16)

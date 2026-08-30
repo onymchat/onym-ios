@@ -145,10 +145,17 @@ targets:
         # Networking is the category Apple files messaging apps under
         # (Messages, WhatsApp, Signal, Telegram all live there).
         LSApplicationCategoryType: public.app-category.social-networking
+        # Portrait only. The app is iPhone-only
+        # (TARGETED_DEVICE_FAMILY 1), so on an iPad it runs in the
+        # compatibility window — and every screen here is laid out for
+        # one hand on a phone-width canvas. Allowing landscape bought
+        # nothing but a second set of proportions to maintain, and it
+        # is what let the iPad's landscape window pick a shape none of
+        # these screens were designed against. Note this also pins
+        # full-screen media playback to portrait: there is no way to
+        # exceed the app's own ceiling from a view controller.
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
-          - UIInterfaceOrientationLandscapeLeft
-          - UIInterfaceOrientationLandscapeRight
         # PR-6: custom URL scheme for the Level-2 deeplink invite
         # fallback. `onym://join?c=…` lands in `.onOpenURL`. The
         # CFBundleURLName uses bundle-prefix namespacing per Apple

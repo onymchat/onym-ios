@@ -192,6 +192,13 @@ final class ChatThreadViewController: UIViewController {
     // `interactivePopGestureRecognizer` (it points at UIKit's private
     // navigation-transition driver) and attach it to our own pan. The
     // edge recognizer stays delegate-gated so the two don't fight.
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // Bounds changes (keyboard, rotation, first layout) move the
+        // line the content has to reach to fill the screen.
+        alignShortContentToBottom()
+    }
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         installFullWidthPopGesture()
@@ -703,14 +710,12 @@ final class ChatThreadViewController: UIViewController {
         // Resolve pending inserts/heights so `contentSize` below is the
         // post-update one, not the size from before this row landed.
         tableView.layoutIfNeeded()
-        let inset = tableView.adjustedContentInset
-        let target = max(
-            -inset.top,
-            tableView.contentSize.height + inset.bottom - tableView.bounds.height
-        )
+        alignShortContentToBottom()
+        let target = bottomContentOffsetY()
         guard abs(target - tableView.contentOffset.y) > 0.5 else { return }
         guard animated else {
             tableView.contentOffset.y = target
+            settleAtBottom(animated: false)
             return
         }
         UIView.animate(
@@ -719,7 +724,83 @@ final class ChatThreadViewController: UIViewController {
             options: [.curveEaseOut, .beginFromCurrentState]
         ) {
             self.tableView.contentOffset.y = target
+        } completion: { [weak self] _ in
+            guard let self else { return }
+            // Only correct a scroll that actually landed where it aimed
+            // — if the user took the table over mid-animation, their
+            // position wins.
+            guard abs(self.tableView.contentOffset.y - target) < 1 else { return }
+            self.settleAtBottom(animated: true)
         }
+    }
+
+    /// Close the gap left by a row that was measured from the table's
+    /// *estimate*.
+    ///
+    /// The row we scroll to is below the viewport when `scrollToBottom`
+    /// computes its target, so the table sizes it from
+    /// `estimatedRowHeight` (or the cached measurement, which a fresh
+    /// row has none of) rather than from a real layout pass. An outgoing
+    /// bubble is taller than the estimate — it carries the delivery
+    /// glyph in a strip below the bubble — so the computed bottom sat
+    /// short by exactly that strip, and a just-sent message showed its
+    /// bubble with the checkmarks cut off beneath the viewport.
+    ///
+    /// Once the row is on screen the table replaces the estimate with
+    /// the measured height and `contentSize` grows; re-deriving the
+    /// bottom here scrolls the remainder. Short and eased so it reads as
+    /// the tail of the same motion, not a second scroll.
+    private func settleAtBottom(animated: Bool) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.tableView.layoutIfNeeded()
+            self.alignShortContentToBottom()
+            let corrected = self.bottomContentOffsetY()
+            let delta = corrected - self.tableView.contentOffset.y
+            guard delta > 0.5 else { return }
+            guard animated else {
+                self.tableView.contentOffset.y = corrected
+                return
+            }
+            UIView.animate(
+                withDuration: 0.15,
+                delay: 0,
+                options: [.curveEaseOut, .beginFromCurrentState]
+            ) {
+                self.tableView.contentOffset.y = corrected
+            }
+        }
+    }
+
+    /// Hold a thread too short to fill the screen against the bottom of
+    /// it, where the composer is.
+    ///
+    /// A table lays its rows out from the top, so the first few messages
+    /// in a new group sat under the navigation bar with the rest of the
+    /// screen empty beneath them — the conversation reading as though it
+    /// had been abandoned mid-screen rather than just started. Padding
+    /// the top by whatever the content leaves over puts them where every
+    /// other messenger puts them: just above the composer, growing
+    /// upward. The padding falls to zero the moment the thread is long
+    /// enough to scroll, so nothing changes for a full one.
+    private func alignShortContentToBottom() {
+        let safe = tableView.safeAreaInsets
+        let viewport = tableView.bounds.height - safe.top - safe.bottom
+        guard viewport > 0 else { return }
+        let gap = max(0, viewport - tableView.contentSize.height)
+        guard abs(tableView.contentInset.top - gap) > 0.5 else { return }
+        tableView.contentInset.top = gap
+    }
+
+    /// The content offset that puts the end of the content flush with
+    /// the bottom of the viewport, clamped to the top of the scrollable
+    /// range for content shorter than the table.
+    private func bottomContentOffsetY() -> CGFloat {
+        let inset = tableView.adjustedContentInset
+        return max(
+            -inset.top,
+            tableView.contentSize.height + inset.bottom - tableView.bounds.height
+        )
     }
 
     // MARK: - Table view (message list)

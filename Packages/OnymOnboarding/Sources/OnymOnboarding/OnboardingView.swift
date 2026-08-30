@@ -27,6 +27,11 @@ public struct OnboardingView: View {
     /// the Welcome/Done bodies, and a placeholder card for the middle
     /// steps.
     private let stepContent: (OnboardingStep) -> AnyView?
+    /// App-supplied alternative action for a step, rendered in the
+    /// scaffold's button stack under the primary rather than inside
+    /// the scrolling body. Return nil for steps that have none — which
+    /// is every step but Welcome today.
+    private let stepSecondaryAction: (OnboardingStep) -> AnyView?
     /// App-supplied step indicator, given (zero-based index, count).
     /// Only rendered on the steps the indicator counts — the three
     /// core steps; welcome, recoveryPhrase and done are unnumbered.
@@ -35,10 +40,12 @@ public struct OnboardingView: View {
     public init(
         flow: OnboardingFlow,
         stepContent: ((OnboardingStep) -> AnyView?)? = nil,
+        stepSecondaryAction: ((OnboardingStep) -> AnyView?)? = nil,
         stepIndicator: ((Int, Int) -> AnyView)? = nil
     ) {
         _flow = State(initialValue: flow)
         self.stepContent = stepContent ?? { _ in nil }
+        self.stepSecondaryAction = stepSecondaryAction ?? { _ in nil }
         self.stepIndicator = stepIndicator ?? { index, count in
             AnyView(DefaultStepIndicator(index: index, count: count))
         }
@@ -64,6 +71,7 @@ public struct OnboardingView: View {
             // guard as the second layer.
             primaryDisabled: flow.requiresOutcomeToAdvance(step) && !flow.outcomeSatisfiesGate(step),
             primaryAction: { primaryTapped() },
+            secondaryAction: stepSecondaryAction(step),
             skipTitle: Self.skipTitle(for: step),
             skipAction: flow.isSkippable(step) ? { flow.skip() } : nil,
             // While the directory probe is unresolved, moderation's

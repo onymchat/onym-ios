@@ -16,6 +16,11 @@ public struct SearchView: View {
     @Bindable var identitiesFlow: IdentitiesFlow
     let groupNameForID: @MainActor (String) -> String?
     let startChats: @MainActor () -> Void
+    /// Leaves the Search tab for Chats. The search role hands its tab
+    /// its own slot and takes the tab strip away while it is showing,
+    /// so with the keyboard up there is nothing on screen to leave by —
+    /// this is the way out.
+    let onBackToChats: @MainActor () -> Void
 
     @State private var query = ""
     @State private var results: [MessageSearchResult] = []
@@ -24,12 +29,14 @@ public struct SearchView: View {
         messageRepository: MessageRepository,
         identitiesFlow: IdentitiesFlow,
         groupNameForID: @escaping @MainActor (String) -> String?,
-        startChats: @escaping @MainActor () -> Void
+        startChats: @escaping @MainActor () -> Void,
+        onBackToChats: @escaping @MainActor () -> Void
     ) {
         self.messageRepository = messageRepository
         self.identitiesFlow = identitiesFlow
         self.groupNameForID = groupNameForID
         self.startChats = startChats
+        self.onBackToChats = onBackToChats
     }
 
     public var body: some View {
@@ -53,11 +60,15 @@ public struct SearchView: View {
     private var emptyState: some View {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
-            ContentUnavailableView(
-                "Search Messages",
-                systemImage: "magnifyingglass",
-                description: Text("Find messages across all your chats.")
-            )
+            ContentUnavailableView {
+                Label("Search Messages", systemImage: "magnifyingglass")
+            } description: {
+                Text("Find messages across all your chats.")
+            } actions: {
+                Button("Back to chats", action: onBackToChats)
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("search.back_to_chats")
+            }
         } else if results.isEmpty {
             ContentUnavailableView.search(text: trimmed)
         }

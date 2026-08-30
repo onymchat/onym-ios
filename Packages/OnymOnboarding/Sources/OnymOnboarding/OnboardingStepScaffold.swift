@@ -24,6 +24,12 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
     /// is the second layer of the same rule).
     private let primaryDisabled: Bool
     private let primaryAction: () -> Void
+    /// A step's alternative action, rendered as its own button
+    /// directly under the primary — the welcome step's "I have a
+    /// recovery phrase". Type-erased rather than a third generic
+    /// parameter so every existing call site keeps its two trailing
+    /// closures. nil for the steps that offer no alternative.
+    private let secondaryAction: AnyView?
     /// Label for the Skip affordance — the recovery step reads
     /// "Remind me later"; the default is "Skip".
     private let skipTitle: String
@@ -41,6 +47,7 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
     private let showsIndicator: Bool
     private let content: Content
     private let indicator: Indicator
+    @Environment(\.colorScheme) private var colorScheme
 
     public init(
         step: OnboardingStep,
@@ -49,6 +56,7 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
         primaryTitle: String,
         primaryDisabled: Bool = false,
         primaryAction: @escaping () -> Void,
+        secondaryAction: AnyView? = nil,
         skipTitle: String = String(localized: "Skip"),
         skipAction: (() -> Void)? = nil,
         showsSkipProgress: Bool = false,
@@ -63,6 +71,7 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
         self.primaryTitle = primaryTitle
         self.primaryDisabled = primaryDisabled
         self.primaryAction = primaryAction
+        self.secondaryAction = secondaryAction
         self.skipTitle = skipTitle
         self.skipAction = skipAction
         self.showsSkipProgress = showsSkipProgress
@@ -112,15 +121,25 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
                 .disabled(primaryDisabled)
                 .accessibilityIdentifier("onboarding.\(step.rawValue).primary")
 
-                // Secondary actions stack centered under the primary
-                // (the design's quiet text buttons) — a corner-pinned
-                // Back read as page chrome, not as this screen's
-                // alternative action.
+                // A real alternative to the primary sits with it, in
+                // the button stack — not in the scrolling body, where
+                // on a wide iPad it lands under a short page of
+                // content and reads as part of the last card.
+                if let secondaryAction {
+                    secondaryAction
+                }
+
+                // The remaining actions stack under the primary, in
+                // the same secondary look — a corner-pinned Back read
+                // as page chrome, not as this screen's alternative
+                // action, and a plain text Skip beneath two real
+                // buttons read as a footnote to them.
                 if let skipAction {
-                    Button(action: skipAction) { Text(verbatim: skipTitle) }
-                        .font(.subheadline)
-                        .frame(maxWidth: .infinity)
-                        .accessibilityIdentifier("onboarding.\(step.rawValue).skip")
+                    Button(action: skipAction) {
+                        Text(verbatim: skipTitle).onboardingSecondaryLabel()
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("onboarding.\(step.rawValue).skip")
                 } else if showsSkipProgress {
                     ProgressView()
                         .controlSize(.small)
@@ -128,15 +147,61 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
                         .accessibilityIdentifier("onboarding.\(step.rawValue).skip_pending")
                 }
                 if let backAction {
-                    Button("Back", action: backAction)
-                        .font(.subheadline)
-                        .frame(maxWidth: .infinity)
-                        .accessibilityIdentifier("onboarding.\(step.rawValue).back")
+                    Button(action: backAction) {
+                        Text("Back").onboardingSecondaryLabel()
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("onboarding.\(step.rawValue).back")
                 }
             }
             .padding(.horizontal, 20)
             .padding(.top, 12)
             .padding(.bottom, 16)
+            // The footer is opaque, and casts a soft shadow upward so
+            // the body reads as scrolling *under* it rather than
+            // stopping short of it. Drawn as a rectangle behind the
+            // stack (not a shadow on the stack itself, which would
+            // outline each button), offset up so the visible edge is
+            // the top one; what spills downward lands on the screen's
+            // bottom edge, past everything.
+            .background {
+                Rectangle()
+                    .fill(.background)
+                    .shadow(color: footerShadow, radius: 5, y: -2)
+                    // Run the rectangle to the screen's bottom edge, so
+                    // the shadow it also casts downward falls off the
+                    // screen instead of banding across the home-indicator
+                    // strip below the buttons.
+                    .ignoresSafeArea(edges: .bottom)
+            }
         }
+    }
+
+    /// The footer's separating shadow. A dark shadow does nothing on a
+    /// dark page — the footer's fill and the body behind it are both
+    /// near-black — so the edge is lifted with light there instead,
+    /// which is the only direction that reads.
+    private var footerShadow: Color {
+        colorScheme == .dark ? .white.opacity(0.18) : .black.opacity(0.10)
+    }
+}
+
+/// The footer's secondary look: a button at the primary's metrics,
+/// carrying its weight through the border rather than a fill. Public
+/// so an app-supplied secondary action (the welcome step's "I have a
+/// recovery phrase") matches the ones the scaffold draws itself —
+/// apply it to the label and pair it with `.buttonStyle(.bordered)`.
+public struct OnboardingSecondaryLabel: ViewModifier {
+    public func body(content: Content) -> some View {
+        content
+            .font(.headline)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+    }
+}
+
+extension View {
+    public func onboardingSecondaryLabel() -> some View {
+        modifier(OnboardingSecondaryLabel())
     }
 }

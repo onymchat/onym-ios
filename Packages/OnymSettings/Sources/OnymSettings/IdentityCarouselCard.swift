@@ -226,10 +226,15 @@ struct IdentityCarouselCard: View {
             .padding(.top, 2)
         }
         .padding(20)
-        // Measure the natural content height first, then fill the carousel
-        // frame so every page occupies the same area (uniform swipe surface).
+        // Measure the page at its natural height, and leave it there.
+        // Filling the carousel frame as well fed the measurement its own
+        // result — page reports height → frame takes it → page grows to
+        // the frame → reports again — and the never-settling relayout
+        // that produced stopped the Settings page underneath from
+        // scrolling at all. The paged TabView already spans the frame,
+        // so the swipe surface is uniform without the page stretching.
         .background(carouselHeightReader)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .frame(maxWidth: .infinity, alignment: .top)
     }
 
     private func carouselAction(
@@ -328,10 +333,15 @@ struct IdentityCarouselCard: View {
             }
         }
         .padding(20)
-        // Measure the natural content height first, then fill the carousel
-        // frame so every page occupies the same area (uniform swipe surface).
+        // Measure the page at its natural height, and leave it there.
+        // Filling the carousel frame as well fed the measurement its own
+        // result — page reports height → frame takes it → page grows to
+        // the frame → reports again — and the never-settling relayout
+        // that produced stopped the Settings page underneath from
+        // scrolling at all. The paged TabView already spans the frame,
+        // so the swipe surface is uniform without the page stretching.
         .background(carouselHeightReader)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .frame(maxWidth: .infinity, alignment: .top)
     }
 }
 

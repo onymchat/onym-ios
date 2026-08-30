@@ -21,6 +21,13 @@ public struct BackupEnrolmentView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var scrolledToEnd = false
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// A dark shadow separates nothing on a dark page — footer and page
+    /// are the same token there — so the edge is lifted with light.
+    private var footerShadow: Color {
+        colorScheme == .dark ? .white.opacity(0.18) : .black.opacity(0.10)
+    }
 
     public init(flow: BackupEnrolmentFlow, onEnrolled: @escaping () -> Void = {}) {
         self.flow = flow
@@ -166,20 +173,45 @@ public struct BackupEnrolmentView: View {
             if reachedEnd { scrolledToEnd = true }
         }
         .safeAreaInset(edge: .bottom) {
-            VStack(spacing: 10) {
+            VStack(spacing: 12) {
                 Button { flow.accept() } label: {
                     Text("Turn On Backup")
+                        .font(.headline)
                         .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!scrolledToEnd)
                 .accessibilityIdentifier("backup.enrolment.accept")
 
-                Button("Not Now") { dismiss() }
-                    .accessibilityIdentifier("backup.enrolment.cancel")
+                // The other answer to "Turn On Backup", at the same
+                // metrics — a bare text link under a full-width button
+                // read as a footnote to it rather than the decision it
+                // is, and this is the screen where declining has to
+                // look like a choice.
+                Button { dismiss() } label: {
+                    Text("Not Now")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("backup.enrolment.cancel")
             }
-            .padding(16)
-            .background(.bar)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 16)
+            // Opaque page colour with a soft edge cast upward, like the
+            // app's other footers. `.bar` put a grey band under a white
+            // page — a different surface rather than the same one,
+            // separated.
+            .background {
+                Rectangle()
+                    .fill(OnymTokens.bg)
+                    .shadow(color: footerShadow, radius: 5, y: -2)
+                    .ignoresSafeArea(edges: .bottom)
+            }
         }
     }
 
