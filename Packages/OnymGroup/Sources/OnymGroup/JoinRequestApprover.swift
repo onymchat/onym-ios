@@ -196,6 +196,14 @@ public actor JoinRequestApprover: JoinRequestApproving {
         /// of the group, and the founder can do something about that
         /// (approve from the device that last anchored, or restore it)
         /// where "the chain said no" leaves them nowhere.
+        ///
+        /// `localEpoch` is what this device holds *after* any correction
+        /// the reconcile handed back has been persisted, not what it
+        /// held when the approval started — the founder reads it next to
+        /// `chainEpoch`, and describing a state that no longer exists
+        /// would send them to restore a backup over current data. The
+        /// two can therefore be equal: the epochs agreeing while the
+        /// commitment does not is a real shape of this failure.
         case staleGroupState(localEpoch: UInt64, chainEpoch: UInt64)
     }
 
@@ -934,6 +942,11 @@ public actor JoinRequestApprover: JoinRequestApproving {
             case .failed(let outcome):
                 return .failed(outcome, reconciled: adopted.group)
             case .stale:
+                // The adopted state is handed back to be persisted, so
+                // by the time the founder reads this the device holds
+                // `adopted.group.epoch` — which `adoptLandedAnchor` set
+                // to the chain's own. Reporting the pre-adopt epoch
+                // would describe a device that no longer exists.
                 return .failed(
                     .staleGroupState(
                         localEpoch: adopted.group.epoch,
@@ -964,8 +977,13 @@ public actor JoinRequestApprover: JoinRequestApproving {
         // offer; a loop here would just re-prove into the same wall for
         // 3-5 seconds a go.
         case .stale:
+            // `rebased`, not `group`: the rebase is persisted on the way
+            // out, so the epoch this device holds afterwards is the
+            // chain's. Naming the epoch it held before would tell the
+            // founder to restore a backup over state that is already
+            // current.
             return .failed(
-                .staleGroupState(localEpoch: group.epoch, chainEpoch: entry.epoch),
+                .staleGroupState(localEpoch: rebased.epoch, chainEpoch: entry.epoch),
                 reconciled: rebased
             )
         }
@@ -985,7 +1003,14 @@ public actor JoinRequestApprover: JoinRequestApproving {
     /// attempt that produced *this* state proved from that same epoch,
     /// so it goes too.
     private func settleAnchor(_ group: ChatGroup) async {
-        await groupRepository.insert(group)
+        let outcome = await groupRepository.insert(group)
+        // `.failed` means nothing was written. Sweeping anyway would
+        // destroy the only evidence of a chain state the device did not
+        // keep — the records would go and the group would still name
+        // the epoch before them, which is the unrecoverable shape
+        // exactly. Leaving them costs a few stale rows; the next
+        // approval's reconcile finds them and tries again.
+        guard outcome != .failed else { return }
         guard group.epoch > 0 else { return }
         await pendingAnchors.clear(
             groupID: group.groupIDData,

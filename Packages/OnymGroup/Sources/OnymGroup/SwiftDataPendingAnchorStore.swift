@@ -59,18 +59,10 @@ public actor SwiftDataPendingAnchorStore: PendingAnchorStore {
     // MARK: - PendingAnchorStore
 
     public func record(_ anchor: PendingAnchor) async throws {
-        // An attempt from an epoch this one has already left cannot be
-        // waiting to land any more. Swept on the way in so a group that
-        // keeps failing doesn't carry rows that can no longer explain
-        // anything.
-        if anchor.epochOld > 0 {
-            deleteRows(
-                groupIDHex: anchor.groupID.hexString,
-                ownerIdentityID: anchor.ownerIdentityID,
-                throughEpoch: anchor.epochOld - 1
-            )
-        }
-
+        // Adds only — see the protocol. The epoch an attempt proves
+        // from is not always one this device has persisted, so a sweep
+        // here can delete the record for a landed transaction while the
+        // group on disk still names the epoch before it.
         let row: PersistedPendingAnchor
         do {
             row = PersistedPendingAnchor(

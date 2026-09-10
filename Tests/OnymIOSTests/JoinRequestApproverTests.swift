@@ -802,13 +802,37 @@ final class JoinRequestApproverTests: XCTestCase {
         )
     }
 
+    /// A persist that answers `.failed` wrote nothing, and sweeping
+    /// after it would destroy the only evidence of a chain state the
+    /// device did not keep — records gone, group still naming the epoch
+    /// before them, which is the unrecoverable shape exactly.
+    func test_approve_whenTheAdvanceCannotBePersisted_keepsTheRecords() async throws {
+        // Swap the repository for one whose store refuses writes, so the
+        // anchor succeeds on chain and the local advance does not land.
+        groups = GroupRepository(store: ApproverRefusingGroupStore())
+        let env = try await seedEnvironment()
+        await env.approver.pumpOnce()
+
+        _ = await env.approver.approve(requestId: env.requestID)
+
+        let ownerID = try await XCTUnwrapAsync(await identity.currentSelectedID())
+        let leftover = await pendingAnchors.pending(
+            groupID: env.groupID,
+            ownerIdentityID: ownerID
+        )
+        XCTAssertEqual(
+            leftover.count, 1,
+            "a write that persisted nothing must not sweep the evidence"
+        )
+    }
+
     /// A salt that cannot be kept is a refusal to submit. Carrying on
     /// would put the group one lost response away from never accepting
     /// another member — the exact state the record exists to prevent.
     func test_approve_whenThePendingAnchorCannotBeRecorded_doesNotSubmit() async throws {
-        let store = InMemoryPendingAnchorStore()
-        await store.failRecords(with: URLError(.cannotWriteToFile))
-        let env = try await seedEnvironment(pendingAnchors: store)
+        let env = try await seedEnvironment(
+            pendingAnchors: ApproverFailingPendingAnchorStore()
+        )
         await env.approver.pumpOnce()
 
         let outcome = await env.approver.approve(requestId: env.requestID)
@@ -1304,6 +1328,42 @@ private final class ApproverStubContractTransport: SEPContractTransport, @unchec
 
 private enum ApproverStubContractError: Error {
     case noCommitmentConfigured
+}
+
+/// A `PendingAnchorStore` that cannot keep anything. Lives here rather
+/// than as a flag on `InMemoryPendingAnchorStore` — that type is a
+/// production fallback, and a way to make it fail on demand has no
+/// business shipping in the app.
+private struct ApproverFailingPendingAnchorStore: PendingAnchorStore {
+    struct Full: Error {}
+    func record(_ anchor: PendingAnchor) async throws { throw Full() }
+    func pending(groupID: Data, ownerIdentityID: IdentityID) async -> [PendingAnchor] { [] }
+    func clear(groupID: Data, ownerIdentityID: IdentityID, throughEpoch: UInt64) async {}
+}
+
+/// A `GroupStore` that keeps rows in memory but answers `.failed` to
+/// every write — the "encode gave way" path, which persists nothing
+/// while the caller carries on holding the value it meant to save.
+private actor ApproverRefusingGroupStore: GroupStore {
+    private var rows: [ChatGroup] = []
+
+    func list() async -> [ChatGroup] { rows }
+
+    func insertOrUpdate(_ group: ChatGroup) async -> GroupInsertOutcome {
+        // The seed's own insert has to land, or there is no group to
+        // approve into; only the anchor's advance is refused.
+        guard rows.contains(where: { $0.id == group.id && $0.epoch != group.epoch }) else {
+            rows.removeAll { $0.id == group.id }
+            rows.append(group)
+            return .inserted
+        }
+        return .failed
+    }
+
+    func markPublished(id: String, ownerIDString: String, commitment: Data?) async {}
+    func markRead(id: String, ownerIDString: String, at date: Date) async {}
+    func delete(id: String, ownerIDString: String) async {}
+    func deleteOwner(_ ownerIDString: String) async {}
 }
 
 /// Static `NetworkPreferenceProviding` for tests.

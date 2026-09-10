@@ -77,9 +77,24 @@ public protocol PendingAnchorStore: Sendable {
 
     /// Write down an attempt about to be submitted.
     ///
-    /// Attempts from epochs the group has already left are swept here
-    /// too, so a group that fails repeatedly doesn't accumulate rows
-    /// that can no longer explain anything.
+    /// Adds only. Sweeping older epochs from here looks tempting — the
+    /// chain has left them, so they read as dead — but the epoch this
+    /// attempt proves *from* is not always one this device has
+    /// persisted. The reconcile retries from an adopted state before
+    /// `settleAnchor` writes it down, so a sweep here would delete the
+    /// record identifying the landed transaction while the group on
+    /// disk still says the epoch before it. A crash in that window and
+    /// the salt is gone for good — the exact state this store exists to
+    /// prevent.
+    ///
+    /// So only `clear`, called after the advance is persisted, may
+    /// delete. Rows do accumulate while a group is stuck: one or two
+    /// per Accept the founder taps at an epoch that never advances.
+    /// That is deliberate. Every one of them is a candidate for having
+    /// landed — the *oldest* most of all, since the first tap is
+    /// usually the one whose answer went missing — so there is no row
+    /// here that can be dropped on age or count without risking the
+    /// roster it would have unfrozen.
     func record(_ anchor: PendingAnchor) async throws
 
     /// Every attempt recorded for this group that could still be
@@ -106,23 +121,17 @@ public struct NoopPendingAnchorStore: PendingAnchorStore {
 ///
 /// The fallback when the on-disk store won't open, and what tests use
 /// when they only need the recovery logic rather than its durability.
+///
+/// As a fallback it covers the case that actually bit — a submitted
+/// transaction whose *answer* was lost, recovered on the next tap — and
+/// not the one where the process dies in between. `OnymIOSApp` logs
+/// when it lands here for that reason.
 public actor InMemoryPendingAnchorStore: PendingAnchorStore {
     private var rows: [PendingAnchor] = []
-    /// When set, `record` throws it — the case the approver treats as a
-    /// refusal to submit.
-    private var recordError: Error?
 
     public init() {}
 
-    public func failRecords(with error: Error) { recordError = error }
-
     public func record(_ anchor: PendingAnchor) async throws {
-        if let recordError { throw recordError }
-        rows.removeAll {
-            $0.groupID == anchor.groupID
-                && $0.ownerIdentityID == anchor.ownerIdentityID
-                && $0.epochOld < anchor.epochOld
-        }
         rows.append(anchor)
     }
 
@@ -220,19 +229,21 @@ public func adoptLandedAnchor(
     return nil
 }
 
-/// `group` moved onto the chain's epoch, if the chain holds this exact
-/// roster and salt and only the counter drifted — the shape a
-/// half-persisted or replayed update leaves behind.
+/// `group` moved onto the chain's epoch, if the chain is *ahead* over
+/// this exact roster and salt and only the counter drifted — the shape
+/// a half-persisted or replayed update leaves behind.
 ///
 /// `nil` when the epochs already agree (the mismatch was something
 /// else, and re-proving would spend 3-5 seconds to be refused
-/// identically) or when the chain's commitment isn't over state this
-/// device can reproduce.
+/// identically), when the chain is behind — an epoch counter that
+/// walked backwards is not a state to rebase onto, whatever the
+/// commitment reproduces — or when the chain's commitment isn't over
+/// state this device can reproduce.
 public func rebaseOnChainEpoch(
     group: ChatGroup,
     entry: SEPCommitmentEntry
 ) -> ChatGroup? {
-    guard entry.epoch != group.epoch else { return nil }
+    guard entry.epoch > group.epoch else { return nil }
     guard
         let root = try? GroupCommitmentBuilder.computeMerkleRoot(
             members: group.members,

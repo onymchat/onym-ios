@@ -294,6 +294,19 @@ final class JoinAnchorReconcileTests: XCTestCase {
         )
     }
 
+    /// A chain *behind* local is not a drifted counter, whatever the
+    /// commitment reproduces. Rebasing onto it would walk this device's
+    /// epoch backwards, and the next proof would be building on a state
+    /// the chain has already superseded.
+    func test_doesNotRebase_ontoAnEpochBehindThisDevice() throws {
+        let g = try group(epoch: 5)
+        let entry = SEPCommitmentEntry(
+            commitment: try commitment(g.members, epoch: 3, salt: g.salt),
+            epoch: 3
+        )
+        XCTAssertNil(rebaseOnChainEpoch(group: g, entry: entry))
+    }
+
     /// A later epoch over a roster this device can't reproduce is a real
     /// divergence, not a drifted counter.
     func test_doesNotRebase_ontoACommitmentItCannotReproduce() throws {

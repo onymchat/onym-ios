@@ -65,22 +65,26 @@ final class SwiftDataPendingAnchorStoreTests: XCTestCase {
         XCTAssertEqual(read[1].saltNew, Data(repeating: 0x11, count: 32))
     }
 
-    /// Recording from a later epoch sweeps what the group has already
-    /// moved past — a group that keeps failing must not accumulate rows
-    /// that can no longer explain anything.
-    func test_recordingFromALaterEpoch_sweepsTheEarlierOnes() async throws {
+    /// `record` adds and never deletes.
+    ///
+    /// The tempting optimisation is to sweep older epochs here — the
+    /// chain has left them. It is wrong: the reconcile retries from an
+    /// adopted state *before* that state is persisted, so a sweep on
+    /// write would delete the record naming the landed transaction
+    /// while the group on disk still says the epoch before it. Crash
+    /// there and the salt is gone for good.
+    func test_recordingFromALaterEpoch_keepsTheEarlierOnes() async throws {
         let store = SwiftDataPendingAnchorStore.inMemory()
-        try await store.record(anchor(epochOld: 3))
-        try await store.record(anchor(epochOld: 4))
+        try await store.record(anchor(epochOld: 3, salt: 0x11))
+        try await store.record(anchor(epochOld: 4, salt: 0x22))
 
         let read = await store.pending(groupID: groupID, ownerIdentityID: owner)
 
-        XCTAssertEqual(read.count, 1)
-        XCTAssertEqual(read.first?.epochOld, 4)
+        XCTAssertEqual(read.count, 2, "only a persisted advance may sweep")
+        XCTAssertEqual(Set(read.map(\.epochOld)), [3, 4])
     }
 
-    /// …but never the epoch it is recording from. Two approvals from the
-    /// same state are both live candidates.
+    /// Two approvals from the same state are both live candidates.
     func test_recordingFromTheSameEpoch_keepsTheOthers() async throws {
         let store = SwiftDataPendingAnchorStore.inMemory()
         try await store.record(anchor(epochOld: 3, joiner: 0xC1))

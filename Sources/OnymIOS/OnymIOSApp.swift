@@ -1,4 +1,5 @@
 import SwiftUI
+import os
 import OnymTransport
 import OnymChain
 import OnymIdentity
@@ -736,6 +737,15 @@ struct OnymIOSApp: App {
         do {
             pendingAnchorStore = try SwiftDataPendingAnchorStore()
         } catch {
+            // Logged rather than swallowed. The in-memory fallback still
+            // covers the case that actually bit — a lost *answer*,
+            // recovered on the next tap in the same session — but not a
+            // force-quit or crash between submit and reply, which is the
+            // one state where an approval can permanently freeze a
+            // roster. If this line ever appears in a log next to a
+            // frozen group, it is the explanation.
+            Logger(subsystem: "app.onym.ios", category: "PendingAnchors")
+                .error("pending-anchor store unavailable, recovery is session-only: \(String(describing: error), privacy: .public)")
             pendingAnchorStore = InMemoryPendingAnchorStore()
         }
         let joinRequestApprover = JoinRequestApprover(
