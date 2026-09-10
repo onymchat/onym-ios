@@ -190,6 +190,15 @@ public final class ApproveRequestsFlow {
             )
         case .anchorRejected(let reason):
             return String(localized: "Chain rejected the proof: \(reason)")
+        case .staleGroupState(let localEpoch, let chainEpoch):
+            // Says which two numbers disagree, because that is the one
+            // thing that makes this diagnosable from a screenshot — and
+            // names the device, since the state the chain is holding was
+            // written by one of them and that device is where the
+            // approval can still work.
+            return String(
+                localized: "This device’s copy of the group is behind the chain (here: epoch \(localEpoch), chain: epoch \(chainEpoch)). Approve from the device that last added a member, or restore this one from a backup."
+            )
         }
     }
 }
