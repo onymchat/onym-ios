@@ -96,6 +96,25 @@ final class ApproveRequestsFlowTests: XCTestCase {
         )
     }
 
+    /// `Error(Contract, #10)` used to reach the founder as the raw
+    /// Soroban diagnostic — a screenful of red starting "Couldn't send:
+    /// anchor:", ending in a hex dump, telling them nothing they could
+    /// act on. It is a statement about this device's copy of the group,
+    /// so the row says that, with the two epochs that disagree.
+    func test_approve_explainsStaleLocalStateByTheTwoEpochs() async throws {
+        let stub = StubApprover()
+        let flow = ApproveRequestsFlow(approver: stub)
+
+        await stub.setNextOutcome(.staleGroupState(localEpoch: 3, chainEpoch: 4))
+        flow.approve("req-stale")
+        try await waitFor { flow.error(for: "req-stale") != nil }
+
+        let message = try XCTUnwrap(flow.error(for: "req-stale"))
+        XCTAssertTrue(message.contains("epoch 3"), "names this device's epoch: \(message)")
+        XCTAssertTrue(message.contains("epoch 4"), "names the chain's epoch: \(message)")
+        XCTAssertFalse(message.contains("HostError"), "no raw diagnostic")
+    }
+
     // MARK: - Decline
 
     func test_decline_routesToApproverAndClearsError() async throws {

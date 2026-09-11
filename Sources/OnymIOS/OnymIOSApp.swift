@@ -1,4 +1,5 @@
 import SwiftUI
+import os
 import OnymTransport
 import OnymChain
 import OnymIdentity
@@ -725,6 +726,28 @@ struct OnymIOSApp: App {
         // memory; the @Observable flow mirrors that snapshot so the
         // toolbar badge on Chats and the modal request list see the
         // same state without re-running decryption.
+        // Keeps each member-add's freshly drawn salt on disk until the
+        // chain has moved past the attempt that used it. Without it a
+        // submitted `update_commitment` whose answer is lost leaves the
+        // chain committed to a salt nothing can name again, and the
+        // group can never add another member. An unopenable store falls
+        // back to memory rather than taking the launch down: approvals
+        // still work, they just lose the recovery across a relaunch.
+        let pendingAnchorStore: any PendingAnchorStore
+        do {
+            pendingAnchorStore = try SwiftDataPendingAnchorStore()
+        } catch {
+            // Logged rather than swallowed. The in-memory fallback still
+            // covers the case that actually bit — a lost *answer*,
+            // recovered on the next tap in the same session — but not a
+            // force-quit or crash between submit and reply, which is the
+            // one state where an approval can permanently freeze a
+            // roster. If this line ever appears in a log next to a
+            // frozen group, it is the explanation.
+            Logger(subsystem: "app.onym.ios", category: "PendingAnchors")
+                .error("pending-anchor store unavailable, recovery is session-only: \(String(describing: error), privacy: .public)")
+            pendingAnchorStore = InMemoryPendingAnchorStore()
+        }
         let joinRequestApprover = JoinRequestApprover(
             identity: repository,
             introKeyStore: introKeyStore,
@@ -737,7 +760,8 @@ struct OnymIOSApp: App {
             // Gives the admin its own "X joined" row on approve. Every
             // other member's copy comes from the fanned-out
             // announcement, which the admin never receives.
-            systemEvents: ChatSystemEventRecorder(messageRepository: messageRepository)
+            systemEvents: ChatSystemEventRecorder(messageRepository: messageRepository),
+            pendingAnchors: pendingAnchorStore
         )
         let approveRequestsFlow = ApproveRequestsFlow(approver: joinRequestApprover)
 

@@ -27,6 +27,9 @@ final class JoinRequestApproverTests: XCTestCase {
     private var contracts: ContractsRepository!
     private var proofGenerator: ApproverStubProofGenerator!
     private var contractTransport: ApproverStubContractTransport!
+    /// Real (in-memory) rather than the Noop default, so every test in
+    /// this file also exercises the record-before-submit write.
+    private var pendingAnchors: InMemoryPendingAnchorStore!
 
     override func setUp() async throws {
         try await super.setUp()
@@ -73,6 +76,7 @@ final class JoinRequestApproverTests: XCTestCase {
 
         proofGenerator = ApproverStubProofGenerator()
         contractTransport = ApproverStubContractTransport()
+        pendingAnchors = InMemoryPendingAnchorStore()
     }
 
     override func tearDown() async throws {
@@ -87,6 +91,7 @@ final class JoinRequestApproverTests: XCTestCase {
         contracts = nil
         proofGenerator = nil
         contractTransport = nil
+        pendingAnchors = nil
         try await super.tearDown()
     }
 
@@ -669,6 +674,179 @@ final class JoinRequestApproverTests: XCTestCase {
 
     // MARK: - re-join recovery
 
+    // MARK: - PublicInputsMismatch recovery
+
+    /// The whole bug, end to end.
+    ///
+    /// The first Accept's `update_commitment` reaches the ledger and its
+    /// answer does not come back — a relayer 502, a dropped connection.
+    /// The founder taps again, and that attempt proves from an epoch the
+    /// chain has already left, so the contract refuses with
+    /// `Error(Contract, #10)`.
+    ///
+    /// What makes it recoverable is that the first attempt wrote its
+    /// salt down before submitting. The reconcile recomputes the
+    /// commitment that salt would have produced, finds it is exactly
+    /// what the chain holds, and adopts it — no second transaction, and
+    /// the joiner finally gets the invitation the lost answer cost them.
+    ///
+    /// The test learns the salt the same way the recovery does: out of
+    /// the record. Nothing else knows it — that is the point of it.
+    func test_approve_afterALostAnswer_adoptsTheLandedStateAndShipsTheInvite() async throws {
+        let env = try await seedEnvironment()
+        await env.approver.pumpOnce()
+
+        // First tap: the transaction goes out, the answer never arrives.
+        contractTransport.nextThrownError = URLError(.networkConnectionLost)
+        let first = await env.approver.approve(requestId: env.requestID)
+        guard case .transportFailed = first else {
+            return XCTFail("expected .transportFailed, got \(first)")
+        }
+
+        // The chain, meanwhile, is one epoch ahead — over the salt only
+        // the record still knows.
+        let snapshotBefore = await groups.currentGroups()
+        let before = try XCTUnwrap(
+            snapshotBefore.first { $0.groupIDData == env.groupID }
+        )
+        let records = await pendingAnchors.pending(
+            groupID: env.groupID,
+            ownerIdentityID: before.ownerIdentityID
+        )
+        let record = try XCTUnwrap(records.first, "the attempt must have been written down")
+        XCTAssertEqual(record.epochOld, before.epoch, "local state did not advance")
+
+        let landedRoster = (before.members + [
+            GovernanceMember(
+                publicKeyCompressed: record.joinerPublicKey,
+                leafHash: record.joinerLeafHash
+            )
+        ]).sorted { $0.publicKeyCompressed.lexicographicallyPrecedes($1.publicKeyCompressed) }
+        contractTransport.nextCommitmentEntry = SEPCommitmentEntry(
+            commitment: try GroupCommitmentBuilder.computePoseidonCommitment(
+                poseidonRoot: try GroupCommitmentBuilder.computeMerkleRoot(
+                    members: landedRoster,
+                    tier: before.tier
+                ),
+                epoch: before.epoch + 1,
+                salt: record.saltNew
+            ),
+            epoch: before.epoch + 1
+        )
+
+        // Second tap: the contract refuses the proof built on the state
+        // this device still believes in.
+        contractTransport.nextThrownError = nil
+        contractTransport.nextAccepted = false
+        contractTransport.nextRejectionMessage =
+            "HostError: Error(Contract, #10)\n\nEvent log (newest first)"
+
+        await env.approver.pumpOnce()
+        let second = await env.approver.approve(requestId: env.requestID)
+
+        XCTAssertEqual(second, .sent)
+
+        let snapshotAfter = await groups.currentGroups()
+        let after = try XCTUnwrap(
+            snapshotAfter.first { $0.groupIDData == env.groupID }
+        )
+        XCTAssertEqual(after.epoch, before.epoch + 1)
+        XCTAssertEqual(after.salt, record.saltNew, "the recovered salt is the lost one")
+        XCTAssertEqual(after.members.count, before.members.count + 1)
+        XCTAssertEqual(after.commitment, contractTransport.nextCommitmentEntry?.commitment)
+
+        // Adopted, not re-submitted: the chain already held this join,
+        // and a second accepted transaction would burn another epoch
+        // over a leaf that is already in the tree.
+        XCTAssertEqual(
+            contractTransport.calls.filter { $0 == "update_commitment" }.count, 2,
+            "two attempts, both refused — the recovery submits nothing"
+        )
+        XCTAssertTrue(contractTransport.calls.contains("get_commitment"))
+
+        // And the joiner got what the lost answer cost them.
+        let sends = await transport.sends
+        XCTAssertEqual(sends.count, 1)
+        XCTAssertEqual(sends.first?.inbox, env.expectedJoinerTag)
+
+        // The records the advance resolved are gone.
+        let leftover = await pendingAnchors.pending(
+            groupID: env.groupID,
+            ownerIdentityID: after.ownerIdentityID
+        )
+        XCTAssertTrue(leftover.isEmpty, "settled records must not outlive the advance")
+    }
+
+    /// Nothing recorded, nothing to recompute against — the shape every
+    /// group anchored before the records existed is in. The approver has
+    /// to say which two epochs disagree rather than retry into the same
+    /// wall.
+    func test_approve_publicInputsMismatch_withoutARecord_isStaleGroupState() async throws {
+        let env = try await seedEnvironment(pendingAnchors: NoopPendingAnchorStore())
+        await env.approver.pumpOnce()
+
+        contractTransport.nextCommitmentEntry = SEPCommitmentEntry(
+            commitment: Data(repeating: 0x9E, count: 32),
+            epoch: 4
+        )
+        contractTransport.nextAccepted = false
+        contractTransport.nextRejectionMessage = "HostError: Error(Contract, #10)"
+
+        let outcome = await env.approver.approve(requestId: env.requestID)
+
+        XCTAssertEqual(outcome, .staleGroupState(localEpoch: 0, chainEpoch: 4))
+        // One attempt only. A second proof would be as wrong as the
+        // first, and costs the founder another 3-5 seconds to find out.
+        XCTAssertEqual(
+            contractTransport.calls.filter { $0 == "update_commitment" }.count, 1
+        )
+    }
+
+    /// A persist that answers `.failed` wrote nothing, and sweeping
+    /// after it would destroy the only evidence of a chain state the
+    /// device did not keep — records gone, group still naming the epoch
+    /// before them, which is the unrecoverable shape exactly.
+    func test_approve_whenTheAdvanceCannotBePersisted_keepsTheRecords() async throws {
+        // Swap the repository for one whose store refuses writes, so the
+        // anchor succeeds on chain and the local advance does not land.
+        groups = GroupRepository(store: ApproverRefusingGroupStore())
+        let env = try await seedEnvironment()
+        await env.approver.pumpOnce()
+
+        _ = await env.approver.approve(requestId: env.requestID)
+
+        let ownerID = try await XCTUnwrapAsync(await identity.currentSelectedID())
+        let leftover = await pendingAnchors.pending(
+            groupID: env.groupID,
+            ownerIdentityID: ownerID
+        )
+        XCTAssertEqual(
+            leftover.count, 1,
+            "a write that persisted nothing must not sweep the evidence"
+        )
+    }
+
+    /// A salt that cannot be kept is a refusal to submit. Carrying on
+    /// would put the group one lost response away from never accepting
+    /// another member — the exact state the record exists to prevent.
+    func test_approve_whenThePendingAnchorCannotBeRecorded_doesNotSubmit() async throws {
+        let env = try await seedEnvironment(
+            pendingAnchors: ApproverFailingPendingAnchorStore()
+        )
+        await env.approver.pumpOnce()
+
+        let outcome = await env.approver.approve(requestId: env.requestID)
+
+        guard case .transportFailed(let reason) = outcome else {
+            return XCTFail("expected .transportFailed, got \(outcome)")
+        }
+        XCTAssertTrue(reason.contains("pending anchor"), "reason = \(reason)")
+        XCTAssertFalse(
+            contractTransport.calls.contains("update_commitment"),
+            "nothing may be submitted once the salt is known to be unrecoverable"
+        )
+    }
+
     func test_approve_joinerAlreadyInRoster_skipsAnchor_reshipsInvitation() async throws {
         let env = try await seedEnvironment()
         await env.approver.pumpOnce()
@@ -796,7 +974,8 @@ final class JoinRequestApproverTests: XCTestCase {
         extraMemberProfiles: [String: MemberProfile] = [:],
         omitJoinerLeafHash: Bool = false,
         groupRules: String? = nil,
-        joinerSigningKey: Curve25519.Signing.PrivateKey? = nil
+        joinerSigningKey: Curve25519.Signing.PrivateKey? = nil,
+        pendingAnchors: (any PendingAnchorStore)? = nil
     ) async throws -> Env {
         let active = try await identity.bootstrap()
         let ownerID = try await XCTUnwrapAsync(await identity.currentSelectedID())
@@ -923,7 +1102,8 @@ final class JoinRequestApproverTests: XCTestCase {
             contracts: contracts,
             networkPreference: ApproverStaticNetworkPreference(value: .testnet),
             proofGenerator: proofGenerator,
-            makeContractTransport: { _ in chainTransport }
+            makeContractTransport: { _ in chainTransport },
+            pendingAnchors: pendingAnchors ?? self.pendingAnchors!
         )
 
         return Env(
@@ -1089,6 +1269,7 @@ private final class ApproverStubContractTransport: SEPContractTransport, @unchec
     private var _nextRejectionMessage: String = "stub rejected"
     private var _nextThrownError: Error?
     private var _calls: [String] = []
+    private var _nextCommitmentEntry: SEPCommitmentEntry?
 
     var nextAccepted: Bool {
         get { lock.withLock { _nextAccepted } }
@@ -1111,11 +1292,29 @@ private final class ApproverStubContractTransport: SEPContractTransport, @unchec
         lock.withLock { _calls }
     }
 
+    /// What `get_commitment` answers. The reconcile path reads the
+    /// chain back after a `PublicInputsMismatch`, so a test that drives
+    /// that path has to be able to say what the chain holds.
+    var nextCommitmentEntry: SEPCommitmentEntry? {
+        get { lock.withLock { _nextCommitmentEntry } }
+        set { lock.withLock { _nextCommitmentEntry = newValue } }
+    }
+
     func invoke<Payload: Encodable & Sendable, Response: Decodable & Sendable>(
         _ invocation: SEPContractInvocation<Payload>,
         responseType: Response.Type
     ) async throws -> Response {
         lock.withLock { _calls.append(invocation.function) }
+        if invocation.function == "get_commitment" {
+            guard let entry = nextCommitmentEntry else {
+                throw ApproverStubContractError.noCommitmentConfigured
+            }
+            let data = try JSONEncoder().encode(entry)
+            return try JSONDecoder().decode(Response.self, from: data)
+        }
+        // Scoped to the write: a configured failure is about
+        // `update_commitment`, and letting it swallow the read-back too
+        // would hide whether the reconcile ever got to ask.
         if let error = nextThrownError { throw error }
         let response = SEPSubmissionResponse(
             accepted: nextAccepted,
@@ -1125,6 +1324,46 @@ private final class ApproverStubContractTransport: SEPContractTransport, @unchec
         let data = try JSONEncoder().encode(response)
         return try JSONDecoder().decode(Response.self, from: data)
     }
+}
+
+private enum ApproverStubContractError: Error {
+    case noCommitmentConfigured
+}
+
+/// A `PendingAnchorStore` that cannot keep anything. Lives here rather
+/// than as a flag on `InMemoryPendingAnchorStore` — that type is a
+/// production fallback, and a way to make it fail on demand has no
+/// business shipping in the app.
+private struct ApproverFailingPendingAnchorStore: PendingAnchorStore {
+    struct Full: Error {}
+    func record(_ anchor: PendingAnchor) async throws { throw Full() }
+    func pending(groupID: Data, ownerIdentityID: IdentityID) async -> [PendingAnchor] { [] }
+    func clear(groupID: Data, ownerIdentityID: IdentityID, throughEpoch: UInt64) async {}
+}
+
+/// A `GroupStore` that keeps rows in memory but answers `.failed` to
+/// every write — the "encode gave way" path, which persists nothing
+/// while the caller carries on holding the value it meant to save.
+private actor ApproverRefusingGroupStore: GroupStore {
+    private var rows: [ChatGroup] = []
+
+    func list() async -> [ChatGroup] { rows }
+
+    func insertOrUpdate(_ group: ChatGroup) async -> GroupInsertOutcome {
+        // The seed's own insert has to land, or there is no group to
+        // approve into; only the anchor's advance is refused.
+        guard rows.contains(where: { $0.id == group.id && $0.epoch != group.epoch }) else {
+            rows.removeAll { $0.id == group.id }
+            rows.append(group)
+            return .inserted
+        }
+        return .failed
+    }
+
+    func markPublished(id: String, ownerIDString: String, commitment: Data?) async {}
+    func markRead(id: String, ownerIDString: String, at date: Date) async {}
+    func delete(id: String, ownerIDString: String) async {}
+    func deleteOwner(_ ownerIDString: String) async {}
 }
 
 /// Static `NetworkPreferenceProviding` for tests.

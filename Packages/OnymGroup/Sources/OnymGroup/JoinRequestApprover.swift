@@ -187,6 +187,24 @@ public actor JoinRequestApprover: JoinRequestApproving {
         /// is separated from `anchorRejected` — which means "the chain
         /// looked at this and said no" and is not worth retrying.
         case groupNotAnchoredYet
+        /// The contract refused because the state this device proved
+        /// *from* is not the state it holds (`PublicInputsMismatch`),
+        /// and the gap could not be closed by reading the chain back.
+        ///
+        /// Distinct from `anchorRejected` because the chain did not
+        /// judge the joiner or the proof — it judged this device's copy
+        /// of the group, and the founder can do something about that
+        /// (approve from the device that last anchored, or restore it)
+        /// where "the chain said no" leaves them nowhere.
+        ///
+        /// `localEpoch` is what this device holds *after* any correction
+        /// the reconcile handed back has been persisted, not what it
+        /// held when the approval started — the founder reads it next to
+        /// `chainEpoch`, and describing a state that no longer exists
+        /// would send them to restore a backup over current data. The
+        /// two can therefore be equal: the epochs agreeing while the
+        /// commitment does not is a real shape of this failure.
+        case staleGroupState(localEpoch: UInt64, chainEpoch: UInt64)
     }
 
     private let identity: IdentityRepository
@@ -205,6 +223,10 @@ public actor JoinRequestApprover: JoinRequestApproving {
     /// receives that (it's the sender), so this is the admin's only
     /// source for the row.
     private let systemEvents: any GroupSystemEventRecording
+    /// Where a member-add's new salt is written down before the
+    /// transaction using it goes out. See `PendingAnchor` for why a
+    /// lost answer is otherwise unrecoverable.
+    private let pendingAnchors: any PendingAnchorStore
 
     private var pendingValue: [PendingRequest] = []
     /// Surviving row id → every raw id that collapsed into it.
@@ -243,7 +265,8 @@ public actor JoinRequestApprover: JoinRequestApproving {
                 authToken: RelayerSecrets.authToken
             )
         },
-        systemEvents: any GroupSystemEventRecording = NoopGroupSystemEventRecorder()
+        systemEvents: any GroupSystemEventRecording = NoopGroupSystemEventRecorder(),
+        pendingAnchors: any PendingAnchorStore = NoopPendingAnchorStore()
     ) {
         self.identity = identity
         self.introKeyStore = introKeyStore
@@ -256,6 +279,7 @@ public actor JoinRequestApprover: JoinRequestApproving {
         self.proofGenerator = proofGenerator
         self.makeContractTransport = makeContractTransport
         self.systemEvents = systemEvents
+        self.pendingAnchors = pendingAnchors
     }
 
     /// Hot stream of decoded pending requests. Replays the current
@@ -376,14 +400,19 @@ public actor JoinRequestApprover: JoinRequestApproving {
                 group: group,
                 activeIdentity: activeIdentity
             ) {
-            case .failed(let outcome):
+            case .failed(let outcome, let reconciled):
+                // The approval failed, but the reconcile may still have
+                // learned where the chain actually is. Keeping that is
+                // what stops the next attempt paying for the same
+                // discovery.
+                if let reconciled { await settleAnchor(reconciled) }
                 return outcome
             case .ok(let updated):
                 anchored = updated
                 // Persist the advanced state immediately so a
                 // subsequent crash before seal+ship doesn't lose the
                 // chain transition.
-                await groupRepository.insert(anchored)
+                await settleAnchor(anchored)
             }
         }
 
@@ -558,6 +587,25 @@ public actor JoinRequestApprover: JoinRequestApproving {
     /// here because `ApproveOutcome` doesn't conform to `Error`.
     private enum AnchorOutcome {
         case ok(ChatGroup)
+        /// `reconciled` is state the reconcile path learned from the
+        /// chain and the caller should persist even though the approval
+        /// failed — a landed transaction this device hadn't recorded.
+        ///
+        /// Carried out rather than written here because the anchor leg
+        /// stays pure: the caller owns persistence, and it is the caller
+        /// that knows to sweep the pending records afterwards. Dropping
+        /// it would make the next attempt rediscover the same thing, and
+        /// pay the chain read again to do it.
+        case failed(ApproveOutcome, reconciled: ChatGroup? = nil)
+    }
+
+    /// Outcome shape for one `proveAndSubmitJoin` round.
+    private enum SubmitVerdict {
+        case ok(ChatGroup)
+        /// The contract refused with `PublicInputsMismatch` — the one
+        /// refusal that says the fault is in what this device believes,
+        /// and therefore the one worth reconciling.
+        case stale
         case failed(ApproveOutcome)
     }
 
@@ -575,10 +623,13 @@ public actor JoinRequestApprover: JoinRequestApproving {
         else {
             return .failed(.outdatedJoinerClient)
         }
-        guard let adminPubkeyHex = group.adminPubkeyHex else {
+        guard group.adminPubkeyHex != nil else {
             // Tyranny group without a stored admin pubkey shouldn't
             // exist (CreateGroupInteractor stamps it at create time).
-            // Reject defensively.
+            // Reject defensively, and say which of the two things is
+            // missing — `adminIndex(in:)` below folds this case into
+            // "not in the roster", which points the founder at the
+            // wrong problem.
             return .failed(.transportFailed("group missing adminPubkeyHex"))
         }
         guard let relayerURL = await relayers.selectURL() else {
@@ -590,35 +641,19 @@ public actor JoinRequestApprover: JoinRequestApproving {
             return .failed(.noContractBinding)
         }
 
-        // Resolve admin's index in the OLD member roster.
-        let adminBytes = ChatGroup.bytes(fromHex: adminPubkeyHex)
-        guard let adminIndexOld = group.members.firstIndex(
-            where: { $0.publicKeyCompressed == adminBytes }
-        ) else {
+        // Resolve admin's index in the roster as it stands, for the
+        // identity pre-flight below. Each attempt re-resolves its own.
+        guard let adminIndexOld = adminIndex(in: group) else {
             return .failed(.transportFailed("admin not in members roster"))
         }
 
-        // Build new sorted member list including the joiner. Compute
-        // the new Poseidon root over the new tree.
+        // The leaf this approval adds. Where it sorts into the roster
+        // is decided per attempt, in `proveAndSubmitJoin`.
         let joinerMember = GovernanceMember(
             publicKeyCompressed: joinerBlsPub,
             leafHash: joinerLeafHash
         )
-        let newMembers = (group.members + [joinerMember]).sorted { lhs, rhs in
-            lhs.publicKeyCompressed.lexicographicallyPrecedes(rhs.publicKeyCompressed)
-        }
-        let memberRootNew: Data
-        do {
-            memberRootNew = try GroupCommitmentBuilder.computeMerkleRoot(
-                members: newMembers,
-                tier: group.tier
-            )
-        } catch {
-            return .failed(.proofFailed("merkle_root: \(error)"))
-        }
-        let saltNew = GroupCommitmentBuilder.generateSalt()
 
-        // Generate the update proof.
         let blsSecret: Data
         do {
             // onym:allow-secret-read
@@ -646,6 +681,87 @@ public actor JoinRequestApprover: JoinRequestApproving {
         guard activePubFromSecret == group.members[adminIndexOld].publicKeyCompressed else {
             return .failed(.notAdminOfThisGroup)
         }
+
+        let client = SEPContractClient(
+            contractID: binding.contractID,
+            contractType: .tyranny,
+            network: activeNetwork.sepNetwork,
+            transport: makeContractTransport(relayerURL)
+        )
+
+        switch await proveAndSubmitJoin(
+            client: client,
+            group: group,
+            blsSecret: blsSecret,
+            joinerMember: joinerMember
+        ) {
+        case .ok(let updated):
+            return .ok(updated)
+        case .failed(let outcome):
+            return .failed(outcome)
+        // The contract held this proof's `c_old` up against the
+        // commitment it actually stores and they differed. That is a
+        // statement about *this device's* copy of the group, not about
+        // the joiner — so ask the chain what it holds before giving up
+        // on the approval.
+        case .stale:
+            return await reconcileAndRetry(
+                client: client,
+                group: group,
+                blsSecret: blsSecret,
+                joinerMember: joinerMember
+            )
+        }
+    }
+
+    /// Where the group's admin sits in `group`'s roster, or nil when it
+    /// isn't there at all.
+    private func adminIndex(in group: ChatGroup) -> Int? {
+        guard let adminPubkeyHex = group.adminPubkeyHex else { return nil }
+        let adminBytes = ChatGroup.bytes(fromHex: adminPubkeyHex)
+        return group.members.firstIndex { $0.publicKeyCompressed == adminBytes }
+    }
+
+    /// One prove-and-submit round from a given `group` state.
+    ///
+    /// Split out of `anchorTyrannyJoin` so the reconcile path can run
+    /// it a second time against a corrected state without duplicating
+    /// the proof wiring — and so "the chain refused because our old
+    /// state was wrong" is a value the caller can branch on rather than
+    /// a string in a message.
+    private func proveAndSubmitJoin(
+        client: SEPContractClient,
+        group: ChatGroup,
+        blsSecret: Data,
+        joinerMember: GovernanceMember
+    ) async -> SubmitVerdict {
+        // Resolved per attempt, against the roster actually being
+        // proved from. A reconcile can change that roster between the
+        // first attempt and the second, and an index carried over from
+        // the first would name the wrong leaf.
+        guard let adminIndexOld = adminIndex(in: group) else {
+            return .failed(.transportFailed("admin not in members roster"))
+        }
+        let newMembers = (group.members + [joinerMember]).sorted { lhs, rhs in
+            lhs.publicKeyCompressed.lexicographicallyPrecedes(rhs.publicKeyCompressed)
+        }
+        let memberRootNew: Data
+        do {
+            memberRootNew = try GroupCommitmentBuilder.computeMerkleRoot(
+                members: newMembers,
+                tier: group.tier
+            )
+        } catch {
+            return .failed(.proofFailed("merkle_root: \(error)"))
+        }
+        // Random, and it stays random: this is the blinding factor that
+        // stops a chain observer confirming a guessed roster by
+        // recomputing the commitment. Deriving it from anything other
+        // members hold would hand that power to everyone who has ever
+        // been in the group — including whoever was removed from it.
+        // What makes it survivable is `pendingAnchors`, below.
+        let saltNew = GroupCommitmentBuilder.generateSalt()
+
         let proofInput = GroupProofUpdateInput(
             groupType: .tyranny,
             tier: group.tier,
@@ -667,19 +783,38 @@ public actor JoinRequestApprover: JoinRequestApproving {
             return .failed(.proofFailed(String(describing: error)))
         }
 
-        // Submit to chain.
-        let transport = makeContractTransport(relayerURL)
-        let client = SEPContractClient(
-            contractID: binding.contractID,
-            contractType: .tyranny,
-            network: activeNetwork.sepNetwork,
-            transport: transport
-        )
         let payload = TyrannyUpdateCommitmentPayload(
             groupID: group.groupIDData,
             proof: proof.proof,
             publicInputs: proof.publicInputs
         )
+
+        // Before the transaction goes out, not after. A row written
+        // afterwards would miss exactly the window it exists to cover:
+        // the process dying, or the answer never arriving, between the
+        // submit and the write.
+        //
+        // A store that cannot keep the salt is a refusal, not a
+        // warning. Submitting anyway would put the group one lost
+        // response away from never accepting another member.
+        do {
+            try await pendingAnchors.record(
+                PendingAnchor(
+                    groupID: group.groupIDData,
+                    ownerIdentityID: group.ownerIdentityID,
+                    epochOld: group.epoch,
+                    joinerPublicKey: joinerMember.publicKeyCompressed,
+                    joinerLeafHash: joinerMember.leafHash,
+                    saltNew: saltNew,
+                    createdAt: Date()
+                )
+            )
+        } catch {
+            return .failed(
+                .transportFailed("couldn't record the pending anchor: \(error)")
+            )
+        }
+
         let response: SEPSubmissionResponse
         do {
             response = try await client.updateCommitmentTyranny(payload)
@@ -687,9 +822,13 @@ public actor JoinRequestApprover: JoinRequestApproving {
             // A refused call arrives as a non-2xx whose body carries the
             // simulation output, so the contract's own error number is
             // in there rather than in a structured field.
-            if let sepError = error as? SEPError,
-               sepError.contractErrorCode == SEPContractErrorCode.groupNotFound.rawValue {
-                return .failed(.groupNotAnchoredYet)
+            if let sepError = error as? SEPError, let code = sepError.contractErrorCode {
+                if code == SEPContractErrorCode.groupNotFound.rawValue {
+                    return .failed(.groupNotAnchoredYet)
+                }
+                if code == SEPContractErrorCode.publicInputsMismatch.rawValue {
+                    return .stale
+                }
             }
             return .failed(.transportFailed("anchor: \(error)"))
         }
@@ -698,23 +837,186 @@ public actor JoinRequestApprover: JoinRequestApproving {
             // `accepted: false`, depending on where the relayer catches
             // it — so both paths check.
             let message = response.message ?? "(no message)"
-            if SEPContractErrorCode.parse(fromDiagnostics: message)
-                == SEPContractErrorCode.groupNotFound.rawValue {
+            switch SEPContractErrorCode.parse(fromDiagnostics: message) {
+            case SEPContractErrorCode.groupNotFound.rawValue:
                 return .failed(.groupNotAnchoredYet)
+            case SEPContractErrorCode.publicInputsMismatch.rawValue:
+                return .stale
+            default:
+                return .failed(.anchorRejected(message))
             }
-            return .failed(.anchorRejected(message))
         }
 
-        // Build the updated local ChatGroup. `commitment` becomes
-        // the proof's c_new (PI[2]); `epoch` advances by 1; `salt`
-        // becomes saltNew; `members` becomes newMembers.
-        let newEpoch = group.epoch + 1
+        // `commitment` becomes the proof's c_new (PI[2]); `epoch`
+        // advances by 1; `salt` becomes saltNew; `members` becomes
+        // newMembers.
         var updated = group
         updated.members = newMembers
         updated.commitment = proof.commitmentNew
-        updated.epoch = newEpoch
+        updated.epoch = group.epoch + 1
         updated.salt = saltNew
         return .ok(updated)
+    }
+
+    /// What to do after the contract answers `PublicInputsMismatch`.
+    ///
+    /// The proof itself was fine; it proved a step *out of a state the
+    /// chain is not in*. Which is nearly always this: an earlier
+    /// attempt — at this same approval, or at another one from the same
+    /// epoch — reached the ledger and its answer did not reach the
+    /// phone. A relayer 502, a dropped connection, a force-quit. The
+    /// chain advanced and this device kept the state it had, so the
+    /// founder sees the first Accept fail and taps again, and the
+    /// second tap is the one that gets #10.
+    ///
+    /// `pendingAnchors` is what makes that answerable. Each attempt
+    /// wrote down the salt it was moving to, so the commitments those
+    /// attempts *would* have produced can be recomputed and held up
+    /// against what the chain actually holds. Whichever one matches is
+    /// the transaction that landed.
+    ///
+    /// Three shapes come out of that:
+    ///
+    /// - this approval's own attempt landed. Nothing left to submit —
+    ///   adopt the state and let `approve` carry on to the invitation
+    ///   the joiner never got.
+    /// - a *different* joiner's attempt landed, which is what has been
+    ///   blocking this one. Adopt that state and re-prove this join
+    ///   from it. The other joiner's request is still pending (their
+    ///   approval failed too), and re-approving them now takes
+    ///   `approve`'s already-in-roster path: invitation only, no second
+    ///   anchor.
+    /// - nothing landed but the chain is at a later epoch over this
+    ///   exact roster and salt, so only the counter drifted. Re-prove
+    ///   from the chain's epoch.
+    ///
+    /// Anything else is a divergence this device cannot name, and a
+    /// second proof would be as wrong as the first. That is
+    /// `staleGroupState`, and it is deliberately not a retry. It is
+    /// also where a group anchored by a build that kept no pending
+    /// record lands — there is nothing to recompute against.
+    private func reconcileAndRetry(
+        client: SEPContractClient,
+        group: ChatGroup,
+        blsSecret: Data,
+        joinerMember: GovernanceMember
+    ) async -> AnchorOutcome {
+        let entry: SEPCommitmentEntry
+        do {
+            entry = try await client.getCommitment(groupID: group.groupIDData)
+        } catch {
+            // Read-back failed, so the mismatch stays unexplained.
+            // Reported as the chain refusal it was rather than as a
+            // reconcile failure the founder never asked for.
+            return .failed(
+                .anchorRejected(
+                    "the chain holds a different state for this group, "
+                        + "and re-reading it failed: \(error)"
+                )
+            )
+        }
+
+        let candidates = await pendingAnchors.pending(
+            groupID: group.groupIDData,
+            ownerIdentityID: group.ownerIdentityID
+        )
+
+        if let adopted = adoptLandedAnchor(group: group, entry: entry, candidates: candidates) {
+            if adopted.joinerPublicKey == joinerMember.publicKeyCompressed {
+                // Our own transaction. The chain already holds the join
+                // this call was making.
+                return .ok(adopted.group)
+            }
+            // Someone else's. Re-prove this join from the corrected
+            // state — and hand the correction back even if that fails,
+            // so a second failure doesn't throw away what was learned
+            // and leave the next attempt to rediscover it.
+            switch await proveAndSubmitJoin(
+                client: client,
+                group: adopted.group,
+                blsSecret: blsSecret,
+                joinerMember: joinerMember
+            ) {
+            case .ok(let updated):
+                return .ok(updated)
+            case .failed(let outcome):
+                return .failed(outcome, reconciled: adopted.group)
+            case .stale:
+                // The adopted state is handed back to be persisted, so
+                // by the time the founder reads this the device holds
+                // `adopted.group.epoch` — which `adoptLandedAnchor` set
+                // to the chain's own. Reporting the pre-adopt epoch
+                // would describe a device that no longer exists.
+                return .failed(
+                    .staleGroupState(
+                        localEpoch: adopted.group.epoch,
+                        chainEpoch: entry.epoch
+                    ),
+                    reconciled: adopted.group
+                )
+            }
+        }
+
+        guard let rebased = rebaseOnChainEpoch(group: group, entry: entry) else {
+            return .failed(
+                .staleGroupState(localEpoch: group.epoch, chainEpoch: entry.epoch)
+            )
+        }
+
+        switch await proveAndSubmitJoin(
+            client: client,
+            group: rebased,
+            blsSecret: blsSecret,
+            joinerMember: joinerMember
+        ) {
+        case .ok(let updated):
+            return .ok(updated)
+        case .failed(let outcome):
+            return .failed(outcome, reconciled: rebased)
+        // Refused again against the chain's own epoch. One retry was the
+        // offer; a loop here would just re-prove into the same wall for
+        // 3-5 seconds a go.
+        case .stale:
+            // `rebased`, not `group`: the rebase is persisted on the way
+            // out, so the epoch this device holds afterwards is the
+            // chain's. Naming the epoch it held before would tell the
+            // founder to restore a backup over state that is already
+            // current.
+            return .failed(
+                .staleGroupState(localEpoch: rebased.epoch, chainEpoch: entry.epoch),
+                reconciled: rebased
+            )
+        }
+    }
+
+    /// Persist an advanced group, then drop the anchor records the
+    /// advance resolved.
+    ///
+    /// Strictly in that order. The records are the only evidence of
+    /// which transaction landed; sweeping them before the state they
+    /// explain is on disk would turn a crash in between into the exact
+    /// unrecoverable group this whole mechanism exists to prevent.
+    ///
+    /// Everything at or below the epoch just left is swept: the chain
+    /// has moved past it, so no proof from it can be accepted again and
+    /// nothing recorded against it can still be waiting to land. The
+    /// attempt that produced *this* state proved from that same epoch,
+    /// so it goes too.
+    private func settleAnchor(_ group: ChatGroup) async {
+        let outcome = await groupRepository.insert(group)
+        // `.failed` means nothing was written. Sweeping anyway would
+        // destroy the only evidence of a chain state the device did not
+        // keep — the records would go and the group would still name
+        // the epoch before them, which is the unrecoverable shape
+        // exactly. Leaving them costs a few stale rows; the next
+        // approval's reconcile finds them and tries again.
+        guard outcome != .failed else { return }
+        guard group.epoch > 0 else { return }
+        await pendingAnchors.clear(
+            groupID: group.groupIDData,
+            ownerIdentityID: group.ownerIdentityID,
+            throughEpoch: group.epoch - 1
+        )
     }
 
     /// Insert/update the joiner's `MemberProfile` on the local
