@@ -1807,9 +1807,17 @@ struct OnymIOSApp: App {
                     //
                     // An unreadable Keychain answers neither question,
                     // and both `try?`s decline to purge on it.
-                    if (try? await identityRepository.hasQuarantinedIdentities()) == false,
-                       let keys = await Self.localUserKeys(of: identityRepository),
-                       !keys.isEmpty {
+                    //
+                    // The identity list is read first, deliberately.
+                    // It is the call that forces the load, and the
+                    // load is what quarantines — so asking about
+                    // quarantine first would, on a launch where the
+                    // `try?`-swallowed `bootstrap()` above failed,
+                    // read the Keychain as it stood before the
+                    // verdict.
+                    if let keys = await Self.localUserKeys(of: identityRepository),
+                       !keys.isEmpty,
+                       (try? await identityRepository.hasQuarantinedIdentities()) == false {
                         await moderationRepository.purgeMandateRecords(keepingUsers: keys)
                     }
                     await moderationRepository.start()

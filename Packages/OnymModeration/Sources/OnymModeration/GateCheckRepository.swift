@@ -139,7 +139,14 @@ public actor GateCheckRepository {
     private let policy: GateCheckPolicy
     private let clock: @Sendable () -> Date
 
-    private var cached: GateStatus = .notMandated
+    /// Seeded from persisted state rather than assumed unmandated.
+    /// Only a persisted ban changes anything here, and it closes the
+    /// window between the first subscriber and the launch check —
+    /// during which a banned device whose mandate is gone would
+    /// otherwise publish `.notMandated` and read as operational.
+    /// Serving the last verdict early is the same answer the grace
+    /// window gives; the launch check replaces it either way.
+    private var cached: GateStatus
     private var continuations: [UUID: AsyncStream<GateStatus>.Continuation] = [:]
     private var loopTask: Task<Void, Never>?
     /// Monotonic tag for in-flight checks; stale completions are dropped.
@@ -163,6 +170,7 @@ public actor GateCheckRepository {
         self.policy = policy
         self.validatesBanVerdicts = validatesBanVerdicts
         self.clock = clock
+        self.cached = Self.statusWithoutMandate(persisted: store.load())
     }
 
     // MARK: - Lifecycle
@@ -213,7 +221,7 @@ public actor GateCheckRepository {
 
         guard let record = await moderation.activeMandateRecord() else {
             guard generation == self.generation else { return }
-            cached = .notMandated
+            cached = Self.statusWithoutMandate(persisted: store.load())
             publish()
             return
         }
@@ -323,8 +331,12 @@ public actor GateCheckRepository {
     /// session naming one but signed by the other is refused as
     /// `signature_invalid`.
     ///
-    /// Throws when the mandate's identity can no longer sign — the key
-    /// was removed with the identity, restored over, or is unreadable.
+    /// Throws when the mandate's identity can no longer sign. Two
+    /// kinds, and the caller separates them: the key is gone from the
+    /// active namespace (removed with the identity, restored over,
+    /// quarantined) and no retry recovers it, or the Keychain simply
+    /// failed to answer, which is transient and rides the grace
+    /// window like any other outage.
     private func makeRequest(
         for record: MandateRecord,
         token: Data?
@@ -520,7 +532,8 @@ public actor GateCheckRepository {
     /// - unsignable (the mandate's identity cannot sign) →
     ///   `.gateCheckRequired(.sessionUnsignable)`, persisted state
     ///   kept; the grace window does not apply to a session that was
-    ///   never sent;
+    ///   never sent — but a persisted `banned` is served instead of
+    ///   the check-required status, since that one routes to consent;
     /// - unreachable with the clock behind `lastSuccessAt` →
     ///   `.gateCheckRequired(.clockRollback)`. A negative age would
     ///   otherwise satisfy the grace comparison forever, so winding the
@@ -543,10 +556,20 @@ public actor GateCheckRepository {
             // grace window exists for.
             return (.gateCheckRequired(reason), persisted)
         case .unsignable:
-            // Blocks now for the same reason, from the other side: the
-            // session never existed. Grace would only postpone a state
-            // that no elapsed time improves, behind a screen asking for
-            // a network that was never the problem.
+            // A ban the backend already served outranks it. The
+            // check-required status routes to consent, and consent
+            // under a new identity is not a way out of a mark this
+            // device is carrying — the persisted verdict keeps
+            // blocking until a successful check replaces it, exactly
+            // as it does inside the grace window below.
+            if let persisted, case .banned = persisted.lastResult {
+                return (status(for: persisted.lastResult), persisted)
+            }
+            // Otherwise blocks now for the same reason `.refused`
+            // does, from the other side: the session never existed.
+            // Grace would only postpone a state that no elapsed time
+            // improves, behind a screen asking for a network that was
+            // never the problem.
             return (.gateCheckRequired(.sessionUnsignable), persisted)
         case .unreachable:
             guard let persisted else {
@@ -561,6 +584,27 @@ public actor GateCheckRepository {
             }
             return (.gateCheckRequired(.offlineGraceExpired), persisted)
         }
+    }
+
+    /// What to serve when there is no active mandate to check under.
+    ///
+    /// `.notMandated` for almost every device — the consent gate
+    /// applies, not this one — but never over a persisted ban. A
+    /// mandate can disappear from a banned device (the consenting
+    /// identity removed, its orphan swept), and reporting
+    /// "not mandated" there hands back an unmoderated app: the flow's
+    /// no-mandate branch softens to operational whenever the
+    /// authorities directory hasn't loaded, which is every cold
+    /// launch until it does. The verdict is the backend's answer and
+    /// survives until a successful check replaces it — including the
+    /// check that follows consenting again.
+    public static func statusWithoutMandate(
+        persisted: PersistedGateState?
+    ) -> GateStatus {
+        if let persisted, case .banned = persisted.lastResult {
+            return status(for: persisted.lastResult)
+        }
+        return .notMandated
     }
 
     static func status(for result: GateCheckResult) -> GateStatus {

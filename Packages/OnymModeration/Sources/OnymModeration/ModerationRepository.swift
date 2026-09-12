@@ -752,17 +752,21 @@ public actor ModerationRepository {
     /// A mandate is signed by the identity that consented, and every
     /// gate check re-signs a session under that same key. Once the key
     /// is gone from the Keychain the record can never produce another
-    /// session: the signer throws before a request is even built, the
-    /// gate reads the failure as an unreachable backend, and the app
-    /// blocks on `.offlineGraceExpired` once the grace window passes —
-    /// a screen whose Retry button cannot ever clear it. Dropping the
-    /// orphan reports `.notMandated` instead, which routes to consent:
-    /// the one move that can still succeed.
+    /// session: the signer throws before a request is even built, and
+    /// the gate blocks — `.sessionUnsignable` now, `.offlineGraceExpired`
+    /// before that failure had its own outcome — behind a screen whose
+    /// Retry button cannot ever clear it. Dropping the orphan reports
+    /// `.notMandated` instead, which routes to consent: the one move
+    /// that can still succeed.
     ///
     /// Not an enforcement hole. Consent re-enrolls, enrollment presents
     /// a fresh device token, and any mark this device carries is read
     /// back from Apple and applied to the identity consenting now —
-    /// exactly what a reinstall already does to the same state.
+    /// exactly what a reinstall already does to the same state. And a
+    /// verdict already served is not dropped with the mandate:
+    /// `GateCheckRepository.statusWithoutMandate` keeps a persisted
+    /// `banned` on screen, so removing the consenting identity is not
+    /// a shortcut out of a mark while the directory loads.
     ///
     /// The caller supplies the keep-set, so an unreadable identity list
     /// is never mistaken for an empty one.

@@ -143,6 +143,20 @@ public final class ModerationGateFlow {
     private func recompute() {
         guard let hasMandate else { return }
         if !hasMandate {
+            // A ban outranks consent, and outranks the no-authorities
+            // softening with it. Without this the shortest route out
+            // of a mark is to remove the identity that consented:
+            // the gate reports the ban from persisted state, but this
+            // branch would answer `.operational` for as long as the
+            // directory hasn't loaded — every cold launch, and
+            // indefinitely on one where the fetch never lands.
+            // Consenting again is still the way forward; it is just
+            // not a way past the verdict, which the next successful
+            // check re-states or clears.
+            if case .banned(let state) = gateStatus {
+                gate = .banned(state)
+                return
+            }
             gate = authoritiesAvailable ? .needsConsent : .operational(openCases: [])
             return
         }
