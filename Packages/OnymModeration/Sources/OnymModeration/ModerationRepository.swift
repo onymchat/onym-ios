@@ -744,6 +744,42 @@ public actor ModerationRepository {
         records.first { $0.isActive }
     }
 
+    /// Drop every mandate whose `user` is not one of `users`
+    /// (`onym:key:<hex>` references). Called when an identity is
+    /// removed, and swept once at launch for devices that removed one
+    /// before this existed.
+    ///
+    /// A mandate is signed by the identity that consented, and every
+    /// gate check re-signs a session under that same key. Once the key
+    /// is gone from the Keychain the record can never produce another
+    /// session: the signer throws before a request is even built, the
+    /// gate reads the failure as an unreachable backend, and the app
+    /// blocks on `.offlineGraceExpired` once the grace window passes —
+    /// a screen whose Retry button cannot ever clear it. Dropping the
+    /// orphan reports `.notMandated` instead, which routes to consent:
+    /// the one move that can still succeed.
+    ///
+    /// Not an enforcement hole. Consent re-enrolls, enrollment presents
+    /// a fresh device token, and any mark this device carries is read
+    /// back from Apple and applied to the identity consenting now —
+    /// exactly what a reinstall already does to the same state.
+    ///
+    /// The caller supplies the keep-set, so an unreadable identity list
+    /// is never mistaken for an empty one.
+    @discardableResult
+    public func purgeMandateRecords(keepingUsers users: Set<String>) -> Int {
+        let before = records.count
+        records.removeAll { !users.contains($0.mandate.user) }
+        let dropped = before - records.count
+        guard dropped > 0 else { return 0 }
+        Self.logger.notice(
+            "dropped \(dropped, privacy: .public) mandate(s) whose signing identity is gone"
+        )
+        mandateStore.save(records)
+        publish()
+        return dropped
+    }
+
     public func currentState() -> ModerationState {
         ModerationState(
             authorities: authorities,

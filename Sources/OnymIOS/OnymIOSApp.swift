@@ -1684,6 +1684,26 @@ struct OnymIOSApp: App {
     }
     #endif
 
+    /// The `onym:key:<hex>` reference of every identity this device
+    /// still holds — the keep-set for the moderation ledgers, which
+    /// are keyed by that reference rather than by `IdentityID`.
+    ///
+    /// `nil` when the list can't be read, which every caller must
+    /// treat as "purge nothing": an unreadable list and a device with
+    /// no identities are indistinguishable from an empty set, and one
+    /// of them would wipe every row rather than the removed one's.
+    private static func localUserKeys(
+        of identityRepository: IdentityRepository
+    ) async -> Set<String>? {
+        guard let identities = try? await identityRepository.currentIdentities() else {
+            return nil
+        }
+        return Set(identities.map { summary in
+            "onym:key:" + summary.sendingPublicKey
+                .map { String(format: "%02x", $0) }.joined()
+        })
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView(dependencies: dependencies)
@@ -1753,6 +1773,18 @@ struct OnymIOSApp: App {
                     // (launch check + P1D interval). Runs after
                     // identity bootstrap above so gate sessions can
                     // carry an identity signature.
+                    // Sweep mandates whose signing identity is no
+                    // longer on this device before the cadence starts.
+                    // The removal cascade below keeps this from
+                    // happening going forward; this is for the devices
+                    // that removed an identity before it did, where the
+                    // orphan is already on disk and every gate check
+                    // fails to sign under a key the Keychain no longer
+                    // has. Ordered ahead of `start()` so the launch
+                    // check runs against the swept set.
+                    if let keys = await Self.localUserKeys(of: identityRepository) {
+                        await moderationRepository.purgeMandateRecords(keepingUsers: keys)
+                    }
                     await moderationRepository.start()
                     await gateCheckRepository.start()
                     // Install the selected-identity filters before replaying
@@ -1808,11 +1840,7 @@ struct OnymIOSApp: App {
                         // can't be read: an empty keep-set would wipe
                         // every identity's ledger, not just the
                         // removed one's.
-                        if let remaining = try? await identityRepository.currentIdentities() {
-                            let keys = Set(remaining.map { summary in
-                                "onym:key:" + summary.sendingPublicKey
-                                    .map { String(format: "%02x", $0) }.joined()
-                            })
+                        if let keys = await Self.localUserKeys(of: identityRepository) {
                             await moderationRepository.purgeReportRecords(
                                 keepingReporters: keys
                             )
@@ -1820,6 +1848,16 @@ struct OnymIOSApp: App {
                                 keepingUsers: keys
                             )
                             await moderationRepository.purgeCaseSubmissionRecords(
+                                keepingUsers: keys
+                            )
+                            // The mandate itself, on the same keep-set:
+                            // it names the identity that consented, and
+                            // the gate re-signs a session under that key
+                            // on every check. Left behind, it blocks the
+                            // whole app on a verification screen no
+                            // retry can clear — see
+                            // `purgeMandateRecords(keepingUsers:)`.
+                            await moderationRepository.purgeMandateRecords(
                                 keepingUsers: keys
                             )
                         }
