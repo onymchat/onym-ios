@@ -142,6 +142,12 @@ public struct GateCheckRequiredView: View {
             return String(localized: "This device's clock is set earlier than its last verification. Check the date and time, then connect to continue.")
         case .backendRefused:
             return String(localized: "The verification service refused this signed session. Check the date, time, and network connection, then retry to create a fresh session.")
+        case .sessionUnsignable:
+            // Normally unreachable for the same reason `.enrollmentLost`
+            // is: the gate flow routes this to consent. Rendered when
+            // the authorities directory is unavailable, so the consent
+            // flow has no row to offer.
+            return String(localized: "The identity that agreed to moderation is no longer on this device, so it can't sign a verification. Consent again to continue — nothing here is fixed by reconnecting or retrying.")
         case .enrollmentLost:
             // Normally unreachable: the gate flow routes this state to
             // consent. Rendered when the authorities directory is
@@ -155,7 +161,8 @@ public struct GateCheckRequiredView: View {
         switch reason {
         case .offlineGraceExpired, .neverChecked, .tokenInvalid, .clockRollback, .backendRefused:
             return true
-        case .attestationUnavailable, .reidentificationRequired, .enrollmentLost:
+        case .attestationUnavailable, .reidentificationRequired, .enrollmentLost,
+             .sessionUnsignable:
             return false
         }
     }

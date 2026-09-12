@@ -186,6 +186,14 @@ public enum CheckRequiredReason: String, Codable, Sendable, Equatable {
     /// path as the `no_mandate` envelope instead of treating it as a
     /// successful check.
     case enrollmentLost
+    /// Client-derived (never sent by the backend): this device cannot
+    /// sign a session as the mandate's user at all — the consenting
+    /// identity's key is not in the Keychain (removed, restored over,
+    /// or unreadable). Nothing leaves the device in this state, so it
+    /// is not a network condition and no retry can change it; the gate
+    /// flow routes it to consent, which mints a mandate under an
+    /// identity this device actually holds.
+    case sessionUnsignable
     /// Local policy: the device clock now reads earlier than the last
     /// successful check, so elapsed time can't be trusted to bound
     /// staleness — the grace window is refused rather than extended.

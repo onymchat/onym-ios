@@ -179,9 +179,10 @@ public final class ModerationGateFlow {
             }
         case .banned(let state):
             gate = .banned(state)
-        case .gateCheckRequired(.enrollmentLost):
-            // The backend has no record of this device's enrollment —
-            // retrying cannot succeed. Consent IS the recovery: it
+        case .gateCheckRequired(let reason)
+                where reason == .enrollmentLost || reason == .sessionUnsignable:
+            // `.enrollmentLost`: the backend has no record of this
+            // device's enrollment — retrying cannot succeed. Consent IS the recovery: it
             // re-runs enrollment, countersignature, and registration,
             // so route there instead of a dead-ended retry screen.
             //
@@ -195,7 +196,16 @@ public final class ModerationGateFlow {
             // unmoderated for as long as the directory stays down —
             // so without authorities this blocks on the (normally
             // unreachable) check-required screen instead.
-            gate = authoritiesAvailable ? .needsConsent : .gateCheckRequired(.enrollmentLost)
+            //
+            // `.sessionUnsignable` is the mirror image and takes the
+            // same route: the backend's record is fine, this device's
+            // is not — the identity that consented can no longer sign
+            // for the mandate. Consent mints one under an identity the
+            // device holds, and the same reasoning about an unloaded
+            // directory applies unchanged.
+            gate = authoritiesAvailable
+                ? .needsConsent
+                : .gateCheckRequired(reason)
         case .gateCheckRequired(let reason):
             gate = .gateCheckRequired(reason)
         }

@@ -772,9 +772,6 @@ public actor ModerationRepository {
         records.removeAll { !users.contains($0.mandate.user) }
         let dropped = before - records.count
         guard dropped > 0 else { return 0 }
-        Self.logger.notice(
-            "dropped \(dropped, privacy: .public) mandate(s) whose signing identity is gone"
-        )
         mandateStore.save(records)
         publish()
         return dropped

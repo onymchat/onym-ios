@@ -113,6 +113,12 @@ public actor GateCheckRepository {
         /// re-consenting) routes differently from a signature refusal
         /// (recoverable by retrying / fixing the clock).
         case refused(CheckRequiredReason)
+
+        /// The session could not be signed, so nothing was sent. NOT
+        /// unreachable: the grace window exists to ride out a network
+        /// this device will get back, and it would spend three days
+        /// counting down against a key that is never coming back.
+        case unsignable
     }
 
     private static let logger = Logger(
@@ -256,30 +262,18 @@ public actor GateCheckRepository {
             token = nil
         }
 
+        // Signing is local and happens before anything is sent, so it
+        // gets its own `catch`: folding it into the transport one
+        // below would report a key this device doesn't have as a
+        // backend it couldn't reach.
+        let request: GateCheckRequest
         do {
-            let timestamp = max(clock(), lastSessionTimestamp.addingTimeInterval(1))
-            lastSessionTimestamp = timestamp
-            let mandateRef = try? record.mandate.mandateHash()
-            // Signed AS the mandate's identity, not the selected one:
-            // with several identities on the device, the selected key
-            // and `mandate.user` diverge, and a session naming one but
-            // signed by the other is refused as `signature_invalid`.
-            let signature = try await signer.sign(
-                GateCheckRequest.signedPayload(
-                    deviceToken: token,
-                    userKey: record.mandate.user,
-                    mandateRef: mandateRef,
-                    timestamp: timestamp
-                ),
-                as: record.mandate.user
-            )
-            let request = GateCheckRequest(
-                deviceToken: token,
-                userKey: record.mandate.user,
-                mandateRef: mandateRef,
-                timestamp: timestamp,
-                signature: signature
-            )
+            request = try await makeRequest(for: record, token: token)
+        } catch {
+            return .unsignable
+        }
+
+        do {
             let result = try await backend.gateCheck(request)
             // `.enrollmentLost` is client-derived from the backend's
             // `no_mandate` error envelope; a conforming backend never
@@ -304,6 +298,39 @@ public actor GateCheckRepository {
             }
             return .unreachable
         }
+    }
+
+    /// Build the signed gate-check session. Signed AS the mandate's
+    /// identity, not the selected one: with several identities on the
+    /// device, the selected key and `mandate.user` diverge, and a
+    /// session naming one but signed by the other is refused as
+    /// `signature_invalid`.
+    ///
+    /// Throws when the mandate's identity can no longer sign — the key
+    /// was removed with the identity, restored over, or is unreadable.
+    private func makeRequest(
+        for record: MandateRecord,
+        token: Data?
+    ) async throws -> GateCheckRequest {
+        let timestamp = max(clock(), lastSessionTimestamp.addingTimeInterval(1))
+        lastSessionTimestamp = timestamp
+        let mandateRef = try? record.mandate.mandateHash()
+        let signature = try await signer.sign(
+            GateCheckRequest.signedPayload(
+                deviceToken: token,
+                userKey: record.mandate.user,
+                mandateRef: mandateRef,
+                timestamp: timestamp
+            ),
+            as: record.mandate.user
+        )
+        return GateCheckRequest(
+            deviceToken: token,
+            userKey: record.mandate.user,
+            mandateRef: mandateRef,
+            timestamp: timestamp,
+            signature: signature
+        )
     }
 
     // MARK: - Device recovery
@@ -467,6 +494,10 @@ public actor GateCheckRepository {
     /// - unreachable past grace → `.gateCheckRequired(.offlineGraceExpired)`,
     ///   persisted state kept (a later success overwrites it);
     /// - unreachable with no history → `.gateCheckRequired(.neverChecked)`;
+    /// - unsignable (the mandate's identity cannot sign) →
+    ///   `.gateCheckRequired(.sessionUnsignable)`, persisted state
+    ///   kept; the grace window does not apply to a session that was
+    ///   never sent;
     /// - unreachable with the clock behind `lastSuccessAt` →
     ///   `.gateCheckRequired(.clockRollback)`. A negative age would
     ///   otherwise satisfy the grace comparison forever, so winding the
@@ -488,6 +519,12 @@ public actor GateCheckRepository {
             // reachable backend's answer, not a network condition the
             // grace window exists for.
             return (.gateCheckRequired(reason), persisted)
+        case .unsignable:
+            // Blocks now for the same reason, from the other side: the
+            // session never existed. Grace would only postpone a state
+            // that no elapsed time improves, behind a screen asking for
+            // a network that was never the problem.
+            return (.gateCheckRequired(.sessionUnsignable), persisted)
         case .unreachable:
             guard let persisted else {
                 return (.gateCheckRequired(.neverChecked), nil)
