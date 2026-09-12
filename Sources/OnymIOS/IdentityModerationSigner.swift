@@ -22,8 +22,10 @@ struct IdentityModerationSigner: ModerationSigner {
     }
 
     /// Maps the one terminal signing failure onto the seam's own
-    /// error. `OnymModeration` cannot see `IdentityError`, so without
-    /// this translation "this device does not hold that key" and "the
+    /// error — a key the active namespace does not hold, which
+    /// includes one quarantined by a fresh-install verdict.
+    /// `OnymModeration` cannot see `IdentityError`, so without that
+    /// translation "this device does not hold that key" and "the
     /// Keychain read failed this once" arrive as the same opaque
     /// `Error` — and a caller that must tell a permanent state from a
     /// transient one has nothing to match on. Every other failure

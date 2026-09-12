@@ -188,11 +188,13 @@ public enum CheckRequiredReason: String, Codable, Sendable, Equatable {
     case enrollmentLost
     /// Client-derived (never sent by the backend): this device cannot
     /// sign a session as the mandate's user at all — the consenting
-    /// identity's key is not in the Keychain (removed, restored over,
-    /// or unreadable). Nothing leaves the device in this state, so it
-    /// is not a network condition and no retry can change it; the gate
-    /// flow routes it to consent, which mints a mandate under an
-    /// identity this device actually holds.
+    /// identity's key is not available in the Keychain's active
+    /// namespace (removed, restored over, or quarantined). A Keychain
+    /// that merely fails to read is not this: that is transient and
+    /// rides the grace window as `.unreachable`. Nothing leaves the
+    /// device in this state, so it is not a network condition and no
+    /// retry can change it; the gate flow routes it to consent, which
+    /// mints a mandate under an identity this device actually holds.
     ///
     /// Never accepted from a 200 body, for the same reason as
     /// `.enrollmentLost`: `GateCheckRepository` normalizes a

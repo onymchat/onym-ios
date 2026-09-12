@@ -232,7 +232,11 @@ public actor GateCheckRepository {
         publish()
     }
 
-    /// The last session timestamp actually used. Session signatures
+    /// The last session timestamp reserved — claimed before signing,
+    /// so a session that fails to sign still consumes its second.
+    /// That is the cheap direction to be wrong in: a second nobody
+    /// used costs nothing, while two callers reading the same
+    /// unreserved second cost a refused check. Session signatures
     /// are single-use server-side and the signed payload is
     /// second-precision; with a nil device token, two checks in the
     /// same second would produce byte-identical signatures and
@@ -325,7 +329,14 @@ public actor GateCheckRepository {
         for record: MandateRecord,
         token: Data?
     ) async throws -> GateCheckRequest {
+        // Read-and-reserve, in one synchronous actor region and
+        // before the first await: `checkNow` expects the cadence loop
+        // and a foreground/retry to overlap, and a reservation that
+        // waited for the signature would let both callers read the
+        // same second and emit byte-identical payloads — the replay
+        // this field exists to prevent.
         let timestamp = max(clock(), lastSessionTimestamp.addingTimeInterval(1))
+        lastSessionTimestamp = timestamp
         let mandateRef = try? record.mandate.mandateHash()
         let signature = try await signer.sign(
             GateCheckRequest.signedPayload(
@@ -336,10 +347,6 @@ public actor GateCheckRepository {
             ),
             as: record.mandate.user
         )
-        // Recorded only once the signature exists: a session that was
-        // never built consumed no second, and the field's contract is
-        // the last timestamp actually used.
-        lastSessionTimestamp = timestamp
         return GateCheckRequest(
             deviceToken: token,
             userKey: record.mandate.user,

@@ -1783,17 +1783,32 @@ struct OnymIOSApp: App {
                     // has. Ordered ahead of `start()` so the launch
                     // check runs against the swept set.
                     //
-                    // An empty keep-set is refused here, where the
-                    // cascade accepts one: a removal is evidence that
-                    // the identities left are the identities left,
-                    // but at launch `currentIdentities()` also returns
-                    // `[]` for a Keychain that reports nothing found
-                    // and for the interval before `reconcileFreshInstall`
-                    // decides whether a quarantine was a real wipe.
-                    // Sweeping on that reading would delete every
-                    // mandate on disk, permanently, over a false
-                    // positive the reconciler exists to defer.
-                    if let keys = await Self.localUserKeys(of: identityRepository),
+                    // Skipped entirely on a device holding quarantined
+                    // identities. The cascade caller has a removal as
+                    // evidence that the keep-set is the whole truth;
+                    // this one has only the active list, and a
+                    // fresh-install verdict — right or wrong — leaves
+                    // that list looking perfectly ordinary: the hidden
+                    // identities are gone from it and `bootstrap()`
+                    // has already minted a replacement, so the set is
+                    // non-empty and excludes every real key. Sweeping
+                    // on it would delete the mandates permanently,
+                    // turning the identity layer's deliberate
+                    // "quarantine, never wipe" into destroyed state
+                    // that a mnemonic restore cannot bring back.
+                    //
+                    // Nothing is lost by skipping: a correct verdict
+                    // means the container died with the previous
+                    // install, so the mandate ledger it would sweep
+                    // isn't there. What such a device gives up is the
+                    // one-time repair for an orphan created before
+                    // this fix shipped — and the removal cascade still
+                    // covers every removal from here on.
+                    //
+                    // An unreadable Keychain answers neither question,
+                    // and both `try?`s decline to purge on it.
+                    if (try? await identityRepository.hasQuarantinedIdentities()) == false,
+                       let keys = await Self.localUserKeys(of: identityRepository),
                        !keys.isEmpty {
                         await moderationRepository.purgeMandateRecords(keepingUsers: keys)
                     }

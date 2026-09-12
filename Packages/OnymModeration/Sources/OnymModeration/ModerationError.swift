@@ -72,8 +72,9 @@ public enum ModerationError: Error, Sendable, Equatable {
     /// a shape this client does not speak.
     case grantInvalid(String)
     /// The signing seam was asked for a signature under a user key
-    /// this device does not hold: the identity was removed, restored
-    /// over, or never existed here. Distinct from every other signing
+    /// this device cannot sign with: the identity was removed,
+    /// restored over, never existed here, or sits in quarantine after
+    /// a fresh-install verdict. Distinct from every other signing
     /// failure — a Keychain read that fails, a store that won't load —
     /// because those are transient and this one cannot be retried
     /// into success. Callers that decide between "wait for it to come

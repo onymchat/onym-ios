@@ -237,6 +237,26 @@ public actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelop
         return orderedIDs.compactMap(summary(for:))
     }
 
+    /// Whether this device holds any quarantined identity — key
+    /// material a fresh-install verdict moved out of the active
+    /// namespace rather than deleting.
+    ///
+    /// Exposed for callers whose action is destructive and whose only
+    /// evidence is the active identity list. That list cannot show
+    /// them a wrong verdict: after one, it reads as a normal device
+    /// with a newly-minted identity, and anything keyed to the
+    /// identities the verdict hid looks like an orphan. A non-empty
+    /// quarantine is the durable record that this device's active
+    /// list may not be the whole story, and it stays true on every
+    /// later launch, not just the one that quarantined.
+    ///
+    /// Throws rather than answering `false` on a Keychain it can't
+    /// read: a caller asking this question is about to delete
+    /// something.
+    public func hasQuarantinedIdentities() throws -> Bool {
+        try !keychain.listQuarantined().isEmpty
+    }
+
     /// One-shot accessor for the currently-selected identity's BLS Fr
     /// scalar. Used by the chain layer (`OnymGroupProofGenerator`) to
     /// call `Tyranny.proveCreate` etc. Loads from the Keychain on
