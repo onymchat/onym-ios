@@ -360,7 +360,17 @@ public actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelop
     /// mandate names the identity that consented, and that identity
     /// must sign even while another one is selected in the picker.
     /// Throws `.noIdentityForKey` when no stored identity matches
-    /// (removed, or quarantined by a fresh-install verdict).
+    /// (removed, or quarantined by a fresh-install verdict), and
+    /// callers treat that as terminal — see
+    /// `ModerationError.signingKeyUnavailable`.
+    ///
+    /// A cached identity whose Keychain item has since disappeared
+    /// reaches the same throw, and belongs there: `keychain.read`
+    /// returns nil only for `errSecItemNotFound`, so the item is
+    /// genuinely gone and the cache is what's stale. A Keychain that
+    /// merely refuses to answer — locked, or any other status —
+    /// throws `.keychainRead` from here instead, which callers keep
+    /// treating as transient.
     public func signWithStellarKey(
         _ message: Data,
         matchingPublicKeyHex publicKeyHex: String

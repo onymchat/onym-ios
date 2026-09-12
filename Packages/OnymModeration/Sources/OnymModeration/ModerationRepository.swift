@@ -770,10 +770,17 @@ public actor ModerationRepository {
     ///
     /// The caller supplies the keep-set, so an unreadable identity list
     /// is never mistaken for an empty one.
+    ///
+    /// Compared case-insensitively. The keep-set is built with `%02x`
+    /// and the signer lowercases before matching, so a mandate whose
+    /// `user` hex arrived upper-cased signs perfectly well — and a
+    /// raw string comparison would read it as an orphan and delete
+    /// the mandate of an identity this device holds.
     @discardableResult
     public func purgeMandateRecords(keepingUsers users: Set<String>) -> Int {
         let before = records.count
-        records.removeAll { !users.contains($0.mandate.user) }
+        let keep = Set(users.map { $0.lowercased() })
+        records.removeAll { !keep.contains($0.mandate.user.lowercased()) }
         let dropped = before - records.count
         guard dropped > 0 else { return 0 }
         mandateStore.save(records)

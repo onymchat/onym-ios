@@ -170,7 +170,7 @@ public actor GateCheckRepository {
         self.policy = policy
         self.validatesBanVerdicts = validatesBanVerdicts
         self.clock = clock
-        self.cached = Self.statusWithoutMandate(persisted: store.load())
+        self.cached = Self.statusWithoutMandate(persisted: store.load(), now: clock())
     }
 
     // MARK: - Lifecycle
@@ -221,7 +221,7 @@ public actor GateCheckRepository {
 
         guard let record = await moderation.activeMandateRecord() else {
             guard generation == self.generation else { return }
-            cached = Self.statusWithoutMandate(persisted: store.load())
+            cached = Self.statusWithoutMandate(persisted: store.load(), now: clock())
             publish()
             return
         }
@@ -532,8 +532,7 @@ public actor GateCheckRepository {
     /// - unsignable (the mandate's identity cannot sign) →
     ///   `.gateCheckRequired(.sessionUnsignable)`, persisted state
     ///   kept; the grace window does not apply to a session that was
-    ///   never sent — but a persisted `banned` is served instead of
-    ///   the check-required status, since that one routes to consent;
+    ///   never sent;
     /// - unreachable with the clock behind `lastSuccessAt` →
     ///   `.gateCheckRequired(.clockRollback)`. A negative age would
     ///   otherwise satisfy the grace comparison forever, so winding the
@@ -556,20 +555,20 @@ public actor GateCheckRepository {
             // grace window exists for.
             return (.gateCheckRequired(reason), persisted)
         case .unsignable:
-            // A ban the backend already served outranks it. The
-            // check-required status routes to consent, and consent
-            // under a new identity is not a way out of a mark this
-            // device is carrying — the persisted verdict keeps
-            // blocking until a successful check replaces it, exactly
-            // as it does inside the grace window below.
-            if let persisted, case .banned = persisted.lastResult {
-                return (status(for: persisted.lastResult), persisted)
-            }
-            // Otherwise blocks now for the same reason `.refused`
-            // does, from the other side: the session never existed.
-            // Grace would only postpone a state that no elapsed time
-            // improves, behind a screen asking for a network that was
-            // never the problem.
+            // Blocks now for the same reason `.refused` does, from the
+            // other side: the session never existed. Grace would only
+            // postpone a state that no elapsed time improves, behind a
+            // screen asking for a network that was never the problem.
+            //
+            // A persisted ban does NOT override this, and deliberately
+            // matches `.refused(.enrollmentLost)` rather than
+            // `statusWithoutMandate`. Both of those states block and
+            // route to consent, so nothing runs unmoderated in the
+            // meantime, and re-enrolling presents a fresh device token
+            // that brings any mark back from Apple. The no-mandate
+            // path is the exception because its alternative is not a
+            // block at all: the flow softens it to operational while
+            // the authorities directory is empty.
             return (.gateCheckRequired(.sessionUnsignable), persisted)
         case .unreachable:
             guard let persisted else {
@@ -589,22 +588,36 @@ public actor GateCheckRepository {
     /// What to serve when there is no active mandate to check under.
     ///
     /// `.notMandated` for almost every device — the consent gate
-    /// applies, not this one — but never over a persisted ban. A
+    /// applies, not this one — but never over a ban still in force. A
     /// mandate can disappear from a banned device (the consenting
     /// identity removed, its orphan swept), and reporting
     /// "not mandated" there hands back an unmoderated app: the flow's
     /// no-mandate branch softens to operational whenever the
     /// authorities directory hasn't loaded, which is every cold
-    /// launch until it does. The verdict is the backend's answer and
-    /// survives until a successful check replaces it — including the
-    /// check that follows consenting again.
+    /// launch until it does.
+    ///
+    /// "Still in force" is load-bearing, because nothing else can
+    /// clear this state. With no mandate there is no session to sign,
+    /// so `checkNow` never reaches the backend, and the ban screen
+    /// offers no retry: a verdict served here is re-served on every
+    /// launch from the same stored bytes. A permanent ban should
+    /// behave that way. One with a `banExpires` should not, so once
+    /// that date passes this yields to `.notMandated` and the consent
+    /// route re-opens — and the check that follows consent is what
+    /// re-states the ban if the backend still holds one, rather than
+    /// this client deciding on its own that an expiry it cached is
+    /// the last word.
     public static func statusWithoutMandate(
-        persisted: PersistedGateState?
+        persisted: PersistedGateState?,
+        now: Date
     ) -> GateStatus {
-        if let persisted, case .banned = persisted.lastResult {
-            return status(for: persisted.lastResult)
+        guard let persisted, case .banned(let state) = persisted.lastResult else {
+            return .notMandated
         }
-        return .notMandated
+        if let expires = state.banExpires, expires <= now {
+            return .notMandated
+        }
+        return status(for: persisted.lastResult)
     }
 
     static func status(for result: GateCheckResult) -> GateStatus {

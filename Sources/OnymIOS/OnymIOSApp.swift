@@ -52,6 +52,15 @@ struct OnymIOSApp: App {
     /// backend is a stub until one is deployed.
     private let moderationRepository: ModerationRepository
     private let gateCheckRepository: GateCheckRepository
+    /// Whether the orphaned-mandate sweeps may run. False on the stub
+    /// moderation seat (UI tests, and Simulator DEBUG without
+    /// `--enforcement-base-url`), whose seeded mandate names
+    /// `onym:key:uitest-user` on purpose — a key no identity owns, so
+    /// every keep-set built from the real repository reads it as an
+    /// orphan and drops it. Sweeping there would boot the seat to the
+    /// consent gate, which is the exact state the seeding exists to
+    /// skip past.
+    private let sweepsOrphanedMandates: Bool
     /// Discovery seat: verified provider catalogs that back the four
     /// known-list fetchers (see `DiscoverySeatAdapters`). Nil under
     /// the UI harness, like the other network fetchers — the legacy
@@ -420,7 +429,9 @@ struct OnymIOSApp: App {
                 store: UserDefaultsGateStateStore()
             )
         }
+        self.sweepsOrphanedMandates = !stubModerationSeat
         #else
+        self.sweepsOrphanedMandates = true
         let moderationBackend = URLSessionEnforcementBackendClient()
         moderationManifestFetcher = URLSessionAuthorityManifestFetcher()
         moderationRepository = ModerationRepository(
@@ -1815,7 +1826,8 @@ struct OnymIOSApp: App {
                     // `try?`-swallowed `bootstrap()` above failed,
                     // read the Keychain as it stood before the
                     // verdict.
-                    if let keys = await Self.localUserKeys(of: identityRepository),
+                    if sweepsOrphanedMandates,
+                       let keys = await Self.localUserKeys(of: identityRepository),
                        !keys.isEmpty,
                        (try? await identityRepository.hasQuarantinedIdentities()) == false {
                         await moderationRepository.purgeMandateRecords(keepingUsers: keys)
@@ -1892,9 +1904,19 @@ struct OnymIOSApp: App {
                             // whole app on a verification screen no
                             // retry can clear — see
                             // `purgeMandateRecords(keepingUsers:)`.
-                            await moderationRepository.purgeMandateRecords(
-                                keepingUsers: keys
-                            )
+                            //
+                            // Not on the stub seat: its mandate is
+                            // seeded under a key no identity owns, so
+                            // this keep-set would read the stage prop
+                            // as the orphan and drop it. The other
+                            // three purges above are keyed the same
+                            // way but cost only history when they
+                            // over-reach; this one costs the seat.
+                            if sweepsOrphanedMandates {
+                                await moderationRepository.purgeMandateRecords(
+                                    keepingUsers: keys
+                                )
+                            }
                         }
                     }
                 }
