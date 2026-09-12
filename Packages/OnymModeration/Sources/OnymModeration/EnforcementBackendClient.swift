@@ -193,6 +193,11 @@ public enum CheckRequiredReason: String, Codable, Sendable, Equatable {
     /// is not a network condition and no retry can change it; the gate
     /// flow routes it to consent, which mints a mandate under an
     /// identity this device actually holds.
+    ///
+    /// Never accepted from a 200 body, for the same reason as
+    /// `.enrollmentLost`: `GateCheckRepository` normalizes a
+    /// serialized one onto the refusal path rather than recording a
+    /// route-to-consent as a successful check.
     case sessionUnsignable
     /// Local policy: the device clock now reads earlier than the last
     /// successful check, so elapsed time can't be trusted to bound

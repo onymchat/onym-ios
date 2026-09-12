@@ -1782,7 +1782,19 @@ struct OnymIOSApp: App {
                     // fails to sign under a key the Keychain no longer
                     // has. Ordered ahead of `start()` so the launch
                     // check runs against the swept set.
-                    if let keys = await Self.localUserKeys(of: identityRepository) {
+                    //
+                    // An empty keep-set is refused here, where the
+                    // cascade accepts one: a removal is evidence that
+                    // the identities left are the identities left,
+                    // but at launch `currentIdentities()` also returns
+                    // `[]` for a Keychain that reports nothing found
+                    // and for the interval before `reconcileFreshInstall`
+                    // decides whether a quarantine was a real wipe.
+                    // Sweeping on that reading would delete every
+                    // mandate on disk, permanently, over a false
+                    // positive the reconciler exists to defer.
+                    if let keys = await Self.localUserKeys(of: identityRepository),
+                       !keys.isEmpty {
                         await moderationRepository.purgeMandateRecords(keepingUsers: keys)
                     }
                     await moderationRepository.start()

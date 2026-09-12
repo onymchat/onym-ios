@@ -266,24 +266,37 @@ public actor GateCheckRepository {
         // gets its own `catch`: folding it into the transport one
         // below would report a key this device doesn't have as a
         // backend it couldn't reach.
+        //
+        // Only the terminal signing failure blocks. A missing key
+        // cannot come back without consent; every other way signing
+        // can fail — an unreadable Keychain, a store that didn't
+        // load — is transient, and hard-blocking a healthy install on
+        // one bad cadence tick would route it to consent, which mints
+        // a new mandate over the working one. Those keep the grace
+        // window, same as an unreachable backend.
         let request: GateCheckRequest
         do {
             request = try await makeRequest(for: record, token: token)
-        } catch {
+        } catch ModerationError.signingKeyUnavailable {
             return .unsignable
+        } catch {
+            return .unreachable
         }
 
         do {
             let result = try await backend.gateCheck(request)
-            // `.enrollmentLost` is client-derived from the backend's
-            // `no_mandate` error envelope; a conforming backend never
-            // puts it in a 200 body. If one does anyway (the reason is
-            // plain `Codable`, so it decodes), normalize it onto the
-            // same refusal path as the envelope: it must not persist
-            // as a successful check, and downstream must see exactly
-            // one `.enrollmentLost` route.
-            if case .checkRequired(.enrollmentLost) = result {
-                return .refused(.enrollmentLost)
+            // `.enrollmentLost` and `.sessionUnsignable` are both
+            // client-derived — one from the backend's `no_mandate`
+            // error envelope, one from a signature this device could
+            // not produce — and a conforming backend puts neither in a
+            // 200 body. If one does anyway (the reasons are plain
+            // `Codable`, so they decode), normalize them onto the
+            // refusal path: a reason that routes to consent must not
+            // also persist as a successful check that refreshes the
+            // grace window.
+            if case .checkRequired(let reason) = result,
+               reason == .enrollmentLost || reason == .sessionUnsignable {
+                return .refused(reason)
             }
             return .success(await sanitize(result))
         } catch {
@@ -313,7 +326,6 @@ public actor GateCheckRepository {
         token: Data?
     ) async throws -> GateCheckRequest {
         let timestamp = max(clock(), lastSessionTimestamp.addingTimeInterval(1))
-        lastSessionTimestamp = timestamp
         let mandateRef = try? record.mandate.mandateHash()
         let signature = try await signer.sign(
             GateCheckRequest.signedPayload(
@@ -324,6 +336,10 @@ public actor GateCheckRepository {
             ),
             as: record.mandate.user
         )
+        // Recorded only once the signature exists: a session that was
+        // never built consumed no second, and the field's contract is
+        // the last timestamp actually used.
+        lastSessionTimestamp = timestamp
         return GateCheckRequest(
             deviceToken: token,
             userKey: record.mandate.user,
