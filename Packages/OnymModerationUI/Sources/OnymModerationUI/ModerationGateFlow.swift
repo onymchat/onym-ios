@@ -143,6 +143,20 @@ public final class ModerationGateFlow {
     private func recompute() {
         guard let hasMandate else { return }
         if !hasMandate {
+            // A ban outranks consent, and outranks the no-authorities
+            // softening with it. Without this the shortest route out
+            // of a mark is to remove the identity that consented:
+            // the gate reports the ban from persisted state, but this
+            // branch would answer `.operational` for as long as the
+            // directory hasn't loaded — every cold launch, and
+            // indefinitely on one where the fetch never lands.
+            // Consenting again is still the way forward; it is just
+            // not a way past the verdict, which the next successful
+            // check re-states or clears.
+            if case .banned(let state) = gateStatus {
+                gate = .banned(state)
+                return
+            }
             gate = authoritiesAvailable ? .needsConsent : .operational(openCases: [])
             return
         }
@@ -179,9 +193,10 @@ public final class ModerationGateFlow {
             }
         case .banned(let state):
             gate = .banned(state)
-        case .gateCheckRequired(.enrollmentLost):
-            // The backend has no record of this device's enrollment —
-            // retrying cannot succeed. Consent IS the recovery: it
+        case .gateCheckRequired(let reason)
+                where reason == .enrollmentLost || reason == .sessionUnsignable:
+            // `.enrollmentLost`: the backend has no record of this
+            // device's enrollment — retrying cannot succeed. Consent IS the recovery: it
             // re-runs enrollment, countersignature, and registration,
             // so route there instead of a dead-ended retry screen.
             //
@@ -195,7 +210,16 @@ public final class ModerationGateFlow {
             // unmoderated for as long as the directory stays down —
             // so without authorities this blocks on the (normally
             // unreachable) check-required screen instead.
-            gate = authoritiesAvailable ? .needsConsent : .gateCheckRequired(.enrollmentLost)
+            //
+            // `.sessionUnsignable` is the mirror image and takes the
+            // same route: the backend's record is fine, this device's
+            // is not — the identity that consented can no longer sign
+            // for the mandate. Consent mints one under an identity the
+            // device holds, and the same reasoning about an unloaded
+            // directory applies unchanged.
+            gate = authoritiesAvailable
+                ? .needsConsent
+                : .gateCheckRequired(reason)
         case .gateCheckRequired(let reason):
             gate = .gateCheckRequired(reason)
         }

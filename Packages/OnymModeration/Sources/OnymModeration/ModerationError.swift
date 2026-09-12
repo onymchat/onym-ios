@@ -71,6 +71,16 @@ public enum ModerationError: Error, Sendable, Equatable {
     /// A recovery grant that does not parse, or a recovery answer in
     /// a shape this client does not speak.
     case grantInvalid(String)
+    /// The signing seam was asked for a signature under a user key
+    /// this device cannot sign with: the identity was removed,
+    /// restored over, never existed here, or sits in quarantine after
+    /// a fresh-install verdict. Distinct from every other signing
+    /// failure — a Keychain read that fails, a store that won't load —
+    /// because those are transient and this one cannot be retried
+    /// into success. Callers that decide between "wait for it to come
+    /// back" and "this state is terminal" MUST match on this case
+    /// specifically rather than on any thrown error.
+    case signingKeyUnavailable(String)
     /// The operation exists in the protocol surface but the concrete
     /// implementation is a stub (no enforcement backend / authority
     /// service is deployed yet).

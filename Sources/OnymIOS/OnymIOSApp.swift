@@ -52,6 +52,15 @@ struct OnymIOSApp: App {
     /// backend is a stub until one is deployed.
     private let moderationRepository: ModerationRepository
     private let gateCheckRepository: GateCheckRepository
+    /// Whether the orphaned-mandate sweeps may run. False on the stub
+    /// moderation seat (UI tests, and Simulator DEBUG without
+    /// `--enforcement-base-url`), whose seeded mandate names
+    /// `onym:key:uitest-user` on purpose — a key no identity owns, so
+    /// every keep-set built from the real repository reads it as an
+    /// orphan and drops it. Sweeping there would boot the seat to the
+    /// consent gate, which is the exact state the seeding exists to
+    /// skip past.
+    private let sweepsOrphanedMandates: Bool
     /// Discovery seat: verified provider catalogs that back the four
     /// known-list fetchers (see `DiscoverySeatAdapters`). Nil under
     /// the UI harness, like the other network fetchers — the legacy
@@ -420,7 +429,9 @@ struct OnymIOSApp: App {
                 store: UserDefaultsGateStateStore()
             )
         }
+        self.sweepsOrphanedMandates = !stubModerationSeat
         #else
+        self.sweepsOrphanedMandates = true
         let moderationBackend = URLSessionEnforcementBackendClient()
         moderationManifestFetcher = URLSessionAuthorityManifestFetcher()
         moderationRepository = ModerationRepository(
@@ -1684,6 +1695,26 @@ struct OnymIOSApp: App {
     }
     #endif
 
+    /// The `onym:key:<hex>` reference of every identity this device
+    /// still holds — the keep-set for the moderation ledgers, which
+    /// are keyed by that reference rather than by `IdentityID`.
+    ///
+    /// `nil` when the list can't be read, which every caller must
+    /// treat as "purge nothing": an unreadable list and a device with
+    /// no identities are indistinguishable from an empty set, and one
+    /// of them would wipe every row rather than the removed one's.
+    private static func localUserKeys(
+        of identityRepository: IdentityRepository
+    ) async -> Set<String>? {
+        guard let identities = try? await identityRepository.currentIdentities() else {
+            return nil
+        }
+        return Set(identities.map { summary in
+            "onym:key:" + summary.sendingPublicKey
+                .map { String(format: "%02x", $0) }.joined()
+        })
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView(dependencies: dependencies)
@@ -1753,6 +1784,54 @@ struct OnymIOSApp: App {
                     // (launch check + P1D interval). Runs after
                     // identity bootstrap above so gate sessions can
                     // carry an identity signature.
+                    // Sweep mandates whose signing identity is no
+                    // longer on this device before the cadence starts.
+                    // The removal cascade below keeps this from
+                    // happening going forward; this is for the devices
+                    // that removed an identity before it did, where the
+                    // orphan is already on disk and every gate check
+                    // fails to sign under a key the Keychain no longer
+                    // has. Ordered ahead of `start()` so the launch
+                    // check runs against the swept set.
+                    //
+                    // Skipped entirely on a device holding quarantined
+                    // identities. The cascade caller has a removal as
+                    // evidence that the keep-set is the whole truth;
+                    // this one has only the active list, and a
+                    // fresh-install verdict — right or wrong — leaves
+                    // that list looking perfectly ordinary: the hidden
+                    // identities are gone from it and `bootstrap()`
+                    // has already minted a replacement, so the set is
+                    // non-empty and excludes every real key. Sweeping
+                    // on it would delete the mandates permanently,
+                    // turning the identity layer's deliberate
+                    // "quarantine, never wipe" into destroyed state
+                    // that a mnemonic restore cannot bring back.
+                    //
+                    // Nothing is lost by skipping: a correct verdict
+                    // means the container died with the previous
+                    // install, so the mandate ledger it would sweep
+                    // isn't there. What such a device gives up is the
+                    // one-time repair for an orphan created before
+                    // this fix shipped — and the removal cascade still
+                    // covers every removal from here on.
+                    //
+                    // An unreadable Keychain answers neither question,
+                    // and both `try?`s decline to purge on it.
+                    //
+                    // The identity list is read first, deliberately.
+                    // It is the call that forces the load, and the
+                    // load is what quarantines — so asking about
+                    // quarantine first would, on a launch where the
+                    // `try?`-swallowed `bootstrap()` above failed,
+                    // read the Keychain as it stood before the
+                    // verdict.
+                    if sweepsOrphanedMandates,
+                       let keys = await Self.localUserKeys(of: identityRepository),
+                       !keys.isEmpty,
+                       (try? await identityRepository.hasQuarantinedIdentities()) == false {
+                        await moderationRepository.purgeMandateRecords(keepingUsers: keys)
+                    }
                     await moderationRepository.start()
                     await gateCheckRepository.start()
                     // Install the selected-identity filters before replaying
@@ -1808,11 +1887,7 @@ struct OnymIOSApp: App {
                         // can't be read: an empty keep-set would wipe
                         // every identity's ledger, not just the
                         // removed one's.
-                        if let remaining = try? await identityRepository.currentIdentities() {
-                            let keys = Set(remaining.map { summary in
-                                "onym:key:" + summary.sendingPublicKey
-                                    .map { String(format: "%02x", $0) }.joined()
-                            })
+                        if let keys = await Self.localUserKeys(of: identityRepository) {
                             await moderationRepository.purgeReportRecords(
                                 keepingReporters: keys
                             )
@@ -1822,6 +1897,26 @@ struct OnymIOSApp: App {
                             await moderationRepository.purgeCaseSubmissionRecords(
                                 keepingUsers: keys
                             )
+                            // The mandate itself, on the same keep-set:
+                            // it names the identity that consented, and
+                            // the gate re-signs a session under that key
+                            // on every check. Left behind, it blocks the
+                            // whole app on a verification screen no
+                            // retry can clear — see
+                            // `purgeMandateRecords(keepingUsers:)`.
+                            //
+                            // Not on the stub seat: its mandate is
+                            // seeded under a key no identity owns, so
+                            // this keep-set would read the stage prop
+                            // as the orphan and drop it. The other
+                            // three purges above are keyed the same
+                            // way but cost only history when they
+                            // over-reach; this one costs the seat.
+                            if sweepsOrphanedMandates {
+                                await moderationRepository.purgeMandateRecords(
+                                    keepingUsers: keys
+                                )
+                            }
                         }
                     }
                 }

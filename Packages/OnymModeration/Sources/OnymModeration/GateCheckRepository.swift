@@ -113,6 +113,12 @@ public actor GateCheckRepository {
         /// re-consenting) routes differently from a signature refusal
         /// (recoverable by retrying / fixing the clock).
         case refused(CheckRequiredReason)
+
+        /// The session could not be signed, so nothing was sent. NOT
+        /// unreachable: the grace window exists to ride out a network
+        /// this device will get back, and it would spend three days
+        /// counting down against a key that is never coming back.
+        case unsignable
     }
 
     private static let logger = Logger(
@@ -133,7 +139,14 @@ public actor GateCheckRepository {
     private let policy: GateCheckPolicy
     private let clock: @Sendable () -> Date
 
-    private var cached: GateStatus = .notMandated
+    /// Seeded from persisted state rather than assumed unmandated.
+    /// Only a persisted ban changes anything here, and it closes the
+    /// window between the first subscriber and the launch check —
+    /// during which a banned device whose mandate is gone would
+    /// otherwise publish `.notMandated` and read as operational.
+    /// Serving the last verdict early is the same answer the grace
+    /// window gives; the launch check replaces it either way.
+    private var cached: GateStatus
     private var continuations: [UUID: AsyncStream<GateStatus>.Continuation] = [:]
     private var loopTask: Task<Void, Never>?
     /// Monotonic tag for in-flight checks; stale completions are dropped.
@@ -157,6 +170,7 @@ public actor GateCheckRepository {
         self.policy = policy
         self.validatesBanVerdicts = validatesBanVerdicts
         self.clock = clock
+        self.cached = Self.statusWithoutMandate(persisted: store.load(), now: clock())
     }
 
     // MARK: - Lifecycle
@@ -207,7 +221,7 @@ public actor GateCheckRepository {
 
         guard let record = await moderation.activeMandateRecord() else {
             guard generation == self.generation else { return }
-            cached = .notMandated
+            cached = Self.statusWithoutMandate(persisted: store.load(), now: clock())
             publish()
             return
         }
@@ -226,7 +240,11 @@ public actor GateCheckRepository {
         publish()
     }
 
-    /// The last session timestamp actually used. Session signatures
+    /// The last session timestamp reserved — claimed before signing,
+    /// so a session that fails to sign still consumes its second.
+    /// That is the cheap direction to be wrong in: a second nobody
+    /// used costs nothing, while two callers reading the same
+    /// unreserved second cost a refused check. Session signatures
     /// are single-use server-side and the signed payload is
     /// second-precision; with a nil device token, two checks in the
     /// same second would produce byte-identical signatures and
@@ -256,40 +274,41 @@ public actor GateCheckRepository {
             token = nil
         }
 
+        // Signing is local and happens before anything is sent, so it
+        // gets its own `catch`: folding it into the transport one
+        // below would report a key this device doesn't have as a
+        // backend it couldn't reach.
+        //
+        // Only the terminal signing failure blocks. A missing key
+        // cannot come back without consent; every other way signing
+        // can fail — an unreadable Keychain, a store that didn't
+        // load — is transient, and hard-blocking a healthy install on
+        // one bad cadence tick would route it to consent, which mints
+        // a new mandate over the working one. Those keep the grace
+        // window, same as an unreachable backend.
+        let request: GateCheckRequest
         do {
-            let timestamp = max(clock(), lastSessionTimestamp.addingTimeInterval(1))
-            lastSessionTimestamp = timestamp
-            let mandateRef = try? record.mandate.mandateHash()
-            // Signed AS the mandate's identity, not the selected one:
-            // with several identities on the device, the selected key
-            // and `mandate.user` diverge, and a session naming one but
-            // signed by the other is refused as `signature_invalid`.
-            let signature = try await signer.sign(
-                GateCheckRequest.signedPayload(
-                    deviceToken: token,
-                    userKey: record.mandate.user,
-                    mandateRef: mandateRef,
-                    timestamp: timestamp
-                ),
-                as: record.mandate.user
-            )
-            let request = GateCheckRequest(
-                deviceToken: token,
-                userKey: record.mandate.user,
-                mandateRef: mandateRef,
-                timestamp: timestamp,
-                signature: signature
-            )
+            request = try await makeRequest(for: record, token: token)
+        } catch ModerationError.signingKeyUnavailable {
+            return .unsignable
+        } catch {
+            return .unreachable
+        }
+
+        do {
             let result = try await backend.gateCheck(request)
-            // `.enrollmentLost` is client-derived from the backend's
-            // `no_mandate` error envelope; a conforming backend never
-            // puts it in a 200 body. If one does anyway (the reason is
-            // plain `Codable`, so it decodes), normalize it onto the
-            // same refusal path as the envelope: it must not persist
-            // as a successful check, and downstream must see exactly
-            // one `.enrollmentLost` route.
-            if case .checkRequired(.enrollmentLost) = result {
-                return .refused(.enrollmentLost)
+            // `.enrollmentLost` and `.sessionUnsignable` are both
+            // client-derived — one from the backend's `no_mandate`
+            // error envelope, one from a signature this device could
+            // not produce — and a conforming backend puts neither in a
+            // 200 body. If one does anyway (the reasons are plain
+            // `Codable`, so they decode), normalize them onto the
+            // refusal path: a reason that routes to consent must not
+            // also persist as a successful check that refreshes the
+            // grace window.
+            if case .checkRequired(let reason) = result,
+               reason == .enrollmentLost || reason == .sessionUnsignable {
+                return .refused(reason)
             }
             return .success(await sanitize(result))
         } catch {
@@ -304,6 +323,49 @@ public actor GateCheckRepository {
             }
             return .unreachable
         }
+    }
+
+    /// Build the signed gate-check session. Signed AS the mandate's
+    /// identity, not the selected one: with several identities on the
+    /// device, the selected key and `mandate.user` diverge, and a
+    /// session naming one but signed by the other is refused as
+    /// `signature_invalid`.
+    ///
+    /// Throws when the mandate's identity can no longer sign. Two
+    /// kinds, and the caller separates them: the key is gone from the
+    /// active namespace (removed with the identity, restored over,
+    /// quarantined) and no retry recovers it, or the Keychain simply
+    /// failed to answer, which is transient and rides the grace
+    /// window like any other outage.
+    private func makeRequest(
+        for record: MandateRecord,
+        token: Data?
+    ) async throws -> GateCheckRequest {
+        // Read-and-reserve, in one synchronous actor region and
+        // before the first await: `checkNow` expects the cadence loop
+        // and a foreground/retry to overlap, and a reservation that
+        // waited for the signature would let both callers read the
+        // same second and emit byte-identical payloads — the replay
+        // this field exists to prevent.
+        let timestamp = max(clock(), lastSessionTimestamp.addingTimeInterval(1))
+        lastSessionTimestamp = timestamp
+        let mandateRef = try? record.mandate.mandateHash()
+        let signature = try await signer.sign(
+            GateCheckRequest.signedPayload(
+                deviceToken: token,
+                userKey: record.mandate.user,
+                mandateRef: mandateRef,
+                timestamp: timestamp
+            ),
+            as: record.mandate.user
+        )
+        return GateCheckRequest(
+            deviceToken: token,
+            userKey: record.mandate.user,
+            mandateRef: mandateRef,
+            timestamp: timestamp,
+            signature: signature
+        )
     }
 
     // MARK: - Device recovery
@@ -467,6 +529,10 @@ public actor GateCheckRepository {
     /// - unreachable past grace → `.gateCheckRequired(.offlineGraceExpired)`,
     ///   persisted state kept (a later success overwrites it);
     /// - unreachable with no history → `.gateCheckRequired(.neverChecked)`;
+    /// - unsignable (the mandate's identity cannot sign) →
+    ///   `.gateCheckRequired(.sessionUnsignable)`, persisted state
+    ///   kept; the grace window does not apply to a session that was
+    ///   never sent;
     /// - unreachable with the clock behind `lastSuccessAt` →
     ///   `.gateCheckRequired(.clockRollback)`. A negative age would
     ///   otherwise satisfy the grace comparison forever, so winding the
@@ -488,6 +554,22 @@ public actor GateCheckRepository {
             // reachable backend's answer, not a network condition the
             // grace window exists for.
             return (.gateCheckRequired(reason), persisted)
+        case .unsignable:
+            // Blocks now for the same reason `.refused` does, from the
+            // other side: the session never existed. Grace would only
+            // postpone a state that no elapsed time improves, behind a
+            // screen asking for a network that was never the problem.
+            //
+            // A persisted ban does NOT override this, and deliberately
+            // matches `.refused(.enrollmentLost)` rather than
+            // `statusWithoutMandate`. Both of those states block and
+            // route to consent, so nothing runs unmoderated in the
+            // meantime, and re-enrolling presents a fresh device token
+            // that brings any mark back from Apple. The no-mandate
+            // path is the exception because its alternative is not a
+            // block at all: the flow softens it to operational while
+            // the authorities directory is empty.
+            return (.gateCheckRequired(.sessionUnsignable), persisted)
         case .unreachable:
             guard let persisted else {
                 return (.gateCheckRequired(.neverChecked), nil)
@@ -501,6 +583,41 @@ public actor GateCheckRepository {
             }
             return (.gateCheckRequired(.offlineGraceExpired), persisted)
         }
+    }
+
+    /// What to serve when there is no active mandate to check under.
+    ///
+    /// `.notMandated` for almost every device — the consent gate
+    /// applies, not this one — but never over a ban still in force. A
+    /// mandate can disappear from a banned device (the consenting
+    /// identity removed, its orphan swept), and reporting
+    /// "not mandated" there hands back an unmoderated app: the flow's
+    /// no-mandate branch softens to operational whenever the
+    /// authorities directory hasn't loaded, which is every cold
+    /// launch until it does.
+    ///
+    /// "Still in force" is load-bearing, because nothing else can
+    /// clear this state. With no mandate there is no session to sign,
+    /// so `checkNow` never reaches the backend, and the ban screen
+    /// offers no retry: a verdict served here is re-served on every
+    /// launch from the same stored bytes. A permanent ban should
+    /// behave that way. One with a `banExpires` should not, so once
+    /// that date passes this yields to `.notMandated` and the consent
+    /// route re-opens — and the check that follows consent is what
+    /// re-states the ban if the backend still holds one, rather than
+    /// this client deciding on its own that an expiry it cached is
+    /// the last word.
+    public static func statusWithoutMandate(
+        persisted: PersistedGateState?,
+        now: Date
+    ) -> GateStatus {
+        guard let persisted, case .banned(let state) = persisted.lastResult else {
+            return .notMandated
+        }
+        if let expires = state.banExpires, expires <= now {
+            return .notMandated
+        }
+        return status(for: persisted.lastResult)
     }
 
     static func status(for result: GateCheckResult) -> GateStatus {

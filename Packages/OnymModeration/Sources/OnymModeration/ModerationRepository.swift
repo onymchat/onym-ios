@@ -744,6 +744,50 @@ public actor ModerationRepository {
         records.first { $0.isActive }
     }
 
+    /// Drop every mandate whose `user` is not one of `users`
+    /// (`onym:key:<hex>` references). Called when an identity is
+    /// removed, and swept once at launch for devices that removed one
+    /// before this existed.
+    ///
+    /// A mandate is signed by the identity that consented, and every
+    /// gate check re-signs a session under that same key. Once the key
+    /// is gone from the Keychain the record can never produce another
+    /// session: the signer throws before a request is even built, and
+    /// the gate blocks — `.sessionUnsignable` now, `.offlineGraceExpired`
+    /// before that failure had its own outcome — behind a screen whose
+    /// Retry button cannot ever clear it. Dropping the orphan reports
+    /// `.notMandated` instead, which routes to consent: the one move
+    /// that can still succeed.
+    ///
+    /// Not an enforcement hole. Consent re-enrolls, enrollment presents
+    /// a fresh device token, and any mark this device carries is read
+    /// back from Apple and applied to the identity consenting now —
+    /// exactly what a reinstall already does to the same state. And a
+    /// verdict already served is not dropped with the mandate:
+    /// `GateCheckRepository.statusWithoutMandate` keeps a persisted
+    /// `banned` on screen, so removing the consenting identity is not
+    /// a shortcut out of a mark while the directory loads.
+    ///
+    /// The caller supplies the keep-set, so an unreadable identity list
+    /// is never mistaken for an empty one.
+    ///
+    /// Compared case-insensitively. The keep-set is built with `%02x`
+    /// and the signer lowercases before matching, so a mandate whose
+    /// `user` hex arrived upper-cased signs perfectly well — and a
+    /// raw string comparison would read it as an orphan and delete
+    /// the mandate of an identity this device holds.
+    @discardableResult
+    public func purgeMandateRecords(keepingUsers users: Set<String>) -> Int {
+        let before = records.count
+        let keep = Set(users.map { $0.lowercased() })
+        records.removeAll { !keep.contains($0.mandate.user.lowercased()) }
+        let dropped = before - records.count
+        guard dropped > 0 else { return 0 }
+        mandateStore.save(records)
+        publish()
+        return dropped
+    }
+
     public func currentState() -> ModerationState {
         ModerationState(
             authorities: authorities,

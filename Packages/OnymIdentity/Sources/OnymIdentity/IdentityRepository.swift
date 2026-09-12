@@ -237,6 +237,26 @@ public actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelop
         return orderedIDs.compactMap(summary(for:))
     }
 
+    /// Whether this device holds any quarantined identity — key
+    /// material a fresh-install verdict moved out of the active
+    /// namespace rather than deleting.
+    ///
+    /// Exposed for callers whose action is destructive and whose only
+    /// evidence is the active identity list. That list cannot show
+    /// them a wrong verdict: after one, it reads as a normal device
+    /// with a newly-minted identity, and anything keyed to the
+    /// identities the verdict hid looks like an orphan. A non-empty
+    /// quarantine is the durable record that this device's active
+    /// list may not be the whole story, and it stays true on every
+    /// later launch, not just the one that quarantined.
+    ///
+    /// Throws rather than answering `false` on a Keychain it can't
+    /// read: a caller asking this question is about to delete
+    /// something.
+    public func hasQuarantinedIdentities() throws -> Bool {
+        try !keychain.listQuarantined().isEmpty
+    }
+
     /// One-shot accessor for the currently-selected identity's BLS Fr
     /// scalar. Used by the chain layer (`OnymGroupProofGenerator`) to
     /// call `Tyranny.proveCreate` etc. Loads from the Keychain on
@@ -340,7 +360,17 @@ public actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelop
     /// mandate names the identity that consented, and that identity
     /// must sign even while another one is selected in the picker.
     /// Throws `.noIdentityForKey` when no stored identity matches
-    /// (removed, or quarantined by a fresh-install verdict).
+    /// (removed, or quarantined by a fresh-install verdict), and
+    /// callers treat that as terminal — see
+    /// `ModerationError.signingKeyUnavailable`.
+    ///
+    /// A cached identity whose Keychain item has since disappeared
+    /// reaches the same throw, and belongs there: `keychain.read`
+    /// returns nil only for `errSecItemNotFound`, so the item is
+    /// genuinely gone and the cache is what's stale. A Keychain that
+    /// merely refuses to answer — locked, or any other status —
+    /// throws `.keychainRead` from here instead, which callers keep
+    /// treating as transient.
     public func signWithStellarKey(
         _ message: Data,
         matchingPublicKeyHex publicKeyHex: String

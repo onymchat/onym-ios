@@ -19,5 +19,16 @@ public protocol ModerationSigner: Sendable {
     /// hold several identities, and a session that presents the
     /// mandate's identity but carries another identity's signature is
     /// refused by the backend as `signature_invalid`.
+    ///
+    /// Throws `ModerationError.signingKeyUnavailable` — and only that
+    /// — when the named key is not available to sign with: absent
+    /// from this device, or held in quarantine after a fresh-install
+    /// verdict. Quarantine is deliberately included. Recovering a
+    /// quarantined identity takes a mnemonic restore or a flow that
+    /// does not exist yet; it will not come back while the app waits,
+    /// which is the distinction this error draws. Conforming adapters
+    /// MUST NOT use it for a failure that clears on its own (an
+    /// unreadable Keychain, a store that didn't load): callers treat
+    /// it as terminal and stop waiting.
     func sign(_ message: Data, as userKey: String) async throws -> Data
 }

@@ -378,10 +378,10 @@ struct UITestAuthorityManifestFetcher: AuthorityManifestFetcher {
 /// Signer for the stubbed moderation seat. The seeded mandate names
 /// `onym:key:uitest-user` — a key no real identity owns — so the real
 /// `IdentityModerationSigner`'s identity-addressed `sign(_:as:)`
-/// throws `noIdentityForKey` for it and every gate check degrades to
-/// "unreachable", blocking the whole app behind the verification
-/// screen. Nothing in the stub seat verifies signatures, so a
-/// constant answers both methods.
+/// throws for it and every gate check degrades to "unsignable",
+/// blocking the whole app behind the verification screen. Nothing in
+/// the stub seat verifies signatures, so a constant answers both
+/// methods.
 struct UITestModerationSigner: ModerationSigner {
     func userKeyID() async throws -> String { "onym:key:uitest-user" }
     func sign(_ message: Data) async throws -> Data {
