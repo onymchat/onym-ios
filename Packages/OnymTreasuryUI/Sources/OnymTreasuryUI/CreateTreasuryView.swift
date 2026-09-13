@@ -14,6 +14,7 @@ import SwiftUI
 /// co-signer among several — and if enough co-signers lose their keys,
 /// the money is gone. Both facts are on the screen, not in a help page.
 public struct CreateTreasuryView: View {
+    @State private var copiedTransaction = false
     @Bindable var flow: TreasuryFlow
     @Environment(\.openURL) private var openURL
 
@@ -94,12 +95,29 @@ public struct CreateTreasuryView: View {
                     Task { await flow.confirmExternalCreation() }
                 }
                 .accessibilityIdentifier("treasury.create.confirm_external")
+                if let deadline = flow.walletDeadline {
+                    Footnote("Signable until \(deadline.formatted(date: .omitted, time: .shortened)). After that a wallet may refuse it \u{2014} some do so without saying anything \u{2014} and you can start over.")
+                }
                 if flow.canReopenWallet {
                     Button { flow.reopenWallet() } label: {
                         Text("Open my wallet again")
                             .font(OnymType.font(size: 14, weight: .medium))
                     }
                     .accessibilityIdentifier("treasury.create.reopen_wallet")
+                }
+                // The far end of a handoff is somebody else's app. When
+                // it stalls, these bytes are the whole transaction and
+                // can be finished anywhere that speaks Stellar.
+                if let xdr = flow.walletTransactionXDR {
+                    Button {
+                        UIPasteboard.general.string = xdr
+                        copiedTransaction = true
+                    } label: {
+                        Text(copiedTransaction ? "Copied" : "Copy the transaction")
+                            .font(OnymType.font(size: 14, weight: .medium))
+                    }
+                    .accessibilityIdentifier("treasury.create.copy_xdr")
+                    Footnote("If your wallet won't finish, copy the transaction and submit it anywhere that takes signed Stellar XDR. It is already signed by the new account; yours is the signature it still needs.")
                 }
                 // The way out. Without it this screen had one button,
                 // and it could only ever fail for a transaction the

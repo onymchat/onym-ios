@@ -59,8 +59,15 @@ final class TreasuryCreationTests: XCTestCase {
     /// creation envelope is signed and submitted in one sitting, and a
     /// stale one should lapse rather than linger as a transaction that
     /// can still spend the founder's funds.
-    func test_theCreationWindow_isShortEnoughToLapseInOneSitting() {
-        XCTAssertGreaterThan(TreasuryCreationInteractor.creationWindow, 60)
+    ///
+    /// The floor is the half that was missing. At ten minutes the
+    /// external path was a race against a person reading four
+    /// operations in another app, and a wallet that finds `maxTime`
+    /// passed is entitled to refuse — quietly, in the ones that do.
+    /// Half an hour is the least that leaves room for a handoff; the
+    /// ceiling keeps it a sitting rather than a standing offer.
+    func test_theCreationWindow_leavesRoomForAHandoffAndStillLapses() {
+        XCTAssertGreaterThanOrEqual(TreasuryCreationInteractor.creationWindow, 1800)
         XCTAssertLessThanOrEqual(TreasuryCreationInteractor.creationWindow, 3600)
         // And far shorter than a proposal's, which people sign across
         // time zones.
