@@ -2273,6 +2273,21 @@ struct OnymIOSApp: App {
                             // verification, so "nothing accepted it" is
                             // an ordinary outcome — and silence is
                             // indistinguishable from success.
+                            //
+                            // The flow waiting on the paste sheet gets
+                            // first refusal, because this alert is
+                            // attached at the root and that sheet is
+                            // always on screen when a wallet returns
+                            // here: an alert under a sheet does not
+                            // present, so both outcomes used to vanish.
+                            // The root alert is the path for a return
+                            // that arrives with no sheet open at all —
+                            // a wallet opened from a screen since left,
+                            // or a link tapped cold.
+                            let handled = proposalsFlowCache.allFlows
+                                .map { $0.returnedFromWallet(adoptedProposalID: adopted) }
+                                .contains(true)
+                            guard !handled else { return }
                             if adopted == nil {
                                 treasuryReturnOutcome.notAdopted()
                             } else {

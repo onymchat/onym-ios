@@ -30,14 +30,25 @@ import OnymStellar
 public struct TreasuryProposalDescription: Equatable, Sendable {
     public struct Line: Equatable, Sendable, Identifiable {
         public enum Value: Equatable, Sendable {
+            /// Runtime data — a memo someone typed, a home domain, a
+            /// hex flag word. Rendered verbatim, never looked up.
             case text(String)
+            /// UI copy. A separate case from `text` because the two are
+            /// different things that happen to both be words: one is a
+            /// stranger's bytes and must never be looked up as a key,
+            /// the other is a sentence this app wrote and must be.
+            case copy(LocalizedStringResource)
             /// Rendered monospaced and fully selectable — an address is
             /// checked character by character or not at all.
             case account(StellarAccountID)
             case amount(StellarAmount, code: String)
         }
 
-        public let label: String
+        /// A key, not a `String`. `Text(_: String)` is the
+        /// non-localizing overload, so every label on this card — the
+        /// recipient, the amount, the authority being handed over —
+        /// rendered English in every language.
+        public let label: LocalizedStringResource
         public let value: Value
         /// Lines a person should look hardest at: the recipient, the
         /// amount, the key being handed authority. The UI leans on this
@@ -64,9 +75,21 @@ public struct TreasuryProposalDescription: Equatable, Sendable {
         /// every line and tore down the address `Text`, dropping any
         /// in-progress selection on the recipient: the one field the
         /// card asks people to check character by character.
-        public var id: String { "\(label)|\(value)" }
+        /// Includes `ordinal` because label and value are not enough:
+        /// two identical rows — the same amount to the same account
+        /// twice, which is a transaction someone might well propose —
+        /// collided in `ForEach` and rendered as one.
+        public var id: String { "\(ordinal)|\(label.key)|\(value)" }
 
-        public init(label: String, value: Value, isPrincipal: Bool = false) {
+        /// Position in the description. Assigned when the lines are
+        /// finalised, so nothing constructing a `Line` has to count.
+        public internal(set) var ordinal: Int = 0
+
+        public init(
+            label: LocalizedStringResource,
+            value: Value,
+            isPrincipal: Bool = false
+        ) {
             self.label = label
             self.value = value
             self.isPrincipal = isPrincipal
@@ -74,7 +97,7 @@ public struct TreasuryProposalDescription: Equatable, Sendable {
     }
 
     /// Short headline, e.g. "Pay 25 USDC".
-    public let title: String
+    public let title: LocalizedStringResource
     public let lines: [Line]
     /// Set when the transaction does something this description could
     /// not fully account for.
@@ -84,11 +107,19 @@ public struct TreasuryProposalDescription: Equatable, Sendable {
     /// of showing a tidy summary of part of it. A partial description
     /// that looks complete is the failure this whole design is built to
     /// avoid.
-    public let caveat: String?
+    public let caveat: LocalizedStringResource?
 
-    public init(title: String, lines: [Line], caveat: String? = nil) {
+    public init(
+        title: LocalizedStringResource,
+        lines: [Line],
+        caveat: LocalizedStringResource? = nil
+    ) {
         self.title = title
-        self.lines = lines
+        self.lines = lines.enumerated().map { index, line in
+            var numbered = line
+            numbered.ordinal = index
+            return numbered
+        }
         self.caveat = caveat
     }
 
@@ -97,8 +128,8 @@ public struct TreasuryProposalDescription: Equatable, Sendable {
         let operations = proposal.operations
         let transactionFee = proposal.envelope.transaction.fee
         var lines: [Line] = []
-        var title = "Treasury transaction"
-        var caveat: String?
+        var title: LocalizedStringResource = "Treasury transaction"
+        var caveat: LocalizedStringResource?
 
         switch operations.first?.body {
         case .payment(let destination, let asset, let amount):
@@ -127,12 +158,12 @@ public struct TreasuryProposalDescription: Equatable, Sendable {
                 lines.append(Line(
                     label: "Limit",
                     value: limit == .max
-                        ? .text("No limit")
+                        ? .copy("No limit")
                         : .amount(limit, code: asset.code)
                 ))
                 lines.append(Line(
                     label: "Reserve",
-                    value: .text("Locks one more base reserve in the treasury")
+                    value: .copy("Locks one more base reserve in the treasury")
                 ))
             }
 
@@ -193,16 +224,32 @@ public struct TreasuryProposalDescription: Equatable, Sendable {
         }
 
         self.title = title
-        self.lines = lines
+        self.lines = lines.enumerated().map { index, line in
+            var numbered = line
+            numbered.ordinal = index
+            return numbered
+        }
         self.caveat = caveat
+    }
+
+    /// The `setOptions` operations at the front of the transaction,
+    /// stopping at the first operation that is anything else.
+    private static func leadingSetOptions(
+        _ operations: [StellarOperation]
+    ) -> [StellarOperation] {
+        Array(operations.prefix { operation in
+            if case .setOptions = operation.body { return true }
+            return false
+        })
     }
 
     private static func explainedOperationCount(_ operations: [StellarOperation]) -> Int {
         switch operations.first?.body {
         case .setOptions:
-            // The control branch reads the whole run.
-            return operations.prefix { if case .setOptions = $0.body { return true }
-                                       return false }.count
+            // The control branch reads exactly this run — one helper, so
+            // the two cannot drift into disagreeing about which
+            // operations were accounted for.
+            return leadingSetOptions(operations).count
         case .payment, .changeTrust:
             return 1
         case .createAccount, .none:
@@ -234,7 +281,7 @@ public struct TreasuryProposalDescription: Equatable, Sendable {
 
     private static func describeControl(
         _ operations: [StellarOperation]
-    ) -> (String, [Line]) {
+    ) -> (LocalizedStringResource, [Line]) {
         var lines: [Line] = []
         var added: [StellarAccountID] = []
         var removed: [StellarAccountID] = []
@@ -245,7 +292,19 @@ public struct TreasuryProposalDescription: Equatable, Sendable {
         var inflationDestination: StellarAccountID?
         var homeDomain: String?
 
-        for operation in operations {
+        // The leading run only — the same operations
+        // `explainedOperationCount` counts, and deliberately so.
+        //
+        // Skipping over a non-`setOptions` operation with `continue`
+        // meant this read every `setOptions` in the transaction while
+        // the count stopped at the first gap. So
+        // `[setOptions, payment, setOptions]` drew a line describing the
+        // third operation *and* a caveat saying two operations are not
+        // shown — a card that contradicts itself about which of the
+        // things in front of you it has accounted for. Reading the run
+        // is the half to give up: the caveat is what makes the rest
+        // visible.
+        for operation in Self.leadingSetOptions(operations) {
             guard case .setOptions(let fields) = operation.body else { continue }
             if let signer = fields.signer {
                 if signer.weight > 0 { added.append(signer.key) } else { removed.append(signer.key) }
@@ -303,9 +362,9 @@ public struct TreasuryProposalDescription: Equatable, Sendable {
             // the treasury shared — and it is spelled out.
             lines.append(Line(
                 label: "Treasury's own key",
-                value: .text(masterWeight == 0
-                    ? "Stays switched off"
-                    : "SWITCHED BACK ON \u{2014} weight \(masterWeight)"),
+                value: masterWeight == 0
+                    ? .copy("Stays switched off")
+                    : .copy("SWITCHED BACK ON \u{2014} weight \(masterWeight)"),
                 isPrincipal: masterWeight != 0
             ))
         }
@@ -334,12 +393,14 @@ public struct TreasuryProposalDescription: Equatable, Sendable {
         if let homeDomain {
             lines.append(Line(
                 label: "Home domain",
-                value: .text(homeDomain.isEmpty ? "(cleared)" : homeDomain),
+                value: homeDomain.isEmpty
+                    ? .copy("(cleared)")
+                    : .text(homeDomain),
                 isPrincipal: true
             ))
         }
 
-        let title: String
+        let title: LocalizedStringResource
         if !added.isEmpty, removed.isEmpty {
             title = added.count == 1 ? "Add a co-signer" : "Add \(added.count) co-signers"
         } else if added.isEmpty, !removed.isEmpty {

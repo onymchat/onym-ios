@@ -111,7 +111,16 @@ public struct TreasuryProposalCard: View {
     private func value(_ line: TreasuryProposalDescription.Line) -> some View {
         switch line.value {
         case .text(let text):
-            Text(text)
+            // Runtime data — a memo, a domain — so verbatim, never
+            // looked up: a stranger's string that happened to match a
+            // catalog key would render the translation instead of
+            // itself.
+            Text(verbatim: text)
+                .font(OnymType.font(size: line.isPrincipal ? 15 : 13,
+                                    weight: line.isPrincipal ? .semibold : .regular))
+                .foregroundStyle(OnymTokens.text)
+        case .copy(let resource):
+            Text(resource)
                 .font(OnymType.font(size: line.isPrincipal ? 15 : 13,
                                     weight: line.isPrincipal ? .semibold : .regular))
                 .foregroundStyle(OnymTokens.text)
@@ -138,7 +147,7 @@ public struct TreasuryProposalCard: View {
         }
     }
 
-    private func warning(_ text: String) -> some View {
+    private func warning(_ text: LocalizedStringResource) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(OnymTokens.red)
@@ -204,13 +213,18 @@ public struct TreasuryProposalCard: View {
             Text(explain(reason))
                 .font(OnymType.font(size: 12, weight: .medium))
                 .foregroundStyle(OnymTokens.red)
+
+        case .dismissed:
+            Text("Set aside on this phone. It isn't holding up other proposals.")
+                .font(OnymType.font(size: 12))
+                .foregroundStyle(OnymTokens.text3)
         }
     }
 
     /// Each refusal says what was actually wrong. "Invalid" would leave
     /// a member unable to tell a peer on the wrong network setting from
     /// someone trying something.
-    private func explain(_ reason: TreasuryRejection) -> String {
+    private func explain(_ reason: TreasuryRejection) -> LocalizedStringKey {
         switch reason {
         case .notThisTreasury:
             "This spends a different account, not this chat's treasury. It was not shown for signing."
@@ -241,7 +255,18 @@ public struct TreasuryProposalCard: View {
 
     @ViewBuilder
     private var actions: some View {
-        if row.canSign || row.canSubmit {
+        if row.standing == .dismissed {
+            Button {
+                Task { await flow.restore(row.id) }
+            } label: {
+                Text("Put it back")
+                    .font(OnymType.font(size: 15, weight: .semibold))
+                    .frame(maxWidth: .infinity, minHeight: 42)
+            }
+            .buttonStyle(.bordered)
+            .disabled(isBusy)
+            .accessibilityIdentifier("treasury.proposal.restore.\(row.id.uuidString)")
+        } else if row.canSign || row.canSubmit {
             HStack(spacing: 10) {
                 if row.canSign {
                     Button {
@@ -269,6 +294,20 @@ public struct TreasuryProposalCard: View {
                     .accessibilityIdentifier("treasury.proposal.submit.\(row.id.uuidString)")
                 }
             }
+            // Deliberately plain and next to the actions rather than
+            // hidden in a menu: an open proposal holds the treasury's
+            // next slot, so "we've decided against this one" needs to be
+            // as reachable as signing it. It changes nothing for anyone
+            // else and is undone by the button that replaces it.
+            Button {
+                Task { await flow.dismiss(row.id) }
+            } label: {
+                Text("Set aside")
+                    .font(OnymType.font(size: 13))
+                    .foregroundStyle(OnymTokens.text3)
+            }
+            .disabled(isBusy)
+            .accessibilityIdentifier("treasury.proposal.dismiss.\(row.id.uuidString)")
         }
         if !row.signedBy.isEmpty {
             Text("Signed by \(row.signedBy.joined(separator: ", "))")

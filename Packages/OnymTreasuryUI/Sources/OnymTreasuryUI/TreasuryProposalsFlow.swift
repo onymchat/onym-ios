@@ -401,9 +401,56 @@ public final class TreasuryProposalsFlow {
         }
     }
 
+    /// Set a proposal aside on this device, and put it back.
+    ///
+    /// Both are local and neither signs anything. The repository holds
+    /// the reasoning: an open proposal claims the treasury's next
+    /// sequence number, so one the group has decided against would
+    /// otherwise block every other proposal until its time bound ran
+    /// out.
+    public func dismiss(_ id: UUID) async {
+        await repository.dismiss(proposalID: id)
+    }
+
+    public func restore(_ id: UUID) async {
+        await repository.restore(proposalID: id)
+    }
+
     public func clearWalletRequest() {
         walletRequest = nil
         walletRequestSurface = nil
+    }
+
+    /// A wallet came back through `onym://tx`, and this flow may be the
+    /// one waiting for it.
+    ///
+    /// Returns whether this flow took responsibility for telling the
+    /// person what happened. It matters because the app's alert is
+    /// attached at the root and the paste sheet is *always* on screen
+    /// on this path — `sign()` sets `pasteTargetID` before opening the
+    /// wallet link, and `ownsPastePrompt` goes true the moment the link
+    /// is handed off. An alert underneath a sheet cannot present, so
+    /// both outcomes were swallowed in silence. Whichever flow owns the
+    /// sheet answers here instead: success dismisses it, failure shows
+    /// the reason inside it.
+    @discardableResult
+    public func returnedFromWallet(adoptedProposalID: UUID?) -> Bool {
+        guard pasteTargetID != nil else { return false }
+        if let adoptedProposalID, adoptedProposalID == pasteTargetID {
+            pastedXDR = ""
+            pasteTargetID = nil
+            pasteSurface = nil
+            pasteError = nil
+            return true
+        }
+        // The sheet is up for a different proposal, or for one the
+        // returned envelope did not match. Either way the person is
+        // looking at "bring the signature back" and has to be told the
+        // signature that came back was not for this.
+        pasteError = String(
+            localized: "That signed transaction didn't match this proposal. It may have already gone through, or expired."
+        )
+        return true
     }
 
     /// Whether `surface` is the one that should present the paste sheet

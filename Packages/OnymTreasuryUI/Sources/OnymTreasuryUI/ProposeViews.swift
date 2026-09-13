@@ -116,9 +116,24 @@ struct ProposePaymentView: View {
         }
     }
 
+    /// Clamps rather than bails.
+    ///
+    /// Bailing left `paymentAssetCode` empty, and an empty code is how
+    /// `proposePayment` spells XLM — so a balance list that shrank while
+    /// the sheet was open (index 2 selected, a refresh returns two
+    /// assets) left the button enabled and asked the group to sign a
+    /// payment denominated in XLM that nobody chose. The selection
+    /// moving to a neighbouring asset is visible on screen; silently
+    /// changing what is being paid is not.
     private func applyAsset() {
-        guard selected < flow.payableAssets.count else { return }
-        let asset = flow.payableAssets[selected]
+        let assets = flow.payableAssets
+        guard !assets.isEmpty else {
+            flow.paymentAssetCode = ""
+            flow.paymentAssetIssuer = ""
+            return
+        }
+        if selected >= assets.count { selected = assets.count - 1 }
+        let asset = assets[selected]
         flow.paymentAssetCode = asset == .native ? "" : asset.code
         flow.paymentAssetIssuer = asset.issuer?.accountID ?? ""
     }

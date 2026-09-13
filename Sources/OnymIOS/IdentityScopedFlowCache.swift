@@ -41,6 +41,12 @@ final class IdentityScopedFlowCache<Flow: StoppableFlow> {
 
     func store(_ flow: Flow, for groupID: String) { flows[groupID] = flow }
 
+    /// Every live flow. For the few events that arrive without a group
+    /// to route them by — a wallet returning a signed transaction
+    /// through `onym://tx` names no group, so the flow that asked for it
+    /// has to be found by asking each one.
+    var allFlows: [Flow] { Array(flows.values) }
+
     /// Clears **only when the selection actually changes**, the same
     /// equality guard `TreasuryRepository.setCurrentIdentity` and its
     /// siblings keep — and for a sharper reason here, because the

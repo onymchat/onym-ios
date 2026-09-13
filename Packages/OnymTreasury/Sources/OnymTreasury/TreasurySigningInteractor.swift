@@ -212,16 +212,34 @@ public struct TreasurySigningInteractor: Sendable {
                 network: stored.proposal.network
             )
             guard !adopted.isEmpty else { continue }
+            // By verification, and believing the store's answer — the
+            // same two corrections `adoptSignatures` documents, which
+            // this path was written without. A hint lookup can match a
+            // *pre-existing* signature from a colliding signer, and
+            // discarding `addSignature`'s result meant a harvest that
+            // stored nothing still returned a proposal id, which the
+            // caller renders as "your signature was added" over a
+            // proposal that is still a signature short.
+            let hash = stored.proposal.envelope.transaction.hash(
+                network: stored.proposal.network
+            )
+            var accepted = false
             for signer in adopted {
-                guard let decorated = working.signatures.first(where: {
-                    $0.hint == signer.signatureHint
+                guard let decorated = working.signatures.first(where: { candidate in
+                    candidate.signature.count == 64
+                        && TransactionEnvelope.verifies(
+                            signature: candidate.signature,
+                            by: signer,
+                            over: hash
+                        )
                 }) else { continue }
-                await treasury.addSignature(
+                guard await treasury.addSignature(
                     decorated.signature,
                     from: signer,
                     toProposal: stored.proposal.id,
                     now: now
-                )
+                ) else { continue }
+                accepted = true
                 await broadcaster.broadcastSignature(
                     proposal: stored.proposal,
                     signature: decorated.signature,
@@ -229,6 +247,7 @@ public struct TreasurySigningInteractor: Sendable {
                     now: now
                 )
             }
+            guard accepted else { continue }
             return stored.proposal.id
         }
         return nil
