@@ -37,6 +37,15 @@ public protocol TreasuryStore: Sendable {
     func proposal(id: UUID, ownerIDString: String) async -> StoredProposal?
     func upsert(_ proposal: StoredProposal) async
 
+    /// A creation handed to a wallet and not yet confirmed. At most one
+    /// per group.
+    func pendingCreation(
+        groupID: String,
+        ownerIDString: String
+    ) async -> PendingTreasuryCreation?
+    func upsert(_ pending: PendingTreasuryCreation) async
+    func removePendingCreation(groupID: String, ownerIDString: String) async
+
     /// Every row belonging to an identity, for cascade delete on
     /// identity removal.
     func removeAll(ownerIDString: String) async
@@ -76,6 +85,7 @@ public actor InMemoryTreasuryStore: TreasuryStore {
     private var treasuries: [Key: Treasury] = [:]
     private var declarations: [Key: [String: TreasurySignerDeclarationRecord]] = [:]
     private var proposals: [String: StoredProposal] = [:]
+    private var pending: [Key: PendingTreasuryCreation] = [:]
 
     private struct Key: Hashable {
         let groupID: String
@@ -153,12 +163,31 @@ public actor InMemoryTreasuryStore: TreasuryStore {
         proposals[key] = proposal
     }
 
+    public func pendingCreation(
+        groupID: String,
+        ownerIDString: String
+    ) -> PendingTreasuryCreation? {
+        pending[Key(groupID: groupID, owner: ownerIDString)]
+    }
+
+    public func upsert(_ record: PendingTreasuryCreation) {
+        pending[Key(
+            groupID: record.groupID,
+            owner: record.ownerIdentityID.rawValue.uuidString
+        )] = record
+    }
+
+    public func removePendingCreation(groupID: String, ownerIDString: String) {
+        pending[Key(groupID: groupID, owner: ownerIDString)] = nil
+    }
+
     public func removeAll(ownerIDString: String) {
         treasuries = treasuries.filter { $0.key.owner != ownerIDString }
         declarations = declarations.filter { $0.key.owner != ownerIDString }
         proposals = proposals.filter {
             $0.value.proposal.ownerIdentityID.rawValue.uuidString != ownerIDString
         }
+        pending = pending.filter { $0.key.owner != ownerIDString }
     }
 
     private static func key(id: UUID, owner: String) -> String {

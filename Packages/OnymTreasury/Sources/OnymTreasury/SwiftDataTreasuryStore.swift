@@ -24,6 +24,7 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
         PersistedTreasury.self,
         PersistedSignerDeclaration.self,
         PersistedProposal.self,
+        PersistedPendingCreation.self,
     ])
 
     public init(container: ModelContainer) {
@@ -319,6 +320,110 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
         }
     }
 
+    // MARK: - Pending creation
+
+    private struct PendingConfiguration: Codable {
+        let coSigners: [String]
+        let low: UInt32
+        let medium: UInt32
+        let high: UInt32
+    }
+
+    public func pendingCreation(
+        groupID: String,
+        ownerIDString: String
+    ) async -> PendingTreasuryCreation? {
+        await perform { () -> PendingTreasuryCreation? in
+            let descriptor = FetchDescriptor<PersistedPendingCreation>(
+                predicate: #Predicate {
+                    $0.groupID == groupID && $0.ownerIdentityIDString == ownerIDString
+                }
+            )
+            guard let row = try self.context.fetch(descriptor).first else { return nil }
+            let configuration = try JSONDecoder().decode(
+                PendingConfiguration.self,
+                from: try StorageEncryption.decrypt(row.encryptedConfiguration)
+            )
+            return PendingTreasuryCreation(
+                groupID: row.groupID,
+                ownerIdentityID: try self.identity(row.ownerIdentityIDString),
+                treasuryAccount: try StellarAccountID(
+                    accountID: try self.string(row.encryptedTreasuryAccountID)
+                ),
+                network: try self.network(row.encryptedNetwork),
+                creationTxHash: try self.string(row.encryptedCreationTxHash),
+                coSigners: try configuration.coSigners.map {
+                    try StellarAccountID(accountID: $0)
+                },
+                thresholds: TreasuryThresholds(
+                    low: configuration.low,
+                    medium: configuration.medium,
+                    high: configuration.high
+                ),
+                startedAt: row.startedAt
+            )
+        } ?? nil
+    }
+
+    public func upsert(_ record: PendingTreasuryCreation) async {
+        let owner = record.ownerIdentityID.rawValue.uuidString
+        let group = record.groupID
+        await perform {
+            let descriptor = FetchDescriptor<PersistedPendingCreation>(
+                predicate: #Predicate {
+                    $0.groupID == group && $0.ownerIdentityIDString == owner
+                }
+            )
+            let configuration = try StorageEncryption.encrypt(
+                try JSONEncoder().encode(PendingConfiguration(
+                    coSigners: record.coSigners.map(\.accountID),
+                    low: record.thresholds.low,
+                    medium: record.thresholds.medium,
+                    high: record.thresholds.high
+                ))
+            )
+            let account = try StorageEncryption.encrypt(
+                Data(record.treasuryAccount.accountID.utf8)
+            )
+            let network = try StorageEncryption.encrypt(
+                Data(record.network.rawValue.utf8)
+            )
+            let hash = try StorageEncryption.encrypt(Data(record.creationTxHash.utf8))
+            if let row = try self.context.fetch(descriptor).first {
+                row.startedAt = record.startedAt
+                row.encryptedTreasuryAccountID = account
+                row.encryptedNetwork = network
+                row.encryptedCreationTxHash = hash
+                row.encryptedConfiguration = configuration
+            } else {
+                self.context.insert(PersistedPendingCreation(
+                    groupID: group,
+                    ownerIdentityIDString: owner,
+                    startedAt: record.startedAt,
+                    encryptedTreasuryAccountID: account,
+                    encryptedNetwork: network,
+                    encryptedCreationTxHash: hash,
+                    encryptedConfiguration: configuration
+                ))
+            }
+            try self.context.save()
+            return ()
+        }
+    }
+
+    public func removePendingCreation(groupID: String, ownerIDString: String) async {
+        await perform {
+            let descriptor = FetchDescriptor<PersistedPendingCreation>(
+                predicate: #Predicate {
+                    $0.groupID == groupID && $0.ownerIdentityIDString == ownerIDString
+                }
+            )
+            for row in try self.context.fetch(descriptor) { self.context.delete(row) }
+            try self.context.save()
+            return ()
+        }
+    }
+
     public func removeAll(ownerIDString: String) async {
         await perform {
             try self.context.delete(
@@ -331,6 +436,10 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
             )
             try self.context.delete(
                 model: PersistedProposal.self,
+                where: #Predicate { $0.ownerIdentityIDString == ownerIDString }
+            )
+            try self.context.delete(
+                model: PersistedPendingCreation.self,
                 where: #Predicate { $0.ownerIdentityIDString == ownerIDString }
             )
             try self.context.save()

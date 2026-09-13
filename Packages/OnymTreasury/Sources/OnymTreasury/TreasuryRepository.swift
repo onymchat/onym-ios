@@ -328,6 +328,37 @@ public actor TreasuryRepository {
         return account
     }
 
+    /// The creation handed to a wallet and awaiting confirmation, if
+    /// any — see `PendingTreasuryCreation`.
+    public func pendingCreation(groupID: String) async -> PendingTreasuryCreation? {
+        guard let owner = currentIdentity?.rawValue.uuidString else { return nil }
+        return await store.pendingCreation(groupID: groupID, ownerIDString: owner)
+    }
+
+    public func recordPendingCreation(_ pending: PendingTreasuryCreation) async {
+        await store.upsert(pending)
+        await publish(groupID: pending.groupID)
+    }
+
+    public func clearPendingCreation(groupID: String) async {
+        guard let owner = currentIdentity?.rawValue.uuidString else { return }
+        await store.removePendingCreation(groupID: groupID, ownerIDString: owner)
+        await publish(groupID: groupID)
+    }
+
+    /// Read any account, for the screens that need to show one that is
+    /// not the treasury — the founder's funding account, most of all.
+    ///
+    /// Here rather than in the flow because this repository owns the
+    /// Horizon seam: a view reaching past it would be a second path to
+    /// the same third party, with its own error handling and no cache.
+    public func account(
+        _ account: StellarAccountID,
+        network: StellarNetwork
+    ) async -> HorizonAccount? {
+        try? await horizon(network).account(account)
+    }
+
     /// Applied transactions for the group's treasury, newest first.
     /// Not cached — history is a screen the user opened, and a stale
     /// list is worse than a spinner.

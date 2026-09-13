@@ -22,6 +22,7 @@ import OnymBackupUI
 import OnymBilling
 import OnymStellar
 import OnymTreasury
+import OnymTreasuryUI
 
 @main
 struct OnymIOSApp: App {
@@ -37,6 +38,11 @@ struct OnymIOSApp: App {
     private let contractsRepository: ContractsRepository
     private let groupRepository: GroupRepository
     private let treasuryRepository: TreasuryRepository
+    /// Stored as well as captured: the factory closure in `init` needs
+    /// the local, and the identity-change listener in `body` needs the
+    /// same instance to clear it.
+    private let treasuryFlowCache: TreasuryFlowCache
+    private let treasuryBroadcaster: TreasuryBroadcaster
     private let messageRepository: MessageRepository
     private let imageLoader: ChatImageLoader
     private let videoLoader: ChatVideoLoader
@@ -528,6 +534,24 @@ struct OnymIOSApp: App {
         #endif
         self.inboxTransport = inboxTransport
         self.contractTransportFactory = contractTransportFactory
+
+        // Memoised per group — see `TreasuryFlowCache`. The screen is
+        // built inside a NavigationLink destination closure that runs on
+        // every re-render of the members screen.
+        let treasuryFlowCache = TreasuryFlowCache()
+        self.treasuryFlowCache = treasuryFlowCache
+
+        // Built here rather than in the factory closure: it holds the
+        // transport, and one broadcaster per app is what keeps a
+        // declaration and the proposal that follows it going out over
+        // the same seam.
+        let treasuryBroadcaster = TreasuryBroadcaster(
+            identity: repository,
+            inboxTransport: inboxTransport,
+            groups: groupRepository,
+            treasury: treasuryRepository
+        )
+        self.treasuryBroadcaster = treasuryBroadcaster
 
         // DEBUG deeplink injection for UI tests (see `initialDeeplinkURL`).
         #if DEBUG
@@ -1524,6 +1548,31 @@ struct OnymIOSApp: App {
                     repository: moderationRepository
                 )))
             },
+            makeTreasuryView: { @MainActor groupID in
+                if let existing = treasuryFlowCache.flow(for: groupID) {
+                    return AnyView(TreasurySetupView(flow: existing))
+                }
+                let flow = TreasuryFlow(
+                    groupID: groupID,
+                    repository: treasuryRepository,
+                    groups: groupRepository,
+                    identity: repository,
+                    broadcaster: treasuryBroadcaster,
+                    creation: TreasuryCreationInteractor(
+                        treasury: treasuryRepository,
+                        identity: repository,
+                        groups: groupRepository,
+                        broadcaster: treasuryBroadcaster
+                    ),
+                    // Read at call time, not captured: the treasury a
+                    // group creates should follow the Settings toggle
+                    // the user is actually on, and this closure outlives
+                    // any one reading of it.
+                    network: { UserDefaultsNetworkPreference().current().stellarNetwork }
+                )
+                treasuryFlowCache.store(flow, for: groupID)
+                return AnyView(TreasurySetupView(flow: flow))
+            },
             makeModerationCaseFlow: { @MainActor notice in
                 ModerationCaseFlow(
                     caseId: notice.caseId,
@@ -1875,6 +1924,15 @@ struct OnymIOSApp: App {
                         await pendingChatRepository.setCurrentIdentity(id)
                         await pendingVerificationStore.setCurrentIdentity(id)
                         await treasuryRepository.setCurrentIdentity(id)
+                        // Treasury flows hold the previous identity's
+                        // roster, admin flag and declaration; keeping
+                        // them across a switch would show the next
+                        // identity the last one's view of the chat.
+                        // Guarded on a real change inside the cache,
+                        // like the repositories above — this stream
+                        // republishes the unchanged id whenever the
+                        // identity list is broadcast.
+                        treasuryFlowCache.setCurrentIdentity(id)
                     }
                 }
                 .task {

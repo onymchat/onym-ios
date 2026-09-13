@@ -1,4 +1,5 @@
 import Foundation
+import OnymFoundation
 import OnymGroup
 import OnymIdentity
 import OnymStellar
@@ -46,8 +47,13 @@ public enum TreasuryCreationOutcome: Equatable, Sendable {
     case alreadyExists
     /// The founder's funding account cannot sign here, so the creation
     /// envelope goes to their wallet. Once it applies, `adopt` records
-    /// the result.
-    case needsExternalWallet(SEP0007Request, treasuryAccountID: String)
+    /// the result — `creationTxHash` is carried along so that what the
+    /// group is eventually told names a transaction anyone can look up.
+    case needsExternalWallet(
+        SEP0007Request,
+        treasuryAccountID: String,
+        creationTxHash: String
+    )
     case notAdmin
     /// Nobody has declared a signer yet, so there would be no one to
     /// hand control to.
@@ -213,11 +219,25 @@ public struct TreasuryCreationInteractor: Sendable {
         }
 
         let funderKey = Self.signingKey(for: funder, of: me)
+        // Known before anyone signs: signatures live in the envelope,
+        // not in the transaction, so this is already the hash the ledger
+        // will record no matter who submits it.
+        let hash = transaction.hash(network: network)
         guard funderKey != .external else {
             // The founder's wallet supplies the other signature. It can
             // also submit, which is why nothing is anchored here — the
             // group learns the treasury exists through `adopt`, after
             // the transaction is on the ledger.
+            await treasury.recordPendingCreation(PendingTreasuryCreation(
+                groupID: groupIDHex,
+                ownerIdentityID: owner,
+                treasuryAccount: treasuryKey.account,
+                network: network,
+                creationTxHash: hash.hexString,
+                coSigners: coSigners,
+                thresholds: thresholds,
+                startedAt: now
+            ))
             return .needsExternalWallet(
                 SEP0007Request(
                     envelope: envelope,
@@ -225,11 +245,11 @@ public struct TreasuryCreationInteractor: Sendable {
                     message: "Create a treasury for \(group.name)",
                     publicKey: funder
                 ),
-                treasuryAccountID: treasuryKey.account.accountID
+                treasuryAccountID: treasuryKey.account.accountID,
+                creationTxHash: hash.hexString
             )
         }
 
-        let hash = transaction.hash(network: network)
         let signature: Data?
         switch funderKey {
         case .treasury:
@@ -313,6 +333,7 @@ public struct TreasuryCreationInteractor: Sendable {
         creationTxHash: String,
         network: StellarNetwork,
         expectedCoSigners: [StellarAccountID],
+        expectedThresholds: TreasuryThresholds,
         now: Date = Date()
     ) async -> TreasuryCreationOutcome {
         guard let owner = await identity.currentSelectedID(),
@@ -324,7 +345,16 @@ public struct TreasuryCreationInteractor: Sendable {
         // re-points the founder's own device, which contradicts "a
         // treasury is never re-anchored" on the one device that can
         // still announce.
+        //
+        // The pending row goes too, and that is the point of clearing it
+        // here rather than only on success. This group has a treasury;
+        // whatever the wallet was asked to do is finished business. Left
+        // behind, the row outlives the handoff and `TreasuryFlow`
+        // restores `awaitingWallet` from it on the next launch — "waiting
+        // for your wallet" on a group whose treasury already exists,
+        // again on every launch after that.
         guard await treasury.snapshot(groupID: groupIDHex).treasury == nil else {
+            await treasury.clearPendingCreation(groupID: groupIDHex)
             return .alreadyExists
         }
 
@@ -339,9 +369,29 @@ public struct TreasuryCreationInteractor: Sendable {
         guard masterWeight == 0 else {
             return .failed("that account can still be controlled by its own key")
         }
-        let onChainSigners = Set(onChain.signers.filter { $0.weight > 0 }.map(\.key))
-        guard onChainSigners == Set(expectedCoSigners) else {
+        let live = onChain.signers.filter { $0.weight > 0 }
+        guard Set(live.map(\.key)) == Set(expectedCoSigners) else {
             return .failed("that account's signers are not the ones this group chose")
+        }
+        // Weights and thresholds, not just the key set.
+        //
+        // This path exists because the founder's wallet submits the
+        // transaction, which means nothing here observed what was
+        // actually sent. Comparing only *which* keys are signers let a
+        // founder ignore the SEP-0007 envelope, submit their own
+        // `createAccount` with the same signer keys but weight 3 on
+        // their own, or `med`/`high` of 1 — and have it anchored and
+        // announced to the group as an account nobody controls alone.
+        // The check has to cover the whole configuration or it covers
+        // nothing.
+        guard live.allSatisfy({ $0.weight == 1 }) else {
+            return .failed("that account gives some signers more weight than others")
+        }
+        guard onChain.thresholds.medium == expectedThresholds.medium,
+              onChain.thresholds.high == expectedThresholds.high,
+              onChain.thresholds.low == expectedThresholds.low
+        else {
+            return .failed("that account needs a different number of signatures than this group chose")
         }
 
         // The thresholds this account actually carries have to be
@@ -366,18 +416,21 @@ public struct TreasuryCreationInteractor: Sendable {
             return .failed("that account's thresholds cannot be met by its signers")
         }
 
-        // The creation hash is displayed as this treasury's origin and
-        // links out to an explorer, and until now it was whatever the
-        // caller passed. A hash that names no transaction — or names
-        // someone else's — is a provenance claim this app would be
-        // making on no evidence, which is the thing the rest of the
-        // treasury design refuses to do.
-        let history = (try? await horizon(network).transactions(
+        // The hash announced to the group must be one the group can look
+        // up, and it must name the transaction this app prepared. It is
+        // computed locally from the envelope handed to the wallet, and
+        // nothing else checks the wallet submitted *that* transaction —
+        // an equivalent one built by hand passes every configuration
+        // check above and anchors a hash that is on no ledger,
+        // permanently, because re-anchoring is refused.
+        let applied = (try? await horizon(network).transactions(
             for: account,
             limit: Self.creationHistoryDepth
         )) ?? []
-        guard history.contains(where: { $0.hash == creationTxHash }) else {
-            return .failed("that transaction is not in the account's history")
+        guard applied.contains(where: { $0.hash == creationTxHash && $0.successful }) else {
+            return .failed(
+                "that account exists, but not from the transaction this app prepared"
+            )
         }
 
         let created = Treasury(
@@ -392,6 +445,7 @@ public struct TreasuryCreationInteractor: Sendable {
             lastRefreshedAt: now
         )
         await treasury.anchor(created)
+        await treasury.clearPendingCreation(groupID: groupIDHex)
         await broadcaster.announceAnchor(created, now: now)
         return .created(created)
     }

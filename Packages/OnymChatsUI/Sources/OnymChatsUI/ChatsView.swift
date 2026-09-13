@@ -32,6 +32,8 @@ public struct ChatsView: View {
     let setGroupAvatar: @MainActor (String, Data?) async -> Void
     let setGroupName: @MainActor (String, String) async -> Void
     let makeModerationReportView: @MainActor (ReportableMessage) -> AnyView
+    /// Passed down to the thread and on to `ChatMembersView`.
+    let makeTreasuryView: (@MainActor (String) -> AnyView)?
 
     public init(
         flow: ChatsFlow,
@@ -49,7 +51,8 @@ public struct ChatsView: View {
         makeShareInviteFlow: @escaping @MainActor () -> ShareInviteFlow,
         setGroupAvatar: @escaping @MainActor (String, Data?) async -> Void,
         setGroupName: @escaping @MainActor (String, String) async -> Void,
-        makeModerationReportView: @escaping @MainActor (ReportableMessage) -> AnyView
+        makeModerationReportView: @escaping @MainActor (ReportableMessage) -> AnyView,
+        makeTreasuryView: (@MainActor (String) -> AnyView)? = nil
     ) {
         self.flow = flow
         self.identitiesFlow = identitiesFlow
@@ -67,6 +70,7 @@ public struct ChatsView: View {
         self.setGroupAvatar = setGroupAvatar
         self.setGroupName = setGroupName
         self.makeModerationReportView = makeModerationReportView
+        self.makeTreasuryView = makeTreasuryView
     }
 
     @State private var showCreateGroup = false
@@ -502,6 +506,7 @@ public struct ChatsView: View {
             videoLoader: videoLoader,
             voiceLoader: voiceLoader,
             makeModerationReportView: makeModerationReportView,
+            makeTreasuryView: makeTreasuryView,
             approveRequestsFlow: approveRequestsFlow
         )
     }

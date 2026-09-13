@@ -309,7 +309,21 @@ public struct Row<Tile: View, Right: View>: View {
     var verbatimTitle: String? = nil
     var titleColor: Color = OnymTokens.text
     var titleMono: Bool = false
+    /// Runtime data — an address, a date, a name off the network.
+    /// Rendered verbatim, never looked up.
     var subtitle: String? = nil
+    /// UI copy. Set this instead of `subtitle` when the text is a
+    /// sentence someone wrote, because `subtitle` is a `String` and
+    /// `Text(_: String)` is the non-localizing overload: a translated
+    /// subtitle passed there renders English in every language, and the
+    /// catalog entry sits inert with nothing to say it is unused.
+    ///
+    /// Additive rather than a change of `subtitle`'s type, which is the
+    /// symmetric fix and the larger one: ~35 call sites across settings,
+    /// backup, moderation and onboarding pass runtime strings, and every
+    /// one would have to move in the same commit to avoid looking up a
+    /// remote value as a key.
+    var subtitleKey: LocalizedStringKey? = nil
     var subtitleMono: Bool = false
     /// Subtitle line cap. `1` (default) middle-truncates on overflow;
     /// pass `nil` to let a longer subtitle wrap freely.
@@ -326,6 +340,7 @@ public struct Row<Tile: View, Right: View>: View {
         titleColor: Color = OnymTokens.text,
         titleMono: Bool = false,
         subtitle: String? = nil,
+        subtitleKey: LocalizedStringKey? = nil,
         subtitleMono: Bool = false,
         subtitleLineLimit: Int? = 1,
         hasChevron: Bool = true,
@@ -339,6 +354,7 @@ public struct Row<Tile: View, Right: View>: View {
         self.titleColor = titleColor
         self.titleMono = titleMono
         self.subtitle = subtitle
+        self.subtitleKey = subtitleKey
         self.subtitleMono = subtitleMono
         self.subtitleLineLimit = subtitleLineLimit
         self.hasChevron = hasChevron
@@ -358,6 +374,7 @@ public struct Row<Tile: View, Right: View>: View {
         titleColor: Color = OnymTokens.text,
         titleMono: Bool = false,
         subtitle: String? = nil,
+        subtitleKey: LocalizedStringKey? = nil,
         subtitleMono: Bool = false,
         subtitleLineLimit: Int? = 1,
         hasChevron: Bool = true,
@@ -372,6 +389,7 @@ public struct Row<Tile: View, Right: View>: View {
         self.titleColor = titleColor
         self.titleMono = titleMono
         self.subtitle = subtitle
+        self.subtitleKey = subtitleKey
         self.subtitleMono = subtitleMono
         self.subtitleLineLimit = subtitleLineLimit
         self.hasChevron = hasChevron
@@ -408,8 +426,9 @@ public struct Row<Tile: View, Right: View>: View {
                         // on purpose. A prose one is a label the reader
                         // came for, and gives way at accessibility sizes.
                         .onymLineLimit(1, relaxing: !titleMono)
-                    if let subtitle {
-                        Text(subtitle)
+                    if let subtitleText = subtitleKey.map({ Text($0) })
+                        ?? subtitle.map({ Text(verbatim: $0) }) {
+                        subtitleText
                             .font(subtitleMono
                                   ? OnymType.mono(size: 12.5)
                                   : OnymType.font(size: 12.5))
@@ -443,6 +462,7 @@ extension Row where Right == EmptyView {
         titleColor: Color = OnymTokens.text,
         titleMono: Bool = false,
         subtitle: String? = nil,
+        subtitleKey: LocalizedStringKey? = nil,
         subtitleMono: Bool = false,
         subtitleLineLimit: Int? = 1,
         hasChevron: Bool = true,
@@ -455,6 +475,7 @@ extension Row where Right == EmptyView {
         self.titleColor = titleColor
         self.titleMono = titleMono
         self.subtitle = subtitle
+        self.subtitleKey = subtitleKey
         self.subtitleMono = subtitleMono
         self.subtitleLineLimit = subtitleLineLimit
         self.hasChevron = hasChevron
@@ -472,6 +493,7 @@ extension Row where Right == EmptyView {
         titleColor: Color = OnymTokens.text,
         titleMono: Bool = false,
         subtitle: String? = nil,
+        subtitleKey: LocalizedStringKey? = nil,
         subtitleMono: Bool = false,
         subtitleLineLimit: Int? = 1,
         hasChevron: Bool = true,
@@ -485,6 +507,7 @@ extension Row where Right == EmptyView {
         self.titleColor = titleColor
         self.titleMono = titleMono
         self.subtitle = subtitle
+        self.subtitleKey = subtitleKey
         self.subtitleMono = subtitleMono
         self.subtitleLineLimit = subtitleLineLimit
         self.hasChevron = hasChevron
@@ -498,18 +521,32 @@ extension Row where Right == EmptyView {
 
 /// Small uppercase chip used for TESTNET / PUBLIC etc. on relayer rows.
 public struct Chip: View {
-    let text: String
+    /// Runtime data, rendered verbatim: "TESTNET", a count, an address
+    /// fragment. Most chips in the app are this.
+    let text: String?
+    /// UI copy, looked up. Set instead of `text` for a chip whose words
+    /// someone wrote — `Text(_: String)` is the non-localizing overload,
+    /// so copy passed as `text` renders English in every language.
+    let key: LocalizedStringKey?
     let fg: Color
     let bg: Color
 
     public init(text: String, fg: Color, bg: Color) {
         self.text = text
+        self.key = nil
+        self.fg = fg
+        self.bg = bg
+    }
+
+    public init(key: LocalizedStringKey, fg: Color, bg: Color) {
+        self.text = nil
+        self.key = key
         self.fg = fg
         self.bg = bg
     }
 
     public var body: some View {
-        Text(text)
+        (key.map { Text($0) } ?? Text(verbatim: text ?? ""))
             .font(OnymType.font(size: 9.5, weight: .bold))
             .tracking(0.5)
             .padding(.horizontal, 6)

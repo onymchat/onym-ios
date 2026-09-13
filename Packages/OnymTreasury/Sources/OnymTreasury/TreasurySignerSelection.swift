@@ -11,6 +11,28 @@ import OnymStellar
 /// quorum that no longer exists.
 public enum TreasurySignerSelection {
 
+    /// What a spendable-amount field means, including the half-typed
+    /// states a text field legitimately passes through.
+    ///
+    /// `StellarAmount(decimalString:)` refuses "" and "1.", which are
+    /// both on the way to a real number — so a field being cleared made
+    /// the funding breakdown vanish mid-keystroke, and an empty field
+    /// failed creation with "That isn't an amount" when "nothing
+    /// spendable" is an ordinary thing to want.
+    ///
+    /// Here rather than on the flow so it can be tested without a
+    /// simulator's worth of collaborators. The first version of that
+    /// test re-declared this logic locally and therefore passed
+    /// regardless of what the flow did.
+    public static func spendableAmount(_ field: String) -> StellarAmount? {
+        let trimmed = field.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty || trimmed == "." { return StellarAmount(stroops: 0) }
+        if trimmed.hasSuffix(".") {
+            return try? StellarAmount(decimalString: String(trimmed.dropLast()))
+        }
+        return try? StellarAmount(decimalString: trimmed)
+    }
+
     /// The accounts a signer set will actually contain, from the
     /// members ticked on screen.
     ///

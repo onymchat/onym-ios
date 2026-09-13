@@ -27,6 +27,12 @@ struct ChatMembersView: View {
     let makeShareInviteFlow: @MainActor () -> ShareInviteFlow
     let setGroupAvatar: @MainActor (String, Data?) async -> Void
     let setGroupName: @MainActor (String, String) async -> Void
+    /// Builds the treasury screen for a group id. Optional, and the
+    /// section is hidden when it is nil — the convention this codebase
+    /// already uses for a subsystem that may not be wired into a given
+    /// build. Erased to `AnyView` so `OnymChatsUI` does not take a
+    /// dependency on the treasury UI, matching `makeModerationReportView`.
+    var makeTreasuryView: (@MainActor (String) -> AnyView)?
 
     /// Both sheets present from this screen through one `sheet(item:)`
     /// over one enum — the rule `GateCheckRequiredView` already
@@ -84,6 +90,7 @@ struct ChatMembersView: View {
                             if let rules = GroupRules.normalized(group.invitationMessage) {
                                 rulesSection(rules)
                             }
+                            treasurySection
                             if group.memberProfiles.isEmpty {
                                 emptyState
                             } else {
@@ -349,6 +356,37 @@ struct ChatMembersView: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 12)
+    }
+
+    /// Entry point to the group's treasury.
+    ///
+    /// Always shown when the subsystem is wired, including for a group
+    /// that has no treasury — the screen behind it explains what one
+    /// is, and a row that appeared only after somebody else created one
+    /// would leave the rest of the group with no way to find out.
+    @ViewBuilder
+    private var treasurySection: some View {
+        if let makeTreasuryView {
+            VStack(alignment: .leading, spacing: 0) {
+                SectionLabel("TREASURY")
+                NavigationLink {
+                    makeTreasuryView(groupID)
+                } label: {
+                    Card {
+                        Row(
+                            title: "Shared money",
+                            subtitleKey: "A Stellar account this chat controls together",
+                            last: true
+                        ) {
+                            IconTile(symbol: "building.columns.fill", bg: OnymTile.green)
+                        } right: { EmptyView() }
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("members.treasury_row")
+            }
+            .padding(.top, 12)
+        }
     }
 
     private func memberRow(_ row: MemberRow) -> some View {
