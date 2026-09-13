@@ -42,6 +42,7 @@ struct OnymIOSApp: App {
     /// the local, and the identity-change listener in `body` needs the
     /// same instance to clear it.
     private let treasuryFlowCache: TreasuryFlowCache
+    private let proposalsFlowCache: TreasuryProposalsFlowCache
     private let treasuryBroadcaster: TreasuryBroadcaster
     private let messageRepository: MessageRepository
     private let imageLoader: ChatImageLoader
@@ -593,9 +594,10 @@ struct OnymIOSApp: App {
         // and the card's `@State` would keep whichever one it saw first
         // while later renders built others.
         let proposalsFlowCache = TreasuryProposalsFlowCache()
+        self.proposalsFlowCache = proposalsFlowCache
         let makeTreasuryProposalsFlow: @MainActor (String) -> TreasuryProposalsFlow = {
             @MainActor groupID in
-            if let existing = proposalsFlowCache.flows[groupID] { return existing }
+            if let existing = proposalsFlowCache.flow(for: groupID) { return existing }
             let flow = TreasuryProposalsFlow(
                 groupID: groupID,
                 repository: treasuryRepository,
@@ -619,7 +621,7 @@ struct OnymIOSApp: App {
                         ?? String(localized: "(unnamed)")
                 }
             )
-            proposalsFlowCache.flows[groupID] = flow
+            proposalsFlowCache.store(flow, for: groupID)
             return flow
         }
 
@@ -1990,6 +1992,7 @@ struct OnymIOSApp: App {
                         // republishes the unchanged id whenever the
                         // identity list is broadcast.
                         treasuryFlowCache.setCurrentIdentity(id)
+                        proposalsFlowCache.setCurrentIdentity(id)
                     }
                 }
                 .task {

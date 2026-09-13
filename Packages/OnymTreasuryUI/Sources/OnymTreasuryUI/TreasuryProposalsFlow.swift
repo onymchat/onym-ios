@@ -212,13 +212,27 @@ public final class TreasuryProposalsFlow {
             for await snapshot in self.repository.snapshots(groupID: self.groupID) {
                 await self.apply(snapshot)
             }
-            // Only reached if the repository ends the stream; the next
-            // `start()` then opens a fresh one rather than no-opping
-            // forever.
-            self.subscription = nil
         }
         subscription = task
         await task.value
+    }
+
+    /// End the subscription.
+    ///
+    /// The same gap `TreasuryFlow.stop()` closes, in its sibling. The
+    /// task deliberately outlives the view, so it holds the flow
+    /// strongly while draining a stream the repository never finishes —
+    /// meaning a flow nobody references any more stays alive and
+    /// subscribed for the rest of the run, woken by every snapshot of a
+    /// group belonging to an identity that is no longer selected.
+    /// Dropping the dictionary's reference alone does not stop that.
+    ///
+    /// The tail `subscription = nil` inside the task went with it: left
+    /// in, it fires as the cancelled iteration unwinds and could null
+    /// out a subscription a subsequent `start()` had already installed.
+    public func stop() {
+        subscription?.cancel()
+        subscription = nil
     }
 
     public func refresh() async {
