@@ -1928,7 +1928,11 @@ struct OnymIOSApp: App {
                         // roster, admin flag and declaration; keeping
                         // them across a switch would show the next
                         // identity the last one's view of the chat.
-                        treasuryFlowCache.clear()
+                        // Guarded on a real change inside the cache,
+                        // like the repositories above — this stream
+                        // republishes the unchanged id whenever the
+                        // identity list is broadcast.
+                        treasuryFlowCache.setCurrentIdentity(id)
                     }
                 }
                 .task {

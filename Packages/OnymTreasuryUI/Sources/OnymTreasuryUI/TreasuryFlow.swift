@@ -234,10 +234,23 @@ public final class TreasuryFlow {
             for await snapshot in self.repository.snapshots(groupID: self.groupID) {
                 await self.apply(snapshot)
             }
-            self.subscription = nil
         }
         subscription = task
         await task.value
+    }
+
+    /// End the subscription.
+    ///
+    /// Needed because the task deliberately outlives the view: it holds
+    /// the flow strongly while it drains a stream that never finishes on
+    /// its own, so a flow nobody references any more stays alive and
+    /// subscribed for the rest of the run — still waking on every
+    /// snapshot, still reading the group and identity repositories on
+    /// the main actor. `TreasuryFlowCache` calls this before dropping an
+    /// entry; `ChatsFlow.stop()` exists for the same reason.
+    public func stop() {
+        subscription?.cancel()
+        subscription = nil
     }
 
     private func apply(_ snapshot: TreasurySnapshot) async {
