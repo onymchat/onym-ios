@@ -1,0 +1,290 @@
+import XCTest
+import OnymFoundation
+@testable import OnymStellar
+
+/// Account IDs, amounts, and the decoder's refusals — the parts a
+/// person's typing or a peer's payload reaches directly.
+final class StellarValueTests: XCTestCase {
+
+    /// A real account from the fixture set.
+    private let valid = "GCFIRY65OQE7DFP5KLNS2PF2LVZMUZYJX4OZIEQ36N2IQANUB5XVYOJR"
+
+    // MARK: - StrKey
+
+    func test_anAccountID_roundTripsThroughItsBytes() throws {
+        let account = try StellarAccountID(accountID: valid)
+        XCTAssertEqual(account.publicKey.count, 32)
+        XCTAssertEqual(StellarStrKey.encodeAccountID(account.publicKey), valid)
+        XCTAssertEqual(try StellarAccountID(publicKey: account.publicKey), account)
+    }
+
+    /// The checksum is what makes a mistyped address fail here rather
+    /// than by sending funds somewhere unrecoverable.
+    func test_aSingleAlteredCharacter_failsTheChecksum() throws {
+        var typo = Array(valid)
+        typo[10] = typo[10] == "A" ? "B" : "A"
+        XCTAssertThrowsError(try StellarStrKey.decodeAccountID(String(typo))) { error in
+            XCTAssertEqual(error as? StellarStrKey.DecodeError, .checksumMismatch)
+        }
+    }
+
+    func test_theDigitsPeopleSubstituteForLetters_areRejectedByName() throws {
+        // Base32 has no 0, 1, 8 or 9 — the characters most often typed
+        // in place of O, I and B.
+        var typo = Array(valid)
+        typo[5] = "0"
+        XCTAssertThrowsError(try StellarStrKey.decodeAccountID(String(typo))) { error in
+            XCTAssertEqual(error as? StellarStrKey.DecodeError, .invalidCharacter("0"))
+        }
+    }
+
+    func test_aSecretKey_isRejectedRatherThanDecoded() throws {
+        // An `S…` StrKey is the same length and alphabet as a `G…`. If
+        // the version byte weren't checked, pasting a secret key into
+        // the account field would "work" — and put a secret on screen
+        // and into the group's wire traffic.
+        let secret = "SBGWSG6BTNCKCOB3DIFBGCVMUPQFYPA2G4O34RMTB343OYPXU5DJDVMN"
+        XCTAssertThrowsError(try StellarStrKey.decodeAccountID(secret)) { error in
+            guard case .notAnAccountID = error as? StellarStrKey.DecodeError else {
+                return XCTFail("expected notAnAccountID, got \(error)")
+            }
+        }
+    }
+
+    func test_shapeCheckedWithoutThrowing() {
+        XCTAssertTrue(StellarStrKey.isValidAccountID(valid))
+        XCTAssertFalse(StellarStrKey.isValidAccountID("not an address"))
+        XCTAssertFalse(StellarStrKey.isValidAccountID(""))
+    }
+
+    // MARK: - Amounts
+
+    func test_amounts_parseAndPrintWithoutFloatingPoint() throws {
+        let cases: [(String, Int64, String)] = [
+            ("0", 0, "0"),
+            ("1", 10_000_000, "1"),
+            ("0.1", 1_000_000, "0.1"),            // unrepresentable as a binary float
+            ("10.0000001", 100_000_001, "10.0000001"),
+            ("0.0000001", 1, "0.0000001"),        // one stroop
+            ("100.5000000", 1_005_000_000, "100.5"),
+            ("922337203685.4775807", Int64.max, "922337203685.4775807"),
+        ]
+        for (input, stroops, printed) in cases {
+            let amount = try StellarAmount(decimalString: input)
+            XCTAssertEqual(amount.stroops, stroops, input)
+            XCTAssertEqual(amount.decimalString, printed, input)
+        }
+    }
+
+    /// An eighth decimal is refused, not rounded. Rounding here would
+    /// change an amount the user typed without telling them.
+    func test_anEighthDecimalPlace_isRefusedRatherThanRounded() {
+        XCTAssertThrowsError(try StellarAmount(decimalString: "1.00000001"))
+    }
+
+    func test_amountsThatArentPlainDecimals_areRefused() {
+        for input in ["", ".", "1.", "-1", "1e7", "1,000", "1 000", "٣", "abc", "1.2.3"] {
+            XCTAssertThrowsError(
+                try StellarAmount(decimalString: input),
+                "'\(input)' should not parse"
+            )
+        }
+    }
+
+    func test_anAmountTooLargeForTheLedger_isRefused() {
+        XCTAssertThrowsError(try StellarAmount(decimalString: "922337203686"))
+    }
+
+    // MARK: - Assets
+
+    func test_assetWidth_isDecidedByCodeLength() throws {
+        let issuer = try StellarAccountID(accountID: valid)
+        guard case .alphanum4 = try StellarAsset(code: "USDC", issuer: issuer) else {
+            return XCTFail("4 characters is alphanum4")
+        }
+        guard case .alphanum12 = try StellarAsset(code: "USDCOIN", issuer: issuer) else {
+            return XCTFail("5 characters is alphanum12")
+        }
+    }
+
+    func test_assetCodes_thatCannotExist_areRefused() throws {
+        let issuer = try StellarAccountID(accountID: valid)
+        for code in ["", "THIRTEENCHARS", "US DC", "USD€", "USD\u{0430}"] {
+            XCTAssertThrowsError(
+                try StellarAsset(code: code, issuer: issuer),
+                "'\(code)' should not be an asset code"
+            )
+        }
+    }
+
+    // MARK: - Decoder refusals
+
+    /// A muxed destination carries a routing id that decides which of a
+    /// custodian's customers gets the money. Flattening it to the base
+    /// account would credit the wrong one, so it is refused.
+    func test_aMuxedAccount_isRefusedRatherThanFlattened() throws {
+        var writer = XDRWriter()
+        writer.writeInt32(0x100) // KEY_TYPE_MUXED_ED25519
+        writer.writeUInt64(7)
+        writer.writeFixedOpaque(try StellarAccountID(accountID: valid).publicKey)
+        var reader = XDRReader(writer.data)
+        XCTAssertThrowsError(try reader.readMuxedAccount())
+    }
+
+    /// `mergeAccount` empties an account into another in one operation.
+    /// The decoder has no arm for it, so a proposal containing one
+    /// cannot be decoded — and therefore cannot be displayed as if it
+    /// were something else.
+    func test_anOperationThisAppCannotDisplay_failsToDecode() throws {
+        var writer = XDRWriter()
+        writer.writeOptional(Optional<StellarAccountID>.none) { $0.writeMuxedAccount($1) }
+        writer.writeInt32(8) // ACCOUNT_MERGE
+        writer.writeMuxedAccount(try StellarAccountID(accountID: valid))
+        var reader = XDRReader(writer.data)
+        XCTAssertThrowsError(try StellarOperation.decode(from: &reader)) { error in
+            XCTAssertEqual(
+                error as? XDRError,
+                .unknownDiscriminant(type: "Operation", value: 8)
+            )
+        }
+    }
+
+    func test_nonZeroPadding_isRefused() throws {
+        // A 1-byte opaque followed by three padding bytes, one of which
+        // is not zero. Accepting it would mean two byte strings decode
+        // to the same value — and a transaction hash is over bytes.
+        var reader = XDRReader(Data([0xAA, 0x00, 0x01, 0x00]))
+        XCTAssertThrowsError(try reader.readFixedOpaque(1)) { error in
+            XCTAssertEqual(error as? XDRError, .nonZeroPadding)
+        }
+    }
+
+    func test_aHostileLengthPrefix_doesNotDriveAnAllocation() {
+        // Claims 4 GB of signature in a 4-byte input.
+        var reader = XDRReader(Data([0xFF, 0xFF, 0xFF, 0xFF]))
+        XCTAssertThrowsError(try reader.readVariableOpaque(maxCount: 64)) { error in
+            guard case .lengthExceedsBound = error as? XDRError else {
+                return XCTFail("expected a bound violation, got \(error)")
+            }
+        }
+    }
+
+    func test_trailingBytesAfterAnEnvelope_areRefused() throws {
+        let base = try StellarTransaction(
+            sourceAccount: StellarAccountID(accountID: valid),
+            fee: 100,
+            sequenceNumber: 1,
+            timeBounds: nil,
+            operations: [StellarOperation(body: .changeTrust(asset: .native, limit: .max))]
+        )
+        var bytes = TransactionEnvelope(transaction: base).xdr
+        bytes.append(0)
+        XCTAssertThrowsError(try TransactionEnvelope(xdr: bytes))
+    }
+
+    // MARK: - SEP-0007
+
+    /// The failure this encoding is written to avoid: base64 contains
+    /// `+` and `/`, and a query parser that treats `+` as a space
+    /// corrupts the transaction. Both must survive as escapes.
+    func test_sep0007_escapesTheCharactersThatBreakBase64InAQuery() throws {
+        let envelope = try envelopeWhoseBase64ContainsPlusAndSlash()
+        XCTAssertTrue(envelope.base64XDR.contains("+"), "precondition for this test")
+        XCTAssertTrue(envelope.base64XDR.contains("/"), "precondition for this test")
+
+        let url = try XCTUnwrap(
+            SEP0007Request(envelope: envelope, network: .testnet, message: "Rent").url
+        )
+        let string = url.absoluteString
+        XCTAssertTrue(string.hasPrefix("web+stellar:tx?xdr="))
+        // The payload's own '+' and '/' must be escaped. (The scheme's
+        // literal '+' in "web+stellar" sits before the query.)
+        let query = String(string.dropFirst("web+stellar:tx?".count))
+        XCTAssertFalse(query.contains("+"))
+        XCTAssertFalse(query.contains("/"))
+        XCTAssertTrue(query.contains("%2B"))
+        XCTAssertTrue(query.contains("%2F"))
+
+        // And it survives a round trip through a standard parser.
+        let parsed = try XCTUnwrap(URLComponents(string: string))
+        let xdr = try XCTUnwrap(
+            parsed.queryItems?.first(where: { $0.name == "xdr" })?.value
+        )
+        XCTAssertEqual(xdr, envelope.base64XDR)
+    }
+
+    /// Always sent, including for the public network: a wallet that
+    /// guesses the network signs against a different network id and
+    /// produces a signature that verifies nowhere.
+    func test_sep0007_alwaysNamesTheNetwork() throws {
+        for network in StellarNetwork.allCases {
+            let envelope = try envelopeWhoseBase64ContainsPlusAndSlash()
+            let url = try XCTUnwrap(SEP0007Request(envelope: envelope, network: network).url)
+            XCTAssertTrue(
+                url.absoluteString.contains("network_passphrase="),
+                "\(network) must be named"
+            )
+        }
+    }
+
+    func test_sep0007_truncatesAnOverLongMessage() throws {
+        let envelope = try envelopeWhoseBase64ContainsPlusAndSlash()
+        let url = try XCTUnwrap(
+            SEP0007Request(
+                envelope: envelope,
+                network: .testnet,
+                message: String(repeating: "a", count: 500)
+            ).url
+        )
+        let msg = try XCTUnwrap(
+            URLComponents(string: url.absoluteString)?
+                .queryItems?.first(where: { $0.name == "msg" })?.value
+        )
+        XCTAssertEqual(msg.count, SEP0007Request.maxMessageLength)
+    }
+
+    func test_aReturnURL_yieldsTheEnvelopeItCarries() throws {
+        let envelope = try envelopeWhoseBase64ContainsPlusAndSlash()
+        let escaped = try XCTUnwrap(
+            envelope.base64XDR.addingPercentEncoding(withAllowedCharacters: .alphanumerics)
+        )
+        let url = try XCTUnwrap(URL(string: "onym://tx?xdr=\(escaped)"))
+        XCTAssertEqual(try SEP0007Request.envelope(fromReturnURL: url), envelope)
+    }
+
+    func test_aReturnURLWithoutATransaction_isRefused() throws {
+        let url = try XCTUnwrap(URL(string: "onym://tx?other=1"))
+        XCTAssertThrowsError(try SEP0007Request.envelope(fromReturnURL: url)) { error in
+            XCTAssertEqual(error as? SEP0007Error, .missingXDR)
+        }
+    }
+
+    // MARK: - Helpers
+
+    /// Searches sequence numbers for an envelope whose base64 happens to
+    /// contain both `+` and `/`, so the escaping test has something real
+    /// to check rather than a hand-written string.
+    private func envelopeWhoseBase64ContainsPlusAndSlash() throws -> TransactionEnvelope {
+        let source = try StellarAccountID(accountID: valid)
+        for sequence in Int64(1)...2000 {
+            let transaction = try StellarTransaction(
+                sourceAccount: source,
+                fee: 100,
+                sequenceNumber: sequence,
+                timeBounds: nil,
+                operations: [
+                    StellarOperation(body: .payment(
+                        destination: source,
+                        asset: .native,
+                        amount: StellarAmount(stroops: sequence)
+                    )),
+                ]
+            )
+            let envelope = TransactionEnvelope(transaction: transaction)
+            if envelope.base64XDR.contains("+") && envelope.base64XDR.contains("/") {
+                return envelope
+            }
+        }
+        throw XCTSkip("no envelope with both characters in range")
+    }
+}

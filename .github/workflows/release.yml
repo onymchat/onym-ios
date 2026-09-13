@@ -210,6 +210,23 @@ jobs:
             -derivedDataPath /tmp/onym-discovery-tests \
             -resultBundlePath /tmp/onym-discovery.xcresult
 
+      - name: xcodebuild test (OnymStellar package)
+        # The OnymStellar test bundle is a SwiftPM package target, so
+        # `-only-testing:OnymIOSTests` above never runs it. This suite is
+        # the one that makes a hand-written transaction codec defensible:
+        # it pins our XDR bytes and transaction hashes against envelopes
+        # built by an independent implementation. Same pre-clean and
+        # `always()` rationale as the steps around it.
+        if: always()
+        working-directory: Packages/OnymStellar
+        run: |
+          rm -rf /tmp/onym-stellar-tests /tmp/onym-stellar.xcresult
+          xcodebuild test \
+            -scheme OnymStellar \
+            -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }},OS=latest" \
+            -derivedDataPath /tmp/onym-stellar-tests \
+            -resultBundlePath /tmp/onym-stellar.xcresult
+
       - name: xcodebuild test (OnymFoundation package)
         # The OnymFoundation test bundle is a SwiftPM package target, so
         # `-only-testing:OnymIOSTests` above never runs it. Run the
