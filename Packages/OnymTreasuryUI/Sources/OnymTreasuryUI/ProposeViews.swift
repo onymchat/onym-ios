@@ -223,6 +223,22 @@ struct PasteSignedTransactionView: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 16)
                 .accessibilityIdentifier("treasury.paste.submit")
+
+                // Rendered here, not by the parent's alert.
+                //
+                // `adoptPasted` sets `actionError`, which only the
+                // parent surface shows — and that alert is attached
+                // *beneath* this sheet, so it cannot present. A wallet
+                // handing back a foreign or malformed envelope gave the
+                // co-signer silent nothing with the button still live.
+                if let error = flow.pasteError {
+                    Text(error)
+                        .font(OnymType.font(size: 13))
+                        .foregroundStyle(OnymTokens.red)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 10)
+                        .accessibilityIdentifier("treasury.paste.error")
+                }
             }
             .padding(.bottom, 32)
         }

@@ -682,11 +682,9 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
     /// section rather than one per proposal: it observes the treasury
     /// flow itself, draws whatever is waiting on signatures, and
     /// collapses to nothing when that is nothing — so neither this
-    /// bridge nor the controller has to carry proposal state.
-    /// Builds the thread's treasury block, handed a callback the
-    /// section calls with whether it is drawing anything — the
-    /// controller needs that for the empty state and cannot see
-    /// proposal state itself.
+    /// bridge nor the controller has to carry proposal state. The
+    /// callback is how it reports whether it is drawing anything, which
+    /// the controller needs for the empty state and cannot see itself.
     let makeTreasuryProposalCard: ((@escaping (Bool) -> Void) -> AnyView)?
 
     func makeUIViewController(context: Context) -> ChatThreadViewController {

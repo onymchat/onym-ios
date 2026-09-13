@@ -56,10 +56,12 @@ public struct TreasuryView: View {
                 }
             }
         }
-        // One sheet modifier, one enum — the rule `ChatMembersView`
-        // already established here. The paste-back sheet is driven off
-        // `pasteTargetID` through the same presentation below rather
-        // than a second `.sheet`.
+        // Two `.sheet` modifiers, which the compose one above and this
+        // one can get away with because they are never owed at the same
+        // time: `compose` is set by a row tap, and `pasteTargetID` only
+        // by a wallet handoff that dismisses the compose sheet first.
+        // `ChatMembersView`'s one-enum rule applies where two sheets can
+        // genuinely race; these cannot.
         .sheet(isPresented: pasteBinding) {
             NavigationStack {
                 PasteSignedTransactionView(flow: flow)
@@ -191,6 +193,33 @@ public struct TreasuryView: View {
             VStack(alignment: .leading, spacing: 10) {
                 SectionLabel("WAITING ON SIGNATURES")
                 ForEach(open) { row in
+                    TreasuryProposalCard(row: row, flow: flow, surface: .screen)
+                        .padding(.horizontal, 16)
+                }
+            }
+            .padding(.top, 8)
+        }
+        refused
+    }
+
+    /// Proposals this device turned down.
+    ///
+    /// Shown rather than hidden. Both call sites filtered on
+    /// `isActionable`, which is false for every rejection — so eight
+    /// carefully-worded refusals could never render, and a member whose
+    /// proposal was refused saw the same nothing as one whose message
+    /// never arrived. Only one of those is worth telling someone about.
+    /// The thread stays quiet; this is the screen where it belongs.
+    @ViewBuilder
+    private var refused: some View {
+        let refusals = flow.rows.filter {
+            if case .rejected = $0.standing { return true }
+            return false
+        }
+        if !refusals.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                SectionLabel("TURNED DOWN")
+                ForEach(refusals) { row in
                     TreasuryProposalCard(row: row, flow: flow, surface: .screen)
                         .padding(.horizontal, 16)
                 }

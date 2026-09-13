@@ -197,6 +197,10 @@ public struct TreasurySigningInteractor: Sendable {
             return nil
         }
         for (stored, candidates) in await treasury.openProposalsWithSigners() {
+            // `sign()` refuses an expired proposal, so adopting a
+            // signature into one — and broadcasting it — would be the
+            // two paths disagreeing about the same transaction.
+            if let expiresAt = stored.proposal.expiresAt, expiresAt <= now { continue }
             // Probe and adopt in one pass. Harvesting to find the match
             // and then calling `adoptSignatures`, which re-fetches the
             // proposal and harvests the same envelope again, doubled the

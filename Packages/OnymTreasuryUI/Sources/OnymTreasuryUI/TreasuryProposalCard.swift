@@ -224,6 +224,12 @@ public struct TreasuryProposalCard: View {
             "This chat has no treasury."
         case .excessiveFee:
             "This offers a network fee far above the going rate \u{2014} money leaving the treasury that none of the rows above would show."
+        case .noExpiry:
+            "This never expires. It would hold the treasury's next slot for good, so nothing else could ever be sent."
+        case .expiresTooLate:
+            "This stays valid far longer than a proposal should."
+        case .tooManySignatures:
+            "This arrived already carrying so many signatures that there is no room left for the people who still have to sign."
         }
     }
 

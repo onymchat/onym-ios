@@ -44,12 +44,22 @@ public struct TreasuryProposalDescription: Equatable, Sendable {
         /// rather than deciding for itself which rows matter.
         public let isPrincipal: Bool
 
-        public var id: String { label }
+        /// Its own identity, not the label.
+        ///
+        /// `describeControl` emits one line per account, all labelled
+        /// "Add co-signer" — so a label-keyed `id` collided in
+        /// `ForEach` and a proposal adding two co-signers rendered
+        /// *one* address. The operation-count backstop cannot catch it:
+        /// the `setOptions` run is fully explained, so no caveat fires.
+        /// A summary of part of a control change, which is precisely
+        /// what this type exists to prevent.
+        public let id: UUID
 
         public init(label: String, value: Value, isPrincipal: Bool = false) {
             self.label = label
             self.value = value
             self.isPrincipal = isPrincipal
+            self.id = UUID()
         }
     }
 
@@ -126,6 +136,25 @@ public struct TreasuryProposalDescription: Equatable, Sendable {
             // refused, and the honest rendering is to say nothing about
             // what it does.
             caveat = "This transaction isn't one this app knows how to describe. Don't sign it."
+        }
+
+        // A memo is not decoration. For an exchange deposit it decides
+        // which customer gets credited, so a payment whose memo went
+        // unmentioned is a payment that can land in the wrong hands
+        // while every row on the card reads correctly.
+        switch proposal.envelope.transaction.memo {
+        case .none:
+            break
+        case .text(let text):
+            lines.append(Line(label: "Memo", value: .text(text), isPrincipal: true))
+        case .id(let value):
+            lines.append(Line(label: "Memo (id)", value: .text(String(value)), isPrincipal: true))
+        case .hash(let data), .returnHash(let data):
+            lines.append(Line(
+                label: "Memo (hash)",
+                value: .text(data.map { String(format: "%02x", $0) }.joined()),
+                isPrincipal: true
+            ))
         }
 
         // The fee is a spend, and it is in none of the operation rows

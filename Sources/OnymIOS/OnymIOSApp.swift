@@ -561,14 +561,6 @@ struct OnymIOSApp: App {
         // stored on the proposal: a proposal names a member by BLS key,
         // and the alias beside it should be whatever that member is
         // called now, not whatever they were called when they proposed.
-        //
-        // Memoised per group, and that is load-bearing rather than an
-        // optimisation. The in-thread block is built from a table
-        // cell's content configuration, which is rebuilt every time the
-        // row is dequeued; a factory that minted a fresh flow per call
-        // would leave a trail of flows each draining its own snapshot
-        // stream, and the card's `@State` would keep whichever one it
-        // saw first while later renders built others.
         let makeTreasuryFlow: @MainActor (String) -> TreasuryFlow = { @MainActor groupID in
             if let existing = treasuryFlowCache.flow(for: groupID) { return existing }
             let flow = TreasuryFlow(
@@ -593,6 +585,13 @@ struct OnymIOSApp: App {
             return flow
         }
 
+        // Memoised per group, and that is load-bearing rather than an
+        // optimisation. The in-thread block is built from a table
+        // cell's content configuration, rebuilt every time the row is
+        // dequeued; a factory that minted a fresh flow per call would
+        // leave a trail of flows each draining its own snapshot stream,
+        // and the card's `@State` would keep whichever one it saw first
+        // while later renders built others.
         let proposalsFlowCache = TreasuryProposalsFlowCache()
         let makeTreasuryProposalsFlow: @MainActor (String) -> TreasuryProposalsFlow = {
             @MainActor groupID in

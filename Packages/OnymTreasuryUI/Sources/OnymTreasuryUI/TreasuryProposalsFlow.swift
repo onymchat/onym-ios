@@ -82,6 +82,7 @@ public final class TreasuryProposalsFlow {
     public private(set) var thresholds: HorizonThresholds?
     public private(set) var history: [HorizonTransaction] = []
     public private(set) var isLoadingHistory = false
+    private var hasLoadedHistory = false
     /// Nil until a live account read has succeeded. The screen draws
     /// "checking…" rather than deciding anything from a cached signer
     /// set — see `TreasurySnapshot.standing(of:now:)`.
@@ -124,6 +125,9 @@ public final class TreasuryProposalsFlow {
     /// Shown after a handoff: where the signed transaction comes back.
     public var pastedXDR = ""
     public var pasteTargetID: UUID?
+    /// Failures from the paste sheet, shown inside it — see
+    /// `PasteSignedTransactionView`.
+    public private(set) var pasteError: String?
 
     // MARK: - Compose
 
@@ -202,8 +206,6 @@ public final class TreasuryProposalsFlow {
         // keeps a second view from opening another.
         let task = Task { [weak self] in
             guard let self else { return }
-            self.myBlsHex = await self.identity.currentIdentity()?
-                .blsPublicKey.hexStringValue
             // A live read before the first draw, so the screen does not
             // sit on "checking…" while a reachable network answers.
             await self.repository.refresh(groupID: self.groupID)
@@ -231,6 +233,12 @@ public final class TreasuryProposalsFlow {
     }
 
     private func apply(_ snapshot: TreasurySnapshot) async {
+        // Re-read per snapshot rather than once in `start()`. The flow
+        // is cached for the app's lifetime, so a value read once was
+        // the *previous* identity's key after a switch — and it is what
+        // decides whether the Sign button is offered.
+        myBlsHex = await identity.currentIdentity()?.blsPublicKey.hexString
+
         treasury = snapshot.treasury
         declarations = snapshot.declarations
         hasLiveAccount = snapshot.account != nil
@@ -250,6 +258,17 @@ public final class TreasuryProposalsFlow {
             ))
         }
         nominees = candidates
+
+        // Loaded from here rather than a sibling `.task`. `loadHistory`
+        // guards on `treasury != nil`, but that is only set after
+        // `start()` finishes a network refresh and drains a snapshot —
+        // so on a first visit the sibling ran too early, found nil, and
+        // left the screen reading "Nothing has happened yet" until a
+        // manual pull-to-refresh.
+        if treasury != nil, history.isEmpty, !hasLoadedHistory {
+            hasLoadedHistory = true
+            await loadHistory()
+        }
 
         let now = Date()
         var built: [TreasuryProposalRow] = []
@@ -342,9 +361,9 @@ public final class TreasuryProposalsFlow {
     /// Take the signature out of an envelope pasted back from a wallet.
     public func adoptPasted() async {
         guard let id = pasteTargetID else { return }
-        actionError = nil
+        pasteError = nil
         guard let returned = try? TransactionEnvelope(base64XDR: pastedXDR) else {
-            actionError = "That doesn't look like a signed Stellar transaction."
+            pasteError = "That doesn't look like a signed Stellar transaction."
             return
         }
         busyProposalID = id
@@ -354,8 +373,9 @@ public final class TreasuryProposalsFlow {
             pastedXDR = ""
             pasteTargetID = nil
             pasteSurface = nil
+            pasteError = nil
         case .failed(let reason):
-            actionError = reason
+            pasteError = reason
         default:
             break
         }
@@ -474,10 +494,4 @@ public final class TreasuryProposalsFlow {
 
 private extension String {
     var trimmed: String { trimmingCharacters(in: .whitespacesAndNewlines) }
-}
-
-extension Data {
-    /// Local spelling so this file doesn't depend on the one in
-    /// `TreasuryBroadcaster`, which is internal to `OnymTreasury`.
-    var hexStringValue: String { map { String(format: "%02x", $0) }.joined() }
 }
