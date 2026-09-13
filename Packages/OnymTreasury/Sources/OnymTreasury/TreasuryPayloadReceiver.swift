@@ -2,6 +2,7 @@ import Foundation
 import OnymGroup
 import OnymIdentity
 import OnymStellar
+import OnymFoundation
 
 /// Applies inbound treasury payloads, after checking them.
 ///
@@ -109,7 +110,7 @@ public struct TreasuryPayloadReceiver: Sendable {
             creationTxHash: payload.creationTxHash,
             createdAt: Date(timeIntervalSince1970: TimeInterval(payload.sentAtMillis) / 1000)
         ))
-        await treasury.refresh(groupID: group.id)
+        await treasury.refresh(groupID: group.id, ownerIdentityID: ownerIdentityID)
     }
 
     // MARK: - Proposal

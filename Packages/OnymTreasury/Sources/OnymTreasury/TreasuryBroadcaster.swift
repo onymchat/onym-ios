@@ -3,6 +3,7 @@ import OnymGroup
 import OnymIdentity
 import OnymStellar
 import OnymTransport
+import OnymFoundation
 
 /// Fans treasury payloads out to every member's inbox, sealed per
 /// recipient — the same best-effort broadcast shape as
@@ -157,8 +158,17 @@ public actor TreasuryBroadcaster {
 
     // MARK: - Fan-out
 
+    /// Scoped to the owning identity.
+    ///
+    /// `currentGroups()` returns the unfiltered cache across every
+    /// local identity, so with two identities in one group the roster
+    /// fanned out to could come from the other identity's copy while
+    /// the row is written under `currentSelectedID()`.
     private func group(_ groupIDHex: String) async -> ChatGroup? {
-        await groups.currentGroups().first { $0.id == groupIDHex }
+        guard let owner = await identity.currentSelectedID() else { return nil }
+        return await groups.currentGroups().first {
+            $0.id == groupIDHex && $0.ownerIdentityID == owner
+        }
     }
 
     private func fanOut(

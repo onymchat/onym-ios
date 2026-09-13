@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import OnymFoundation
 
 /// One member's agreement to a group's rules, as a file that can leave
 /// the device and still mean something.

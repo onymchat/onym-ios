@@ -169,4 +169,13 @@ public enum TreasuryRejection: String, Codable, Equatable, Sendable {
     /// The transaction offers a fee far above the going rate — a spend
     /// that would appear in none of the operation rows.
     case excessiveFee
+    /// No time bound at all. Such a proposal never expires, and because
+    /// it holds the treasury's next sequence number it would block
+    /// every later proposal for good.
+    case noExpiry
+    /// A time bound so far out that it amounts to the same thing.
+    case expiresTooLate
+    /// Arrived carrying more signatures than a proposal should, which
+    /// would leave no room for the co-signers who still have to sign.
+    case tooManySignatures
 }

@@ -274,8 +274,14 @@ public actor TreasuryRepository {
     /// current — deciding a proposal is ready, or submitting it. The
     /// cached value exists to draw a screen, not to make a decision.
     @discardableResult
-    public func refresh(groupID: String) async -> HorizonAccount? {
-        guard let owner = currentIdentity?.rawValue.uuidString,
+    public func refresh(
+        groupID: String,
+        ownerIdentityID: IdentityID? = nil
+    ) async -> HorizonAccount? {
+        // Same reason as `snapshot(groupID:ownerIdentityID:)`: the
+        // receive path runs for a named identity, and refreshing the
+        // selected one's row there is refreshing the wrong row.
+        guard let owner = (ownerIdentityID ?? currentIdentity)?.rawValue.uuidString,
               var treasury = await store.treasury(groupID: groupID, ownerIDString: owner)
         else { return nil }
         let account = try? await horizon(treasury.network).account(treasury.account)

@@ -1,6 +1,7 @@
 import Foundation
 import OnymIdentity
 import OnymStellar
+import OnymFoundation
 
 /// What happened when someone tried to act on a proposal.
 public enum TreasuryActionOutcome: Equatable, Sendable {

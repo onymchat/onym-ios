@@ -135,13 +135,39 @@ public struct TreasuryCreationInteractor: Sendable {
         network: StellarNetwork,
         now: Date = Date()
     ) async -> TreasuryCreationOutcome {
-        guard let group = await groups.currentGroups().first(where: { $0.id == groupIDHex }),
-              let me = await identity.currentIdentity(),
+        guard let me = await identity.currentIdentity(),
               let owner = await identity.currentSelectedID()
         else { return .failed("no group") }
+        // Scoped to the owning identity. `currentGroups()` returns the
+        // unfiltered cache across every local identity — filtering
+        // happens only in `snapshots` — so with two identities in one
+        // group the `isAdmin` check could consult the other identity's
+        // copy while the row is written under this one.
+        guard let group = await groups.currentGroups().first(where: {
+            $0.id == groupIDHex && $0.ownerIdentityID == owner
+        }) else { return .failed("no group") }
 
         guard group.isAdmin(blsPublicKey: me.blsPublicKey) else { return .notAdmin }
         guard !coSigners.isEmpty else { return .noDeclaredSigners }
+
+        // Checked here, not only in the UI. `high > coSigners.count`
+        // produces exactly the "nobody holding it, permanently" state
+        // the atomic-creation design exists to rule out — and it would
+        // be produced *after* real money moved in. A screen is not the
+        // place this invariant can live, because a screen is not the
+        // only caller.
+        let deduplicated = Array(
+            NSOrderedSet(array: coSigners.map(\.accountID)).compactMap { $0 as? String }
+        )
+        guard deduplicated.count == coSigners.count else {
+            return .failed("Two co-signers named the same account.")
+        }
+        guard TreasurySignerSelection.isUsable(
+            thresholds,
+            signerCount: coSigners.count
+        ) else {
+            return .failed("Those thresholds can't be met by that many co-signers.")
+        }
         guard await treasury.snapshot(groupID: groupIDHex).treasury == nil else {
             return .alreadyExists
         }

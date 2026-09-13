@@ -29,6 +29,23 @@ public enum TreasuryProposalVerifier {
     /// more than one built on a quiet one.
     public static let maxFeePerOperation: UInt32 = 10_000
 
+    /// The longest a proposal may stay live, in seconds.
+    ///
+    /// Matches `TreasuryProposalInteractor.proposalWindow`, with a
+    /// day's slack for clock skew between the proposer and whoever is
+    /// checking. A peer is not this app and can put anything it likes
+    /// in `timeBounds`.
+    public static let maxLifetime: TimeInterval = 8 * 24 * 3600
+
+    /// The most signatures an *inbound* proposal may already carry.
+    ///
+    /// Zero would be tidier but the proposer legitimately signs their
+    /// own proposal before sending it, and a relay may deliver a
+    /// proposal that already gathered a few. The cap is what matters:
+    /// `TransactionEnvelope` refuses to append past twenty, so a
+    /// proposal arriving full can never be signed by anybody.
+    public static let maxInboundSignatures = 4
+
 
     /// What the verifier concluded.
     public enum Outcome: Equatable, Sendable {
@@ -52,7 +69,8 @@ public enum TreasuryProposalVerifier {
         network: StellarNetwork,
         treasury: Treasury?,
         proposerBlsPubkeyHex: String,
-        group: ChatGroup
+        group: ChatGroup,
+        now: Date = Date()
     ) -> Outcome {
         guard let treasury else { return .rejected(.noTreasury) }
 
@@ -87,6 +105,39 @@ public enum TreasuryProposalVerifier {
             }
         }
 
+        // Time bounds are attacker-controlled, and their absence is
+        // what makes a proposal immortal.
+        //
+        // The decoder accepts PRECOND_NONE, `expiresAt` is nil for it,
+        // and the one-open-proposal rule reads nil as "still live". So
+        // one well-formed payment proposal with no time bounds claims
+        // the treasury's next sequence number forever: every honest
+        // device then answers `.sequenceContended` for every new
+        // proposal, nothing expires it, and there is no dismiss path.
+        // Any member could freeze the treasury permanently, for the
+        // cost of one message.
+        //
+        // `TreasuryProposal`'s own doc says this app always builds
+        // bounded transactions — but a peer is not this app, and that
+        // is exactly the assumption this boundary exists to stop
+        // trusting.
+        guard let bounds = envelope.transaction.timeBounds, bounds.maxTime != 0 else {
+            return .rejected(.noExpiry)
+        }
+        let latestPermitted = now.addingTimeInterval(maxLifetime).timeIntervalSince1970
+        guard TimeInterval(bounds.maxTime) <= latestPermitted else {
+            return .rejected(.expiresTooLate)
+        }
+
+        // An envelope arriving with twenty junk signatures verifies
+        // cleanly and can then never be signed by anyone: `append`
+        // refuses past the protocol's cap, which surfaces to a
+        // co-signer as "signature did not verify". Cheap griefing on
+        // its own, and a sequence lock when combined with the above.
+        guard envelope.signatures.count <= maxInboundSignatures else {
+            return .rejected(.tooManySignatures)
+        }
+
         // The fee is a real spend that appears in no operation row, and
         // the card is built from operations only. `fee = UInt32.max` on
         // a one-stroop payment is ~429 XLM leaving the treasury with
@@ -116,7 +167,7 @@ public enum TreasuryProposalVerifier {
     /// how a control change is expressed: adding a signer and raising
     /// the threshold to match has to be atomic, or the account spends
     /// the gap between them in a state nobody chose.
-    static func kind(of operations: [StellarOperation]) -> TreasuryProposalKind? {
+    public static func kind(of operations: [StellarOperation]) -> TreasuryProposalKind? {
         guard !operations.isEmpty else { return nil }
 
         if operations.count == 1 {

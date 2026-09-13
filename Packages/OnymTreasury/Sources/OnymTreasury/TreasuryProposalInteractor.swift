@@ -1,6 +1,7 @@
 import Foundation
 import OnymIdentity
 import OnymStellar
+import OnymFoundation
 
 public enum TreasuryProposalOutcome: Equatable, Sendable {
     case proposed(TreasuryProposal)
@@ -105,7 +106,16 @@ public struct TreasuryProposalInteractor: Sendable {
         newThresholds: TreasuryThresholds? = nil,
         now: Date = Date()
     ) async -> TreasuryProposalOutcome {
-        await propose(groupID: groupID, kind: .addSigner, now: now) { context in
+        // Adding a signer raises the count, so the new thresholds are
+        // checked against the set this proposal would produce. Same
+        // "nobody holding it, permanently" failure as creation, and it
+        // is worth catching here rather than trusting the caller.
+        if let newThresholds,
+           let count = await liveSignerCount(groupID: groupID),
+           !TreasurySignerSelection.isUsable(newThresholds, signerCount: count + 1) {
+            return .failed("Those thresholds can't be met once that signer is added.")
+        }
+        return await propose(groupID: groupID, kind: .addSigner, now: now) { context in
             try TreasuryTransactionFactory.addSigner(
                 treasury: context.account,
                 treasurySequence: context.sequenceNumber,
@@ -123,7 +133,18 @@ public struct TreasuryProposalInteractor: Sendable {
         newThresholds: TreasuryThresholds? = nil,
         now: Date = Date()
     ) async -> TreasuryProposalOutcome {
-        await propose(groupID: groupID, kind: .changeControl, now: now) { context in
+        // Removal lowers the count, so an unchanged threshold can
+        // become unreachable even without new numbers being asked for.
+        if let count = await liveSignerCount(groupID: groupID) {
+            let resulting = max(count - 1, 0)
+            let existing = await currentThresholds(groupID: groupID)
+            let effective = newThresholds ?? existing
+            if let effective,
+               !TreasurySignerSelection.isUsable(effective, signerCount: resulting) {
+                return .failed("Removing that signer would leave a treasury nobody can use.")
+            }
+        }
+        return await propose(groupID: groupID, kind: .changeControl, now: now) { context in
             try TreasuryTransactionFactory.removeSigner(
                 treasury: context.account,
                 treasurySequence: context.sequenceNumber,
@@ -136,6 +157,21 @@ public struct TreasuryProposalInteractor: Sendable {
     }
 
     // MARK: - Shared path
+
+    /// Signers with weight on the live account.
+    private func liveSignerCount(groupID: String) async -> Int? {
+        await treasury.refresh(groupID: groupID)
+            .map { $0.signers.filter { $0.weight > 0 }.count }
+    }
+
+    private func currentThresholds(groupID: String) async -> TreasuryThresholds? {
+        guard let account = await treasury.refresh(groupID: groupID) else { return nil }
+        return TreasuryThresholds(
+            low: account.thresholds.low,
+            medium: account.thresholds.medium,
+            high: account.thresholds.high
+        )
+    }
 
     private struct BuildContext {
         let account: StellarAccountID
@@ -193,6 +229,15 @@ public struct TreasuryProposalInteractor: Sendable {
             return .failed("could not build the transaction")
         }
 
+        // The kind is re-derived from the built operations rather than
+        // taken from the caller. `addSigner` with new thresholds emits
+        // two `setOptions`, which every *receiver* classifies as
+        // `.changeControl` — so storing the caller's `.addSigner` made
+        // the proposer's card read differently from everyone else's.
+        // Same required weight either way, but the summary is the thing
+        // people sign against, and it should say the same thing on
+        // every device.
+        let derivedKind = TreasuryProposalVerifier.kind(of: transaction.operations) ?? kind
         var proposal = TreasuryProposal(
             id: UUID(),
             groupID: groupID,
@@ -200,7 +245,7 @@ public struct TreasuryProposalInteractor: Sendable {
             proposerBlsPubkeyHex: me.blsPublicKey.hexString,
             treasuryAccount: anchored.account,
             network: anchored.network,
-            kind: kind,
+            kind: derivedKind,
             envelope: TransactionEnvelope(transaction: transaction),
             createdAt: now
         )
