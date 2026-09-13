@@ -365,6 +365,23 @@
         }
       }
     },
+    "%lld ready to co-sign": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld ready to co-sign"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld готовы подписать"
+          }
+        }
+      }
+    },
     "%lld services": {
       "extractionState": "manual",
       "localizations": {
@@ -467,6 +484,23 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "%lld/56 characters": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld/56 characters"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld/56 символов"
           }
         }
       }
@@ -1976,6 +2010,23 @@
         }
       }
     },
+    "Choose your Stellar account": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose your Stellar account"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Выберите свой счёт Stellar"
+          }
+        }
+      }
+    },
     "Choosing again replaces this. It won't remove you from a treasury that already exists — that takes a proposal the other co-signers approve.": {
       "extractionState": "manual",
       "localizations": {
@@ -2633,6 +2684,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Развёрнут %1$@ · %2$@"
+          }
+        }
+      }
+    },
+    "Derived by Onym — this app can sign": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Derived by Onym — this app can sign"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Создан Onym — это приложение может подписывать"
           }
         }
       }
@@ -3341,6 +3409,23 @@
         }
       }
     },
+    "Held in your own wallet": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Held in your own wallet"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Хранится в вашем кошельке"
+          }
+        }
+      }
+    },
     "I agree to these rules": {
       "localizations": {
         "en": {
@@ -4000,6 +4085,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "КАЗНЫ ПОКА НЕТ"
+          }
+        }
+      }
+    },
+    "Needed before you can co-sign anything": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Needed before you can co-sign anything"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Нужно, прежде чем вы сможете что-либо подписывать"
           }
         }
       }
@@ -4898,6 +5000,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Onym работает на независимых сервисах доставки, файлов и меток времени. Начните с готового набора или выберите свои."
+          }
+        }
+      }
+    },
+    "Open my wallet again": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open my wallet again"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Открыть кошелёк снова"
           }
         }
       }
@@ -6684,6 +6803,57 @@
         }
       }
     },
+    "Start over": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Start over"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Начать заново"
+          }
+        }
+      }
+    },
+    "Starting over forgets this handoff on this phone. If your wallet did send it, create again — Onym checks the ledger and will find the account rather than make a second one.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Starting over forgets this handoff on this phone. If your wallet did send it, create again — Onym checks the ledger and will find the account rather than make a second one."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "«Начать заново» забудет эту передачу на этом телефоне. Если кошелёк всё же отправил транзакцию, создайте снова — Onym проверит реестр и найдёт счёт, а не создаст второй."
+          }
+        }
+      }
+    },
+    "Stellar": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stellar"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stellar"
+          }
+        }
+      }
+    },
     "Stellar Soroban contract ID": {
       "localizations": {
         "en": {
@@ -6696,6 +6866,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "ID контракта Stellar Soroban"
+          }
+        }
+      }
+    },
+    "Stellar testnet — not real money": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stellar testnet — not real money"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Тестовая сеть Stellar — не настоящие деньги"
           }
         }
       }
@@ -7262,6 +7449,23 @@
         }
       }
     },
+    "This account has nothing in it yet": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This account has nothing in it yet"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "На этом счёте пока ничего нет"
+          }
+        }
+      }
+    },
     "This build runs without a service directory. Continue — the app uses its built-in defaults.": {
       "localizations": {
         "en": {
@@ -7692,6 +7896,23 @@
         }
       }
     },
+    "Valid address": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Valid address"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Адрес верен"
+          }
+        }
+      }
+    },
     "Verify": {
       "extractionState": "stale",
       "localizations": {
@@ -7836,6 +8057,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "ЧТО БЫЛО ПОДПИСАНО"
+          }
+        }
+      }
+    },
+    "Waiting for people to choose their accounts": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting for people to choose their accounts"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ждём, пока участники выберут свои счета"
           }
         }
       }

@@ -143,12 +143,20 @@ public final class TreasuryFlow {
         /// switches between handing off and confirming would otherwise
         /// have the ledger check run against the wrong Horizon and be
         /// told their perfectly good treasury is not on the ledger.
+        /// `request` is the SEP-0007 handoff, retained so the wallet
+        /// can be opened again — `pendingWalletRequest` is cleared the
+        /// moment the link is handed off, so without this the URL was
+        /// gone and a wallet dismissed by accident could not be
+        /// reopened. Nil after a relaunch: the envelope is not
+        /// persisted, so a restored stage can confirm or discard but
+        /// cannot re-offer the same transaction.
         case awaitingWallet(
             treasuryAccountID: String,
             creationTxHash: String,
             coSigners: [StellarAccountID],
             thresholds: TreasuryThresholds,
-            network: StellarNetwork
+            network: StellarNetwork,
+            request: SEP0007Request?
         )
         case created
     }
@@ -270,7 +278,8 @@ public final class TreasuryFlow {
                 creationTxHash: pending.creationTxHash,
                 coSigners: pending.coSigners,
                 thresholds: pending.thresholds,
-                network: pending.network
+                network: pending.network,
+                request: nil
             )
         }
 
@@ -540,7 +549,8 @@ public final class TreasuryFlow {
                 creationTxHash: creationTxHash,
                 coSigners: coSigners,
                 thresholds: thresholds,
-                network: buildNetwork
+                network: buildNetwork,
+                request: request
             )
         case .failed(let reason):
             creationError = reason
@@ -548,6 +558,51 @@ public final class TreasuryFlow {
     }
 
     public func clearWalletRequest() { pendingWalletRequest = nil }
+
+    /// Hand the same transaction to the wallet again.
+    ///
+    /// `clearWalletRequest()` runs as soon as the link is opened, so
+    /// the URL was unrecoverable from that moment: a wallet dismissed
+    /// by accident, or one that never came to the front, left the
+    /// founder on a screen whose only button was "I've sent it" for a
+    /// transaction they had not sent. Unavailable after a relaunch,
+    /// because the envelope is not persisted — the stage says so by
+    /// carrying a nil request rather than by offering a button that
+    /// does nothing.
+    public var canReopenWallet: Bool {
+        if case .awaitingWallet(_, _, _, _, _, let request) = creationStage {
+            return request != nil
+        }
+        return false
+    }
+
+    public func reopenWallet() {
+        guard case .awaitingWallet(_, _, _, _, _, let request) = creationStage,
+              let request
+        else { return }
+        pendingWalletRequest = request
+    }
+
+    /// Give up on a handoff and go back to the form.
+    ///
+    /// The pending row is written before the wallet opens, and until now
+    /// nothing ever set `creationStage` back to `.idle`. A wallet that
+    /// refused the transaction, an envelope that timed out, or a founder
+    /// who simply wanted different co-signers left the group pinned to
+    /// "Waiting for your wallet" on every launch, with one button that
+    /// could only ever fail.
+    ///
+    /// Safe because nothing has happened on-chain that this discards: if
+    /// the wallet *did* submit, the account exists and `adopt` finds it
+    /// — the founder can create again and the ledger check will confirm
+    /// the existing account rather than build a second one. What is
+    /// thrown away is this device's memory of an unfinished handoff.
+    public func abandonExternalCreation() async {
+        await repository.clearPendingCreation(groupID: groupID)
+        pendingWalletRequest = nil
+        creationError = nil
+        creationStage = .idle
+    }
 
     /// After a wallet handoff: check the ledger and, if the account is
     /// there and configured as asked, anchor it and tell the group.
@@ -568,7 +623,8 @@ public final class TreasuryFlow {
             let creationTxHash,
             let coSigners,
             let thresholds,
-            let network
+            let network,
+            _
         ) = creationStage else { return }
         isCreating = true
         creationError = nil

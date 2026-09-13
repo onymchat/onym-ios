@@ -130,7 +130,11 @@ public struct DeclareSignerView: View {
 
                     if !flow.externalAccountField.isEmpty {
                         Chip(
-                            text: flow.externalAccountIsValid
+                            // `key:`, not `text:` — both arms are UI
+                            // copy, and `text:` is the verbatim
+                            // initialiser, so the Russian translation of
+                            // "Valid address" could never be reached.
+                            key: flow.externalAccountIsValid
                                 ? "Valid address"
                                 : "\(flow.externalAccountField.count)/56 characters",
                             fg: flow.externalAccountIsValid ? OnymTokens.green : OnymTokens.red,

@@ -94,6 +94,26 @@ public struct CreateTreasuryView: View {
                     Task { await flow.confirmExternalCreation() }
                 }
                 .accessibilityIdentifier("treasury.create.confirm_external")
+                if flow.canReopenWallet {
+                    Button { flow.reopenWallet() } label: {
+                        Text("Open my wallet again")
+                            .font(OnymType.font(size: 14, weight: .medium))
+                    }
+                    .accessibilityIdentifier("treasury.create.reopen_wallet")
+                }
+                // The way out. Without it this screen had one button,
+                // and it could only ever fail for a transaction the
+                // wallet refused or the founder changed their mind
+                // about.
+                Button(role: .destructive) {
+                    Task { await flow.abandonExternalCreation() }
+                } label: {
+                    Text("Start over")
+                        .font(OnymType.font(size: 14))
+                        .foregroundStyle(OnymTokens.text3)
+                }
+                .accessibilityIdentifier("treasury.create.abandon_external")
+                Footnote("Starting over forgets this handoff on this phone. If your wallet did send it, create again \u{2014} Onym checks the ledger and will find the account rather than make a second one.")
             }
             .padding(.horizontal, 20)
             .padding(.top, 20)
