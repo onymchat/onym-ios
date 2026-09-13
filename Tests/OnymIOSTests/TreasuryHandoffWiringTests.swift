@@ -47,6 +47,32 @@ final class TreasuryHandoffWiringTests: XCTestCase {
         XCTAssertTrue(body.contains("creationError = String("), body)
     }
 
+    /// The stranded-funding branch has to be reachable without the
+    /// create screen.
+    ///
+    /// Once another admin's anchor lands, `CreateTreasuryView` is no
+    /// longer presented, so the only button that could finish a funded
+    /// account disappears while the row and its key persist. The flow
+    /// reconciles on the snapshot instead, and this fails if that call
+    /// is removed from `apply`.
+    func test_aStrandedHandoff_isReconciledWithoutTheCreateScreen() throws {
+        let body = try methodBody(
+            of: "private func apply(_ snapshot: TreasurySnapshot) async {",
+            in: "TreasuryFlow.swift"
+        )
+        XCTAssertTrue(body.contains("reconcileStrandedFunding"), body)
+
+        let reconcile = try methodBody(
+            of: "private func reconcileStrandedFunding(_ snapshot: TreasurySnapshot) async {",
+            in: "TreasuryFlow.swift"
+        )
+        XCTAssertTrue(reconcile.contains("completeExternalCreation"), reconcile)
+        // Only when the row disagrees with the anchor, and only once —
+        // a snapshot arrives on every change and this reads a ledger.
+        XCTAssertTrue(reconcile.contains("treasuryAccount != anchored.account"), reconcile)
+        XCTAssertTrue(reconcile.contains("hasReconciledStrandedFunding"), reconcile)
+    }
+
     // MARK: - Helpers
 
     /// Source of one method, from its signature to the line that closes

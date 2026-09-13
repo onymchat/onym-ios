@@ -121,6 +121,10 @@ public final class TreasuryFlow {
     /// Set when creation needs the founder's own wallet — the app
     /// cannot sign for an account it does not hold.
     public private(set) var pendingWalletRequest: SEP0007Request?
+    /// Reconciliation reads a ledger, and snapshots arrive on every
+    /// change; once per flow is enough to resolve a state that only
+    /// changes when someone acts.
+    private var hasReconciledStrandedFunding = false
     /// Where creation has got to. The screen used to end at
     /// `creationError = nil` on success and at nothing at all on the
     /// wallet handoff: the founder was left looking at an enabled
@@ -263,6 +267,7 @@ public final class TreasuryFlow {
                 request: nil
             )
         }
+        await reconcileStrandedFunding(snapshot)
 
         treasury = snapshot.treasury
         // Scoped to the owning identity. `currentGroups()` is every
@@ -516,10 +521,12 @@ public final class TreasuryFlow {
             creationStage = .created
         case .alreadyExists:
             creationError = String(localized: "This chat already has a treasury.")
-        case .fundedAnotherAccount(let account):
-            creationError = String(
-                localized: "This chat already has a treasury, so your funding went to a different account: \(account.abbreviated). It is now controlled by the same co-signers, who can move it."
-            )
+        case .fundedAnotherAccount:
+            // `create` returns `.alreadyExists` long before it reaches
+            // the external path, so this cannot happen here. Named
+            // rather than defaulted, so adding a case stays a compiler
+            // error somewhere useful.
+            creationError = String(localized: "This chat already has a treasury.")
         case .notAdmin:
             creationError = String(localized: "Only the founder can create the treasury.")
         case .noDeclaredSigners:
@@ -599,6 +606,34 @@ public final class TreasuryFlow {
               let request
         else { return }
         pendingWalletRequest = request
+    }
+
+    /// Finish a handoff the create screen can no longer reach.
+    ///
+    /// When another admin's anchor lands mid-handoff, this group has a
+    /// treasury and `CreateTreasuryView` stops being presented at all —
+    /// so the one button that could finish the founder's funded account
+    /// is gone, while the row and its key persist. That is the state
+    /// `configureStrandedFunding` was written to resolve, reachable
+    /// only if something outside the create screen triggers it.
+    ///
+    /// This is that trigger: opening the treasury screen. Once per flow,
+    /// and only when a seeded row disagrees with the anchor, because a
+    /// snapshot arrives on every change and this reads a ledger.
+    private func reconcileStrandedFunding(_ snapshot: TreasurySnapshot) async {
+        guard !hasReconciledStrandedFunding,
+              let anchored = snapshot.treasury,
+              let pending = await repository.pendingCreation(groupID: groupID),
+              pending.treasurySeed != nil,
+              pending.treasuryAccount != anchored.account
+        else { return }
+        hasReconciledStrandedFunding = true
+        if case .fundedAnotherAccount(let account) = await creation
+            .completeExternalCreation(groupIDHex: groupID) {
+            creationError = String(
+                localized: "This chat already has a treasury, so your funding went to a different account: \(account.abbreviated). It is now controlled by the same co-signers, who can move it."
+            )
+        }
     }
 
     /// Give up on a handoff — unless the wallet already funded it.

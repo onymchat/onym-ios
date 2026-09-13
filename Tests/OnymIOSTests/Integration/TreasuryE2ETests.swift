@@ -444,16 +444,9 @@ final class TreasuryE2ETests: XCTestCase {
     func test_externalCreation_isFundedByTheWalletAndLockedDownHere() async throws {
         let world = try await makeExternalWorld()
 
-        guard case .needsExternalWallet(let request, let accountID, _) =
-            await world.side.creation.create(
-                groupIDHex: groupIDHex,
-                funder: world.funder,
-                coSigners: world.coSigners,
-                thresholds: world.thresholds,
-                spendable: StellarAmount(stroops: 0),
-                network: .testnet
-            )
-        else { return XCTFail("an external funder must hand off to a wallet") }
+        let request = try await handOff(world)
+        let loadedPending = await world.side.repository.pendingCreation(groupID: groupIDHex)
+        let accountID = try XCTUnwrap(loadedPending).treasuryAccount.accountID
 
         // What a wallet is given: one operation, one source, unsigned.
         let funding = request.envelope.transaction
@@ -563,6 +556,7 @@ final class TreasuryE2ETests: XCTestCase {
     /// discarded — which is the case the button exists for.
     func test_abandoning_isAllowedBeforeTheWalletSendsAnything() async throws {
         let world = try await makeExternalWorld()
+        try await handOff(world)
         let outcome = await world.side.creation.abandonExternalCreation(groupIDHex: groupIDHex)
         XCTAssertEqual(outcome, .discarded)
         let pending = await world.side.repository.pendingCreation(groupID: groupIDHex)
@@ -573,6 +567,7 @@ final class TreasuryE2ETests: XCTestCase {
     /// still finish, through the path that was written for it.
     func test_aPendingRowWithNoSeed_fallsBackToAdopt() async throws {
         let world = try await makeExternalWorld()
+        try await handOff(world)
         let loaded = await world.side.repository.pendingCreation(groupID: groupIDHex)
         let pending = try XCTUnwrap(loaded)
         await world.side.repository.recordPendingCreation(PendingTreasuryCreation(
@@ -700,6 +695,85 @@ final class TreasuryE2ETests: XCTestCase {
         XCTAssertGreaterThanOrEqual(quoted, configuration)
     }
 
+    /// A stranded account that cannot be finished must not be reported
+    /// as a treasury. Every failure in that branch used to answer
+    /// `.alreadyExists`, which the screen renders as "created" — the
+    /// founder told it worked while their XLM sat under a key they were
+    /// told was destroyed.
+    func test_strandedFunding_thatCannotBeFinished_isNotReportedAsCreated() async throws {
+        let world = try await makeExternalWorld()
+        try await fundExternally(world)
+        let loaded = await world.side.repository.pendingCreation(groupID: groupIDHex)
+        let pending = try XCTUnwrap(loaded)
+
+        // Another admin's anchor, and a ledger that refuses the
+        // lockdown.
+        await world.side.repository.anchor(Treasury(
+            account: try StellarAccountID(
+                publicKey: Data(Curve25519.Signing.PrivateKey().publicKey.rawRepresentation)
+            ),
+            groupID: groupIDHex,
+            ownerIdentityID: pending.ownerIdentityID,
+            network: .testnet,
+            creationTxHash: "elsewhere",
+            createdAt: Date()
+        ))
+        await world.ledger.refuseSubmissions(true)
+
+        let outcome = await world.side.creation.completeExternalCreation(groupIDHex: groupIDHex)
+        guard case .failed(let reason) = outcome else {
+            return XCTFail("a stranded account that cannot be finished is not a success")
+        }
+        XCTAssertTrue(reason.contains(pending.treasuryAccount.abbreviated), reason)
+        // And the key survives, because the account still needs it.
+        let survived = await world.side.repository.pendingCreation(groupID: groupIDHex)
+        XCTAssertNotNil(survived?.treasurySeed)
+    }
+
+    /// A second `create` must not mint a new key over a handoff that is
+    /// already out there — the same loss `abandonExternalCreation`
+    /// refuses, reached by a different button.
+    func test_creatingTwice_doesNotOverwriteALiveHandoff() async throws {
+        let world = try await makeExternalWorld()
+        try await handOff(world)
+        let loaded = await world.side.repository.pendingCreation(groupID: groupIDHex)
+        let first = try XCTUnwrap(loaded)
+
+        let outcome = await world.side.creation.create(
+            groupIDHex: groupIDHex,
+            funder: world.funder,
+            coSigners: world.coSigners,
+            thresholds: world.thresholds,
+            spendable: StellarAmount(stroops: 0),
+            network: .testnet
+        )
+        guard case .failed(let reason) = outcome else {
+            return XCTFail("expected a refusal, got \(outcome)")
+        }
+        XCTAssertTrue(reason.contains("already waiting"), reason)
+        let after = await world.side.repository.pendingCreation(groupID: groupIDHex)
+        XCTAssertEqual(after?.treasuryAccount, first.treasuryAccount)
+        XCTAssertEqual(after?.treasurySeed, first.treasurySeed)
+    }
+
+    /// What the group is told has to resolve on the ledger. When the
+    /// configuration landed on an earlier run there is no recorded
+    /// hash, and the fallback used to be the *predicted* funding hash a
+    /// wallet may have renumbered.
+    func test_theAnchoredHash_isOneTheLedgerHolds() async throws {
+        let world = try await makeExternalWorld()
+        try await fundExternally(world)
+        guard case .created(let treasury) =
+            await world.side.creation.completeExternalCreation(groupIDHex: groupIDHex)
+        else { return XCTFail("completion failed") }
+
+        let history = try await world.ledger.transactions(for: treasury.account, limit: 50)
+        XCTAssertTrue(
+            history.contains { $0.hash == treasury.creationTxHash && $0.successful },
+            "announced \(treasury.creationTxHash), ledger holds \(history.map(\.hash))"
+        )
+    }
+
     // MARK: - External-path harness
 
     private struct ExternalWorld {
@@ -768,18 +842,26 @@ final class TreasuryE2ETests: XCTestCase {
             coSigners: [funder, boSigner],
             thresholds: TreasuryThresholds(low: 1, medium: 2, high: 2)
         )
-        guard case .needsExternalWallet = await side.creation.create(
+        return world
+    }
+
+    /// The handoff itself, as its own step — `create` refuses to run
+    /// twice over a live one, which is the point of a separate call.
+    @discardableResult
+    private func handOff(_ world: ExternalWorld) async throws -> SEP0007Request {
+        let outcome = await world.side.creation.create(
             groupIDHex: groupIDHex,
-            funder: funder,
+            funder: world.funder,
             coSigners: world.coSigners,
             thresholds: world.thresholds,
             spendable: StellarAmount(stroops: 0),
             network: .testnet
-        ) else {
-            struct NotExternal: Error {}
-            throw NotExternal()
+        )
+        guard case .needsExternalWallet(let request, _, _) = outcome else {
+            struct NotExternal: Error { let outcome: TreasuryCreationOutcome }
+            throw NotExternal(outcome: outcome)
         }
-        return world
+        return request
     }
 
     /// Play the wallet: sign the funding transaction and submit it.
@@ -787,6 +869,9 @@ final class TreasuryE2ETests: XCTestCase {
         _ world: ExternalWorld,
         stroops: Int64 = 40_000_000
     ) async throws {
+        if await world.side.repository.pendingCreation(groupID: groupIDHex) == nil {
+            try await handOff(world)
+        }
         let loaded = await world.side.repository.pendingCreation(groupID: groupIDHex)
         let pending = try XCTUnwrap(loaded)
         let account = try await world.ledger.account(world.funder)
@@ -1092,12 +1177,18 @@ private actor LedgerHorizon: HorizonClient {
     }
 
     private var accounts: [String: Account] = [:]
+    /// When set, every submission is refused — for the tests that need
+    /// a transaction the network will not take.
+    private var refusesSubmissions = false
+    private var applied: [(accounts: Set<String>, transaction: HorizonTransaction)] = []
 
     /// The ledger's clock, so a test can move past a time bound without
     /// waiting for one. Defaults to the real one.
     var now: () -> Date = { Date() }
 
     func setNow(_ clock: @escaping @Sendable () -> Date) { now = clock }
+
+    func refuseSubmissions(_ refuses: Bool) { refusesSubmissions = refuses }
 
     /// What the acting account requires for this operation. Matches the
     /// protocol's classes: payments and trustlines are medium, anything
@@ -1165,8 +1256,19 @@ private actor LedgerHorizon: HorizonClient {
         )
     }
 
+    /// Applied transactions involving `id`, newest first.
+    ///
+    /// Recorded rather than returned empty, because "the ledger holds
+    /// no history" is not a thing a real Horizon says about an account
+    /// that exists — and the anchor path now refuses to announce a hash
+    /// the ledger cannot confirm. A fake that forgets every transaction
+    /// it applied would make that refusal fire on correct behaviour.
     func transactions(for id: StellarAccountID, limit: Int) async throws -> [HorizonTransaction] {
-        []
+        applied
+            .filter { $0.accounts.contains(id.accountID) }
+            .suffix(limit)
+            .reversed()
+            .map(\.transaction)
     }
 
     func networkParameters() async throws -> HorizonNetworkParameters {
@@ -1177,6 +1279,9 @@ private actor LedgerHorizon: HorizonClient {
     }
 
     func submit(_ envelope: TransactionEnvelope) async throws -> String {
+        if refusesSubmissions {
+            throw HorizonError.submissionFailed(resultCodes: ["tx_failed"], body: "refused")
+        }
         // Snapshot, so a rejected transaction leaves nothing behind.
         //
         // Operations were applied one at a time with no rollback, so
@@ -1330,7 +1435,29 @@ private actor LedgerHorizon: HorizonClient {
         source.sequence = transaction.sequenceNumber
         source.balances["XLM", default: 0] -= Int64(transaction.fee)
         accounts[sourceID] = source
-        return transaction.hash(network: network).hexString
+
+        let hash = transaction.hash(network: network).hexString
+        var touched: Set<String> = [sourceID]
+        for operation in transaction.operations {
+            if let opSource = operation.sourceAccount?.accountID { touched.insert(opSource) }
+            switch operation.body {
+            case .createAccount(let destination, _): touched.insert(destination.accountID)
+            case .payment(let destination, _, _): touched.insert(destination.accountID)
+            case .setOptions, .changeTrust: break
+            }
+        }
+        applied.append((
+            accounts: touched,
+            transaction: HorizonTransaction(
+                hash: hash,
+                ledgerCloseTime: now(),
+                sourceAccount: transaction.sourceAccount,
+                successful: true,
+                feeCharged: StellarAmount(stroops: Int64(transaction.fee)),
+                envelopeXDR: envelope.base64XDR
+            )
+        ))
+        return hash
     }
 
     /// `(2 + subentries) × baseReserve`, with signers beyond the master

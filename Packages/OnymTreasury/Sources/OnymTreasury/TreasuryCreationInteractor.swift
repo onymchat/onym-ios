@@ -292,6 +292,21 @@ public struct TreasuryCreationInteractor: Sendable {
                 timeBounds: bounds
             ) else { return .failed("could not build the funding transaction") }
 
+            // Never over a handoff that is already out there.
+            //
+            // A second `create` used to mint a fresh key and overwrite
+            // the row, which on this path destroys the only key for an
+            // account a wallet may already have funded — the same loss
+            // `abandonExternalCreation` refuses, reached by a different
+            // button. Only UI stage ordering stood between them.
+            if let existing = await treasury.pendingCreation(groupID: groupIDHex),
+               existing.treasurySeed != nil {
+                return .failed(
+                    "a treasury handoff for this chat is already waiting. Finish it, or "
+                    + "start over from that screen, before creating another."
+                )
+            }
+
             let fundingEnvelope = TransactionEnvelope(transaction: funding)
             await treasury.recordPendingCreation(PendingTreasuryCreation(
                 groupID: groupIDHex,
@@ -577,11 +592,14 @@ public struct TreasuryCreationInteractor: Sendable {
             guard let parameters = try? await client.networkParameters() else {
                 return .failed("could not read the network's fee and reserve")
             }
-            // Clamped to what the account can actually spend above its
-            // reserve. The margin funded at step one covers an ordinary
-            // rise; this covers the rest, because a fee the treasury
-            // cannot pay is a transaction that cannot be submitted at
-            // all, and offering less is at least an attempt.
+            // Checked against what the account can spend above its
+            // reserve, and refused with the reason when it cannot.
+            //
+            // An earlier version clamped the fee to whatever was
+            // affordable, which sounds forgiving and is not: below the
+            // base rate the network declines the submission, and the
+            // founder reads that as an opaque failure rather than as
+            // "send this account a little more".
             let operationCount = Int64(pending.coSigners.count + 1)
             let reserve = TreasuryTransactionFactory.minimumBalance(
                 signerCount: pending.coSigners.count,
@@ -664,15 +682,36 @@ public struct TreasuryCreationInteractor: Sendable {
             )
         }
 
+        // Announce only a hash the ledger actually holds.
+        //
+        // `configurationTxHash` is this device's own and therefore
+        // exact — but it is nil when the configuration was already
+        // on-chain before the first run got that far, and the fallback
+        // was then the *predicted* funding hash, which a wallet is free
+        // to renumber. The group cannot re-derive either, so a hash
+        // that resolves to nothing is a provenance claim on no evidence
+        // — the thing `adopt` refuses to make.
+        let history = (try? await client.transactions(
+            for: pending.treasuryAccount,
+            limit: Self.creationHistoryDepth
+        )) ?? []
+        let candidates = [record.configurationTxHash, pending.creationTxHash].compactMap { $0 }
+        let announcedHash = candidates.first { candidate in
+            history.contains { $0.hash == candidate && $0.successful }
+        } ?? history.first(where: \.successful)?.hash
+        guard let announcedHash else {
+            return .failed(
+                "the treasury is locked down, but its history could not be read. "
+                + "Nothing has been announced to the group; try again."
+            )
+        }
+
         let created = Treasury(
             account: pending.treasuryAccount,
             groupID: groupIDHex,
             ownerIdentityID: owner,
             network: pending.network,
-            // The transaction that made it a treasury, which is this
-            // device's own and therefore known exactly. Step one's hash
-            // was a prediction, and a wallet is free to renumber it.
-            creationTxHash: record.configurationTxHash ?? pending.creationTxHash,
+            creationTxHash: announcedHash,
             createdAt: now,
             lastKnownSigners: configured.signers,
             lastKnownThresholds: configured.thresholds,
@@ -699,17 +738,33 @@ public struct TreasuryCreationInteractor: Sendable {
         groupIDHex: String,
         now: Date
     ) async -> TreasuryCreationOutcome {
+        // Every exit below used to be `.alreadyExists`, which the screen
+        // renders as "created". So an unreachable Horizon, a refused
+        // submission or a seed that would not rebuild all ended with a
+        // founder told their treasury was made while their XLM sat in an
+        // unconfigured account under a key they were told was destroyed.
+        // The account is named in every one of these, because knowing
+        // where the money is is the least this can offer.
+        let stuck = "your funding is in \(pending.treasuryAccount.abbreviated), which is not "
+            + "this chat's treasury and is not locked down yet."
         guard let seed = pending.treasurySeed,
               let key = try? EphemeralTreasuryKey(seed: seed),
               key.account == pending.treasuryAccount
-        else { return .alreadyExists }
-        let client = horizon(pending.network)
-        guard let onChain = try? await client.account(pending.treasuryAccount) else {
-            // Nothing was funded after all, or the ledger is
-            // unreachable. Either way the row stays: it is the only
-            // copy of the key, and an unreachable Horizon is not proof.
-            return .alreadyExists
+        else {
+            return .failed("\(stuck) The key for it is unreadable on this device.")
         }
+        let client = horizon(pending.network)
+        let onChain: HorizonAccount
+        do {
+            onChain = try await client.account(pending.treasuryAccount)
+        } catch HorizonError.accountNotFound {
+            // Nothing was funded after all. The row stays: it is the
+            // only copy of the key, and a wallet may still send it.
+            return .alreadyExists
+        } catch {
+            return .failed("could not reach the network to check. Nothing has been changed.")
+        }
+
         if Self.misconfiguration(
             onChain,
             account: pending.treasuryAccount,
@@ -719,25 +774,47 @@ public struct TreasuryCreationInteractor: Sendable {
             await treasury.clearPendingCreation(groupID: groupIDHex)
             return .fundedAnotherAccount(pending.treasuryAccount)
         }
-        guard let parameters = try? await client.networkParameters(),
-              let configuration = try? TreasuryTransactionFactory.creationConfiguration(
-                  treasury: pending.treasuryAccount,
-                  treasurySequence: onChain.sequenceNumber,
-                  coSigners: pending.coSigners,
-                  thresholds: pending.thresholds,
-                  baseFee: parameters.baseFee,
-                  timeBounds: StellarTimeBounds(
-                      minTime: 0,
-                      maxTime: UInt64(
-                          now.addingTimeInterval(Self.creationWindow).timeIntervalSince1970
-                      )
-                  )
-              )
-        else { return .alreadyExists }
+
+        guard let parameters = try? await client.networkParameters() else {
+            return .failed("\(stuck) Could not read the network's fee and reserve; try again.")
+        }
+        guard let configuration = try? TreasuryTransactionFactory.creationConfiguration(
+            treasury: pending.treasuryAccount,
+            treasurySequence: onChain.sequenceNumber,
+            coSigners: pending.coSigners,
+            thresholds: pending.thresholds,
+            baseFee: parameters.baseFee,
+            timeBounds: StellarTimeBounds(
+                minTime: 0,
+                maxTime: UInt64(
+                    now.addingTimeInterval(Self.creationWindow).timeIntervalSince1970
+                )
+            )
+        ) else {
+            return .failed("\(stuck) Could not build the transaction that locks it down.")
+        }
         var envelope = TransactionEnvelope(transaction: configuration)
-        guard (try? key.sign(&envelope, network: pending.network)) != nil,
-              (try? await client.submit(envelope)) != nil
-        else { return .alreadyExists }
+        guard (try? key.sign(&envelope, network: pending.network)) != nil else {
+            return .failed("\(stuck) Could not sign as that account.")
+        }
+        guard (try? await client.submit(envelope)) != nil else {
+            return .failed("\(stuck) The network refused the transaction; try again.")
+        }
+
+        // Re-read before deleting the key, exactly as the main path
+        // does. A successful POST is not the same as an applied
+        // transaction, and here the difference is paid for with the only
+        // copy of a secret.
+        guard let configured = try? await client.account(pending.treasuryAccount),
+              Self.misconfiguration(
+                  configured,
+                  account: pending.treasuryAccount,
+                  expectedCoSigners: pending.coSigners,
+                  expectedThresholds: pending.thresholds
+              ) == nil
+        else {
+            return .failed("\(stuck) The lockdown was sent but the ledger does not show it yet.")
+        }
         await treasury.clearPendingCreation(groupID: groupIDHex)
         return .fundedAnotherAccount(pending.treasuryAccount)
     }
