@@ -1,3 +1,4 @@
+import CryptoKit
 import XCTest
 import OnymFoundation
 @testable import OnymStellar
@@ -286,5 +287,156 @@ final class StellarValueTests: XCTestCase {
             }
         }
         throw XCTSkip("no envelope with both characters in range")
+    }
+}
+
+/// Regression tests for the decode-path gaps found in review of #329.
+///
+/// Every one sits inside the threat model the package argues for: a
+/// co-signer renders from decoded operations, so anything the decoder
+/// accepts is something a person can be shown and asked to sign.
+final class StellarDecodeHardeningTests: XCTestCase {
+
+    private let issuer = "GCFIRY65OQE7DFP5KLNS2PF2LVZMUZYJX4OZIEQ36N2IQANUB5XVYOJR"
+
+    // MARK: - Negative amounts
+
+    /// Integer division truncates toward zero, so `-5_000_000 / 10_000_000`
+    /// is 0 and the old renderer printed −0.5 XLM as "0.5" — a hostile
+    /// proposal shown to a co-signer as a positive payment.
+    func test_aNegativeAmount_keepsItsSignWhenPrinted() {
+        XCTAssertEqual(StellarAmount(stroops: -5_000_000).decimalString, "-0.5")
+        XCTAssertEqual(StellarAmount(stroops: -1).decimalString, "-0.0000001")
+        XCTAssertEqual(StellarAmount(stroops: -10_000_000).decimalString, "-1")
+        XCTAssertEqual(StellarAmount(stroops: Int64.min).decimalString.first, "-")
+    }
+
+    /// And it never reaches the renderer from the wire in the first
+    /// place: the protocol has no negative amounts, so one in an
+    /// envelope is refused rather than carried.
+    func test_aNegativePaymentAmount_failsToDecode() throws {
+        var writer = XDRWriter()
+        writer.writeOptional(Optional<StellarAccountID>.none) { $0.writeMuxedAccount($1) }
+        writer.writeInt32(1) // PAYMENT
+        writer.writeMuxedAccount(try StellarAccountID(accountID: issuer))
+        StellarAsset.native.encode(to: &writer)
+        writer.writeInt64(-5_000_000)
+        var reader = XDRReader(writer.data)
+        XCTAssertThrowsError(try StellarOperation.decode(from: &reader)) { error in
+            XCTAssertEqual(error as? StellarError, .negativeAmount(-5_000_000))
+        }
+    }
+
+    func test_aNegativeStartingBalance_failsToDecode() throws {
+        var writer = XDRWriter()
+        writer.writeOptional(Optional<StellarAccountID>.none) { $0.writeMuxedAccount($1) }
+        writer.writeInt32(0) // CREATE_ACCOUNT
+        writer.writeAccountID(try StellarAccountID(accountID: issuer))
+        writer.writeInt64(-1)
+        var reader = XDRReader(writer.data)
+        XCTAssertThrowsError(try StellarOperation.decode(from: &reader))
+    }
+
+    // MARK: - Asset codes
+
+    /// A Cyrillic "С" is two UTF-8 bytes, fits inside alphanum12, and
+    /// renders identically to the Latin "C". The construction path
+    /// always refused it; the read path did not, and a proposal's asset
+    /// comes from the wire.
+    func test_aHomoglyphAssetCode_failsToDecode() throws {
+        let spoofed = "USD\u{0421}"
+        XCTAssertThrowsError(
+            try StellarAsset(code: spoofed, issuer: StellarAccountID(accountID: issuer))
+        )
+        var reader = XDRReader(try alphanum12(codeBytes: Data(spoofed.utf8)))
+        XCTAssertThrowsError(try StellarAsset.decode(from: &reader))
+    }
+
+    /// "US\0DC" and "US\0\0" used to trim to the same asset — the same
+    /// "two byte strings, one value" the XDR reader refuses for
+    /// padding, and here the difference is which asset moves.
+    func test_anAssetCodeWithABuriedNonZeroByte_failsToDecode() throws {
+        var codeBytes = Data("US".utf8)
+        codeBytes.append(0)
+        codeBytes.append(contentsOf: Data("DC".utf8))
+        var reader = XDRReader(try alphanum12(codeBytes: codeBytes))
+        XCTAssertThrowsError(try StellarAsset.decode(from: &reader))
+    }
+
+    func test_anEmptyAssetCode_failsToDecode() throws {
+        var reader = XDRReader(try alphanum12(codeBytes: Data()))
+        XCTAssertThrowsError(try StellarAsset.decode(from: &reader))
+    }
+
+    func test_aWellFormedCode_stillDecodes() throws {
+        var reader = XDRReader(try alphanum12(codeBytes: Data("LONGASSET123".utf8)))
+        let asset = try StellarAsset.decode(from: &reader)
+        XCTAssertEqual(asset.code, "LONGASSET123")
+    }
+
+    // MARK: - Signature accounting
+
+    /// The envelope is full, so nothing is stored — and nothing is
+    /// reported as adopted. Claiming a signature that was dropped is
+    /// how a proposal sits a signature short with nobody able to see
+    /// why.
+    func test_atTheSignatureCap_nothingIsAdoptedAndNothingIsClaimed() throws {
+        let source = try StellarAccountID(accountID: issuer)
+        let transaction = try StellarTransaction(
+            sourceAccount: source,
+            fee: 100,
+            sequenceNumber: 1,
+            timeBounds: nil,
+            operations: [StellarOperation(body: .changeTrust(asset: .native, limit: .max))]
+        )
+
+        // Fill to the protocol's limit with distinct real signers.
+        var full = TransactionEnvelope(transaction: transaction)
+        for seed in 0..<UInt8(TransactionEnvelope.maxSignatures) {
+            let key = try Curve25519.Signing.PrivateKey(
+                rawRepresentation: Data(repeating: seed &+ 1, count: 32)
+            )
+            try full.sign(with: key, network: .testnet)
+        }
+        XCTAssertEqual(full.signatures.count, TransactionEnvelope.maxSignatures)
+
+        // One more must fail loudly rather than silently do nothing.
+        let extraKey = try Curve25519.Signing.PrivateKey(
+            rawRepresentation: Data(repeating: 0xFE, count: 32)
+        )
+        XCTAssertThrowsError(try full.sign(with: extraKey, network: .testnet)) { error in
+            XCTAssertEqual(
+                error as? StellarError,
+                .tooManySignatures(TransactionEnvelope.maxSignatures)
+            )
+        }
+
+        // And harvesting into a full envelope adopts nobody.
+        var signed = TransactionEnvelope(transaction: transaction)
+        try signed.sign(with: extraKey, network: .testnet)
+        let extra = try StellarAccountID(
+            publicKey: Data(extraKey.publicKey.rawRepresentation)
+        )
+        let adopted = full.harvestSignatures(
+            from: signed,
+            candidates: [extra],
+            network: .testnet
+        )
+        XCTAssertTrue(adopted.isEmpty)
+        XCTAssertEqual(full.signatures.count, TransactionEnvelope.maxSignatures)
+    }
+
+    // MARK: - Helpers
+
+    /// An alphanum12 asset with a hand-chosen code field, so the test
+    /// can write bytes the encoder would refuse to produce.
+    private func alphanum12(codeBytes: Data) throws -> Data {
+        var writer = XDRWriter()
+        writer.writeInt32(2) // ASSET_TYPE_CREDIT_ALPHANUM12
+        var padded = codeBytes
+        padded.append(Data(repeating: 0, count: max(0, 12 - padded.count)))
+        writer.writeFixedOpaque(padded.prefix(12))
+        writer.writeAccountID(try StellarAccountID(accountID: issuer))
+        return writer.data
     }
 }

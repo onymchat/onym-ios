@@ -147,13 +147,39 @@ public struct StellarAmount: Equatable, Hashable, Sendable, Comparable {
     /// one digit after the point kept off — "10", not "10.0000000".
     /// This is the form Horizon and every explorer print, so a user
     /// comparing the two sees the same string.
+    ///
+    /// The sign is taken from the whole value, not from the integer
+    /// division. `-5_000_000 / 10_000_000` is `0` in Swift, so a naive
+    /// `"\(whole).\(digits)"` renders −0.5 as "0.5" — a negative amount
+    /// shown to a co-signer as a positive one. Amounts are rejected as
+    /// negative at the decode boundary now, but this is the rendering
+    /// the card uses and it should not depend on that holding.
     public var decimalString: String {
-        let whole = stroops / Self.stroopsPerUnit
-        let fraction = abs(stroops % Self.stroopsPerUnit)
-        guard fraction != 0 else { return String(whole) }
-        var digits = String(format: "%07d", fraction)
+        let magnitude = stroops.magnitude
+        let sign = stroops < 0 ? "-" : ""
+        let whole = magnitude / UInt64(Self.stroopsPerUnit)
+        let fraction = magnitude % UInt64(Self.stroopsPerUnit)
+        guard fraction != 0 else { return "\(sign)\(whole)" }
+        var digits = String(format: "%07llu", fraction)
         while digits.hasSuffix("0") { digits.removeLast() }
-        return "\(whole).\(digits)"
+        return "\(sign)\(whole).\(digits)"
+    }
+
+    /// Read an amount off the wire, refusing a negative one.
+    ///
+    /// Stellar has no negative amounts: a payment, a starting balance
+    /// and a trustline limit are all non-negative by definition. But
+    /// XDR carries a plain `int64`, so a hostile proposal can put one
+    /// there — and every arithmetic and comparison downstream (weight
+    /// checks, "is this more than the balance") would then be reasoning
+    /// about a number the protocol says cannot exist.
+    ///
+    /// Rejected at the boundary rather than clamped, because a
+    /// transaction that encodes an impossible amount is not a
+    /// transaction with a small error in it.
+    static func decoded(_ stroops: Int64) throws -> StellarAmount {
+        guard stroops >= 0 else { throw StellarError.negativeAmount(stroops) }
+        return StellarAmount(stroops: stroops)
     }
 
     public static func < (lhs: StellarAmount, rhs: StellarAmount) -> Bool {
@@ -176,9 +202,14 @@ private extension Character {
 public enum StellarError: Error, Equatable, Sendable {
     case badPublicKeyLength(Int)
     case badAmount(String)
+    /// An amount the protocol says cannot exist. See
+    /// `StellarAmount.decoded(_:)`.
+    case negativeAmount(Int64)
     case badAssetCode(String)
     /// More operations than a Stellar transaction permits.
     case tooManyOperations(Int)
+    /// The envelope already carries the protocol's maximum signatures.
+    case tooManySignatures(Int)
     /// A signature that did not verify against the transaction hash this
     /// device computed. Never a reason to retry — it means the bytes
     /// signed were not the bytes proposed.

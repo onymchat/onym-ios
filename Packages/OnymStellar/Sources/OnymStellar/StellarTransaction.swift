@@ -19,6 +19,15 @@ public enum StellarMemo: Equatable, Sendable {
             writer.writeInt32(0)
         case .text(let value):
             writer.writeInt32(1)
+            // `string<28>` is a byte bound, and it is checked on the way
+            // out as well as in. Encoding an over-long memo produces an
+            // envelope the network refuses *after* the group has signed
+            // it — the signatures are over bytes, so there is no fixing
+            // it afterwards.
+            precondition(
+                Data(value.utf8).count <= 28,
+                "memo text exceeds the protocol's 28 bytes"
+            )
             writer.writeString(value)
         case .id(let value):
             writer.writeInt32(2)
@@ -170,6 +179,5 @@ public struct StellarTransaction: Equatable, Sendable {
 }
 
 enum EnvelopeType {
-    static let transactionV0: Int32 = 0
     static let transaction: Int32 = 2
 }

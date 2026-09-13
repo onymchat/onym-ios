@@ -136,7 +136,15 @@ public struct StellarOperation: Equatable, Sendable {
             writer.writeOptional(fields.lowThreshold) { $0.writeUInt32($1) }
             writer.writeOptional(fields.mediumThreshold) { $0.writeUInt32($1) }
             writer.writeOptional(fields.highThreshold) { $0.writeUInt32($1) }
-            writer.writeOptional(fields.homeDomain) { $0.writeString($1) }
+            writer.writeOptional(fields.homeDomain) { writer, domain in
+                // `string32`, checked on write for the same reason the
+                // memo is.
+                precondition(
+                    Data(domain.utf8).count <= 32,
+                    "home domain exceeds the protocol's 32 bytes"
+                )
+                writer.writeString(domain)
+            }
             writer.writeOptional(fields.signer) { $1.encode(to: &$0) }
 
         case .changeTrust(let asset, let limit):
@@ -152,7 +160,7 @@ public struct StellarOperation: Equatable, Sendable {
         switch type {
         case StellarOperationBody.typeCreateAccount:
             let destination = try reader.readAccountID()
-            let balance = StellarAmount(stroops: try reader.readInt64())
+            let balance = try StellarAmount.decoded(reader.readInt64())
             return StellarOperation(
                 sourceAccount: source,
                 body: .createAccount(destination: destination, startingBalance: balance)
@@ -161,7 +169,7 @@ public struct StellarOperation: Equatable, Sendable {
         case StellarOperationBody.typePayment:
             let destination = try reader.readMuxedAccount()
             let asset = try StellarAsset.decode(from: &reader)
-            let amount = StellarAmount(stroops: try reader.readInt64())
+            let amount = try StellarAmount.decoded(reader.readInt64())
             return StellarOperation(
                 sourceAccount: source,
                 body: .payment(destination: destination, asset: asset, amount: amount)
@@ -184,7 +192,7 @@ public struct StellarOperation: Equatable, Sendable {
 
         case StellarOperationBody.typeChangeTrust:
             let asset = try StellarAsset.decode(from: &reader)
-            let limit = StellarAmount(stroops: try reader.readInt64())
+            let limit = try StellarAmount.decoded(reader.readInt64())
             return StellarOperation(
                 sourceAccount: source,
                 body: .changeTrust(asset: asset, limit: limit)

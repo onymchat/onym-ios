@@ -25,12 +25,10 @@ public enum StellarAsset: Equatable, Hashable, Sendable, Codable {
     /// does not make the *issuer* safe, which is why the issuer is
     /// always shown alongside the code in the UI.
     public init(code: String, issuer: StellarAccountID) throws {
-        guard (1...12).contains(code.count),
-              code.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber) })
-        else {
+        guard Self.isPermitted(code, width: 12) else {
             throw StellarError.badAssetCode(code)
         }
-        self = code.count <= 4
+        self = Data(code.utf8).count <= 4
             ? .alphanum4(code: code, issuer: issuer)
             : .alphanum12(code: code, issuer: issuer)
     }
@@ -91,18 +89,65 @@ public enum StellarAsset: Equatable, Hashable, Sendable, Codable {
         }
     }
 
+    /// Whether `code` is a code the protocol permits: ASCII
+    /// alphanumerics only, within the width.
+    ///
+    /// Shared by `init(code:issuer:)` and by the decoder, deliberately.
+    /// Validating only on construction left the read path open: a
+    /// twelve-byte field holds "USD" plus a Cyrillic "С" (U+0421, two
+    /// UTF-8 bytes) and decodes to something that renders identically
+    /// to USDC on a co-signer's screen. The rule has to hold wherever
+    /// an asset comes from, and a proposal's asset comes from the wire.
+    static func isPermitted(_ code: String, width: Int) -> Bool {
+        let bytes = Data(code.utf8)
+        return !bytes.isEmpty
+            && bytes.count <= width
+            && code.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) }
+    }
+
     /// Codes are right-padded with **zero bytes**, not spaces. A
     /// space-padded code is a different asset.
+    ///
+    /// The precondition is the guard on the construction path. The
+    /// enum's cases are public, so `.alphanum4(code: "LONGASSET123", …)`
+    /// can be written directly, bypassing `init(code:issuer:)`; without
+    /// this it would silently encode the first four bytes — a valid
+    /// transaction paying a different asset than the one named in the
+    /// source. That is a programmer error rather than hostile input, so
+    /// it fails loudly here rather than being smuggled onto the wire.
     private static func paddedCode(_ code: String, width: Int) -> Data {
+        precondition(
+            isPermitted(code, width: width),
+            "asset code '\(code)' does not fit \(width) ASCII-alphanumeric bytes"
+        )
         var bytes = Data(code.utf8)
         bytes.append(Data(repeating: 0, count: max(0, width - bytes.count)))
-        return bytes.prefix(width)
+        return bytes
     }
 
     private static func trimmedCode(_ bytes: Data) throws -> String {
-        let significant = Data(bytes.prefix(while: { $0 != 0 }))
-        guard let code = String(data: significant, encoding: .utf8), !code.isEmpty else {
-            throw StellarError.badAssetCode("<non-UTF8>")
+        guard let firstZero = bytes.firstIndex(of: 0) else {
+            return try validated(bytes, width: bytes.count)
+        }
+        // Everything after the first zero must also be zero. Otherwise
+        // "US\0DC" and "US\0\0" trim to the same asset from different
+        // bytes — the same "two encodings, one value" the XDR reader
+        // refuses for padding, and it matters more here because the
+        // difference is which asset is being moved.
+        let padding = bytes[firstZero...]
+        guard padding.allSatisfy({ $0 == 0 }) else {
+            throw StellarError.badAssetCode("<embedded zero>")
+        }
+        return try validated(Data(bytes[..<firstZero]), width: bytes.count)
+    }
+
+    private static func validated(_ bytes: Data, width: Int) throws -> String {
+        guard let code = String(data: bytes, encoding: .utf8),
+              isPermitted(code, width: width)
+        else {
+            throw StellarError.badAssetCode(
+                String(data: bytes, encoding: .utf8) ?? "<non-UTF8>"
+            )
         }
         return code
     }

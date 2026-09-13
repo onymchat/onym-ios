@@ -19,6 +19,7 @@ reference the moment it is regenerated.
 """
 
 import json
+import pathlib
 from stellar_sdk import (Account, Asset, Keypair, Network, TransactionBuilder,
                          Transaction, TransactionEnvelope, Preconditions)
 from stellar_sdk.operation import CreateAccount, Payment, SetOptions, ChangeTrust
@@ -91,6 +92,16 @@ meta = {
                  [("src", SRC), ("dst", DST), ("issuer", ISS), ("co1", CO1), ("co2", CO2), ("treasury", T)]},
     "secrets": {"src": SRC.secret, "co1": CO1.secret},
 }
-json.dump({"meta": meta, "cases": cases}, open("fixtures.json", "w"), indent=2)
+# Written to the fixture the test bundle actually loads, resolved from
+# this file rather than the working directory. The documented invocation
+# is from the repo root, where a bare "fixtures.json" landed next to
+# project.yml and left the real fixture untouched — a regeneration that
+# silently changed nothing.
+OUT = (pathlib.Path(__file__).resolve().parent.parent
+       / "Packages/OnymStellar/Tests/OnymStellarTests/Fixtures/fixtures.json")
+OUT.parent.mkdir(parents=True, exist_ok=True)
+with OUT.open("w") as handle:
+    json.dump({"meta": meta, "cases": cases}, handle, indent=2)
+print("wrote", OUT)
 print(json.dumps(meta["accounts"], indent=2))
 print("cases:", len(cases))

@@ -108,7 +108,7 @@ public struct TransactionEnvelope: Equatable, Sendable {
     ) throws {
         let signature = try privateKey.signature(for: transaction.hash(network: network))
         let hint = Data(privateKey.publicKey.rawRepresentation).suffix(4)
-        append(DecoratedSignature(hint: hint, signature: signature))
+        try append(DecoratedSignature(hint: hint, signature: signature))
     }
 
     /// Add a signature produced elsewhere — the other device in the
@@ -131,7 +131,7 @@ public struct TransactionEnvelope: Equatable, Sendable {
         ) else {
             throw StellarError.signatureDoesNotVerify
         }
-        append(DecoratedSignature(hint: signer.signatureHint, signature: signature))
+        try append(DecoratedSignature(hint: signer.signatureHint, signature: signature))
     }
 
     /// Take the usable signatures out of an envelope that came back from
@@ -164,15 +164,24 @@ public struct TransactionEnvelope: Equatable, Sendable {
         var adopted: [StellarAccountID] = []
         for decorated in returned.signatures {
             // The hint narrows the search; the Ed25519 check decides.
-            // Signers whose hints collide are all tried.
+            // Signers whose hints collide are all tried — which is why
+            // the "already have this one" test is by verification and
+            // not by hint. Skipping on a hint match alone would drop a
+            // second signer's genuine signature whenever four bytes
+            // happened to collide, and its weight would never count.
             for candidate in candidates where candidate.signatureHint == decorated.hint {
-                guard !hasSignature(from: candidate),
-                      Self.verify(signature: decorated.signature, by: candidate, over: hash)
+                guard Self.verify(signature: decorated.signature, by: candidate, over: hash),
+                      !carriesSignature(from: candidate, over: hash)
                 else { continue }
-                append(DecoratedSignature(
+                // `append` refuses past the protocol's cap, and a
+                // signature that was not stored must not be reported as
+                // adopted — a caller saying "added Alice's signature"
+                // when the envelope is unchanged is how a proposal sits
+                // a signature short with nobody able to see why.
+                guard (try? append(DecoratedSignature(
                     hint: candidate.signatureHint,
                     signature: decorated.signature
-                ))
+                ))) != nil else { return adopted }
                 adopted.append(candidate)
                 break
             }
@@ -192,11 +201,14 @@ public struct TransactionEnvelope: Equatable, Sendable {
         }
     }
 
-    /// Hint-only variant used inside `harvestSignatures`, where the hash
-    /// is already in hand. Deliberately not public: a hint match alone
-    /// is not evidence of anything.
-    private func hasSignature(from signer: StellarAccountID) -> Bool {
-        signatures.contains { $0.hint == signer.signatureHint }
+    /// Whether a verifying signature from `signer` is already present,
+    /// reusing a hash the caller has already computed. Same answer as
+    /// `hasSignature(from:network:)` without re-hashing per candidate.
+    private func carriesSignature(from signer: StellarAccountID, over hash: Data) -> Bool {
+        signatures.contains { decorated in
+            decorated.hint == signer.signatureHint
+                && Self.verify(signature: decorated.signature, by: signer, over: hash)
+        }
     }
 
     private static func verify(
@@ -210,8 +222,16 @@ public struct TransactionEnvelope: Equatable, Sendable {
         return key.isValidSignature(signature, for: hash)
     }
 
-    private mutating func append(_ signature: DecoratedSignature) {
-        guard signatures.count < Self.maxSignatures else { return }
+    /// Throws rather than silently dropping.
+    ///
+    /// A no-op at the cap meant `sign(with:)` could return successfully
+    /// having added nothing, with no way for the caller to tell. Twenty
+    /// signatures is a limit a real treasury can reach, so reaching it
+    /// has to be visible.
+    private mutating func append(_ signature: DecoratedSignature) throws {
+        guard signatures.count < Self.maxSignatures else {
+            throw StellarError.tooManySignatures(Self.maxSignatures)
+        }
         signatures.append(signature)
     }
 }
