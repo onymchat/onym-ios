@@ -93,6 +93,10 @@ struct AppDependencies {
     /// view this returns, keeping OnymChatsUI free of any
     /// OnymModerationUI dependency.
     let makeModerationReportView: @MainActor (ReportableMessage) -> AnyView
+    /// Opaque treasury-screen factory, for the same reason as the
+    /// report sheet above: the chats layer presents whatever this
+    /// returns and stays free of any OnymTreasuryUI dependency.
+    let makeTreasuryView: @MainActor (String) -> AnyView
     /// Case screen for a served notice — carries both the caseId and
     /// the mandateRef the repository resolves standing by.
     let makeModerationCaseFlow: @MainActor (CaseNotice) -> ModerationCaseFlow

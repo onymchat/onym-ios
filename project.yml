@@ -23,6 +23,7 @@ packages:
   OnymChain: {path: Packages/OnymChain}
   OnymStellar: {path: Packages/OnymStellar}
   OnymTreasury: {path: Packages/OnymTreasury}
+  OnymTreasuryUI: {path: Packages/OnymTreasuryUI}
   OnymTransportNostr: {path: Packages/OnymTransportNostr}
   OnymTransportBlossom: {path: Packages/OnymTransportBlossom}
   OnymIdentity: {path: Packages/OnymIdentity}
@@ -63,6 +64,7 @@ targets:
       - package: OnymChain
       - package: OnymStellar
       - package: OnymTreasury
+      - package: OnymTreasuryUI
       - package: OnymTransportNostr
       - package: OnymTransportBlossom
       - package: OnymIdentity
@@ -249,6 +251,7 @@ targets:
       - package: OnymChain
       - package: OnymStellar
       - package: OnymTreasury
+      - package: OnymTreasuryUI
       - package: OnymTransportNostr
       - package: OnymTransportBlossom
       - package: OnymIdentity

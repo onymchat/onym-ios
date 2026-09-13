@@ -67,6 +67,8 @@ public struct ChatThreadView: View {
     /// an opaque view factory so the chats layer stays moderation-UI-
     /// agnostic (OnymChatsUI does not depend on OnymModerationUI).
     let makeModerationReportView: @MainActor (ReportableMessage) -> AnyView
+    /// Passed straight through to `ChatMembersView`; see its note.
+    var makeTreasuryView: (@MainActor (String) -> AnyView)?
     /// Drives the in-thread join-request rows. This replaced the separate
     /// "Join requests" screen: the founder now accepts or declines from
     /// inside the conversation the request is about, because a badged
@@ -91,6 +93,7 @@ public struct ChatThreadView: View {
         videoLoader: ChatVideoLoader,
         voiceLoader: ChatVoiceLoader,
         makeModerationReportView: @escaping @MainActor (ReportableMessage) -> AnyView,
+        makeTreasuryView: (@MainActor (String) -> AnyView)? = nil,
         approveRequestsFlow: ApproveRequestsFlow,
         scrollToMessageID: UUID? = nil
     ) {
@@ -107,6 +110,7 @@ public struct ChatThreadView: View {
         self.videoLoader = videoLoader
         self.voiceLoader = voiceLoader
         self.makeModerationReportView = makeModerationReportView
+        self.makeTreasuryView = makeTreasuryView
         self.approveRequestsFlow = approveRequestsFlow
         self.scrollToMessageID = scrollToMessageID
     }
@@ -390,7 +394,8 @@ public struct ChatThreadView: View {
                 identitiesFlow: identitiesFlow,
                 makeShareInviteFlow: makeShareInviteFlow,
                 setGroupAvatar: setGroupAvatar,
-                setGroupName: setGroupName
+                setGroupName: setGroupName,
+                makeTreasuryView: makeTreasuryView
             )
         }
         // Per-thread subscription. `task(id:)` cancels + restarts when

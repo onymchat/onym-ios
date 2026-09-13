@@ -22,6 +22,7 @@ import OnymBackupUI
 import OnymBilling
 import OnymStellar
 import OnymTreasury
+import OnymTreasuryUI
 
 @main
 struct OnymIOSApp: App {
@@ -37,6 +38,7 @@ struct OnymIOSApp: App {
     private let contractsRepository: ContractsRepository
     private let groupRepository: GroupRepository
     private let treasuryRepository: TreasuryRepository
+    private let treasuryBroadcaster: TreasuryBroadcaster
     private let messageRepository: MessageRepository
     private let imageLoader: ChatImageLoader
     private let videoLoader: ChatVideoLoader
@@ -528,6 +530,18 @@ struct OnymIOSApp: App {
         #endif
         self.inboxTransport = inboxTransport
         self.contractTransportFactory = contractTransportFactory
+
+        // Built here rather than in the factory closure: it holds the
+        // transport, and one broadcaster per app is what keeps a
+        // declaration and the proposal that follows it going out over
+        // the same seam.
+        let treasuryBroadcaster = TreasuryBroadcaster(
+            identity: repository,
+            inboxTransport: inboxTransport,
+            groups: groupRepository,
+            treasury: treasuryRepository
+        )
+        self.treasuryBroadcaster = treasuryBroadcaster
 
         // DEBUG deeplink injection for UI tests (see `initialDeeplinkURL`).
         #if DEBUG
@@ -1522,6 +1536,26 @@ struct OnymIOSApp: App {
                 AnyView(ModerationReportView(flow: ModerationReportFlow(
                     message: message,
                     repository: moderationRepository
+                )))
+            },
+            makeTreasuryView: { @MainActor groupID in
+                AnyView(TreasurySetupView(flow: TreasuryFlow(
+                    groupID: groupID,
+                    repository: treasuryRepository,
+                    groups: groupRepository,
+                    identity: repository,
+                    broadcaster: treasuryBroadcaster,
+                    creation: TreasuryCreationInteractor(
+                        treasury: treasuryRepository,
+                        identity: repository,
+                        groups: groupRepository,
+                        broadcaster: treasuryBroadcaster
+                    ),
+                    // Read at call time, not captured: the treasury a
+                    // group creates should follow the Settings toggle
+                    // the user is actually on, and this closure outlives
+                    // any one reading of it.
+                    network: { UserDefaultsNetworkPreference().current().stellarNetwork }
                 )))
             },
             makeModerationCaseFlow: { @MainActor notice in
