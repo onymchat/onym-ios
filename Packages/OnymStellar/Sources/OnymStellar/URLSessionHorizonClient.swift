@@ -182,10 +182,7 @@ private struct AccountWire: Decodable {
         return HorizonAccount(
             accountID: accountID,
             sequenceNumber: sequenceNumber,
-            balances: balances.compactMap { wire in
-                guard let amount = try? StellarAmount(decimalString: wire.balance) else {
-                    return nil
-                }
+            balances: try balances.compactMap { wire -> HorizonBalance? in
                 let asset: StellarAsset
                 if wire.assetType == "native" {
                     asset = .native
@@ -199,6 +196,16 @@ private struct AccountWire: Decodable {
                     // than guessed at — the treasury screen has no row
                     // that would tell the truth about one.
                     return nil
+                }
+                // An unparseable *amount* is not dropped. Silently
+                // omitting a balance makes the treasury look poorer
+                // than it is, which is a worse answer than admitting
+                // the read failed — the whole point of the screen is
+                // telling people what the account holds.
+                guard let amount = try? StellarAmount(decimalString: wire.balance) else {
+                    throw HorizonError.decodeFailure(
+                        "balance '\(wire.balance)' for \(asset.code)"
+                    )
                 }
                 return HorizonBalance(
                     asset: asset,

@@ -29,9 +29,13 @@ public struct HorizonAccount: Equatable, Sendable {
     /// list rather than from anything stored locally, because the signer
     /// set is exactly what a `setOptions` proposal changes.
     public func weight(of candidates: [StellarAccountID]) -> UInt32 {
+        // Saturating. Weights arrive as `UInt32` from Horizon's JSON and
+        // the protocol's own ceiling is 255, so a malformed or hostile
+        // response could otherwise trap here — crashing the app instead
+        // of failing a threshold check. `weight(of:)` has to stay total.
         signers
             .filter { signer in candidates.contains(signer.key) }
-            .reduce(UInt32(0)) { $0 + $1.weight }
+            .reduce(UInt32(0)) { $0 &+ $1.weight }
     }
 }
 

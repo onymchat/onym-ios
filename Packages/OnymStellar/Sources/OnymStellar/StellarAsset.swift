@@ -25,7 +25,11 @@ public enum StellarAsset: Equatable, Hashable, Sendable, Codable {
     /// does not make the *issuer* safe, which is why the issuer is
     /// always shown alongside the code in the UI.
     public init(code: String, issuer: StellarAccountID) throws {
-        guard Self.isPermitted(code, width: 12) else {
+        guard Self.isPermitted(
+            code,
+            minBytes: Self.alphanum4Bytes.min,
+            maxBytes: Self.alphanum12Bytes.max
+        ) else {
             throw StellarError.badAssetCode(code)
         }
         self = Data(code.utf8).count <= 4
@@ -75,10 +79,16 @@ public enum StellarAsset: Equatable, Hashable, Sendable, Codable {
         case typeNative:
             return .native
         case typeAlphanum4:
-            let code = try trimmedCode(reader.readFixedOpaque(4))
+            let code = try trimmedCode(
+                reader.readFixedOpaque(4),
+                bounds: alphanum4Bytes
+            )
             return .alphanum4(code: code, issuer: try reader.readAccountID())
         case typeAlphanum12:
-            let code = try trimmedCode(reader.readFixedOpaque(12))
+            let code = try trimmedCode(
+                reader.readFixedOpaque(12),
+                bounds: alphanum12Bytes
+            )
             return .alphanum12(code: code, issuer: try reader.readAccountID())
         default:
             // Includes ASSET_TYPE_POOL_SHARE. A liquidity-pool share is
@@ -98,12 +108,30 @@ public enum StellarAsset: Equatable, Hashable, Sendable, Codable {
     /// UTF-8 bytes) and decodes to something that renders identically
     /// to USDC on a co-signer's screen. The rule has to hold wherever
     /// an asset comes from, and a proposal's asset comes from the wire.
-    static func isPermitted(_ code: String, width: Int) -> Bool {
+    static func isPermitted(_ code: String, minBytes: Int, maxBytes: Int) -> Bool {
         let bytes = Data(code.utf8)
-        return !bytes.isEmpty
-            && bytes.count <= width
+        return bytes.count >= minBytes
+            && bytes.count <= maxBytes
             && code.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) }
     }
+
+    /// The byte range each width class permits.
+    ///
+    /// The **lower** bound on alphanum12 is the load-bearing half.
+    /// Without it a twelve-byte field holding "USD" plus nine zeros
+    /// decodes to `.alphanum12(code: "USD")`, which `.code` then renders
+    /// as "USD" — indistinguishable on a co-signer's screen from the
+    /// alphanum4 `USD`, a *different* asset with a different trustline.
+    /// stellar-core rejects it, so it is also an asset the network
+    /// would never have produced. Neither the constructor tests nor the
+    /// fixture round-trip could catch it: `init(code:issuer:)` picks
+    /// alphanum4 at four bytes or fewer and so can never build one, and
+    /// re-encoding the malformed field is byte-identical.
+    ///
+    /// Same class as the homoglyph and embedded-zero gaps — two things
+    /// with one rendering.
+    static let alphanum4Bytes = (min: 1, max: 4)
+    static let alphanum12Bytes = (min: 5, max: 12)
 
     /// Codes are right-padded with **zero bytes**, not spaces. A
     /// space-padded code is a different asset.
@@ -116,18 +144,22 @@ public enum StellarAsset: Equatable, Hashable, Sendable, Codable {
     /// source. That is a programmer error rather than hostile input, so
     /// it fails loudly here rather than being smuggled onto the wire.
     private static func paddedCode(_ code: String, width: Int) -> Data {
+        let bounds = width == alphanum4Bytes.max ? alphanum4Bytes : alphanum12Bytes
         precondition(
-            isPermitted(code, width: width),
-            "asset code '\(code)' does not fit \(width) ASCII-alphanumeric bytes"
+            isPermitted(code, minBytes: bounds.min, maxBytes: bounds.max),
+            "asset code '\(code)' is not \(bounds.min)–\(bounds.max) ASCII-alphanumeric bytes"
         )
         var bytes = Data(code.utf8)
         bytes.append(Data(repeating: 0, count: max(0, width - bytes.count)))
         return bytes
     }
 
-    private static func trimmedCode(_ bytes: Data) throws -> String {
+    private static func trimmedCode(
+        _ bytes: Data,
+        bounds: (min: Int, max: Int)
+    ) throws -> String {
         guard let firstZero = bytes.firstIndex(of: 0) else {
-            return try validated(bytes, width: bytes.count)
+            return try validated(bytes, bounds: bounds)
         }
         // Everything after the first zero must also be zero. Otherwise
         // "US\0DC" and "US\0\0" trim to the same asset from different
@@ -138,12 +170,15 @@ public enum StellarAsset: Equatable, Hashable, Sendable, Codable {
         guard padding.allSatisfy({ $0 == 0 }) else {
             throw StellarError.badAssetCode("<embedded zero>")
         }
-        return try validated(Data(bytes[..<firstZero]), width: bytes.count)
+        return try validated(Data(bytes[..<firstZero]), bounds: bounds)
     }
 
-    private static func validated(_ bytes: Data, width: Int) throws -> String {
+    private static func validated(
+        _ bytes: Data,
+        bounds: (min: Int, max: Int)
+    ) throws -> String {
         guard let code = String(data: bytes, encoding: .utf8),
-              isPermitted(code, width: width)
+              isPermitted(code, minBytes: bounds.min, maxBytes: bounds.max)
         else {
             throw StellarError.badAssetCode(
                 String(data: bytes, encoding: .utf8) ?? "<non-UTF8>"

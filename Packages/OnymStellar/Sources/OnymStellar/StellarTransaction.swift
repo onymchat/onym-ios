@@ -34,11 +34,20 @@ public enum StellarMemo: Equatable, Sendable {
             writer.writeUInt64(value)
         case .hash(let value):
             writer.writeInt32(3)
-            writer.writeFixedOpaque(value)
+            writer.writeFixedOpaque(Self.hash32(value))
         case .returnHash(let value):
             writer.writeInt32(4)
-            writer.writeFixedOpaque(value)
+            writer.writeFixedOpaque(Self.hash32(value))
         }
+    }
+
+    /// `Hash` is a fixed 32 bytes. Writing a shorter one emits its
+    /// length plus padding where the decoder expects 32 — a malformed
+    /// envelope from a programmer error, which is the failure the memo
+    /// *text* precondition already exists to prevent.
+    private static func hash32(_ value: Data) -> Data {
+        precondition(value.count == 32, "memo hash must be exactly 32 bytes")
+        return value
     }
 
     static func decode(from reader: inout XDRReader) throws -> StellarMemo {
@@ -131,9 +140,12 @@ public struct StellarTransaction: Equatable, Sendable {
         let source = try reader.readMuxedAccount()
         let fee = try reader.readUInt32()
         let sequence = try reader.readInt64()
-        let precondition = try reader.readInt32()
+        // Not named `precondition`: this file calls the stdlib
+        // `precondition(_:_:)` a few lines away, and shadowing it for
+        // the rest of the function is a trap waiting for an edit.
+        let conditionType = try reader.readInt32()
         var bounds: StellarTimeBounds?
-        switch precondition {
+        switch conditionType {
         case 0: // PRECOND_NONE
             bounds = nil
         case 1: // PRECOND_TIME
@@ -142,7 +154,10 @@ public struct StellarTransaction: Equatable, Sendable {
                 maxTime: try reader.readUInt64()
             )
         default: // includes PRECOND_V2
-            throw XDRError.unknownDiscriminant(type: "Preconditions", value: precondition)
+            throw XDRError.unknownDiscriminant(
+                type: "Preconditions",
+                value: conditionType
+            )
         }
         let memo = try StellarMemo.decode(from: &reader)
         let operations = try reader.readArray(maxCount: maxOperations) {

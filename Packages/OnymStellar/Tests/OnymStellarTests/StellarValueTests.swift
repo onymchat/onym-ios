@@ -374,6 +374,48 @@ final class StellarDecodeHardeningTests: XCTestCase {
         XCTAssertEqual(asset.code, "LONGASSET123")
     }
 
+    /// A twelve-byte field holding "USD" plus nine zeros used to decode
+    /// to `.alphanum12(code: "USD")`, which renders as "USD" — the same
+    /// string a co-signer sees for the alphanum4 `USD`, a *different*
+    /// asset with a different trustline. stellar-core rejects it, so it
+    /// is also an asset the network would never produce.
+    ///
+    /// Neither the constructor tests nor the fixture round-trip could
+    /// catch it: `init(code:issuer:)` picks alphanum4 at four bytes or
+    /// fewer, and re-encoding the malformed field is byte-identical.
+    func test_aShortCodeInAnAlphanum12Field_failsToDecode() throws {
+        var reader = XDRReader(try alphanum12(codeBytes: Data("USD".utf8)))
+        XCTAssertThrowsError(try StellarAsset.decode(from: &reader))
+    }
+
+    func test_anOverLongCodeInAnAlphanum4Field_failsToDecode() throws {
+        // Four bytes of code with no room for a terminator is legal;
+        // five is not the alphanum4 class at all.
+        var writer = XDRWriter()
+        writer.writeInt32(1) // ASSET_TYPE_CREDIT_ALPHANUM4
+        writer.writeFixedOpaque(Data("ABCD".utf8))
+        writer.writeAccountID(try StellarAccountID(accountID: issuer))
+        var reader = XDRReader(writer.data)
+        XCTAssertEqual(try StellarAsset.decode(from: &reader).code, "ABCD")
+    }
+
+    func test_theWidthClassesMeetWithoutOverlapping() throws {
+        // Five bytes is the smallest alphanum12 and is not a legal
+        // alphanum4; four is the largest alphanum4. No code is valid in
+        // both, which is what keeps one rendering from meaning two
+        // assets.
+        var twelve = XDRReader(try alphanum12(codeBytes: Data("ABCDE".utf8)))
+        XCTAssertEqual(try StellarAsset.decode(from: &twelve).code, "ABCDE")
+
+        let issuerAccount = try StellarAccountID(accountID: issuer)
+        guard case .alphanum4 = try StellarAsset(code: "ABCD", issuer: issuerAccount) else {
+            return XCTFail("four bytes is alphanum4")
+        }
+        guard case .alphanum12 = try StellarAsset(code: "ABCDE", issuer: issuerAccount) else {
+            return XCTFail("five bytes is alphanum12")
+        }
+    }
+
     // MARK: - Signature accounting
 
     /// The envelope is full, so nothing is stored — and nothing is

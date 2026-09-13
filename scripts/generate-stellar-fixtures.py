@@ -102,6 +102,8 @@ OUT = (pathlib.Path(__file__).resolve().parent.parent
 OUT.parent.mkdir(parents=True, exist_ok=True)
 with OUT.open("w") as handle:
     json.dump({"meta": meta, "cases": cases}, handle, indent=2)
+    # Trailing newline, so regenerating doesn't show up as a diff.
+    handle.write("\n")
 print("wrote", OUT)
 print(json.dumps(meta["accounts"], indent=2))
 print("cases:", len(cases))

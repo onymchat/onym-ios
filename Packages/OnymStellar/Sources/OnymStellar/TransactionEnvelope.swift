@@ -90,7 +90,10 @@ public struct TransactionEnvelope: Equatable, Sendable {
             base64Encoded: base64XDR.trimmingCharacters(in: .whitespacesAndNewlines),
             options: [.ignoreUnknownCharacters]
         ) else {
-            throw XDRError.invalidUTF8
+            // Its own case: this is the error a paste-from-wallet flow
+            // shows a person, and "invalid UTF-8" describes a different
+            // failure than "that isn't base64".
+            throw StellarError.notBase64
         }
         try self.init(xdr: data)
     }
@@ -194,11 +197,7 @@ public struct TransactionEnvelope: Equatable, Sendable {
     /// same signature arrives twice — a relay replay, or a co-signer
     /// tapping twice.
     public func hasSignature(from signer: StellarAccountID, network: StellarNetwork) -> Bool {
-        let hash = transaction.hash(network: network)
-        return signatures.contains { decorated in
-            decorated.hint == signer.signatureHint
-                && Self.verify(signature: decorated.signature, by: signer, over: hash)
-        }
+        carriesSignature(from: signer, over: transaction.hash(network: network))
     }
 
     /// Whether a verifying signature from `signer` is already present,

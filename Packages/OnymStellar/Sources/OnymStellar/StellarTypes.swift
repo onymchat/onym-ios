@@ -215,4 +215,6 @@ public enum StellarError: Error, Equatable, Sendable {
     /// signed were not the bytes proposed.
     case signatureDoesNotVerify
     case unsupportedEnvelopeType(Int32)
+    /// A string that was meant to be a base64 envelope and is not.
+    case notBase64
 }
