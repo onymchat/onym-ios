@@ -42,6 +42,23 @@ public struct TreasuryProposalDescription: Equatable, Sendable {
             /// checked character by character or not at all.
             case account(StellarAccountID)
             case amount(StellarAmount, code: String)
+
+            /// A stable string for `ForEach` identity.
+            ///
+            /// Spelled out rather than interpolating the enum, which
+            /// went through `String(describing:)` — a reflection-derived
+            /// description with no stability guarantee across compiler
+            /// versions. It worked, and a `ForEach` identity that
+            /// silently changes shape on a toolchain upgrade is not
+            /// something to leave resting on that.
+            var identity: String {
+                switch self {
+                case .text(let text): "text:\(text)"
+                case .copy(let resource): "copy:\(resource.key)"
+                case .account(let account): "account:\(account.accountID)"
+                case .amount(let amount, let code): "amount:\(amount.stroops):\(code)"
+                }
+            }
         }
 
         /// A key, not a `String`. `Text(_: String)` is the
@@ -79,7 +96,7 @@ public struct TreasuryProposalDescription: Equatable, Sendable {
         /// two identical rows — the same amount to the same account
         /// twice, which is a transaction someone might well propose —
         /// collided in `ForEach` and rendered as one.
-        public var id: String { "\(ordinal)|\(label.key)|\(value)" }
+        public var id: String { "\(ordinal)|\(label.key)|\(value.identity)" }
 
         /// Position in the description. Assigned when the lines are
         /// finalised, so nothing constructing a `Line` has to count.
@@ -274,6 +291,10 @@ public struct TreasuryProposalDescription: Equatable, Sendable {
         if flags & ~UInt32(0xF) != 0 {
             named.append("flags this app does not recognise")
         }
+        // `0` is a real value a proposal can carry — `setFlags: 0`
+        // turns nothing on — and rendering it as `0x0` reads like a
+        // flag word nobody recognised rather than like nothing.
+        if flags == 0 { return "\u{2014}" }
         return named.isEmpty
             ? "0x\(String(flags, radix: 16))"
             : named.joined(separator: ", ")
@@ -400,12 +421,47 @@ public struct TreasuryProposalDescription: Equatable, Sendable {
             ))
         }
 
+        // The headline has to be true of the rows under it.
+        //
+        // It used to be chosen from `added`/`removed` alone, so a
+        // one-operation `setOptions{setFlags: AUTH_IMMUTABLE}` — no
+        // signer change, no threshold change — fell through to "Change
+        // how many signatures are needed" and sat directly above a row
+        // saying the account's authorisation settings are being frozen
+        // forever. Adding the flag rows fixed the empty box and made
+        // the contradiction worse: a title that actively misdescribes
+        // the one change nobody can undo.
+        let changesSettings = setFlags != nil
+            || clearFlags != nil
+            || inflationDestination != nil
+            || homeDomain != nil
+        let changesThresholds = thresholds.low != nil
+            || thresholds.medium != nil
+            || thresholds.high != nil
+            || masterWeight != nil
         let title: LocalizedStringResource
-        if !added.isEmpty, removed.isEmpty {
-            title = added.count == 1 ? "Add a co-signer" : "Add \(added.count) co-signers"
-        } else if added.isEmpty, !removed.isEmpty {
-            title = removed.count == 1 ? "Remove a co-signer" : "Remove \(removed.count) co-signers"
-        } else if added.isEmpty, removed.isEmpty {
+        if !added.isEmpty || !removed.isEmpty {
+            // A signer change is the headline whenever there is one,
+            // and anything alongside it makes this a control change
+            // rather than a tidy "add one person".
+            if changesSettings || changesThresholds || (!added.isEmpty && !removed.isEmpty) {
+                title = "Change who controls the treasury"
+            } else if removed.isEmpty {
+                title = added.count == 1 ? "Add a co-signer" : "Add \(added.count) co-signers"
+            } else {
+                title = removed.count == 1
+                    ? "Remove a co-signer"
+                    : "Remove \(removed.count) co-signers"
+            }
+        } else if changesSettings {
+            // Named for what it is, and `AUTH_IMMUTABLE` named in the
+            // title rather than only in a row: it is the one setting on
+            // this screen that cannot be reversed by anyone.
+            let immutable = (setFlags ?? 0) & 0x4 != 0
+            title = immutable
+                ? "Freeze this account's settings permanently"
+                : "Change this account's settings"
+        } else if changesThresholds {
             title = "Change how many signatures are needed"
         } else {
             title = "Change who controls the treasury"

@@ -212,11 +212,20 @@ public struct TreasuryView: View {
     /// The thread stays quiet; this is the screen where it belongs.
     @ViewBuilder
     private var refused: some View {
-        // Refusals *and* lapses. `.superseded` and `.expired` are not
-        // actionable and are not rejections, so they rendered on no
-        // surface at all — a member whose proposal was overtaken or ran
-        // out of time was told nothing, which is the same failure this
-        // section was added to fix for refusals.
+        // Refusals, lapses *and* dismissals. `.superseded` and
+        // `.expired` are not actionable and are not rejections, so they
+        // rendered on no surface at all — a member whose proposal was
+        // overtaken or ran out of time was told nothing, which is the
+        // same failure this section was added to fix for refusals.
+        //
+        // Dismissals get their own section below rather than joining
+        // these: a proposal somebody set aside did not fail, and filing
+        // it under "didn't go through" would be the card saying
+        // something untrue about a transaction that can still be put
+        // back. But it was the third instance of the same mistake, and
+        // the worst one — the card carries the only way back, so with
+        // no section picking it up, "Put it back" and `flow.restore`
+        // were unreachable and "Set aside" was a one-way door.
         let refusals = flow.rows.filter { row in
             switch row.standing {
             case .rejected, .superseded, .expired: true
@@ -230,6 +239,24 @@ public struct TreasuryView: View {
                     TreasuryProposalCard(row: row, flow: flow, surface: .screen)
                         .padding(.horizontal, 16)
                 }
+            }
+            .padding(.top, 8)
+        }
+        setAside
+    }
+
+    /// Proposals this device put down, and the only place they appear.
+    @ViewBuilder
+    private var setAside: some View {
+        let dismissed = flow.rows.filter { $0.standing == .dismissed }
+        if !dismissed.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                SectionLabel("SET ASIDE")
+                ForEach(dismissed) { row in
+                    TreasuryProposalCard(row: row, flow: flow, surface: .screen)
+                        .padding(.horizontal, 16)
+                }
+                Footnote("Set aside on this phone only. Nobody else sees this, and putting one back makes it signable again.")
             }
             .padding(.top, 8)
         }

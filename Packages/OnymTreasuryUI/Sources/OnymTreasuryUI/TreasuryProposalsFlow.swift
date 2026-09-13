@@ -405,17 +405,25 @@ public final class TreasuryProposalsFlow {
     @discardableResult
     public func returnedFromWallet(adoptedProposalID: UUID?) -> Bool {
         guard pasteTargetID != nil else { return false }
-        if let adoptedProposalID, adoptedProposalID == pasteTargetID {
-            pastedXDR = ""
-            pasteTargetID = nil
-            pasteSurface = nil
-            pasteError = nil
-            return true
-        }
-        // The sheet is up for a different proposal, or for one the
-        // returned envelope did not match. Either way the person is
-        // looking at "bring the signature back" and has to be told the
-        // signature that came back was not for this.
+        guard adoptedProposalID == pasteTargetID else { return false }
+        pastedXDR = ""
+        pasteTargetID = nil
+        pasteSurface = nil
+        pasteError = nil
+        return true
+    }
+
+    /// Nothing anywhere took the returned envelope — tell the person
+    /// waiting on this sheet, if there is one.
+    ///
+    /// Separate from the success path, and called only after every flow
+    /// has been offered the adoption, because the app holds one flow per
+    /// group: reporting "didn't match this proposal" on every open sheet
+    /// the moment one of them succeeded would tell a co-signer their
+    /// signature failed in one chat because it succeeded in another.
+    @discardableResult
+    public func walletReturnWentNowhere() -> Bool {
+        guard pasteTargetID != nil else { return false }
         pasteError = String(
             localized: "That signed transaction didn't match this proposal. It may have already gone through, or expired."
         )

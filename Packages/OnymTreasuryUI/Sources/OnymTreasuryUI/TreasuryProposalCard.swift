@@ -187,11 +187,11 @@ public struct TreasuryProposalCard: View {
             }
 
         case .ready:
-            Chip(text: "Ready to send", fg: OnymTokens.green, bg: OnymTokens.green.opacity(0.14))
+            Chip(key: "Ready to send", fg: OnymTokens.green, bg: OnymTokens.green.opacity(0.14))
 
         case .submitted(let hash):
             VStack(alignment: .leading, spacing: 4) {
-                Chip(text: "Sent", fg: OnymTokens.green, bg: OnymTokens.green.opacity(0.14))
+                Chip(key: "Sent", fg: OnymTokens.green, bg: OnymTokens.green.opacity(0.14))
                 Text(hash)
                     .font(OnymType.mono(size: 11))
                     .foregroundStyle(OnymTokens.text3)

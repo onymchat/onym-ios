@@ -12,6 +12,18 @@ import XCTest
 /// screens predate this check and sweeping them is a separate job.
 final class TreasuryLocalizationTests: XCTestCase {
 
+    /// Where `TreasuryProposalDescription` keeps the card's own
+    /// vocabulary — its labels, its titles, and its caveats.
+    private static var descriptionPatterns: [String] {
+        let body = "(" + literalBody + ")"
+        return [
+            #"label: ""# + body + #"""#,
+            #"\.copy\(\s*""# + body + #""\)"#,
+            #"title = ""# + body + #"""#,
+            #"caveat = ""# + body + #"""#,
+        ]
+    }
+
     /// Call sites whose first string literal is a `LocalizedStringKey`.
     /// `titleText:` / `verbatim:` initialisers are deliberately absent —
     /// those exist precisely so runtime data is never looked up as a key.
@@ -138,22 +150,22 @@ final class TreasuryLocalizationTests: XCTestCase {
         let keys = Set((json?["strings"] as? [String: Any] ?? [:]).keys)
         XCTAssertFalse(keys.isEmpty)
 
-        let sources = root
-            .appendingPathComponent("Packages")
-            .appendingPathComponent("OnymTreasuryUI")
-            .appendingPathComponent("Sources")
-        guard let walker = FileManager.default.enumerator(
-            at: sources,
-            includingPropertiesForKeys: nil
-        ) else {
-            throw XCTSkip("treasury UI sources not reachable")
-        }
+        // Through the shared walker, not a second copy of it. Two
+        // tests each building their own list is how one of them ended
+        // up scanning a directory the other did not.
+        let sources = try treasuryUISources()
 
         var missing: [String] = []
         var checked = 0
-        for case let url as URL in walker where url.pathExtension == "swift" {
+        for url in sources {
             let source = try String(contentsOf: url, encoding: .utf8)
-            for pattern in Self.patterns {
+            // The view layer's set includes a broad "a literal that
+            // opens its own line" rule, which is right for a SwiftUI
+            // body and wrong in a domain type full of literals that are
+            // not keys. The description file is read with the narrow
+            // set that names the three places its copy lives.
+            let isDomain = url.pathComponents.contains("OnymTreasury")
+            for pattern in isDomain ? Self.descriptionPatterns : Self.patterns {
                 let regex = try NSRegularExpression(pattern: pattern)
                 let range = NSRange(source.startIndex..., in: source)
                 for match in regex.matches(in: source, range: range) {
@@ -260,19 +272,40 @@ final class TreasuryLocalizationTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-        let sources = root
-            .appendingPathComponent("Packages")
-            .appendingPathComponent("OnymTreasuryUI")
-            .appendingPathComponent("Sources")
-        guard let walker = FileManager.default.enumerator(
-            at: sources,
-            includingPropertiesForKeys: nil
-        ) else {
-            throw XCTSkip("treasury UI sources not reachable")
-        }
+        // Two roots, because this PR moved the feature's most
+        // safety-critical copy — the proposal card's row labels, its
+        // titles, and the red "Don't sign it" caveat — into
+        // `TreasuryProposalDescription`, which ships in the domain
+        // package. A scanner rooted only at `OnymTreasuryUI` would have
+        // reported green over precisely that.
+        //
+        // The domain package contributes one file. The rest of it holds
+        // strings that are *not* keys — the interactors' `.failed`
+        // reasons, store key fragments — and those are a separate
+        // problem: they reach the screen in English too, but fixing
+        // them means changing what an outcome carries, which is wider
+        // than a test should quietly require.
+        let directories = [
+            ["Packages", "OnymTreasuryUI", "Sources"],
+            ["Packages", "OnymTreasury", "Sources"],
+        ]
+        let domainFiles = ["TreasuryProposalDescription.swift"]
         var found: [URL] = []
-        for case let url as URL in walker where url.pathExtension == "swift" {
-            found.append(url)
+        for components in directories {
+            let sources = components.reduce(root) { $0.appendingPathComponent($1) }
+            guard let walker = FileManager.default.enumerator(
+                at: sources,
+                includingPropertiesForKeys: nil
+            ) else {
+                throw XCTSkip("treasury sources not reachable")
+            }
+            for case let url as URL in walker where url.pathExtension == "swift" {
+                if components.contains("OnymTreasury"),
+                   !domainFiles.contains(url.lastPathComponent) {
+                    continue
+                }
+                found.append(url)
+            }
         }
         return found
     }

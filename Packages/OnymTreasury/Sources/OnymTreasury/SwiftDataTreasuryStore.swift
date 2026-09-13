@@ -434,7 +434,14 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
                 },
                 sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
             )
-            return try self.context.fetch(descriptor).compactMap { try? self.decode($0) }
+            // Dismissal is filtered here rather than in the predicate: a
+            // fourth clause puts `#Predicate` past what the type checker
+            // will do in reasonable time, and the set reaching this
+            // point is already one identity's unsubmitted, unrefused
+            // rows.
+            return try self.context.fetch(descriptor)
+                .filter { $0.dismissedAt == nil }
+                .compactMap { try? self.decode($0) }
         } ?? []
     }
 

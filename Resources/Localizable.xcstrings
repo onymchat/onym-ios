@@ -131,6 +131,23 @@
         }
       }
     },
+    "%@ issued by": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ issued by"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Эмитент %@"
+          }
+        }
+      }
+    },
     "%@ joined": {
       "extractionState": "manual",
       "localizations": {
@@ -535,6 +552,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "(Без названия)"
+          }
+        }
+      }
+    },
+    "(cleared)": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "(cleared)"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "(очищено)"
           }
         }
       }
@@ -1003,6 +1037,23 @@
         }
       }
     },
+    "Add %lld co-signers": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add %lld co-signers"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Добавить %lld подписантов"
+          }
+        }
+      }
+    },
     "Add Custom URL": {
       "extractionState": "stale",
       "localizations": {
@@ -1032,6 +1083,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "Добавить личность"
+          }
+        }
+      }
+    },
+    "Add a co-signer": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add a co-signer"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Добавить подписанта"
+          }
+        }
+      }
+    },
+    "Add co-signer": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add co-signer"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Добавить подписанта"
           }
         }
       }
@@ -1296,6 +1381,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Всегда использовать основной релеер. Если основной не выбран, используется первый из настроенных."
+          }
+        }
+      }
+    },
+    "Amount": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Amount"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Сумма"
           }
         }
       }
@@ -1565,6 +1667,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Попросить впустить как"
+          }
+        }
+      }
+    },
+    "Asset": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Asset"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Актив"
           }
         }
       }
@@ -2014,6 +2133,57 @@
         }
       }
     },
+    "Change how many signatures are needed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Change how many signatures are needed"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Изменить требуемое число подписей"
+          }
+        }
+      }
+    },
+    "Change this account's settings": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Change this account's settings"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Изменить настройки этого счёта"
+          }
+        }
+      }
+    },
+    "Change who controls the treasury": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Change who controls the treasury"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Изменить, кто управляет казной"
+          }
+        }
+      }
+    },
     "Check this address character by character. A payment that leaves the treasury cannot be recalled by anyone, including the people who signed it.": {
       "extractionState": "manual",
       "localizations": {
@@ -2061,6 +2231,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Сверяемся с сетью…"
+          }
+        }
+      }
+    },
+    "Checking…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking…"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Проверяем…"
           }
         }
       }
@@ -3416,6 +3603,23 @@
         }
       }
     },
+    "Freeze this account's settings permanently": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Freeze this account's settings permanently"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Навсегда заморозить настройки этого счёта"
+          }
+        }
+      }
+    },
     "GROUP RULES": {
       "localizations": {
         "en": {
@@ -3660,6 +3864,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Хранится в вашем кошельке"
+          }
+        }
+      }
+    },
+    "Hold %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hold %@"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Держать %@"
           }
         }
       }
@@ -3997,6 +4218,23 @@
         }
       }
     },
+    "Issued by": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Issued by"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Эмитент"
+          }
+        }
+      }
+    },
     "Its catalogs are being fetched and verified now — the next steps can offer what it lists.": {
       "localizations": {
         "en": {
@@ -4178,6 +4416,23 @@
         }
       }
     },
+    "Limit": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Limit"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Лимит"
+          }
+        }
+      }
+    },
     "Loading…": {
       "extractionState": "manual",
       "localizations": {
@@ -4208,6 +4463,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Замороженный резерв"
+          }
+        }
+      }
+    },
+    "Locks one more base reserve in the treasury": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Locks one more base reserve in the treasury"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Блокирует ещё один базовый резерв в казне"
           }
         }
       }
@@ -4292,6 +4564,57 @@
           "stringUnit": {
             "state": "translated",
             "value": "Участники"
+          }
+        }
+      }
+    },
+    "Memo": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memo"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Памятка"
+          }
+        }
+      }
+    },
+    "Memo (hash)": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memo (hash)"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Памятка (хеш)"
+          }
+        }
+      }
+    },
+    "Memo (id)": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memo (id)"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Памятка (id)"
           }
         }
       }
@@ -4768,6 +5091,23 @@
         }
       }
     },
+    "No limit": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No limit"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Без лимита"
+          }
+        }
+      }
+    },
     "No members yet": {
       "localizations": {
         "en": {
@@ -5189,6 +5529,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ничего не окончательно — любой выбор можно изменить позже в настройках."
+          }
+        }
+      }
+    },
+    "Nothing yet": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing yet"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Пока ничего"
           }
         }
       }
@@ -5732,6 +6089,23 @@
         }
       }
     },
+    "Pay %@ %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pay %@ %@"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Выплата %@ %@"
+          }
+        }
+      }
+    },
     "Payments and trustlines": {
       "extractionState": "manual",
       "localizations": {
@@ -6081,6 +6455,23 @@
         }
       }
     },
+    "Ready to send": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ready to send"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Готово к отправке"
+          }
+        }
+      }
+    },
     "Recommended setup": {
       "extractionState": "manual",
       "localizations": {
@@ -6233,6 +6624,23 @@
         }
       }
     },
+    "Remove %lld co-signers": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove %lld co-signers"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Убрать %lld подписантов"
+          }
+        }
+      }
+    },
     "Remove Photo": {
       "extractionState": "stale",
       "localizations": {
@@ -6246,6 +6654,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "Удалить фото"
+          }
+        }
+      }
+    },
+    "Remove a co-signer": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove a co-signer"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Убрать подписанта"
+          }
+        }
+      }
+    },
+    "Remove co-signer": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove co-signer"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Убрать подписанта"
           }
         }
       }
@@ -6345,6 +6787,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Срок запроса истёк, или он уже обработан."
+          }
+        }
+      }
+    },
+    "Reserve": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reserve"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Резерв"
           }
         }
       }
@@ -6626,6 +7085,23 @@
         }
       }
     },
+    "SET ASIDE": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SET ASIDE"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ОТЛОЖЕНО"
+          }
+        }
+      }
+    },
     "SETUP": {
       "localizations": {
         "en": {
@@ -6689,6 +7165,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "ПРЕДЛОЖЕНО ВАШИМИ КАТАЛОГАМИ"
+          }
+        }
+      }
+    },
+    "SWITCHED BACK ON — weight %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SWITCHED BACK ON — weight %@"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "СНОВА ВКЛЮЧЁН — вес %@"
           }
         }
       }
@@ -7008,6 +7501,23 @@
         }
       }
     },
+    "Sent": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sent"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Отправлено"
+          }
+        }
+      }
+    },
     "Sent when you created the group. Each one can still be used to request to join.": {
       "localizations": {
         "en": {
@@ -7070,6 +7580,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Отложить"
+          }
+        }
+      }
+    },
+    "Set aside on this phone only. Nobody else sees this, and putting one back makes it signable again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Set aside on this phone only. Nobody else sees this, and putting one back makes it signable again."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Отложено только на этом телефоне. Никто другой этого не видит, а возврат снова делает предложение доступным для подписи."
           }
         }
       }
@@ -7286,6 +7813,57 @@
           "stringUnit": {
             "state": "translated",
             "value": "Подпись под правилами не проходит проверку"
+          }
+        }
+      }
+    },
+    "Signatures for minor changes": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signatures for minor changes"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Подписи для мелких изменений"
+          }
+        }
+      }
+    },
+    "Signatures to change control": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signatures to change control"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Подписи для смены управления"
+          }
+        }
+      }
+    },
+    "Signatures to spend": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signatures to spend"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Подписи для траты"
           }
         }
       }
@@ -7619,6 +8197,23 @@
         }
       }
     },
+    "Stays switched off": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stays switched off"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Остаётся выключенным"
+          }
+        }
+      }
+    },
     "Stellar": {
       "extractionState": "manual",
       "localizations": {
@@ -7715,6 +8310,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Подключение этого устройства к сети ещё настраивается. Нажмите «Повторить» через мгновение."
+          }
+        }
+      }
+    },
+    "Stop holding %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop holding %@"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Перестать держать %@"
           }
         }
       }
@@ -8750,6 +9362,40 @@
         }
       }
     },
+    "This transaction does %lld more thing(s) this summary doesn't show. Don't sign it unless you know what they are.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This transaction does %lld more thing(s) this summary doesn't show. Don't sign it unless you know what they are."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Эта транзакция делает ещё %lld действий, не показанных в сводке. Не подписывайте, если не знаете, что это."
+          }
+        }
+      }
+    },
+    "This transaction isn't one this app knows how to describe. Don't sign it.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This transaction isn't one this app knows how to describe. Don't sign it."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Эту транзакцию приложение не умеет описывать. Не подписывайте её."
+          }
+        }
+      }
+    },
     "This usually takes a few seconds. It’s safe to close this — we’ll finish in the background.": {
       "localizations": {
         "en": {
@@ -8779,6 +9425,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Это собрано для другой сети Stellar."
+          }
+        }
+      }
+    },
+    "To": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "To"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Кому"
           }
         }
       }
@@ -8834,6 +9497,23 @@
         }
       }
     },
+    "Treasury transaction": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Treasury transaction"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Транзакция казны"
+          }
+        }
+      }
+    },
     "Treasury — %lld waiting on signatures": {
       "extractionState": "manual",
       "localizations": {
@@ -8864,6 +9544,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Казна — ждём подписи"
+          }
+        }
+      }
+    },
+    "Treasury's own key": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Treasury's own key"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Собственный ключ казны"
           }
         }
       }

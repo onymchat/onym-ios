@@ -2284,10 +2284,23 @@ struct OnymIOSApp: App {
                             // that arrives with no sheet open at all —
                             // a wallet opened from a screen since left,
                             // or a link tapped cold.
-                            let handled = proposalsFlowCache.allFlows
+                            // Routed by id first, and only then — if
+                            // nothing claimed it — does any open sheet
+                            // get told it went nowhere. Telling every
+                            // flow at once meant a successful adoption
+                            // in one chat set "didn't match this
+                            // proposal" on every *other* chat's sheet,
+                            // which reads as a failure caused by the
+                            // success.
+                            let flows = proposalsFlowCache.allFlows
+                            let claimed = flows
                                 .map { $0.returnedFromWallet(adoptedProposalID: adopted) }
                                 .contains(true)
-                            guard !handled else { return }
+                            if claimed { return }
+                            let told = flows
+                                .map { $0.walletReturnWentNowhere() }
+                                .contains(true)
+                            guard !told else { return }
                             if adopted == nil {
                                 treasuryReturnOutcome.notAdopted()
                             } else {
