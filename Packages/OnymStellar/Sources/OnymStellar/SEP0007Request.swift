@@ -21,7 +21,8 @@ import Foundation
 ///
 /// ## What is deliberately not sent
 ///
-/// `callback` is omitted. SEP-0007 defines it as an HTTPS endpoint the
+/// `callback` is omitted, and so is `origin_domain` — see its note.
+/// SEP-0007 defines `callback` as an HTTPS endpoint the
 /// wallet POSTs the signed envelope to, which would mean running a
 /// server that receives other people's transactions. The signed
 /// transaction comes back by one of the three routes the signing screen
@@ -40,6 +41,14 @@ public struct SEP0007Request: Equatable, Sendable {
     /// The account the request is meant for. Wallets holding several
     /// accounts use it to preselect the right one.
     public let publicKey: StellarAccountID?
+    /// Defaults to **nil**, and should stay that way until requests are
+    /// signed.
+    ///
+    /// SEP-0007 pairs `origin_domain` with a `signature` the wallet
+    /// verifies against the domain's stellar.toml. Sending the claim
+    /// without the signature is an assertion no wallet can check;
+    /// several warn about it and some refuse the request outright. An
+    /// unverifiable claim of provenance is worth less than no claim.
     public let originDomain: String?
 
     public init(
@@ -47,7 +56,7 @@ public struct SEP0007Request: Equatable, Sendable {
         network: StellarNetwork,
         message: String? = nil,
         publicKey: StellarAccountID? = nil,
-        originDomain: String? = "onym.app"
+        originDomain: String? = nil
     ) {
         self.envelope = envelope
         self.network = network

@@ -207,11 +207,20 @@ private struct AccountWire: Decodable {
                         "balance '\(wire.balance)' for \(asset.code)"
                     )
                 }
-                return HorizonBalance(
-                    asset: asset,
-                    balance: amount,
-                    limit: wire.limit.flatMap { try? StellarAmount(decimalString: $0) }
-                )
+                // An unparseable limit is not "no limit". `nil` is
+                // documented as no ceiling, so swallowing a parse
+                // failure here is the same "looks richer than it is"
+                // answer the balance parse above throws to avoid.
+                var limit: StellarAmount?
+                if let raw = wire.limit {
+                    guard let parsed = try? StellarAmount(decimalString: raw) else {
+                        throw HorizonError.decodeFailure(
+                            "limit '\(raw)' for \(asset.code)"
+                        )
+                    }
+                    limit = parsed
+                }
+                return HorizonBalance(asset: asset, balance: amount, limit: limit)
             },
             // Non-Ed25519 signers (pre-auth, hash-x) are dropped: they
             // are not accounts, `StellarAccountID` cannot hold one, and
@@ -223,7 +232,10 @@ private struct AccountWire: Decodable {
                 guard wire.type == "ed25519_public_key",
                       let key = try? StellarAccountID(accountID: wire.key)
                 else { return nil }
-                return StellarSigner(key: key, weight: wire.weight)
+                // Clamped to the protocol's ceiling. Horizon spells
+                // weight as an unbounded JSON number, and everything
+                // downstream adds these up.
+                return StellarSigner(key: key, weight: min(wire.weight, 255))
             },
             thresholds: HorizonThresholds(
                 low: thresholds.lowThreshold,

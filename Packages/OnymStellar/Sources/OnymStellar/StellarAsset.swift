@@ -51,6 +51,44 @@ public enum StellarAsset: Equatable, Hashable, Sendable, Codable {
         }
     }
 
+    // MARK: - Codable
+
+    /// Hand-written so that JSON reaching this type is validated the
+    /// same way the wire and the constructor are.
+    ///
+    /// The synthesized conformance bypassed `init(code:issuer:)` — the
+    /// cases are public — so `{"alphanum12":{"code":"USD",…}}` built an
+    /// asset that violates the width class, and `paddedCode`'s
+    /// precondition then *trapped* when it was encoded. A crash on
+    /// hostile input is not a validation strategy. `StellarAccountID`
+    /// already validates in `init(from:)`; this now matches.
+    private enum CodingKeys: String, CodingKey {
+        case code
+        case issuer
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let code = try container.decode(String.self, forKey: .code)
+        guard let issuer = try container.decodeIfPresent(
+            StellarAccountID.self,
+            forKey: .issuer
+        ) else {
+            guard code == "XLM" else {
+                throw StellarError.badAssetCode(code)
+            }
+            self = .native
+            return
+        }
+        self = try StellarAsset(code: code, issuer: issuer)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(code, forKey: .code)
+        try container.encodeIfPresent(issuer, forKey: .issuer)
+    }
+
     // MARK: - XDR
 
     // AssetType discriminants.

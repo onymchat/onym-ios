@@ -30,7 +30,6 @@ final class StellarXDRFixtureTests: XCTestCase {
         }
         struct Meta: Decodable {
             let accounts: [String: String]
-            let secrets: [String: String]
         }
         let meta: Meta
         let cases: [String: Case]

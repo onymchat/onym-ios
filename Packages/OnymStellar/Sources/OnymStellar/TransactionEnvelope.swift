@@ -172,7 +172,14 @@ public struct TransactionEnvelope: Equatable, Sendable {
             // not by hint. Skipping on a hint match alone would drop a
             // second signer's genuine signature whenever four bytes
             // happened to collide, and its weight would never count.
-            for candidate in candidates where candidate.signatureHint == decorated.hint {
+            // Every candidate, not only hint matches. The hint is the
+            // *sender's* claim about which key signed, and this envelope
+            // is untrusted by construction — a wallet that returns a
+            // correct signature with a zeroed or wrong hint would
+            // otherwise contribute nothing while `adopted` reported
+            // success with nobody in it. At most twenty Ed25519 checks
+            // buys removing a silent-drop path.
+            for candidate in candidates {
                 guard Self.verify(signature: decorated.signature, by: candidate, over: hash),
                       !carriesSignature(from: candidate, over: hash)
                 else { continue }

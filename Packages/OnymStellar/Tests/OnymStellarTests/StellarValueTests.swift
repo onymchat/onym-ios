@@ -416,6 +416,91 @@ final class StellarDecodeHardeningTests: XCTestCase {
         }
     }
 
+    /// The synthesized `Codable` bypassed the validating initializer —
+    /// the cases are public — so JSON could build an asset violating
+    /// its width class, and `paddedCode`'s precondition then *trapped*
+    /// when it was encoded. A crash on hostile input is not validation.
+    func test_assetJSON_thatViolatesItsWidthClass_throwsRatherThanTrapping() throws {
+        let json = Data(#"{"code":"USD","issuer":"\#(issuer)"}"#.utf8)
+        // Decodes as the alphanum4 it actually is, never as a malformed
+        // alphanum12.
+        let decoded = try JSONDecoder().decode(StellarAsset.self, from: json)
+        guard case .alphanum4 = decoded else {
+            return XCTFail("three bytes is alphanum4")
+        }
+        // And codes the protocol forbids are refused at decode.
+        for bad in ["", "THIRTEENCHARS", "US DC"] {
+            let hostile = Data(#"{"code":"\#(bad)","issuer":"\#(issuer)"}"#.utf8)
+            XCTAssertThrowsError(
+                try JSONDecoder().decode(StellarAsset.self, from: hostile),
+                "'\(bad)' should not decode"
+            )
+        }
+    }
+
+    func test_assetJSON_roundTrips() throws {
+        let issuerAccount = try StellarAccountID(accountID: issuer)
+        for asset in [
+            StellarAsset.native,
+            try StellarAsset(code: "USDC", issuer: issuerAccount),
+            try StellarAsset(code: "LONGASSET123", issuer: issuerAccount),
+        ] {
+            let data = try JSONEncoder().encode(asset)
+            XCTAssertEqual(try JSONDecoder().decode(StellarAsset.self, from: data), asset)
+        }
+    }
+
+    /// The hint is the *sender's* claim about which key signed, and the
+    /// returned envelope is untrusted by construction. A wallet that
+    /// returns a correct signature with a zeroed hint used to
+    /// contribute nothing while the caller reported success.
+    func test_aReturnedSignatureWithAWrongHint_isStillAdopted() throws {
+        let key = try Curve25519.Signing.PrivateKey(
+            rawRepresentation: Data(repeating: 0x21, count: 32)
+        )
+        let signer = try StellarAccountID(
+            publicKey: Data(key.publicKey.rawRepresentation)
+        )
+        let transaction = try StellarTransaction(
+            sourceAccount: signer,
+            fee: 100,
+            sequenceNumber: 1,
+            timeBounds: nil,
+            operations: [StellarOperation(body: .changeTrust(asset: .native, limit: .max))]
+        )
+        let signature = try key.signature(for: transaction.hash(network: .testnet))
+
+        // A wallet that zeroed the hint.
+        let returned = TransactionEnvelope(
+            transaction: transaction,
+            signatures: [DecoratedSignature(
+                hint: Data(repeating: 0, count: 4),
+                signature: signature
+            )]
+        )
+        var proposal = TransactionEnvelope(transaction: transaction)
+        let adopted = proposal.harvestSignatures(
+            from: returned,
+            candidates: [signer],
+            network: .testnet
+        )
+        XCTAssertEqual(adopted, [signer])
+        XCTAssertTrue(proposal.hasSignature(from: signer, network: .testnet))
+    }
+
+    /// A transaction with no operations is not "too many" of them.
+    func test_anEmptyOperationList_isRejectedByName() throws {
+        XCTAssertThrowsError(try StellarTransaction(
+            sourceAccount: StellarAccountID(accountID: issuer),
+            fee: 100,
+            sequenceNumber: 1,
+            timeBounds: nil,
+            operations: []
+        )) { error in
+            XCTAssertEqual(error as? StellarError, .noOperations)
+        }
+    }
+
     // MARK: - Signature accounting
 
     /// The envelope is full, so nothing is stored — and nothing is

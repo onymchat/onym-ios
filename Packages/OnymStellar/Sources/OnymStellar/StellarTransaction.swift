@@ -109,7 +109,10 @@ public struct StellarTransaction: Equatable, Sendable {
         memo: StellarMemo = .none,
         operations: [StellarOperation]
     ) throws {
-        guard (1...Self.maxOperations).contains(operations.count) else {
+        guard !operations.isEmpty else {
+            throw StellarError.noOperations
+        }
+        guard operations.count <= Self.maxOperations else {
             throw StellarError.tooManyOperations(operations.count)
         }
         self.sourceAccount = sourceAccount

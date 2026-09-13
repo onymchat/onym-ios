@@ -92,9 +92,45 @@ final class HorizonWireTests: XCTestCase {
         }
     }
 
-    /// Saturating rather than trapping: weights arrive as UInt32 with
-    /// no clamp to the protocol's 0–255, and a hostile response must
-    /// not crash the app instead of failing a threshold check.
+    /// Clamped where they enter, so the sums downstream are honest.
+    ///
+    /// The first fix here used `&+`, which is wrapping, not saturating:
+    /// three signers at 0x8000_0000 sum to 0x8000_0000, and a set
+    /// summing to 2^32 sums to *zero* — a threshold check reading no
+    /// weight for a full quorum, which is worse than the crash it was
+    /// avoiding. The protocol bounds weight at 255, so the boundary is
+    /// the right place to say so.
+    func test_signerWeights_areClampedAtTheProtocolCeiling() async throws {
+        let json = accountJSON(extraSigner: """
+        {"key": "\(issuer)", "weight": 4294967295, "type": "ed25519_public_key"}
+        """)
+        let parsed = try await client(returning: json).account(
+            try StellarAccountID(accountID: account)
+        )
+        XCTAssertEqual(parsed.signers.map(\.weight).max(), 255)
+
+        // And the sum of a full signer set cannot overflow.
+        let total = parsed.weight(of: parsed.signers.map(\.key))
+        XCTAssertEqual(total, 255 + 2)
+    }
+
+    /// `nil` is documented as "no ceiling", so a limit that failed to
+    /// parse must not quietly become one — the same "looks richer than
+    /// it is" answer the balance parse throws to avoid.
+    func test_anUnparseableTrustlineLimit_failsTheRead() async throws {
+        let json = """
+        {"sequence": "1", "balances": [
+          {"balance": "1.0000000", "limit": "not-a-number",
+           "asset_type": "credit_alphanum4", "asset_code": "USDC",
+           "asset_issuer": "\(issuer)"}],
+         "signers": [], "thresholds": {"low_threshold": 1,
+         "med_threshold": 1, "high_threshold": 1}}
+        """
+        await assertThrows(try await client(returning: json).account(
+            try StellarAccountID(accountID: account)
+        ))
+    }
+
     func test_absurdSignerWeights_doNotTrap() throws {
         let signer = try StellarAccountID(accountID: account)
         let other = try StellarAccountID(accountID: issuer)

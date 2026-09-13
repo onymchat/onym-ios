@@ -208,6 +208,9 @@ public enum StellarError: Error, Equatable, Sendable {
     case badAssetCode(String)
     /// More operations than a Stellar transaction permits.
     case tooManyOperations(Int)
+    /// None at all — which `tooManyOperations(0)` used to report,
+    /// naming the opposite problem.
+    case noOperations
     /// The envelope already carries the protocol's maximum signatures.
     case tooManySignatures(Int)
     /// A signature that did not verify against the transaction hash this

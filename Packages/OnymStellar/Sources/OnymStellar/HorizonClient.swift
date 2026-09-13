@@ -29,13 +29,18 @@ public struct HorizonAccount: Equatable, Sendable {
     /// list rather than from anything stored locally, because the signer
     /// set is exactly what a `setOptions` proposal changes.
     public func weight(of candidates: [StellarAccountID]) -> UInt32 {
-        // Saturating. Weights arrive as `UInt32` from Horizon's JSON and
-        // the protocol's own ceiling is 255, so a malformed or hostile
-        // response could otherwise trap here — crashing the app instead
-        // of failing a threshold check. `weight(of:)` has to stay total.
+        // Plain addition, and safe because weights are clamped to the
+        // protocol's 0–255 where they enter (`AccountWire.domain`).
+        //
+        // The previous version used `&+` and called itself saturating,
+        // which it is not: wrapping turns three signers at 0x8000_0000
+        // into 0x8000_0000, and a set summing to 2^32 into zero. A
+        // threshold check reading zero for a quorum is worse than a
+        // crash. Clamping at the boundary makes the sum honest instead
+        // of merely non-trapping — 20 signers × 255 cannot overflow.
         signers
             .filter { signer in candidates.contains(signer.key) }
-            .reduce(UInt32(0)) { $0 &+ $1.weight }
+            .reduce(UInt32(0)) { $0 + $1.weight }
     }
 }
 

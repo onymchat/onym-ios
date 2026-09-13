@@ -6,7 +6,6 @@ envelope in `OnymStellarTests/Fixtures/fixtures.json` is produced here by
 an independent implementation, and `StellarXDRFixtureTests` checks our
 bytes and our transaction hashes against it.
 
-    ~/Developer/onym-bank/.venv/bin/python scripts/generate-stellar-fixtures.py
 
 Requires `stellar-sdk` (15.0.0 when these fixtures were generated); the
 onym-bank virtualenv already has it.
@@ -90,7 +89,10 @@ cases["signed_two"] = {"xdr": te.to_xdr(), "hash": te.hash().hex(), "passphrase"
 meta = {
     "accounts": {n: k.public_key for n, k in
                  [("src", SRC), ("dst", DST), ("issuer", ISS), ("co1", CO1), ("co2", CO2), ("treasury", T)]},
-    "secrets": {"src": SRC.secret, "co1": CO1.secret},
+    # No secret keys. They were never read by the tests, and a
+    # committed file with `S…` seeds in it is a file that looks like a
+    # leak to every scanner that meets it. Every key here is derived
+    # from a fixed seed, so anyone regenerating gets the same accounts.
 }
 # Written to the fixture the test bundle actually loads, resolved from
 # this file rather than the working directory. The documented invocation
