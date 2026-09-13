@@ -1,0 +1,13 @@
+{
+  "core_latest_ledger": 4659432,
+  "core_supported_protocol_version": 28,
+  "core_version": "stellar-core 28.0.1 (947aad8413c189d85504acf72207e85eeda9b021)",
+  "current_protocol_version": 28,
+  "history_elder_ledger": 128,
+  "history_latest_ledger": 4659432,
+  "history_latest_ledger_closed_at": "2026-09-13T17:32:27Z",
+  "horizon_version": "28.0.1-a70eb47f76985d372de3e59f4d75c7f8542752f7",
+  "ingest_latest_ledger": 4659432,
+  "network_passphrase": "Test SDF Network ; September 2015",
+  "supported_protocol_version": 28
+}

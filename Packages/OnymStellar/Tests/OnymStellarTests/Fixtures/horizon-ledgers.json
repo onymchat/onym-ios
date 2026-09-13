@@ -1,0 +1,15 @@
+{
+  "_embedded": {
+    "records": [
+      {
+        "base_fee_in_stroops": 100,
+        "base_reserve_in_stroops": 5000000,
+        "closed_at": "2026-09-13T17:32:27Z",
+        "hash": "293aa85354519a7ad062eb50dc306fecb64b5135e4a9b90dd8eb0108d434ad46",
+        "max_tx_set_size": 200,
+        "protocol_version": 28,
+        "sequence": 4659432
+      }
+    ]
+  }
+}

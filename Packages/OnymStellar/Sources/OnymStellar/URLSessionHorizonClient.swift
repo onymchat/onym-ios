@@ -92,10 +92,27 @@ public struct URLSessionHorizonClient: HorizonClient {
     }
 
     public func networkParameters() async throws -> HorizonNetworkParameters {
-        let wire: RootWire = try await get("/", notFound: "root")
+        // The latest ledger, not the root.
+        //
+        // Horizon's root document carries versions and ledger cursors
+        // and nothing else: there is no `base_fee_in_stroops` and no
+        // `base_reserve_in_stroops` anywhere in it. Reading them from
+        // there did not fail loudly — it failed as a decode error on
+        // every call, which the treasury's creation path reported as
+        // "could not read the funding account", so a founder with a
+        // funded account was told their funding was the problem. The
+        // two values are per-ledger protocol parameters and live on the
+        // ledger resource, which is where they are read from now.
+        let page: PageWire<LedgerWire> = try await get(
+            "/ledgers?order=desc&limit=1",
+            notFound: "ledgers"
+        )
+        guard let latest = page.embedded.records.first else {
+            throw HorizonError.decodeFailure("no ledgers in /ledgers")
+        }
         return HorizonNetworkParameters(
-            baseFee: StellarAmount(stroops: wire.baseFeeInStroops),
-            baseReserve: StellarAmount(stroops: wire.baseReserveInStroops)
+            baseFee: StellarAmount(stroops: latest.baseFeeInStroops),
+            baseReserve: StellarAmount(stroops: latest.baseReserveInStroops)
         )
     }
 
@@ -136,7 +153,12 @@ private struct PageWire<Record: Decodable>: Decodable {
     enum CodingKeys: String, CodingKey { case embedded = "_embedded" }
 }
 
-private struct RootWire: Decodable {
+/// One ledger, reduced to the two protocol parameters a treasury needs.
+///
+/// Both are per-ledger values that validators can vote to change, which
+/// is why they are read rather than hardcoded — and why they are on
+/// this resource rather than on anything global.
+private struct LedgerWire: Decodable {
     let baseFeeInStroops: Int64
     let baseReserveInStroops: Int64
 
