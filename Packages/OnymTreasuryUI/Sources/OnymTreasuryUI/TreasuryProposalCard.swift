@@ -116,7 +116,7 @@ public struct TreasuryProposalCard: View {
                                     weight: line.isPrincipal ? .semibold : .regular))
                 .foregroundStyle(OnymTokens.text)
         case .amount(let amount, let code):
-            Text("\(amount.decimalString) \(code)")
+            Text(verbatim: "\(amount.decimalString) \(code)")
                 .font(OnymType.mono(size: line.isPrincipal ? 17 : 13,
                                     weight: line.isPrincipal ? .semibold : .regular))
                 .foregroundStyle(OnymTokens.text)
@@ -163,7 +163,11 @@ public struct TreasuryProposalCard: View {
 
         case .collecting(let weight, let required):
             VStack(alignment: .leading, spacing: 4) {
-                Text("\(weight) of \(required) signatures")
+                // Cast so the catalog placeholder is unambiguously
+                // `%lld`: SwiftUI's placeholder for a `UInt32` is not
+                // the one a translator would guess, and the key has to
+                // match what the catalog holds exactly.
+                Text("\(Int(weight)) of \(Int(required)) signatures")
                     .font(OnymType.font(size: 13, weight: .medium))
                     .foregroundStyle(OnymTokens.text2)
                 if !row.waitingOn.isEmpty {
@@ -230,6 +234,8 @@ public struct TreasuryProposalCard: View {
             "This stays valid far longer than a proposal should."
         case .tooManySignatures:
             "This arrived already carrying so many signatures that there is no room left for the people who still have to sign."
+        case .implausibleSequence:
+            "This claims a slot far beyond the treasury's next one, which would block everything else until it expired."
         }
     }
 

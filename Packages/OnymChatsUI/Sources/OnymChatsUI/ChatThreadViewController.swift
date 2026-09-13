@@ -1214,6 +1214,12 @@ extension ChatThreadViewController: UITableViewDelegate {
         forRowAt indexPath: IndexPath
     ) {
         guard let id = dataSource.itemIdentifier(for: indexPath) else { return }
+        // Never the treasury row. Its height moves between zero and a
+        // full card with no snapshot apply and no `reconfigureItems` —
+        // the hosted view redraws itself off the flow — so a cached
+        // measurement goes stale and reintroduces, for this one row,
+        // exactly the offset jump the cache exists to prevent.
+        guard id != Self.treasuryRowID else { return }
         measuredRowHeights[id] = cell.frame.height
     }
 

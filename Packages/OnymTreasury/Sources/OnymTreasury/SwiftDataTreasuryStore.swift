@@ -422,6 +422,7 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
             try self.context.save()
             return ()
         }
+    }
 
     public func openProposals(ownerIDString: String) async -> [StoredProposal] {
         await perform {

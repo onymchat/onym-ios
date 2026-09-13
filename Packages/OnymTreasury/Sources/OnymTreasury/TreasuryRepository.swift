@@ -347,6 +347,18 @@ public actor TreasuryRepository {
         return account
     }
 
+    /// Whether this group has a treasury at all, without subscribing.
+    ///
+    /// The in-thread block is built for *every* thread, and a flow that
+    /// starts always means a permanent snapshot continuation and a
+    /// cached flow per group visited — growing for the life of the
+    /// process, almost all of it for chats that hold no money. One
+    /// store read answers the question instead.
+    public func hasTreasury(groupID: String) async -> Bool {
+        guard let owner = currentIdentity?.rawValue.uuidString else { return false }
+        return await store.treasury(groupID: groupID, ownerIDString: owner) != nil
+    }
+
     /// The creation handed to a wallet and awaiting confirmation, if
     /// any — see `PendingTreasuryCreation`.
     public func pendingCreation(groupID: String) async -> PendingTreasuryCreation? {

@@ -35,6 +35,10 @@ struct ProposePaymentView: View {
                             }
                             .pickerStyle(.segmented)
                             .accessibilityIdentifier("treasury.payment.asset")
+                        } else if flow.payableAssets.isEmpty {
+                            Text("Checking what this treasury holds\u{2026}")
+                                .font(OnymType.font(size: 13))
+                                .foregroundStyle(OnymTokens.text3)
                         } else if let only = flow.payableAssets.first {
                             Text(only.code)
                                 .font(OnymType.font(size: 14, weight: .medium))
@@ -71,9 +75,16 @@ struct ProposePaymentView: View {
                 }
                 Footnote("Check this address character by character. A payment that leaves the treasury cannot be recalled by anyone, including the people who signed it.")
 
+                // Also gated on knowing what the treasury holds. With no
+                // live account read there are no payable assets, the
+                // picker draws nothing, and the composer fell through to
+                // `.native` — a proposal denominated in XLM that nobody
+                // chose.
                 PrimaryButton(
                     "Put it to the group",
-                    disabled: flow.isComposing || !flow.paymentDestinationIsValid
+                    disabled: flow.isComposing
+                        || !flow.paymentDestinationIsValid
+                        || flow.payableAssets.isEmpty
                 ) {
                     Task {
                         applyAsset()

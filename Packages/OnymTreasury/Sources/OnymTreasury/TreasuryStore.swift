@@ -189,6 +189,7 @@ public actor InMemoryTreasuryStore: TreasuryStore {
 
     public func removePendingCreation(groupID: String, ownerIDString: String) {
         pending[Key(groupID: groupID, owner: ownerIDString)] = nil
+    }
 
     public func openProposals(ownerIDString: String) -> [StoredProposal] {
         proposals.values.filter {

@@ -173,7 +173,7 @@ public struct TreasuryView: View {
                             bg: signer.weight == 0 ? OnymTile.gray : OnymTile.green
                         )
                     } right: {
-                        Text("weight \(signer.weight)")
+                        Text(verbatim: "weight \(signer.weight)")
                             .font(OnymType.mono(size: 12))
                             .foregroundStyle(OnymTokens.text3)
                     }
@@ -212,13 +212,20 @@ public struct TreasuryView: View {
     /// The thread stays quiet; this is the screen where it belongs.
     @ViewBuilder
     private var refused: some View {
-        let refusals = flow.rows.filter {
-            if case .rejected = $0.standing { return true }
-            return false
+        // Refusals *and* lapses. `.superseded` and `.expired` are not
+        // actionable and are not rejections, so they rendered on no
+        // surface at all — a member whose proposal was overtaken or ran
+        // out of time was told nothing, which is the same failure this
+        // section was added to fix for refusals.
+        let refusals = flow.rows.filter { row in
+            switch row.standing {
+            case .rejected, .superseded, .expired: true
+            default: false
+            }
         }
         if !refusals.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                SectionLabel("TURNED DOWN")
+                SectionLabel("DIDN'T GO THROUGH")
                 ForEach(refusals) { row in
                     TreasuryProposalCard(row: row, flow: flow, surface: .screen)
                         .padding(.horizontal, 16)

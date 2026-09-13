@@ -44,7 +44,7 @@ public struct TreasuryProposalDescription: Equatable, Sendable {
         /// rather than deciding for itself which rows matter.
         public let isPrincipal: Bool
 
-        /// Its own identity, not the label.
+        /// Derived, not random.
         ///
         /// `describeControl` emits one line per account, all labelled
         /// "Add co-signer" — so a label-keyed `id` collided in
@@ -53,13 +53,23 @@ public struct TreasuryProposalDescription: Equatable, Sendable {
         /// the `setOptions` run is fully explained, so no caveat fires.
         /// A summary of part of a control change, which is precisely
         /// what this type exists to prevent.
-        public let id: UUID
+        /// `label` alone collided: `describeControl` emits one line per
+        /// account, all labelled "Add co-signer", so a proposal adding
+        /// two rendered a single address.
+        ///
+        /// A fresh `UUID` fixed that and broke something quieter — it
+        /// made `Line`, and so the whole description, never equal to an
+        /// identically-derived value despite conforming to `Equatable`.
+        /// Rows are rebuilt on every snapshot, so `ForEach` re-identified
+        /// every line and tore down the address `Text`, dropping any
+        /// in-progress selection on the recipient: the one field the
+        /// card asks people to check character by character.
+        public var id: String { "\(label)|\(value)" }
 
         public init(label: String, value: Value, isPrincipal: Bool = false) {
             self.label = label
             self.value = value
             self.isPrincipal = isPrincipal
-            self.id = UUID()
         }
     }
 
@@ -203,6 +213,25 @@ public struct TreasuryProposalDescription: Equatable, Sendable {
     /// Signer and threshold changes, which are the proposals worth
     /// reading most carefully — they decide who can spend everything
     /// else.
+    /// Account flags, named where the protocol names them.
+    ///
+    /// `AUTH_IMMUTABLE` is the one to read twice: it freezes the
+    /// account's authorisation settings permanently and cannot be
+    /// undone by anyone, including everyone at once.
+    private static func describeFlags(_ flags: UInt32) -> String {
+        var named: [String] = []
+        if flags & 0x1 != 0 { named.append("AUTH_REQUIRED") }
+        if flags & 0x2 != 0 { named.append("AUTH_REVOCABLE") }
+        if flags & 0x4 != 0 { named.append("AUTH_IMMUTABLE (cannot be undone)") }
+        if flags & 0x8 != 0 { named.append("AUTH_CLAWBACK_ENABLED") }
+        if flags & ~UInt32(0xF) != 0 {
+            named.append("flags this app does not recognise")
+        }
+        return named.isEmpty
+            ? "0x\(String(flags, radix: 16))"
+            : named.joined(separator: ", ")
+    }
+
     private static func describeControl(
         _ operations: [StellarOperation]
     ) -> (String, [Line]) {
@@ -211,6 +240,10 @@ public struct TreasuryProposalDescription: Equatable, Sendable {
         var removed: [StellarAccountID] = []
         var thresholds: (low: UInt32?, medium: UInt32?, high: UInt32?) = (nil, nil, nil)
         var masterWeight: UInt32?
+        var setFlags: UInt32?
+        var clearFlags: UInt32?
+        var inflationDestination: StellarAccountID?
+        var homeDomain: String?
 
         for operation in operations {
             guard case .setOptions(let fields) = operation.body else { continue }
@@ -221,6 +254,19 @@ public struct TreasuryProposalDescription: Equatable, Sendable {
             thresholds.medium = fields.mediumThreshold ?? thresholds.medium
             thresholds.high = fields.highThreshold ?? thresholds.high
             masterWeight = fields.masterWeight ?? masterWeight
+            // Read, because `StellarOperation` decodes them precisely so
+            // a co-signer can see them — and this function used to read
+            // none of the four. A one-operation
+            // `setOptions{setFlags: AUTH_IMMUTABLE}` classifies as a
+            // control change, so it is *accepted*, and it rendered as
+            // the title "Change how many signatures are needed" over an
+            // empty details box with the operation counted as explained,
+            // so no caveat fired. A tidy summary of a control change it
+            // did not describe — and AUTH_IMMUTABLE cannot be undone.
+            setFlags = fields.setFlags ?? setFlags
+            clearFlags = fields.clearFlags ?? clearFlags
+            inflationDestination = fields.inflationDestination ?? inflationDestination
+            homeDomain = fields.homeDomain ?? homeDomain
         }
 
         for account in added {
@@ -261,6 +307,35 @@ public struct TreasuryProposalDescription: Equatable, Sendable {
                     ? "Stays switched off"
                     : "SWITCHED BACK ON \u{2014} weight \(masterWeight)"),
                 isPrincipal: masterWeight != 0
+            ))
+        }
+
+        if let setFlags {
+            lines.append(Line(
+                label: "Turns on account flags",
+                value: .text(Self.describeFlags(setFlags)),
+                isPrincipal: true
+            ))
+        }
+        if let clearFlags {
+            lines.append(Line(
+                label: "Turns off account flags",
+                value: .text(Self.describeFlags(clearFlags)),
+                isPrincipal: true
+            ))
+        }
+        if let inflationDestination {
+            lines.append(Line(
+                label: "Inflation destination",
+                value: .account(inflationDestination),
+                isPrincipal: true
+            ))
+        }
+        if let homeDomain {
+            lines.append(Line(
+                label: "Home domain",
+                value: .text(homeDomain.isEmpty ? "(cleared)" : homeDomain),
+                isPrincipal: true
             ))
         }
 

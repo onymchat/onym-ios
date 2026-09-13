@@ -195,6 +195,12 @@ public final class TreasuryProposalsFlow {
     /// Idempotent *while a stream is actually draining*, and resumable
     /// once one is not. Safe to call from every `.task` that shows this
     /// flow, however many times a view is rebuilt.
+    /// Whether this group has a treasury, without opening a
+    /// subscription — see `TreasuryRepository.hasTreasury`.
+    public func groupHasTreasury() async -> Bool {
+        await repository.hasTreasury(groupID: groupID)
+    }
+
     public func start() async {
         guard subscription == nil else { return }
         // Unstructured on purpose. An unstructured `Task` does not

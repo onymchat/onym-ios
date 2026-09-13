@@ -42,6 +42,7 @@ struct OnymIOSApp: App {
     /// the local, and the identity-change listener in `body` needs the
     /// same instance to clear it.
     private let treasuryFlowCache: TreasuryFlowCache
+    @State private var treasuryReturnOutcome = TreasuryReturnOutcome()
     private let proposalsFlowCache: TreasuryProposalsFlowCache
     private let treasuryBroadcaster: TreasuryBroadcaster
     private let messageRepository: MessageRepository
@@ -2244,6 +2245,7 @@ struct OnymIOSApp: App {
                     }
                     currentTask?.cancel()
                 }
+                .reasonAlert("Treasury", reason: $treasuryReturnOutcome.message)
                 .onOpenURL { url in
                     // Custom URL scheme (`onym://join?c=…`) and
                     // Universal Link cold-start both surface here on
@@ -2262,11 +2264,20 @@ struct OnymIOSApp: App {
                     // A link from anywhere else therefore does nothing.
                     if let xdr = DeeplinkCapture.signedTransactionXDR(from: url) {
                         Task {
-                            await TreasurySigningInteractor(
+                            let adopted = await TreasurySigningInteractor(
                                 treasury: treasuryRepository,
                                 identity: identityRepository,
                                 broadcaster: treasuryBroadcaster
                             ).adoptReturned(base64XDR: xdr)
+                            // Told either way. Attribution is by
+                            // verification, so "nothing accepted it" is
+                            // an ordinary outcome — and silence is
+                            // indistinguishable from success.
+                            if adopted == nil {
+                                treasuryReturnOutcome.notAdopted()
+                            } else {
+                                treasuryReturnOutcome.adopted()
+                            }
                         }
                     }
                 }

@@ -67,7 +67,16 @@ public struct TreasuryThreadSection: View {
                 .padding(.vertical, 10)
             }
         }
-        .task { await flow.start() }
+        .task {
+            // Asked before subscribing. Most chats hold no money, and a
+            // flow started for each one leaves a permanent continuation
+            // and a cached flow behind it. The cost is that a treasury
+            // created while this thread is already open shows up when it
+            // is next entered rather than immediately — the anchor
+            // arrives by inbox, so that is a re-entry away.
+            guard await flow.groupHasTreasury() else { return }
+            await flow.start()
+        }
         .onChange(of: open.isEmpty) { _, isEmpty in
             onContentChanged(!isEmpty)
         }

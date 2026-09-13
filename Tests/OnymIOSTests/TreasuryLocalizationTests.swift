@@ -289,9 +289,14 @@ final class TreasuryLocalizationTests: XCTestCase {
             result.replaceSubrange(match, with: scalar.map { String(Character($0)) } ?? "")
         }
         // Interpolations. Integers format as %lld, everything else %@.
-        while let match = result.range(of: #"\\\([^)]*\)"#, options: .regularExpression) {
+        // One level of nesting, so `\(Int(weight))` is matched whole —
+        // `[^)]*` stopped at the inner paren and left a stray ")".
+        while let match = result.range(
+            of: #"\\\((?:[^()]|\([^()]*\))*\)"#,
+            options: .regularExpression
+        ) {
             let expression = result[match]
-            let isInteger = ["count", "wrappedValue", "maximum"]
+            let isInteger = ["count", "wrappedValue", "maximum", "Int("]
                 .contains { expression.contains($0) }
             result.replaceSubrange(match, with: isInteger ? "%lld" : "%@")
         }
