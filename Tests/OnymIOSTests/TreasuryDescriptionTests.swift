@@ -25,7 +25,7 @@ final class TreasuryDescriptionTests: XCTestCase {
                 amount: try StellarAmount(decimalString: "25.5")
             )),
         ])
-        XCTAssertEqual(description.title, "Pay 25.5 XLM")
+        XCTAssertEqual(String(localized: description.title), "Pay 25.5 XLM")
         XCTAssertNil(description.caveat)
         // The two things worth checking are flagged for the UI to
         // emphasise, rather than each screen deciding for itself.
@@ -47,9 +47,13 @@ final class TreasuryDescriptionTests: XCTestCase {
                 amount: try StellarAmount(decimalString: "1")
             )),
         ])
-        XCTAssertEqual(description.title, "Pay 1 USDC")
+        XCTAssertEqual(String(localized: description.title), "Pay 1 USDC")
+        // The key is the format string now; the asset code is an
+        // argument. Checked through the rendered label so the
+        // assertion says what a reader sees.
         XCTAssertTrue(description.lines.contains {
-            $0.label == "USDC issued by" && $0.value == .account(issuer)
+            String(localized: $0.label) == "USDC issued by"
+                && $0.value == .account(issuer)
         })
     }
 
@@ -60,8 +64,8 @@ final class TreasuryDescriptionTests: XCTestCase {
                 limit: .max
             )),
         ])
-        XCTAssertEqual(description.title, "Hold USDC")
-        XCTAssertTrue(description.lines.contains { $0.label == "Reserve" })
+        XCTAssertEqual(String(localized: description.title), "Hold USDC")
+        XCTAssertTrue(description.lines.contains { $0.label.key == "Reserve" })
         XCTAssertNil(description.caveat)
     }
 
@@ -72,7 +76,7 @@ final class TreasuryDescriptionTests: XCTestCase {
                 limit: StellarAmount(stroops: 0)
             )),
         ])
-        XCTAssertEqual(description.title, "Stop holding USDC")
+        XCTAssertEqual(String(localized: description.title), "Stop holding USDC")
     }
 
     func test_addingASigner_namesTheKey() throws {
@@ -83,7 +87,7 @@ final class TreasuryDescriptionTests: XCTestCase {
         ])
         XCTAssertEqual(description.title, "Add a co-signer")
         XCTAssertTrue(description.lines.contains {
-            $0.label == "Add co-signer" && $0.value == .account(recipient)
+            $0.label.key == "Add co-signer" && $0.value == .account(recipient)
         })
     }
 
@@ -94,7 +98,7 @@ final class TreasuryDescriptionTests: XCTestCase {
             ))),
         ])
         XCTAssertEqual(description.title, "Remove a co-signer")
-        XCTAssertTrue(description.lines.contains { $0.label == "Remove co-signer" })
+        XCTAssertTrue(description.lines.contains { $0.label.key == "Remove co-signer" })
     }
 
     /// Re-enabling the treasury's own key would undo the thing that
@@ -105,10 +109,14 @@ final class TreasuryDescriptionTests: XCTestCase {
             StellarOperation(body: .setOptions(SetOptionsFields(masterWeight: 1))),
         ])
         let line = try XCTUnwrap(
-            description.lines.first { $0.label == "Treasury's own key" }
+            description.lines.first { $0.label.key == "Treasury's own key" }
         )
         XCTAssertTrue(line.isPrincipal)
-        guard case .text(let text) = line.value else { return XCTFail("expected text") }
+        // `.copy`, not `.text`: this line is a sentence this app wrote,
+        // and the two cases exist to keep that apart from a stranger's
+        // bytes.
+        guard case .copy(let resource) = line.value else { return XCTFail("expected copy") }
+        let text = String(localized: resource)
         XCTAssertTrue(text.contains("SWITCHED BACK ON"), text)
     }
 
@@ -121,14 +129,14 @@ final class TreasuryDescriptionTests: XCTestCase {
             [payment()],
             memo: .text("order-4417")
         )
-        let line = try XCTUnwrap(description.lines.first { $0.label == "Memo" })
+        let line = try XCTUnwrap(description.lines.first { $0.label.key == "Memo" })
         XCTAssertEqual(line.value, .text("order-4417"))
         XCTAssertTrue(line.isPrincipal, "a memo routes money and must stand out")
     }
 
     func test_anIdMemo_isShown() throws {
         let description = try describe([payment()], memo: .id(902_144))
-        let line = try XCTUnwrap(description.lines.first { $0.label == "Memo (id)" })
+        let line = try XCTUnwrap(description.lines.first { $0.label.key == "Memo (id)" })
         XCTAssertEqual(line.value, .text("902144"))
     }
 
@@ -137,13 +145,13 @@ final class TreasuryDescriptionTests: XCTestCase {
             [payment()],
             memo: .hash(Data(repeating: 0xAB, count: 32))
         )
-        let line = try XCTUnwrap(description.lines.first { $0.label == "Memo (hash)" })
+        let line = try XCTUnwrap(description.lines.first { $0.label.key == "Memo (hash)" })
         XCTAssertEqual(line.value, .text(String(repeating: "ab", count: 32)))
     }
 
     func test_noMemo_addsNoLine() throws {
         let description = try describe([payment()])
-        XCTAssertFalse(description.lines.contains { $0.label.hasPrefix("Memo") })
+        XCTAssertFalse(description.lines.contains { $0.label.key.hasPrefix("Memo") })
     }
 
     /// The fields `StellarOperation` decodes so a co-signer can see
@@ -155,7 +163,7 @@ final class TreasuryDescriptionTests: XCTestCase {
             StellarOperation(body: .setOptions(SetOptionsFields(setFlags: 0x4))),
         ])
         let line = try XCTUnwrap(
-            description.lines.first { $0.label == "Turns on account flags" }
+            description.lines.first { $0.label.key == "Turns on account flags" }
         )
         guard case .text(let text) = line.value else { return XCTFail("expected text") }
         XCTAssertTrue(text.contains("AUTH_IMMUTABLE"), text)
@@ -163,12 +171,44 @@ final class TreasuryDescriptionTests: XCTestCase {
         XCTAssertTrue(line.isPrincipal)
     }
 
+    /// The other two of the four, which the first version of this file
+    /// left unpinned — and they are the same shape as the bug it was
+    /// written to catch. A one-op `setOptions{inflationDestination:}`
+    /// verifies as a control change, so it renders under the title
+    /// "Change how many signatures are needed" and counts as explained,
+    /// meaning no caveat fires either.
+    func test_clearedFlags_areNamedRatherThanOmitted() throws {
+        let description = try describe([
+            StellarOperation(body: .setOptions(SetOptionsFields(clearFlags: 0x2))),
+        ])
+        let line = try XCTUnwrap(
+            description.lines.first { $0.label.key == "Turns off account flags" }
+        )
+        guard case .text(let text) = line.value else { return XCTFail("expected text") }
+        XCTAssertTrue(text.contains("AUTH_REVOCABLE"), text)
+        XCTAssertTrue(line.isPrincipal)
+    }
+
+    func test_anInflationDestination_isShown() throws {
+        let description = try describe([
+            StellarOperation(body: .setOptions(
+                SetOptionsFields(inflationDestination: recipient)
+            )),
+        ])
+        let line = try XCTUnwrap(
+            description.lines.first { $0.label.key == "Inflation destination" }
+        )
+        XCTAssertEqual(line.value, .account(recipient))
+        XCTAssertTrue(line.isPrincipal)
+        XCTAssertNil(description.caveat)
+    }
+
     func test_aHomeDomainChange_isShown() throws {
         let description = try describe([
             StellarOperation(body: .setOptions(SetOptionsFields(homeDomain: "example.com"))),
         ])
         XCTAssertTrue(description.lines.contains {
-            $0.label == "Home domain" && $0.value == .text("example.com")
+            $0.label.key == "Home domain" && $0.value == .text("example.com")
         })
     }
 
@@ -187,7 +227,7 @@ final class TreasuryDescriptionTests: XCTestCase {
                 signer: StellarSigner(key: second, weight: 1)
             ))),
         ])
-        let added = description.lines.filter { $0.label == "Add co-signer" }
+        let added = description.lines.filter { $0.label.key == "Add co-signer" }
         XCTAssertEqual(added.count, 2)
         XCTAssertEqual(Set(added.map(\.id)).count, 2, "both rows must survive ForEach")
         XCTAssertTrue(added.contains { $0.value == .account(first) })
@@ -221,7 +261,7 @@ final class TreasuryDescriptionTests: XCTestCase {
                 amount: StellarAmount(stroops: 999_999_999)
             )),
         ])
-        let caveat = try XCTUnwrap(description.caveat)
+        let caveat = String(localized: try XCTUnwrap(description.caveat))
         XCTAssertTrue(caveat.contains("Don't sign"), caveat)
     }
 
@@ -232,7 +272,7 @@ final class TreasuryDescriptionTests: XCTestCase {
                 startingBalance: StellarAmount(stroops: 1)
             )),
         ])
-        let caveat = try XCTUnwrap(description.caveat)
+        let caveat = String(localized: try XCTUnwrap(description.caveat))
         XCTAssertTrue(caveat.contains("Don't sign"), caveat)
         XCTAssertTrue(description.lines.isEmpty)
     }
@@ -250,9 +290,9 @@ final class TreasuryDescriptionTests: XCTestCase {
             ))),
         ])
         XCTAssertNil(description.caveat)
-        XCTAssertTrue(description.lines.contains { $0.label == "Signatures to spend" })
+        XCTAssertTrue(description.lines.contains { $0.label.key == "Signatures to spend" })
         XCTAssertTrue(description.lines.contains {
-            $0.label == "Signatures to change control"
+            $0.label.key == "Signatures to change control"
         })
     }
 

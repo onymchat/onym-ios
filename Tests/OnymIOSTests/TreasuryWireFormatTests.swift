@@ -186,43 +186,29 @@ final class TreasuryWireFormatTests: XCTestCase {
     /// These are the only ones that can actually steal a treasury
     /// message, which makes them the point of the suite — and the first
     /// version of this test checked the ones tried *after*, which is
-    /// backwards relative to the stated risk. Keys are distinct today;
-    /// the pin exists for future drift.
+    /// backwards relative to the stated risk.
+    ///
+    /// All six of them, now. The docstring said "the payloads tried
+    /// before" and the body checked two, so the announcement, the name
+    /// update and the invitation were never checked in the direction
+    /// that matters, and the avatar only incidentally, further down.
+    /// A test that names a set and checks a third of it is worse than
+    /// one that names what it does.
     func test_noPayloadTriedEarlier_decodesAsATreasuryPayload() throws {
-        let offer = try JSONEncoder().encode(GroupInviteOfferPayload(
-            introPublicKey: Data(repeating: 5, count: 32),
-            groupID: groupID,
-            groupName: "Flat",
-            inviterAlias: "Ada"
-        ))
-        let refresh = try JSONEncoder().encode(GroupStateRefreshRequest(
-            groupID: groupID,
-            requesterInboxPublicKey: Data(repeating: 6, count: 32),
-            requesterBlsPublicKey: Data(repeating: 7, count: 48)
-        ))
-        for (name, data) in [("invite offer", offer), ("refresh request", refresh)] {
+        for (name, data) in try payloadsTriedBeforeTreasury() {
             for (treasuryName, decode) in Self.treasuryDecoders {
                 XCTAssertFalse(decode(data), "\(name) decoded as \(treasuryName)")
             }
         }
     }
 
-    /// And the reverse for the same three: a treasury payload must not
-    /// be taken by an arm that runs before it.
+    /// And the reverse for the same six: a treasury payload must not be
+    /// taken by an arm that runs before it.
     func test_noTreasuryPayload_decodesAsAPayloadTriedEarlier() throws {
-        for (name, data) in try allTreasuryPayloadBytes() {
-            XCTAssertNil(
-                try? JSONDecoder().decode(GroupInviteOfferPayload.self, from: data),
-                "\(name) decoded as an invite offer"
-            )
-            XCTAssertNil(
-                try? JSONDecoder().decode(GroupStateRefreshRequest.self, from: data),
-                "\(name) decoded as a state-refresh request"
-            )
-            XCTAssertNil(
-                try? JSONDecoder().decode(GroupInvitationPayload.self, from: data),
-                "\(name) decoded as a group invitation"
-            )
+        for (treasuryName, data) in try allTreasuryPayloadBytes() {
+            for (name, decode) in Self.earlierDecoders {
+                XCTAssertFalse(decode(data), "\(treasuryName) decoded as \(name)")
+            }
         }
     }
 
@@ -300,6 +286,24 @@ final class TreasuryWireFormatTests: XCTestCase {
 
     // MARK: - Helpers
 
+    /// Every arm `IncomingMessageDispatcher` tries ahead of the
+    /// treasury arm, in the order it tries them. Kept as one list so
+    /// the two directions above cannot check different sets.
+    private static let earlierDecoders: [(String, (Data) -> Bool)] = [
+        ("invite offer", { (try? JSONDecoder().decode(
+            GroupInviteOfferPayload.self, from: $0)) != nil }),
+        ("state-refresh request", { (try? JSONDecoder().decode(
+            GroupStateRefreshRequest.self, from: $0)) != nil }),
+        ("member announcement", { (try? JSONDecoder().decode(
+            MemberAnnouncementPayload.self, from: $0)) != nil }),
+        ("avatar update", { (try? JSONDecoder().decode(
+            GroupAvatarPayload.self, from: $0)) != nil }),
+        ("name update", { (try? JSONDecoder().decode(
+            GroupNamePayload.self, from: $0)) != nil }),
+        ("group invitation", { (try? JSONDecoder().decode(
+            GroupInvitationPayload.self, from: $0)) != nil }),
+    ]
+
     private static let treasuryDecoders: [(String, (Data) -> Bool)] = [
         ("declaration", { (try? JSONDecoder().decode(
             TreasurySignerDeclarationPayload.self, from: $0)) != nil }),
@@ -310,6 +314,67 @@ final class TreasuryWireFormatTests: XCTestCase {
         ("signature", { (try? JSONDecoder().decode(
             TreasurySignaturePayload.self, from: $0)) != nil }),
     ]
+
+    /// One encoded instance of every arm the dispatcher tries before
+    /// the treasury arm. Real values, not hand-written JSON: a
+    /// disjointness pin built from a shape someone typed out is a pin
+    /// against that person's idea of the shape.
+    private func payloadsTriedBeforeTreasury() throws -> [(String, Data)] {
+        let encoder = JSONEncoder()
+        let announcement = try MemberAnnouncementPayload(
+            version: 1,
+            groupId: groupID,
+            newMember: try MemberAnnouncementPayload.AnnouncedMember(
+                blsPub: Data(repeating: 8, count: 48),
+                inboxPub: Data(repeating: 9, count: 32),
+                alias: "Ada",
+                sendingPub: Data(repeating: 10, count: 32)
+            ),
+            adminAlias: "Bo"
+        )
+        let invitation = GroupInvitationPayload(
+            version: 1,
+            groupID: groupID,
+            groupSecret: Data(repeating: 11, count: 32),
+            name: "Flat",
+            members: [],
+            epoch: 1,
+            salt: Data(repeating: 12, count: 32),
+            commitment: nil,
+            tierRaw: 0,
+            groupTypeRaw: "standard",
+            adminPubkeyHex: nil
+        )
+        return [
+            ("invite offer", try encoder.encode(GroupInviteOfferPayload(
+                introPublicKey: Data(repeating: 5, count: 32),
+                groupID: groupID,
+                groupName: "Flat",
+                inviterAlias: "Ada"
+            ))),
+            ("state-refresh request", try encoder.encode(GroupStateRefreshRequest(
+                groupID: groupID,
+                requesterInboxPublicKey: Data(repeating: 6, count: 32),
+                requesterBlsPublicKey: Data(repeating: 7, count: 48)
+            ))),
+            ("member announcement", try encoder.encode(announcement)),
+            ("avatar update", try encoder.encode(GroupAvatarPayload(
+                version: 1,
+                groupID: groupID,
+                senderBlsPubkeyHex: "aa",
+                sentAtMillis: 1,
+                avatar: nil
+            ))),
+            ("name update", try encoder.encode(GroupNamePayload(
+                version: 1,
+                groupID: groupID,
+                senderBlsPubkeyHex: "aa",
+                sentAtMillis: 1,
+                name: "Flat"
+            ))),
+            ("group invitation", try encoder.encode(invitation)),
+        ]
+    }
 
     private func allTreasuryPayloadBytes() throws -> [(String, Data)] {
         [

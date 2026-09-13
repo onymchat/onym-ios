@@ -193,7 +193,6 @@ final class TreasuryVerifierTests: XCTestCase {
         let standing = TreasuryProposalVerifier.standing(
             of: proposal,
             account: account(sequence: 5, signers: [], thresholds: .init(low: 1, medium: 1, high: 1)),
-            declaredSigners: [],
             now: Date()
         )
         XCTAssertEqual(standing, .superseded)
@@ -205,7 +204,6 @@ final class TreasuryVerifierTests: XCTestCase {
         let standing = TreasuryProposalVerifier.standing(
             of: proposal,
             account: account(sequence: 9, signers: [], thresholds: .init(low: 1, medium: 1, high: 1)),
-            declaredSigners: [],
             now: Date()
         )
         XCTAssertEqual(standing, .superseded)
@@ -227,7 +225,6 @@ final class TreasuryVerifierTests: XCTestCase {
                     signers: [StellarSigner(key: signer, weight: 1)],
                     thresholds: thresholds
                 ),
-                declaredSigners: [signer],
                 now: Date()
             ),
             .collecting(weight: 1, required: 2)
@@ -242,26 +239,26 @@ final class TreasuryVerifierTests: XCTestCase {
                     signers: [StellarSigner(key: signer, weight: 2)],
                     thresholds: thresholds
                 ),
-                declaredSigners: [signer],
                 now: Date()
             ),
             .ready
         )
     }
 
-    /// A signature from an account nobody declared carries no weight
-    /// here, even when the chain would give it weight.
+    /// A signature from an account the chain does not list as a signer
+    /// carries no weight, however this device has it stored.
     ///
-    /// The first version of this put the signer in neither the declared
-    /// list nor the on-chain one — and `HorizonAccount.weight(of:)`
-    /// filters by the on-chain list itself, so the answer was zero
-    /// whether or not `standing` consulted `declaredSigners` at all.
-    /// Deleting the `signers(among:)` filter left it green. The signer
-    /// is on-chain at weight 1 now, and only the declaration is
-    /// missing, so the filter is the only thing keeping this at zero.
-    func test_aSignatureFromAnUndeclaredAccount_addsNoWeight() throws {
-        let undeclared = TreasuryTestKeys.account(7)
-        let declared = TreasuryTestKeys.account(4)
+    /// This test used to assert the opposite filter — that an account
+    /// missing from the *declarations* carried no weight — and that
+    /// rule was wrong. Declaration broadcast is best-effort, so a
+    /// device that missed one under-counted a proposal the network
+    /// would accept and refused to submit it, with nothing on screen to
+    /// explain the disagreement. Weight comes from `account.signers`
+    /// now, and this pins the direction that actually protects anyone:
+    /// a declaration cannot conjure weight the ledger does not grant.
+    func test_aSignatureFromAnAccountTheChainDoesNotList_addsNoWeight() throws {
+        let notASigner = TreasuryTestKeys.account(7)
+        let realSigner = TreasuryTestKeys.account(4)
         var proposal = try makeProposal(sequence: 1)
         try proposal.envelope.sign(with: TreasuryTestKeys.key(7), network: .testnet)
 
@@ -269,18 +266,36 @@ final class TreasuryVerifierTests: XCTestCase {
             of: proposal,
             account: account(
                 sequence: 0,
-                signers: [
-                    StellarSigner(key: declared, weight: 1),
-                    // On-chain, and would be counted if the declaration
-                    // filter were not there.
-                    StellarSigner(key: undeclared, weight: 1),
-                ],
+                // `notASigner` is deliberately absent, and declared
+                // locally by the fixture below — the only thing keeping
+                // this at zero is that the chain does not list it.
+                signers: [StellarSigner(key: realSigner, weight: 1)],
                 thresholds: .init(low: 1, medium: 1, high: 1)
             ),
-            declaredSigners: [declared],
             now: Date()
         )
         XCTAssertEqual(standing, .collecting(weight: 0, required: 1))
+        XCTAssertNotEqual(notASigner, realSigner)
+    }
+
+    /// The other direction, which is the one the change bought: a
+    /// signer the chain lists counts even though this device holds no
+    /// declaration for it.
+    func test_aSignatureFromAnUndeclaredButOnChainSigner_counts() throws {
+        let onChainOnly = TreasuryTestKeys.account(7)
+        var proposal = try makeProposal(sequence: 1)
+        try proposal.envelope.sign(with: TreasuryTestKeys.key(7), network: .testnet)
+
+        let standing = TreasuryProposalVerifier.standing(
+            of: proposal,
+            account: account(
+                sequence: 0,
+                signers: [StellarSigner(key: onChainOnly, weight: 1)],
+                thresholds: .init(low: 1, medium: 1, high: 1)
+            ),
+            now: Date()
+        )
+        XCTAssertEqual(standing, .ready)
     }
 
     /// The positive half of the PR's headline refusals: a proposal that
@@ -299,10 +314,68 @@ final class TreasuryVerifierTests: XCTestCase {
                 signers: [],
                 thresholds: .init(low: 1, medium: 1, high: 1)
             ),
-            declaredSigners: [],
             now: Date()
         )
         XCTAssertEqual(standing, .expired)
+    }
+
+    // MARK: - Sequence
+
+    /// Both arms, because the guard has two and a test of one half
+    /// leaves the other deletable with everything still green. This is
+    /// the other half of the frozen-treasury attack that `noExpiry` and
+    /// `expiresTooLate` close, and it was the one rule in the verifier
+    /// with no coverage at all: the helper never passed
+    /// `currentSequence`, so the whole check could be removed without a
+    /// single failure.
+    func test_aSequenceAlreadyPassed_isRefused() throws {
+        let envelope = try envelope(
+            source: treasuryAccount,
+            sequenceNumber: 7,
+            operations: [payment()]
+        )
+        XCTAssertEqual(
+            verify(envelope, currentSequence: 7),
+            .rejected(.implausibleSequence)
+        )
+        XCTAssertEqual(
+            verify(envelope, currentSequence: 9),
+            .rejected(.implausibleSequence)
+        )
+    }
+
+    func test_aSequenceFarBeyondTheNext_isRefused() throws {
+        let lookahead = TreasuryProposalVerifier.maxSequenceLookahead
+        let tooFar = try envelope(
+            source: treasuryAccount,
+            sequenceNumber: 10 + lookahead + 1,
+            operations: [payment()]
+        )
+        XCTAssertEqual(
+            verify(tooFar, currentSequence: 10),
+            .rejected(.implausibleSequence)
+        )
+
+        // The far edge of the window is inside it, so the bound is the
+        // one documented rather than one off it.
+        let atTheEdge = try envelope(
+            source: treasuryAccount,
+            sequenceNumber: 10 + lookahead,
+            operations: [payment()]
+        )
+        XCTAssertEqual(verify(atTheEdge, currentSequence: 10), .accepted(.payment))
+    }
+
+    /// Without a live read there is no basis to judge a sequence, and
+    /// refusing on that basis would drop genuine proposals whenever the
+    /// network is unreachable.
+    func test_withNoLedgerRead_theSequenceIsNotJudged() throws {
+        let far = try envelope(
+            source: treasuryAccount,
+            sequenceNumber: 9_999_999,
+            operations: [payment()]
+        )
+        XCTAssertEqual(verify(far, currentSequence: nil), .accepted(.payment))
     }
 
     // MARK: - Helpers
@@ -332,15 +405,31 @@ final class TreasuryVerifierTests: XCTestCase {
         _ envelope: TransactionEnvelope,
         network: StellarNetwork = .testnet,
         proposer: String = "aa",
-        useDefaultTreasury: Bool = true
+        useDefaultTreasury: Bool = true,
+        currentSequence: Int64? = nil
     ) -> TreasuryProposalVerifier.Outcome {
         TreasuryProposalVerifier.verify(
             envelope: envelope,
             network: network,
             treasury: useDefaultTreasury ? defaultTreasury : nil,
             proposerBlsPubkeyHex: proposer,
-            group: group
+            group: group,
+            currentSequence: currentSequence
         )
+    }
+
+    private func envelope(
+        source: StellarAccountID,
+        sequenceNumber: Int64,
+        operations: [StellarOperation]
+    ) throws -> TransactionEnvelope {
+        TransactionEnvelope(transaction: try StellarTransaction(
+            sourceAccount: source,
+            fee: 100,
+            sequenceNumber: sequenceNumber,
+            timeBounds: Self.soon,
+            operations: operations
+        ))
     }
 
     private var defaultTreasury: Treasury {

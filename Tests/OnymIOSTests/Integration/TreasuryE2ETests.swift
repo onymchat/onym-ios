@@ -153,10 +153,16 @@ final class TreasuryE2ETests: XCTestCase {
         // co-signers are on it — read back from the ledger, not from
         // what we asked for.
         let onChain = try await ledger.account(treasury.account)
-        let masterWeight = onChain.signers
-            .first { $0.key == treasury.account }
-            .map(\.weight) ?? 0
-        XCTAssertEqual(masterWeight, 0, "the treasury's own key must be switched off")
+        // `?? 0` would default to the passing value, so the assertion
+        // would also hold with the master key absent entirely — which
+        // is in fact what Horizon returns for weight 0, meaning the
+        // check could never fail either way. Absent or zero, stated as
+        // the two acceptable answers rather than folded into one.
+        let master = onChain.signers.first { $0.key == treasury.account }
+        XCTAssertTrue(
+            master == nil || master?.weight == 0,
+            "the treasury's own key must be switched off, was \(String(describing: master))"
+        )
         let liveSigners: Set<StellarAccountID> = Set(
             onChain.signers.filter { $0.weight > 0 }.map(\.key)
         )
@@ -222,7 +228,7 @@ final class TreasuryE2ETests: XCTestCase {
         XCTAssertNil(boStored.rejection, "Bo refused a genuine proposal")
         // What Bo is shown comes from the bytes, not from Ada.
         let description = TreasuryProposalDescription(boStored.proposal)
-        XCTAssertEqual(description.title, "Pay 5 XLM")
+        XCTAssertEqual(String(localized: description.title), "Pay 5 XLM")
         XCTAssertNil(description.caveat)
         XCTAssertTrue(description.lines.contains { $0.value == .account(recipient) })
 
@@ -423,6 +429,91 @@ final class TreasuryE2ETests: XCTestCase {
             }
             XCTAssertEqual(codes, ["tx_bad_auth"])
         }
+    }
+
+    /// The fake refuses what the network refuses — the three checks it
+    /// was missing, each of which could otherwise let a future change
+    /// look correct against a more permissive ledger than production.
+    func test_theLedgerRefusesExpiredUnderfundedAndUnaffordable() async throws {
+        let loaded = await ada.currentIdentity()
+        let adaIdentity = try XCTUnwrap(loaded)
+        let signer = try StellarAccountID(accountID: adaIdentity.treasuryAccountID)
+        let treasuryAccount = TreasuryTestKeys.account(80)
+        let recipient = TreasuryTestKeys.account(81)
+
+        func ledgerWithTreasury(balance: Int64) async -> LedgerHorizon {
+            let ledger = LedgerHorizon()
+            await ledger.create(account: treasuryAccount, balance: balance)
+            await ledger.setControl(
+                of: treasuryAccount,
+                signers: [signer.accountID: 1],
+                thresholds: HorizonThresholds(low: 1, medium: 1, high: 1)
+            )
+            await ledger.create(account: recipient, balance: 10_000_000)
+            return ledger
+        }
+
+        func signedPayment(
+            stroops: Int64,
+            fee: UInt32 = 100,
+            maxTime: UInt64 = 4_000_000_000
+        ) async throws -> TransactionEnvelope {
+            let transaction = try StellarTransaction(
+                sourceAccount: treasuryAccount,
+                fee: fee,
+                sequenceNumber: 2,
+                timeBounds: StellarTimeBounds(minTime: 0, maxTime: maxTime),
+                operations: [
+                    StellarOperation(body: .payment(
+                        destination: recipient,
+                        asset: .native,
+                        amount: StellarAmount(stroops: stroops)
+                    )),
+                ]
+            )
+            var envelope = TransactionEnvelope(transaction: transaction)
+            let signature = try await ada.signWithTreasuryKey(
+                transaction.hash(network: .testnet)
+            )
+            try envelope.addSignature(signature, from: signer, network: .testnet)
+            return envelope
+        }
+
+        func codes(from error: Error) -> [String] {
+            guard case HorizonError.submissionFailed(let codes, _) = error else { return [] }
+            return codes
+        }
+
+        // Past its time bound. The ledger's clock is moved rather than
+        // the envelope's bound, because a bound in the past is one the
+        // proposal verifier would have refused long before this.
+        let expiredLedger = await ledgerWithTreasury(balance: 100_000_000)
+        await expiredLedger.setNow { Date(timeIntervalSince1970: 4_000_000_001) }
+        do {
+            _ = try await expiredLedger.submit(try await signedPayment(stroops: 1_000))
+            XCTFail("the ledger accepted an expired transaction")
+        } catch {
+            XCTAssertEqual(codes(from: error), ["tx_too_late"])
+        }
+
+        // Spending into the reserve. The balance covers the amount on
+        // its face and does not cover it once the account's minimum is
+        // taken out, which is the arithmetic the treasury screen shows.
+        let poorLedger = await ledgerWithTreasury(balance: 20_000_000)
+        do {
+            _ = try await poorLedger.submit(try await signedPayment(stroops: 19_000_000))
+            XCTFail("the ledger accepted a payment that spends the reserve")
+        } catch {
+            XCTAssertEqual(codes(from: error), ["tx_failed", "op_underfunded"])
+        }
+
+        // And the fee is a real debit, taken from the source whatever
+        // else happens.
+        let payingLedger = await ledgerWithTreasury(balance: 100_000_000)
+        _ = try await payingLedger.submit(try await signedPayment(stroops: 1_000, fee: 5_000))
+        let after = try await payingLedger.account(treasuryAccount)
+        let balance = try XCTUnwrap(after.balances.first { $0.asset == .native })
+        XCTAssertEqual(balance.balance.stroops, 100_000_000 - 1_000 - 5_000)
     }
 
     /// A proposal spending an account that is not this group's treasury
@@ -626,6 +717,12 @@ private actor LedgerHorizon: HorizonClient {
 
     private var accounts: [String: Account] = [:]
 
+    /// The ledger's clock, so a test can move past a time bound without
+    /// waiting for one. Defaults to the real one.
+    var now: () -> Date = { Date() }
+
+    func setNow(_ clock: @escaping @Sendable () -> Date) { now = clock }
+
     /// What the acting account requires for this operation. Matches the
     /// protocol's classes: payments and trustlines are medium, anything
     /// that changes control is high.
@@ -730,6 +827,29 @@ private actor LedgerHorizon: HorizonClient {
             throw HorizonError.submissionFailed(resultCodes: ["tx_bad_seq"], body: "")
         }
 
+        // An envelope past its time bound is `tx_too_late`, and until
+        // now this fake ignored bounds entirely — so an expired
+        // transaction submitted happily. Of all the gaps to leave in a
+        // fake, that is the one most likely to make a future test pass
+        // for the wrong reason: a great deal of this design rests on
+        // time bounds, and a ledger that does not enforce them would
+        // let a change removing them look correct.
+        if let bounds = transaction.timeBounds, bounds.maxTime != 0 {
+            let deadline = Date(timeIntervalSince1970: TimeInterval(bounds.maxTime))
+            if now() > deadline {
+                throw HorizonError.submissionFailed(
+                    resultCodes: ["tx_too_late"],
+                    body: "maxTime \(bounds.maxTime)"
+                )
+            }
+        }
+
+        // The fee is debited from the source whatever happens next, and
+        // it has to be there to begin with.
+        guard (source.balances["XLM"] ?? 0) >= Int64(transaction.fee) else {
+            throw HorizonError.submissionFailed(resultCodes: ["tx_insufficient_fee"], body: "")
+        }
+
         // Each operation is authorised against the account state *at
         // that point in the transaction*, then applied — which is what
         // makes operation order observable.
@@ -786,6 +906,23 @@ private actor LedgerHorizon: HorizonClient {
                         body: destination.accountID
                     )
                 }
+                // Spendable is the balance minus the reserve Stellar
+                // locks while the account exists. Without this the fake
+                // applied a payment that emptied an account past its
+                // minimum — `op_underfunded` on the real network — and
+                // the treasury screen's whole "spendable" arithmetic
+                // could have been wrong with every test green.
+                let acting = accounts[actingID]
+                let reserve = Self.minimumBalance(of: acting)
+                let available = (acting?.balances["XLM"] ?? 0)
+                    - reserve
+                    - Int64(transaction.fee)
+                guard available >= amount.stroops else {
+                    throw HorizonError.submissionFailed(
+                        resultCodes: ["tx_failed", "op_underfunded"],
+                        body: "\(actingID) has \(available) spendable"
+                    )
+                }
                 accounts[actingID]?.balances["XLM", default: 0] -= amount.stroops
                 accounts[destination.accountID]?.balances["XLM", default: 0] += amount.stroops
 
@@ -815,7 +952,16 @@ private actor LedgerHorizon: HorizonClient {
 
         source = accounts[sourceID] ?? source
         source.sequence = transaction.sequenceNumber
+        source.balances["XLM", default: 0] -= Int64(transaction.fee)
         accounts[sourceID] = source
         return transaction.hash(network: network).hexString
+    }
+
+    /// `(2 + subentries) × baseReserve`, with signers beyond the master
+    /// key as the subentries this fake models.
+    private static func minimumBalance(of account: Account?) -> Int64 {
+        guard let account else { return 0 }
+        let subentries = Int64(max(account.signers.count - 1, 0))
+        return (2 + subentries) * 5_000_000
     }
 }
