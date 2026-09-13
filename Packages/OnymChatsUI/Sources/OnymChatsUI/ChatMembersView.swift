@@ -375,7 +375,7 @@ struct ChatMembersView: View {
                     Card {
                         Row(
                             title: "Shared money",
-                            subtitle: "A Stellar account this chat controls together",
+                            subtitleKey: "A Stellar account this chat controls together",
                             last: true
                         ) {
                             IconTile(symbol: "building.columns.fill", bg: OnymTile.green)

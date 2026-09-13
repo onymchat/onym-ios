@@ -1,4 +1,5 @@
 import Foundation
+import OnymFoundation
 import OnymGroup
 import OnymIdentity
 import OnymStellar
@@ -245,7 +246,7 @@ public struct TreasuryCreationInteractor: Sendable {
                     publicKey: funder
                 ),
                 treasuryAccountID: treasuryKey.account.accountID,
-                creationTxHash: hash.map { String(format: "%02x", $0) }.joined()
+                creationTxHash: hash.hexString
             )
         }
 
