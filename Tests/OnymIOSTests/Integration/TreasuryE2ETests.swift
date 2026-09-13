@@ -2,6 +2,7 @@ import CryptoKit
 import Foundation
 import XCTest
 @testable import OnymIOS
+import OnymFoundation
 import OnymGroup
 import OnymIdentity
 import OnymStellar
@@ -86,8 +87,8 @@ final class TreasuryE2ETests: XCTestCase {
             owner: adaOwner,
             me: adaIdentity,
             peer: boIdentity,
-            adminBlsHex: adaIdentity.blsPublicKey.hex,
-            adminEd25519Hex: adaIdentity.stellarPublicKey.hex,
+            adminBlsHex: adaIdentity.blsPublicKey.hexString,
+            adminEd25519Hex: adaIdentity.stellarPublicKey.hexString,
             ledger: ledger
         )
         let boSide = try await makeSide(
@@ -95,8 +96,8 @@ final class TreasuryE2ETests: XCTestCase {
             owner: boOwner,
             me: boIdentity,
             peer: adaIdentity,
-            adminBlsHex: adaIdentity.blsPublicKey.hex,
-            adminEd25519Hex: adaIdentity.stellarPublicKey.hex,
+            adminBlsHex: adaIdentity.blsPublicKey.hexString,
+            adminEd25519Hex: adaIdentity.stellarPublicKey.hexString,
             ledger: ledger
         )
 
@@ -106,7 +107,7 @@ final class TreasuryE2ETests: XCTestCase {
             await side.repository.record(TreasurySignerDeclarationRecord(
                 groupID: groupIDHex,
                 ownerIdentityID: side.owner,
-                memberBlsPubkeyHex: identity.blsPublicKey.hex,
+                memberBlsPubkeyHex: identity.blsPublicKey.hexString,
                 account: account,
                 source: .onym,
                 signature: try sign(
@@ -123,7 +124,7 @@ final class TreasuryE2ETests: XCTestCase {
         await adaSide.repository.record(TreasurySignerDeclarationRecord(
             groupID: groupIDHex,
             ownerIdentityID: adaOwner,
-            memberBlsPubkeyHex: boIdentity.blsPublicKey.hex,
+            memberBlsPubkeyHex: boIdentity.blsPublicKey.hexString,
             account: boSigner,
             source: .onym,
             signature: try sign(
@@ -178,7 +179,12 @@ final class TreasuryE2ETests: XCTestCase {
         XCTAssertEqual(boTreasury?.account, treasury.account)
 
         // 4. Ada proposes a payment. She signs her own proposal.
+        //
+        // The recipient has to exist: real Horizon answers
+        // `op_no_destination` for an unfunded one, and the ledger fake
+        // now does too.
         let recipient = TreasuryTestKeys.account(77)
+        await ledger.create(account: recipient, balance: 0)
         let proposed = await adaSide.proposing.proposePayment(
             groupID: groupIDHex,
             destination: recipient,
@@ -203,7 +209,7 @@ final class TreasuryE2ETests: XCTestCase {
             TreasuryProposalPayload(
                 groupID: groupIDData,
                 proposalID: proposal.id,
-                proposerBlsPubkeyHex: adaIdentity.blsPublicKey.hex,
+                proposerBlsPubkeyHex: adaIdentity.blsPublicKey.hexString,
                 xdr: proposal.envelope.base64XDR,
                 networkPassphrase: StellarNetwork.testnet.passphrase,
                 sentAtMillis: 2
@@ -262,6 +268,110 @@ final class TreasuryE2ETests: XCTestCase {
         }
     }
 
+    /// The claim the ledger fake exists to support: creation applies
+    /// whole or not at all, and its operations are in an order the
+    /// network will accept.
+    ///
+    /// Moving the lockdown ahead of the signer installs makes the
+    /// treasury's own key weightless before the operations that need it
+    /// run — so the fake must refuse it. Previously it applied
+    /// `setOptions` from any source without consulting weights, and
+    /// this reordering passed every assertion.
+    func test_aCreationWithTheLockdownFirst_isRefusedByTheLedger() async throws {
+        let loaded = await ada.currentIdentity()
+        let adaIdentity = try XCTUnwrap(loaded)
+        let adaSigner = try StellarAccountID(accountID: adaIdentity.treasuryAccountID)
+        let ledger = LedgerHorizon()
+        await ledger.create(account: adaSigner, balance: 1_000_000_000)
+
+        let treasuryKey = try EphemeralTreasuryKey()
+        let bounds = StellarTimeBounds(minTime: 0, maxTime: 4_000_000_000)
+        // The lockdown first, then the signer install it would forbid.
+        let transaction = try StellarTransaction(
+            sourceAccount: adaSigner,
+            fee: 300,
+            sequenceNumber: 2,
+            timeBounds: bounds,
+            operations: [
+                StellarOperation(body: .createAccount(
+                    destination: treasuryKey.account,
+                    startingBalance: StellarAmount(stroops: 20_000_000)
+                )),
+                StellarOperation(sourceAccount: treasuryKey.account, body: .setOptions(
+                    SetOptionsFields(masterWeight: 0, lowThreshold: 1,
+                                     mediumThreshold: 1, highThreshold: 1)
+                )),
+                StellarOperation(sourceAccount: treasuryKey.account, body: .setOptions(
+                    SetOptionsFields(signer: StellarSigner(key: adaSigner, weight: 1))
+                )),
+            ]
+        )
+        var envelope = TransactionEnvelope(transaction: transaction)
+        try treasuryKey.sign(&envelope, network: .testnet)
+        let signature = try await ada.signWithTreasuryKey(
+            transaction.hash(network: .testnet)
+        )
+        try envelope.addSignature(signature, from: adaSigner, network: .testnet)
+
+        do {
+            _ = try await ledger.submit(envelope)
+            XCTFail("the ledger accepted a creation whose lockdown ran first")
+        } catch let error as HorizonError {
+            guard case .submissionFailed(let codes, _) = error else {
+                return XCTFail("expected an auth failure, got \(error)")
+            }
+            XCTAssertEqual(codes, ["tx_bad_auth"])
+        }
+    }
+
+    /// And the other half: an under-signed payment is refused by the
+    /// ledger, not only by the client-side readiness check.
+    func test_anUnderSignedPayment_isRefusedByTheLedger() async throws {
+        let loaded = await ada.currentIdentity()
+        let adaIdentity = try XCTUnwrap(loaded)
+        let adaSigner = try StellarAccountID(accountID: adaIdentity.treasuryAccountID)
+        let ledger = LedgerHorizon()
+        let treasuryAccount = TreasuryTestKeys.account(70)
+        await ledger.create(account: treasuryAccount, balance: 100_000_000)
+        await ledger.setControl(
+            of: treasuryAccount,
+            signers: [adaSigner.accountID: 1, TreasuryTestKeys.account(71).accountID: 1],
+            thresholds: HorizonThresholds(low: 1, medium: 2, high: 2)
+        )
+        let recipient = TreasuryTestKeys.account(72)
+        await ledger.create(account: recipient, balance: 0)
+
+        let transaction = try StellarTransaction(
+            sourceAccount: treasuryAccount,
+            fee: 100,
+            sequenceNumber: 2,
+            timeBounds: StellarTimeBounds(minTime: 0, maxTime: 4_000_000_000),
+            operations: [
+                StellarOperation(body: .payment(
+                    destination: recipient,
+                    asset: .native,
+                    amount: StellarAmount(stroops: 1_000)
+                )),
+            ]
+        )
+        var envelope = TransactionEnvelope(transaction: transaction)
+        let signature = try await ada.signWithTreasuryKey(
+            transaction.hash(network: .testnet)
+        )
+        try envelope.addSignature(signature, from: adaSigner, network: .testnet)
+
+        // One of the two required signatures.
+        do {
+            _ = try await ledger.submit(envelope)
+            XCTFail("the ledger accepted a payment one signature short")
+        } catch let error as HorizonError {
+            guard case .submissionFailed(let codes, _) = error else {
+                return XCTFail("expected an auth failure, got \(error)")
+            }
+            XCTAssertEqual(codes, ["tx_bad_auth"])
+        }
+    }
+
     /// A proposal spending an account that is not this group's treasury
     /// is refused on arrival — the rule that stops a member collecting
     /// the group's signatures for their own transaction.
@@ -279,8 +389,8 @@ final class TreasuryE2ETests: XCTestCase {
             owner: boOwner,
             me: boIdentity,
             peer: adaIdentity,
-            adminBlsHex: adaIdentity.blsPublicKey.hex,
-            adminEd25519Hex: adaIdentity.stellarPublicKey.hex,
+            adminBlsHex: adaIdentity.blsPublicKey.hexString,
+            adminEd25519Hex: adaIdentity.stellarPublicKey.hexString,
             ledger: ledger
         )
         let treasuryAccount = TreasuryTestKeys.account(60)
@@ -312,7 +422,7 @@ final class TreasuryE2ETests: XCTestCase {
             TreasuryProposalPayload(
                 groupID: groupIDData,
                 proposalID: id,
-                proposerBlsPubkeyHex: adaIdentity.blsPublicKey.hex,
+                proposerBlsPubkeyHex: adaIdentity.blsPublicKey.hexString,
                 xdr: rogue.base64XDR,
                 networkPassphrase: StellarNetwork.testnet.passphrase,
                 sentAtMillis: 1
@@ -372,12 +482,12 @@ final class TreasuryE2ETests: XCTestCase {
         // Ada was allowed to set the treasury up.
         group.adminPubkeyHex = adminBlsHex
         group.memberProfiles = [
-            me.blsPublicKey.hex: MemberProfile(
+            me.blsPublicKey.hexString: MemberProfile(
                 alias: "Me",
                 inboxPublicKey: me.inboxPublicKey,
                 sendingPubkey: me.stellarPublicKey
             ),
-            peer.blsPublicKey.hex: MemberProfile(
+            peer.blsPublicKey.hexString: MemberProfile(
                 alias: "Peer",
                 inboxPublicKey: peer.inboxPublicKey,
                 sendingPubkey: peer.stellarPublicKey
@@ -441,10 +551,6 @@ final class TreasuryE2ETests: XCTestCase {
     }
 }
 
-private extension Data {
-    var hex: String { map { String(format: "%02x", $0) }.joined() }
-}
-
 /// A Horizon that applies what it is given.
 ///
 /// Not a stub returning canned answers: `submit` interprets the
@@ -453,6 +559,10 @@ private extension Data {
 /// actually wrote. A fake that merely said "ok" would let a creation
 /// transaction with its operations in the wrong order pass.
 private actor LedgerHorizon: HorizonClient {
+    /// The network this ledger stands for. Was hardcoded to testnet in
+    /// the returned hash while the authorisation checks used it too.
+    private let network: StellarNetwork = .testnet
+
     private struct Account {
         var sequence: Int64 = 0
         var balances: [String: Int64] = [:]
@@ -463,14 +573,40 @@ private actor LedgerHorizon: HorizonClient {
 
     private var accounts: [String: Account] = [:]
 
+    /// What the acting account requires for this operation. Matches the
+    /// protocol's classes: payments and trustlines are medium, anything
+    /// that changes control is high.
+    private func threshold(for operation: StellarOperation, on account: Account) -> UInt32 {
+        switch operation.body {
+        case .setOptions:
+            return max(account.thresholds.high, 1)
+        case .payment, .changeTrust:
+            return max(account.thresholds.medium, 1)
+        case .createAccount:
+            return max(account.thresholds.low, 1)
+        }
+    }
+
     func create(account: StellarAccountID, balance: Int64) {
         accounts[account.accountID] = Account(
             sequence: 1,
             balances: ["XLM": balance],
             // A fresh account is controlled by its own key at weight 1.
             signers: [account.accountID: 1],
+            thresholds: HorizonThresholds(low: 1, medium: 1, high: 1),
             key: account
         )
+    }
+
+    /// Set an account's signers and thresholds directly, for tests that
+    /// need a configured treasury without running creation.
+    func setControl(
+        of account: StellarAccountID,
+        signers: [String: UInt32],
+        thresholds: HorizonThresholds
+    ) {
+        accounts[account.accountID]?.signers = signers
+        accounts[account.accountID]?.thresholds = thresholds
     }
 
     func account(_ id: StellarAccountID) async throws -> HorizonAccount {
@@ -482,7 +618,11 @@ private actor LedgerHorizon: HorizonClient {
             sequenceNumber: account.sequence,
             balances: account.balances.map { code, amount in
                 HorizonBalance(
-                    asset: .native,
+                    // The code was being discarded, so every balance
+                    // reported as the native asset.
+                    asset: code == "XLM"
+                        ? .native
+                        : ((try? StellarAsset(code: code, issuer: account.key)) ?? .native),
                     balance: StellarAmount(stroops: amount),
                     limit: nil
                 )
@@ -516,23 +656,55 @@ private actor LedgerHorizon: HorizonClient {
             throw HorizonError.submissionFailed(resultCodes: ["tx_bad_seq"], body: "")
         }
 
+
+        // Each operation is authorised against the account state *at
+        // that point in the transaction*, then applied — which is what
+        // makes operation order observable.
+        //
+        // The fake used to skip authorisation entirely, so its
+        // docstring's claim was not delivered: moving the lockdown
+        // ahead of the signer installs left every assertion passing,
+        // and the payment applied with no signatures at all.
         for operation in transaction.operations {
             let actingID = operation.sourceAccount?.accountID ?? sourceID
+            if let acting = accounts[actingID] {
+                let required = threshold(for: operation, on: acting)
+                let weight = acting.signers.reduce(UInt32(0)) { total, entry in
+                    guard let key = try? StellarAccountID(accountID: entry.key),
+                          envelope.hasSignature(from: key, network: network)
+                    else { return total }
+                    return total + entry.value
+                }
+                guard weight >= required else {
+                    throw HorizonError.submissionFailed(
+                        resultCodes: ["tx_bad_auth"],
+                        body: "\(actingID) needs \(required), has \(weight)"
+                    )
+                }
+            }
             switch operation.body {
             case .createAccount(let destination, let startingBalance):
                 accounts[destination.accountID] = Account(
                     sequence: 1,
                     balances: ["XLM": startingBalance.stroops],
                     signers: [destination.accountID: 1],
+                    thresholds: HorizonThresholds(low: 1, medium: 1, high: 1),
                     key: destination
                 )
                 accounts[actingID]?.balances["XLM", default: 0] -= startingBalance.stroops
 
             case .payment(let destination, _, let amount):
-                accounts[actingID]?.balances["XLM", default: 0] -= amount.stroops
-                if accounts[destination.accountID] == nil {
-                    accounts[destination.accountID] = Account(key: destination)
+                // Real Horizon answers `op_no_destination` for an
+                // unfunded destination. The fake used to invent the
+                // account, which meant the E2E asserted a payment that
+                // the network would have refused.
+                guard accounts[destination.accountID] != nil else {
+                    throw HorizonError.submissionFailed(
+                        resultCodes: ["op_no_destination"],
+                        body: destination.accountID
+                    )
                 }
+                accounts[actingID]?.balances["XLM", default: 0] -= amount.stroops
                 accounts[destination.accountID]?.balances["XLM", default: 0] += amount.stroops
 
             case .setOptions(let fields):
@@ -545,11 +717,7 @@ private actor LedgerHorizon: HorizonClient {
                     }
                 }
                 if let master = fields.masterWeight {
-                    if master == 0 {
-                        acting.signers[actingID] = 0
-                    } else {
-                        acting.signers[actingID] = master
-                    }
+                    acting.signers[actingID] = master
                 }
                 acting.thresholds = HorizonThresholds(
                     low: fields.lowThreshold ?? acting.thresholds.low,
@@ -566,6 +734,6 @@ private actor LedgerHorizon: HorizonClient {
         source = accounts[sourceID] ?? source
         source.sequence = transaction.sequenceNumber
         accounts[sourceID] = source
-        return transaction.hash(network: .testnet).map { String(format: "%02x", $0) }.joined()
+        return transaction.hash(network: network).hexString
     }
 }

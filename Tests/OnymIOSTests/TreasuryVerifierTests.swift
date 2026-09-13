@@ -16,6 +16,16 @@ import OnymTreasury
 /// induced to authorise something they did not read.
 final class TreasuryVerifierTests: XCTestCase {
 
+    /// Inside the lifetime the verifier permits — see
+    /// `test_aProposalWithNoTimeBound_isRefused` for why an unbounded
+    /// one is not merely untidy.
+    static var soon: StellarTimeBounds {
+        StellarTimeBounds(
+            minTime: 0,
+            maxTime: UInt64(Date().addingTimeInterval(3600).timeIntervalSince1970)
+        )
+    }
+
     private let treasuryAccount = TreasuryTestKeys.account(9)
     private let stranger = TreasuryTestKeys.account(8)
     private let owner = IdentityID(UUID())
@@ -275,7 +285,7 @@ final class TreasuryVerifierTests: XCTestCase {
             sourceAccount: source,
             fee: 100,
             sequenceNumber: 2,
-            timeBounds: StellarTimeBounds(minTime: 0, maxTime: 4_000_000_000),
+            timeBounds: Self.soon,
             operations: operations
         ))
     }
@@ -382,6 +392,7 @@ final class TreasuryVerifierTests: XCTestCase {
 final class TreasuryReviewRegressionTests: XCTestCase {
 
     private let treasuryAccount = TreasuryTestKeys.account(90)
+    private static var soon: StellarTimeBounds { TreasuryVerifierTests.soon }
     private let stranger = TreasuryTestKeys.account(91)
     private let owner = IdentityID(UUID())
     private let groupIDHex = String(repeating: "ab", count: 32)
@@ -399,6 +410,72 @@ final class TreasuryReviewRegressionTests: XCTestCase {
             group: group
         )
         XCTAssertEqual(outcome, .rejected(.excessiveFee))
+    }
+
+    /// The worst bug found in review: without a time bound a proposal
+    /// never expires, and because it holds the treasury's next sequence
+    /// number every honest device then answers `.sequenceContended` for
+    /// every later proposal. One message from any member, and the
+    /// treasury is unusable for good.
+    func test_aProposalWithNoTimeBound_isRefused() throws {
+        let outcome = TreasuryProposalVerifier.verify(
+            envelope: try envelope(bounds: nil),
+            network: .testnet,
+            treasury: treasury,
+            proposerBlsPubkeyHex: "aa",
+            group: group
+        )
+        XCTAssertEqual(outcome, .rejected(.noExpiry))
+    }
+
+    /// A bound in 2096 is the same thing wearing a hat.
+    func test_aProposalThatOutlivesTheWindow_isRefused() throws {
+        let far = StellarTimeBounds(minTime: 0, maxTime: 4_000_000_000)
+        let outcome = TreasuryProposalVerifier.verify(
+            envelope: try envelope(bounds: far),
+            network: .testnet,
+            treasury: treasury,
+            proposerBlsPubkeyHex: "aa",
+            group: group
+        )
+        XCTAssertEqual(outcome, .rejected(.expiresTooLate))
+    }
+
+    /// An envelope packed with junk signatures verifies cleanly and can
+    /// then never be signed by anyone, because `append` refuses past
+    /// the protocol's cap — which reaches the co-signer as "signature
+    /// did not verify".
+    func test_aProposalArrivingFullOfSignatures_isRefused() throws {
+        var envelope = try self.envelope(bounds: TreasuryVerifierTests.soon)
+        for seed in 1...UInt8(10) {
+            let key = try Curve25519.Signing.PrivateKey(
+                rawRepresentation: Data(repeating: seed, count: 32)
+            )
+            try envelope.sign(with: key, network: .testnet)
+        }
+        let outcome = TreasuryProposalVerifier.verify(
+            envelope: envelope,
+            network: .testnet,
+            treasury: treasury,
+            proposerBlsPubkeyHex: "aa",
+            group: group
+        )
+        XCTAssertEqual(outcome, .rejected(.tooManySignatures))
+    }
+
+    /// A proposer signing their own proposal before sending it is
+    /// ordinary and must still be accepted.
+    func test_aProposalCarryingItsProposersOwnSignature_isAccepted() throws {
+        var envelope = try self.envelope(bounds: TreasuryVerifierTests.soon)
+        try envelope.sign(with: TreasuryTestKeys.key(93), network: .testnet)
+        let outcome = TreasuryProposalVerifier.verify(
+            envelope: envelope,
+            network: .testnet,
+            treasury: treasury,
+            proposerBlsPubkeyHex: "aa",
+            group: group
+        )
+        XCTAssertEqual(outcome, .accepted(.payment))
     }
 
     /// A busy ledger legitimately costs more than a quiet one, so the
@@ -433,12 +510,15 @@ final class TreasuryReviewRegressionTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func envelope(fee: UInt32) throws -> TransactionEnvelope {
+    private func envelope(
+        fee: UInt32 = 100,
+        bounds: StellarTimeBounds? = TreasuryVerifierTests.soon
+    ) throws -> TransactionEnvelope {
         TransactionEnvelope(transaction: try StellarTransaction(
             sourceAccount: treasuryAccount,
             fee: fee,
             sequenceNumber: 2,
-            timeBounds: StellarTimeBounds(minTime: 0, maxTime: 4_000_000_000),
+            timeBounds: bounds,
             operations: [
                 StellarOperation(body: .payment(
                     destination: stranger,

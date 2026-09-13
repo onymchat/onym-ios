@@ -55,6 +55,21 @@ final class TreasuryCreationTests: XCTestCase {
         XCTAssertNil(last.signer, "the lockdown must not also add a signer")
     }
 
+    /// The window itself, not the bounds this test handed in. A
+    /// creation envelope is signed and submitted in one sitting, and a
+    /// stale one should lapse rather than linger as a transaction that
+    /// can still spend the founder's funds.
+    func test_theCreationWindow_isShortEnoughToLapseInOneSitting() {
+        XCTAssertGreaterThan(TreasuryCreationInteractor.creationWindow, 60)
+        XCTAssertLessThanOrEqual(TreasuryCreationInteractor.creationWindow, 3600)
+        // And far shorter than a proposal's, which people sign across
+        // time zones.
+        XCTAssertLessThan(
+            TreasuryCreationInteractor.creationWindow,
+            TreasuryProposalInteractor.proposalWindow
+        )
+    }
+
     func test_creation_carriesATimeBoundSoAnUnsentOneLapses() throws {
         let transaction = try makeCreation(coSigners: [coSignerA])
         XCTAssertNotNil(transaction.timeBounds)
@@ -149,9 +164,24 @@ final class TreasuryCreationTests: XCTestCase {
             timeBounds: bounds
         )
         // Pairing them is the point: adding a fifth signer without
-        // moving the threshold quietly makes spending easier.
+        // moving the threshold quietly makes spending easier. Asserting
+        // only the count would pass if the thresholds were dropped.
         XCTAssertEqual(transaction.operations.count, 2)
         XCTAssertEqual(transaction.sequenceNumber, 5)
+
+        guard case .setOptions(let first) = transaction.operations[0].body else {
+            return XCTFail("the first operation should add the signer")
+        }
+        XCTAssertEqual(first.signer?.key, coSignerB)
+        XCTAssertEqual(first.signer?.weight, 1)
+        XCTAssertNil(first.mediumThreshold, "the signer op must not also move thresholds")
+
+        guard case .setOptions(let second) = transaction.operations[1].body else {
+            return XCTFail("the second operation should move the thresholds")
+        }
+        XCTAssertEqual(second.mediumThreshold, 3)
+        XCTAssertEqual(second.highThreshold, 3)
+        XCTAssertNil(second.signer)
     }
 
     func test_removeSigner_isTheSameOperationWithZeroWeight() throws {

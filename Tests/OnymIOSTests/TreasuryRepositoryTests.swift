@@ -1,6 +1,7 @@
 import CryptoKit
 import XCTest
 @testable import OnymIOS
+import OnymGroup
 import OnymIdentity
 import OnymStellar
 import OnymTreasury
@@ -108,7 +109,6 @@ final class TreasuryRepositoryTests: XCTestCase {
             snapshot.standing(of: stored, now: Date()),
             .collecting(weight: 0, required: 2)
         )
-        _ = proposal
     }
 
     func test_aRejectedProposal_reportsItsRefusalRatherThanProgress() async throws {
@@ -120,7 +120,57 @@ final class TreasuryRepositoryTests: XCTestCase {
             snapshot.standing(of: stored, now: Date()),
             .rejected(reason: .wrongNetwork)
         )
-        _ = proposal
+    }
+
+    /// `tx_bad_seq` means somebody else's transaction won the race
+    /// between the readiness check and the submit. It needs a different
+    /// answer from the user than a generic failure — "this can never
+    /// work, propose again" rather than "try again" — and that mapping
+    /// had no test.
+    func test_aLostSequenceRace_readsAsSupersededRatherThanAFailure() async throws {
+        let store = InMemoryTreasuryStore()
+        let horizon = FakeHorizonClient()
+        await horizon.setAccount(HorizonAccount(
+            accountID: treasuryAccount,
+            sequenceNumber: 1,
+            balances: [],
+            signers: [StellarSigner(key: signer, weight: 1)],
+            thresholds: HorizonThresholds(low: 1, medium: 1, high: 1)
+        ))
+        await horizon.setSubmitError(
+            .submissionFailed(resultCodes: ["tx_bad_seq"], body: "")
+        )
+        let repository = TreasuryRepository(store: store, horizon: { _ in horizon })
+        await repository.setCurrentIdentity(owner)
+        let proposal = try await seedProposal(store: store)
+
+        // Enough weight, so it gets as far as submitting.
+        let signature = try signerKey.signature(
+            for: proposal.envelope.transaction.hash(network: .testnet)
+        )
+        await repository.addSignature(signature, from: signer, toProposal: proposal.id)
+
+        let interactor = TreasurySigningInteractor(
+            treasury: repository,
+            identity: IdentityRepository(
+                keychain: IdentityKeychainStore(testNamespace: "seq-\(UUID().uuidString)"),
+                selectionStore: .inMemory()
+            ),
+            broadcaster: TreasuryBroadcaster(
+                identity: IdentityRepository(
+                    keychain: IdentityKeychainStore(
+                        testNamespace: "seq2-\(UUID().uuidString)"
+                    ),
+                    selectionStore: .inMemory()
+                ),
+                inboxTransport: FakeInboxTransport(),
+                groups: GroupRepository(store: SwiftDataGroupStore.inMemory()),
+                treasury: repository
+            ),
+            horizon: { _ in horizon }
+        )
+        let outcome = await interactor.submit(proposalID: proposal.id)
+        XCTAssertEqual(outcome, .superseded)
     }
 
     // MARK: - Identity scoping
@@ -157,14 +207,39 @@ final class TreasuryRepositoryTests: XCTestCase {
     /// A returned envelope carries no group id, so attribution is by
     /// verification: offered to every open proposal, accepted only by
     /// the one it was actually signed over.
-    func test_openProposalsAcrossGroups_areOfferedTheirSigners() async throws {
+    func test_openProposalsAcrossGroups_areOfferedTheirOwnSigners() async throws {
         let (repository, store) = await makeRepository()
-        let proposal = try await seedProposal(store: store)
+        let mine = try await seedProposal(store: store)
+        // A second group, with a different declared signer. The name of
+        // this test promised cross-group attribution and the first
+        // version seeded only one group.
+        let otherGroup = String(repeating: "ef", count: 32)
+        let otherSigner = TreasuryTestKeys.account(33)
+        let theirs = try await seedProposal(
+            store: store,
+            groupID: otherGroup,
+            signer: otherSigner,
+            amount: 777
+        )
 
         let open = await repository.openProposalsWithSigners()
-        XCTAssertEqual(open.count, 1)
-        XCTAssertEqual(open.first?.0.proposal.id, proposal.id)
-        XCTAssertEqual(open.first?.1, [signer])
+        XCTAssertEqual(open.count, 2)
+        let byID = Dictionary(uniqueKeysWithValues: open.map { ($0.0.proposal.id, $0.1) })
+        XCTAssertEqual(byID[mine.id], [signer])
+        XCTAssertEqual(byID[theirs.id], [otherSigner])
+
+        // And a signature over one group's proposal is not adopted into
+        // the other's — the property that makes attribution-by-
+        // verification safe for a link that names no group.
+        let signature = try signerKey.signature(
+            for: theirs.envelope.transaction.hash(network: .testnet)
+        )
+        let wrong = await repository.addSignature(
+            signature,
+            from: signer,
+            toProposal: mine.id
+        )
+        XCTAssertFalse(wrong, "a signature over another proposal was adopted")
     }
 
     func test_aSubmittedProposal_isNoLongerOpen() async throws {
@@ -177,11 +252,16 @@ final class TreasuryRepositoryTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func payment() -> StellarOperation {
+    /// `amount` varies per caller so two groups' proposals are
+    /// genuinely different transactions. Seeding both with identical
+    /// operations gave them one hash, and a signature over either
+    /// verified against both — which made the cross-group test pass for
+    /// the wrong reason.
+    private func payment(amount: Int64 = 10) -> StellarOperation {
         StellarOperation(body: .payment(
             destination: TreasuryTestKeys.account(32),
             asset: .native,
-            amount: StellarAmount(stroops: 10)
+            amount: StellarAmount(stroops: amount)
         ))
     }
 
@@ -206,9 +286,17 @@ final class TreasuryRepositoryTests: XCTestCase {
 
     private func seedProposal(
         store: InMemoryTreasuryStore,
+        groupID: String? = nil,
+        signer: StellarAccountID? = nil,
+        // Explicit rather than derived from the group id: `hashValue`
+        // is seeded per process, so a derived amount would make this
+        // test's distinctness a coin flip.
+        amount: Int64 = 10,
         declarationSource: TreasurySignerSource = .onym,
         rejection: TreasuryRejection? = nil
     ) async throws -> TreasuryProposal {
+        let groupID = groupID ?? self.groupID
+        let signer = signer ?? self.signer
         await store.upsert(Treasury(
             account: treasuryAccount,
             groupID: groupID,
@@ -232,7 +320,7 @@ final class TreasuryRepositoryTests: XCTestCase {
             fee: 100,
             sequenceNumber: 2,
             timeBounds: StellarTimeBounds(minTime: 0, maxTime: 4_000_000_000),
-            operations: [payment()]
+            operations: [payment(amount: amount)]
         )
         let proposal = TreasuryProposal(
             id: UUID(),

@@ -7,6 +7,8 @@ import OnymGroup
 import OnymPersistence
 import OnymChatsCore
 import OnymInbox
+import OnymStellar
+import OnymTreasury
 
 /// Behavioral tests for `IncomingMessageDispatcher` — the receive-side
 /// fan-out target that decides whether an inbound inbox message is a
@@ -38,6 +40,104 @@ final class IncomingMessageDispatcherTests: XCTestCase {
         owner = nil
         chainState = nil
         try await super.tearDown()
+    }
+
+    // MARK: - Treasury routing
+
+    /// The dispatcher's treasury arm is optional, so dropping its
+    /// wiring in the composition root silently discards all four
+    /// payload types. Nothing failed when it was removed; this is the
+    /// test that would.
+    func test_aTreasuryPayload_reachesTheTreasuryReceiver() async throws {
+        let groupID = Data(repeating: 0xAB, count: 32)
+        let adminKey = Curve25519.Signing.PrivateKey()
+        let adminPub = Data(adminKey.publicKey.rawRepresentation)
+        await seedGroup(
+            groupID: groupID,
+            memberProfiles: ["aa".repeated(48): MemberProfile(
+                alias: "Ada",
+                inboxPublicKey: Data(repeating: 0x10, count: 32),
+                sendingPubkey: adminPub
+            )],
+            adminEd25519PubkeyHex: adminPub.hexString
+        )
+
+        let account = try StellarAccountID(
+            publicKey: Data(Curve25519.Signing.PrivateKey().publicKey.rawRepresentation)
+        )
+        let payload = try JSONEncoder().encode(TreasuryAnchorPayload(
+            groupID: groupID,
+            treasuryAccountID: account.accountID,
+            networkPassphrase: StellarNetwork.testnet.passphrase,
+            creationTxHash: "hash",
+            sentAtMillis: 1
+        ))
+
+        let treasuryStore = InMemoryTreasuryStore()
+        let horizon = FakeHorizonClient()
+        let treasury = TreasuryRepository(store: treasuryStore, horizon: { _ in horizon })
+        await treasury.setCurrentIdentity(owner)
+
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: FakeInvitationEnvelopeDecrypter(
+                mode: .fixed(payload),
+                senderEd25519PublicKey: adminPub
+            ),
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory()),
+            treasury: TreasuryPayloadReceiver(treasury: treasury, groups: groups)
+        )
+        await dispatcher.dispatch(
+            messageID: "msg-treasury",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+
+        let anchored = await treasury.snapshot(groupID: groupID.hexString).treasury
+        XCTAssertEqual(anchored?.account, account)
+    }
+
+    /// And with no receiver wired the same payload falls through to the
+    /// opaque-invitation safety net rather than being dropped.
+    func test_aTreasuryPayloadWithNoReceiver_fallsThrough() async throws {
+        let groupID = Data(repeating: 0xAB, count: 32)
+        await seedGroup(groupID: groupID, memberProfiles: [:])
+        let payload = try JSONEncoder().encode(TreasuryAnchorPayload(
+            groupID: groupID,
+            treasuryAccountID: try StellarAccountID(
+                publicKey: Data(Curve25519.Signing.PrivateKey().publicKey.rawRepresentation)
+            ).accountID,
+            networkPassphrase: StellarNetwork.testnet.passphrase,
+            creationTxHash: "hash",
+            sentAtMillis: 1
+        ))
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: FakeInvitationEnvelopeDecrypter(
+                mode: .fixed(payload),
+                senderEd25519PublicKey: Data(repeating: 0xEE, count: 32)
+            ),
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState,
+            messageRepository: MessageRepository(store: SwiftDataMessageStore.inMemory())
+        )
+        await dispatcher.dispatch(
+            messageID: "msg-no-receiver",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date()
+        )
+        let queued = await invitationsStore.count
+        XCTAssertEqual(
+            queued,
+            1,
+            "an unroutable payload should reach the opaque-invitation safety net"
+        )
     }
 
     // MARK: - Announcement path

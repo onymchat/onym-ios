@@ -44,6 +44,27 @@ final class TreasuryWireFormatTests: XCTestCase {
         XCTAssertEqual(payload.declarerBlsPubkeyHex, "aabb")
     }
 
+    /// And lowercased on the way *out* of the wire, which is the path a
+    /// sender controls. A mixed-case key on the wire that stayed
+    /// mixed-case would miss every `memberProfiles` lookup.
+    func test_aMixedCaseKeyOnTheWire_isLowercasedOnDecode() throws {
+        var json = try object(TreasurySignerDeclarationPayload(
+            groupID: groupID,
+            declarerBlsPubkeyHex: "aabb",
+            signerAccountID: TreasuryTestKeys.account(1).accountID,
+            source: .onym,
+            sentAtMillis: 1,
+            signature: Data(repeating: 7, count: 64)
+        ))
+        json["declarer_bls_pubkey_hex"] = "AABB"
+        let data = try JSONSerialization.data(withJSONObject: json)
+        let decoded = try JSONDecoder().decode(
+            TreasurySignerDeclarationPayload.self,
+            from: data
+        )
+        XCTAssertEqual(decoded.declarerBlsPubkeyHex, "aabb")
+    }
+
     func test_anchor_pinsItsWireKeys() throws {
         let json = try object(TreasuryAnchorPayload(
             groupID: groupID,
@@ -157,6 +178,51 @@ final class TreasuryWireFormatTests: XCTestCase {
                     "\(name) wrongly decoded as \(otherName)"
                 )
             }
+        }
+    }
+
+    /// The payloads the dispatcher tries **before** the treasury arm.
+    ///
+    /// These are the only ones that can actually steal a treasury
+    /// message, which makes them the point of the suite — and the first
+    /// version of this test checked the ones tried *after*, which is
+    /// backwards relative to the stated risk. Keys are distinct today;
+    /// the pin exists for future drift.
+    func test_noPayloadTriedEarlier_decodesAsATreasuryPayload() throws {
+        let offer = try JSONEncoder().encode(GroupInviteOfferPayload(
+            introPublicKey: Data(repeating: 5, count: 32),
+            groupID: groupID,
+            groupName: "Flat",
+            inviterAlias: "Ada"
+        ))
+        let refresh = try JSONEncoder().encode(GroupStateRefreshRequest(
+            groupID: groupID,
+            requesterInboxPublicKey: Data(repeating: 6, count: 32),
+            requesterBlsPublicKey: Data(repeating: 7, count: 48)
+        ))
+        for (name, data) in [("invite offer", offer), ("refresh request", refresh)] {
+            for (treasuryName, decode) in Self.treasuryDecoders {
+                XCTAssertFalse(decode(data), "\(name) decoded as \(treasuryName)")
+            }
+        }
+    }
+
+    /// And the reverse for the same three: a treasury payload must not
+    /// be taken by an arm that runs before it.
+    func test_noTreasuryPayload_decodesAsAPayloadTriedEarlier() throws {
+        for (name, data) in try allTreasuryPayloadBytes() {
+            XCTAssertNil(
+                try? JSONDecoder().decode(GroupInviteOfferPayload.self, from: data),
+                "\(name) decoded as an invite offer"
+            )
+            XCTAssertNil(
+                try? JSONDecoder().decode(GroupStateRefreshRequest.self, from: data),
+                "\(name) decoded as a state-refresh request"
+            )
+            XCTAssertNil(
+                try? JSONDecoder().decode(GroupInvitationPayload.self, from: data),
+                "\(name) decoded as a group invitation"
+            )
         }
     }
 
