@@ -43,8 +43,18 @@ public struct URLSessionHorizonClient: HorizonClient {
             + "?order=desc&limit=\(limit)&include_failed=true"
         let page: PageWire<TransactionWire> = try await get(path, notFound: id.accountID)
         // A record that fails to convert is dropped rather than failing
-        // the page: history is informational, and one operation type
-        // this build cannot name should not blank the whole list.
+        // the page: history is informational, and one unreadable row
+        // should not blank the whole list.
+        //
+        // The reasons a row can be dropped are worth naming, because the
+        // comment that used to sit here named the wrong one. `domain()`
+        // never decodes operations. What it can fail on is an
+        // unparseable `created_at`, an unparseable `fee_charged`, and a
+        // source account it cannot read — which, for a transaction sent
+        // from a muxed account, is the interesting case. Horizon carries
+        // the base `G…` in a separate field there, so `domain()` reads
+        // that one when the primary field is not an account id this
+        // build can decode; only a row with neither disappears.
         return page.embedded.records.compactMap { try? $0.domain() }
     }
 
@@ -250,6 +260,11 @@ private struct TransactionWire: Decodable {
     let hash: String
     let createdAt: String
     let sourceAccount: String
+    /// Present when the sender used a muxed account. Which of the two
+    /// fields holds the `M…` and which holds the base `G…` has not been
+    /// stable across Horizon versions, so `domain()` reads whichever one
+    /// parses rather than betting on a layout.
+    let accountMuxed: String?
     let successful: Bool
     let feeCharged: String
     let envelopeXDR: String
@@ -258,6 +273,7 @@ private struct TransactionWire: Decodable {
         case hash, successful
         case createdAt = "created_at"
         case sourceAccount = "source_account"
+        case accountMuxed = "account_muxed"
         case feeCharged = "fee_charged"
         case envelopeXDR = "envelope_xdr"
     }
@@ -269,10 +285,21 @@ private struct TransactionWire: Decodable {
         guard let fee = Int64(feeCharged) else {
             throw HorizonError.decodeFailure("fee_charged '\(feeCharged)'")
         }
+        // `M…` is refused by `StellarAccountID` on purpose — this build
+        // does not name muxed accounts anywhere a user can act on one —
+        // so a muxed sender's row is recovered through the base address
+        // in the sibling field rather than lost. A row where neither
+        // field is a readable `G…` still throws, which is the honest
+        // outcome: there is no account to attribute it to.
+        guard let source = (try? StellarAccountID(accountID: sourceAccount))
+            ?? accountMuxed.flatMap({ try? StellarAccountID(accountID: $0) })
+        else {
+            throw HorizonError.decodeFailure("source_account '\(sourceAccount)'")
+        }
         return HorizonTransaction(
             hash: hash,
             ledgerCloseTime: date,
-            sourceAccount: try StellarAccountID(accountID: sourceAccount),
+            sourceAccount: source,
             successful: successful,
             feeCharged: StellarAmount(stroops: fee),
             envelopeXDR: envelopeXDR

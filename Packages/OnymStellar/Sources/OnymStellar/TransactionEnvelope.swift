@@ -127,13 +127,25 @@ public struct TransactionEnvelope: Equatable, Sendable {
         from signer: StellarAccountID,
         network: StellarNetwork
     ) throws {
-        guard Self.verify(
-            signature: signature,
-            by: signer,
-            over: transaction.hash(network: network)
-        ) else {
+        let hash = transaction.hash(network: network)
+        guard Self.verify(signature: signature, by: signer, over: hash) else {
             throw StellarError.signatureDoesNotVerify
         }
+        // Already have it: nothing to do, and saying so is not an error.
+        //
+        // `harvestSignatures` has always checked this and this path did
+        // not, which makes two things reachable. Ed25519 here is
+        // deterministic, so a proposer who self-signs and then taps
+        // "sign" adds a second byte-identical signature — and stellar
+        // refuses a transaction carrying signatures no signer needed
+        // (`tx_bad_auth_extra`), so the proposal could never be
+        // submitted and nothing on screen would say why. Worse, a
+        // signature that arrives over the wire carries no trustworthy
+        // claim about who sent it, so the same observed signature can be
+        // resent twenty times, hit `append`'s cap, and make every
+        // genuine co-signer's `addSignature` throw from then on. A
+        // per-proposal freeze for the price of a replay.
+        guard !carriesSignature(from: signer, over: hash) else { return }
         try append(DecoratedSignature(hint: signer.signatureHint, signature: signature))
     }
 
@@ -210,10 +222,20 @@ public struct TransactionEnvelope: Equatable, Sendable {
     /// Whether a verifying signature from `signer` is already present,
     /// reusing a hash the caller has already computed. Same answer as
     /// `hasSignature(from:network:)` without re-hashing per candidate.
+    ///
+    /// Deliberately does **not** filter on the hint first, for the same
+    /// reason `harvestSignatures` does not: the hint on a stored
+    /// signature is whatever the peer who sent it wrote there. Envelopes
+    /// decoded by `init(xdr:)` keep the sender's hints verbatim, so a
+    /// proposal relayed with a zeroed or mismatched hint would report
+    /// "no signature from Alice" while carrying one that verifies —
+    /// undercounting weight, and, since `addSignature` uses this, also
+    /// letting the same signature in twice. The Ed25519 check is the
+    /// answer; the hint was never more than a lookup aid, and this is
+    /// not a lookup.
     private func carriesSignature(from signer: StellarAccountID, over hash: Data) -> Bool {
         signatures.contains { decorated in
-            decorated.hint == signer.signatureHint
-                && Self.verify(signature: decorated.signature, by: signer, over: hash)
+            Self.verify(signature: decorated.signature, by: signer, over: hash)
         }
     }
 

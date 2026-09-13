@@ -29,18 +29,26 @@ public struct HorizonAccount: Equatable, Sendable {
     /// list rather than from anything stored locally, because the signer
     /// set is exactly what a `setOptions` proposal changes.
     public func weight(of candidates: [StellarAccountID]) -> UInt32 {
-        // Plain addition, and safe because weights are clamped to the
-        // protocol's 0–255 where they enter (`AccountWire.domain`).
+        // Summed wide, then clamped — not because the protocol allows
+        // weights this large (it caps them at 255), but because nothing
+        // in the type system holds anyone to that. `HorizonAccount.init`
+        // and `StellarSigner.init` are both public and unvalidated, and
+        // the wire clamp in `AccountWire.domain` covers exactly one of
+        // the ways a signer can reach this function: a decoded
+        // `setOptions` signer, a persisted account, and the relayer
+        // conformer that replaces this one all arrive by other doors.
         //
-        // The previous version used `&+` and called itself saturating,
-        // which it is not: wrapping turns three signers at 0x8000_0000
-        // into 0x8000_0000, and a set summing to 2^32 into zero. A
-        // threshold check reading zero for a quorum is worse than a
-        // crash. Clamping at the boundary makes the sum honest instead
-        // of merely non-trapping — 20 signers × 255 cannot overflow.
-        signers
+        // Two earlier versions of this line were wrong in opposite
+        // directions. `&+` wrapped, turning a set summing to 2^32 into
+        // zero — a threshold check reading zero for a quorum. Plain `+`
+        // then trapped, which crashed the test that exists to say it
+        // must not. Widening makes the sum unable to overflow at all;
+        // the clamp is what turns an absurd input into an absurd
+        // *answer* rather than a crash or a lie.
+        let total = signers
             .filter { signer in candidates.contains(signer.key) }
-            .reduce(UInt32(0)) { $0 + $1.weight }
+            .reduce(UInt64(0)) { $0 + UInt64($1.weight) }
+        return UInt32(min(total, UInt64(UInt32.max)))
     }
 }
 

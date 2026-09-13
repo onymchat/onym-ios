@@ -89,15 +89,21 @@ public struct SEP0007Request: Equatable, Sendable {
         if let originDomain, !originDomain.isEmpty {
             items.append(("origin_domain", originDomain))
         }
-        let query = items
-            .compactMap { key, value -> String? in
-                guard let escaped = value.addingPercentEncoding(
-                    withAllowedCharacters: Self.unreserved
-                ) else { return nil }
-                return "\(key)=\(escaped)"
-            }
-            .joined(separator: "&")
-        return URL(string: "web+stellar:tx?\(query)")
+        // `compactMap` would drop an item that failed to escape and
+        // still hand back a URL. For `msg` or `pubkey` that is a
+        // degraded request; for `xdr` it is a wallet opening a signing
+        // screen with no transaction in it, which is the one outcome
+        // worth failing over. Nothing to escape here can legitimately
+        // return nil, so a nil is a bug rather than a user's input —
+        // and the honest response to a bug on this path is no URL.
+        var escapedItems: [String] = []
+        for (key, value) in items {
+            guard let escaped = value.addingPercentEncoding(
+                withAllowedCharacters: Self.unreserved
+            ) else { return nil }
+            escapedItems.append("\(key)=\(escaped)")
+        }
+        return URL(string: "web+stellar:tx?\(escapedItems.joined(separator: "&"))")
     }
 
     /// Read a signed envelope out of a return URL (`onym://tx?xdr=…`).
