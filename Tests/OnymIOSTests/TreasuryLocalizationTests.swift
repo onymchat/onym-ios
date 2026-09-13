@@ -14,14 +14,40 @@ final class TreasuryLocalizationTests: XCTestCase {
 
     /// Where `TreasuryProposalDescription` keeps the card's own
     /// vocabulary — its labels, its titles, and its caveats.
+    ///
+    /// Every `setOptions` headline is chosen by a branch, and `title = "`
+    /// matched only the two written as a bare assignment. Nine titles
+    /// were invisible — including "Freeze this account's settings
+    /// permanently", added precisely because the old headline lied about
+    /// the one change nobody can undo. So the title rule reaches past a
+    /// type annotation and a condition to the first literal on the line,
+    /// and a ternary contributes both arms.
+    ///
+    /// What is deliberately still absent is the view set's "a literal
+    /// that opens its own line" rule: in a type full of literals that
+    /// are not keys it would claim `"0x\(String(flags, radix: 16))"`, a
+    /// hex flag word, as copy. Folding continuation lines gives the
+    /// narrow set a multi-line ternary's reach without that rule.
     private static var descriptionPatterns: [String] {
         let body = "(" + literalBody + ")"
         return [
             #"label: ""# + body + #"""#,
             #"\.copy\(\s*""# + body + #""\)"#,
-            #"title = ""# + body + #"""#,
+            #"title[^"\n]*""# + body + #"""#,
             #"caveat = ""# + body + #"""#,
+            #"\?\s*""# + body + #""\s*:\s*""# + body + #"""#,
         ]
+    }
+
+    /// A ternary written across three lines, read as the one expression
+    /// it is. Shared, because the two tests each folding their own way
+    /// is the same shape of mistake as the two walkers.
+    private static func folded(_ source: String) -> String {
+        source.replacingOccurrences(
+            of: #"\n\s*([?:])"#,
+            with: " $1",
+            options: .regularExpression
+        )
     }
 
     /// Call sites whose first string literal is a `LocalizedStringKey`.
@@ -142,6 +168,59 @@ final class TreasuryLocalizationTests: XCTestCase {
         }
     }
 
+    /// The same pinning, for the narrow set — which never had it, and
+    /// which is why nine titles were invisible in the one file where
+    /// being wrong costs the most.
+    ///
+    /// The fixture is the two shapes that matter there together: a
+    /// headline chosen by a branch, and a hex flag word chosen the same
+    /// way. A rule wide enough to find the first and narrow enough to
+    /// leave the second is the whole requirement, and neither half is
+    /// worth anything without the other.
+    func test_theDomainScannerFindsATitleChosenByABranch() throws {
+        let fixture = Self.folded("""
+        var title: LocalizedStringResource = "default title"
+        title = closing ? "one-line then" : "one-line else"
+        title = immutable
+            ? "multiline then"
+            : "multiline else"
+        lines.append(Line(label: "a label", value: .copy("wrapped copy")))
+        let names = named.isEmpty
+            ? "0x\\(String(flags, radix: 16))"
+            : named.joined(separator: ", ")
+        caveat = "a caveat"
+        """)
+        var found: Set<String> = []
+        for pattern in Self.descriptionPatterns {
+            let regex = try NSRegularExpression(pattern: pattern)
+            let range = NSRange(fixture.startIndex..., in: fixture)
+            for match in regex.matches(in: fixture, range: range) {
+                for group in 1..<match.numberOfRanges {
+                    guard let captured = Range(match.range(at: group), in: fixture) else {
+                        continue
+                    }
+                    found.insert(String(fixture[captured]))
+                }
+            }
+        }
+        for expected in [
+            "default title",
+            "one-line then",
+            "one-line else",
+            "multiline then",
+            "multiline else",
+            "a label",
+            "wrapped copy",
+            "a caveat",
+        ] {
+            XCTAssertTrue(found.contains(expected), "the domain scanner missed: \(expected)")
+        }
+        XCTAssertFalse(
+            found.contains(#"0x\(String(flags, radix: 16))"#),
+            "the domain scanner claimed a hex flag word as copy"
+        )
+    }
+
     func test_everyTreasuryUIString_isInTheCatalog() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -166,13 +245,16 @@ final class TreasuryLocalizationTests: XCTestCase {
         var missing: [String] = []
         var checked = 0
         for url in sources {
-            let source = try String(contentsOf: url, encoding: .utf8)
             // The view layer's set includes a broad "a literal that
             // opens its own line" rule, which is right for a SwiftUI
             // body and wrong in a domain type full of literals that are
             // not keys. The description file is read with the narrow
-            // set that names the three places its copy lives.
+            // set that names the places its copy lives — and folded
+            // first, so a title chosen by a branch across three lines is
+            // one expression the ternary rule can see.
             let isDomain = url.pathComponents.contains("OnymTreasury")
+            let read = try String(contentsOf: url, encoding: .utf8)
+            let source = isDomain ? Self.folded(read) : read
             for pattern in isDomain ? Self.descriptionPatterns : Self.patterns {
                 let regex = try NSRegularExpression(pattern: pattern)
                 let range = NSRange(source.startIndex..., in: source)
@@ -264,12 +346,8 @@ final class TreasuryLocalizationTests: XCTestCase {
             // across three lines — which is how every one of them is
             // written once the arms are sentences — reads as the single
             // expression it is.
-            let source = try String(contentsOf: url, encoding: .utf8)
-                .replacingOccurrences(
-                    of: #"\n\s*([?:])"#,
-                    with: " $1",
-                    options: .regularExpression
-                )
+            let read = try String(contentsOf: url, encoding: .utf8)
+            let source = Self.folded(read)
             for pattern in patterns {
                 let regex = try NSRegularExpression(pattern: pattern)
                 let range = NSRange(source.startIndex..., in: source)

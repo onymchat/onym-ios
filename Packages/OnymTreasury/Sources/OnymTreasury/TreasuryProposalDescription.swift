@@ -400,11 +400,19 @@ public struct TreasuryProposalDescription: Equatable, Sendable {
             // shows up in a proposal it is someone re-enabling the
             // account's own key — that is, undoing the thing that makes
             // the treasury shared — and it is spelled out.
+            //
+            // Cast, like every other integer this app interpolates into
+            // a key: the placeholder for a `UInt32` is `%u`, not the
+            // `%@` a reader would guess, and a key the catalog does not
+            // hold renders English in every language. The card says the
+            // same thing over the same `UInt32` a few lines from where
+            // this row is drawn, and the catalog holds `weight %lld`
+            // because of it.
             lines.append(Line(
                 label: "Treasury's own key",
                 value: masterWeight == 0
                     ? .copy("Stays switched off")
-                    : .copy("SWITCHED BACK ON \u{2014} weight \(masterWeight)"),
+                    : .copy("SWITCHED BACK ON \u{2014} weight \(Int(masterWeight))"),
                 isPrincipal: masterWeight != 0
             ))
         }

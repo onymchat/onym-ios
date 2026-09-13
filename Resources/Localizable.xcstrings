@@ -7407,19 +7407,19 @@
         }
       }
     },
-    "SWITCHED BACK ON — weight %@": {
+    "SWITCHED BACK ON — weight %lld": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "SWITCHED BACK ON — weight %@"
+            "value": "SWITCHED BACK ON — weight %lld"
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "СНОВА ВКЛЮЧЁН — вес %@"
+            "value": "СНОВА ВКЛЮЧЁН — вес %lld"
           }
         }
       }
