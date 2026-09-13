@@ -559,6 +559,37 @@ public final class TreasuryFlow {
         return false
     }
 
+    /// The transaction itself, base64 XDR, for a founder whose wallet
+    /// will not finish the job.
+    ///
+    /// A handoff has two ends and this app controls one of them. When
+    /// the far end stalls — a Confirm button that does nothing, a wallet
+    /// that cannot cope with an envelope that already carries a
+    /// signature — the founder was left with a screen that could only
+    /// wait. These bytes are the whole transaction, signed by the
+    /// treasury's own key and short one signature, and they can be
+    /// finished in any tool that speaks Stellar.
+    ///
+    /// Nil after a relaunch, for the same reason `canReopenWallet` is:
+    /// the envelope is not persisted.
+    public var walletTransactionXDR: String? {
+        guard case .awaitingWallet(_, _, _, _, _, let request) = creationStage else {
+            return nil
+        }
+        return request?.envelope.base64XDR
+    }
+
+    /// When the handed-off transaction stops being submittable. Shown
+    /// rather than left to be discovered: past it, wallets are entitled
+    /// to refuse, and several do so without saying anything.
+    public var walletDeadline: Date? {
+        guard case .awaitingWallet(_, _, _, _, _, let request) = creationStage,
+              let bounds = request?.envelope.transaction.timeBounds,
+              bounds.maxTime != 0
+        else { return nil }
+        return Date(timeIntervalSince1970: TimeInterval(bounds.maxTime))
+    }
+
     public func reopenWallet() {
         guard case .awaitingWallet(_, _, _, _, _, let request) = creationStage,
               let request

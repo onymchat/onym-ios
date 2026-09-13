@@ -73,11 +73,21 @@ public struct TreasuryCreationInteractor: Sendable {
     private let broadcaster: TreasuryBroadcaster
     private let horizon: @Sendable (StellarNetwork) -> any HorizonClient
 
-    /// How long a creation envelope stays submittable. Short: it is
-    /// signed and submitted in one sitting, and a stale one should
-    /// lapse rather than linger as a transaction that can still spend
-    /// the founder's funds.
-    public static let creationWindow: TimeInterval = 600
+    /// How long a creation envelope stays submittable.
+    ///
+    /// Bounded, because an unsent one should lapse rather than linger as
+    /// a transaction that can still spend the founder's funds. An hour
+    /// rather than the ten minutes this used to be: the external path
+    /// hands the envelope to another app, and a founder reading four
+    /// operations on a wallet's confirmation screen — one of which
+    /// carries a "this might lock your account forever" warning — is not
+    /// on a ten-minute clock. Past `maxTime` a wallet is entitled to
+    /// refuse, and the ones that refuse quietly present as a Confirm
+    /// button that does nothing.
+    ///
+    /// Still far shorter than a proposal's window, and still one
+    /// sitting. What it stops being is a race against the reader.
+    public static let creationWindow: TimeInterval = 3600
 
     public init(
         treasury: TreasuryRepository,

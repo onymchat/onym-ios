@@ -2752,6 +2752,23 @@
         }
       }
     },
+    "Copy the transaction": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy the transaction"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Скопировать транзакцию"
+          }
+        }
+      }
+    },
     "Couldn't confirm that treasury.": {
       "extractionState": "manual",
       "localizations": {
@@ -4320,6 +4337,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Если кошелёк сам отправил транзакцию, здесь делать нечего — она вскоре появится в истории казны. Иначе вставьте то, что он вам выдал."
+          }
+        }
+      }
+    },
+    "If your wallet won't finish, copy the transaction and submit it anywhere that takes signed Stellar XDR. It is already signed by the new account; yours is the signature it still needs.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "If your wallet won't finish, copy the transaction and submit it anywhere that takes signed Stellar XDR. It is already signed by the new account; yours is the signature it still needs."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Если кошелёк не доводит дело до конца, скопируйте транзакцию и отправьте её любым инструментом, принимающим подписанный Stellar XDR. Она уже подписана новым счётом; не хватает только вашей подписи."
           }
         }
       }
@@ -8035,6 +8069,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Каким аккаунтом подписывать?"
+          }
+        }
+      }
+    },
+    "Signable until %@. After that a wallet may refuse it — some do so without saying anything — and you can start over.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signable until %@. After that a wallet may refuse it — some do so without saying anything — and you can start over."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Можно подписать до %@. После этого кошелёк вправе отказать — некоторые делают это молча — и вы сможете начать заново."
           }
         }
       }
