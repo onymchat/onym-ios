@@ -187,20 +187,10 @@ public final class TreasuryFlow {
     private let broadcaster: TreasuryBroadcaster
     private let creation: TreasuryCreationInteractor
     private let network: @Sendable () -> StellarNetwork
-    /// The live subscription, if one is draining.
-    ///
-    /// Not a `started` bool. The flow is memoised for the app's
-    /// lifetime, and `start()` consumed the stream inline on the view's
-    /// `.task` — so popping the treasury screen cancelled the task, the
-    /// iteration ended, and the flag stayed true. Every later visit then
-    /// rendered state frozen at the moment of the last exit: other
-    /// members' declarations, the anchor broadcast, `mine` after a
-    /// re-declaration, none of it arriving. Same defect as the one
-    /// found in `TreasuryProposalsFlow`; it was here too and I missed
-    /// it. Every other flow in the app (`ChatsFlow`, `PendingChatsFlow`,
-    /// `ModerationSettingsFlow`) spawns a detached task and guards on
-    /// it being nil, for exactly this reason.
-    private var subscription: Task<Void, Never>?
+    /// The live subscription — shared with `TreasuryProposalsFlow`, see
+    /// `FlowSubscription`, because the same defect was found in one of
+    /// these two flows and fixed only there three times running.
+    private let subscription = FlowSubscription()
     /// Seeded once. Keying the seed off `selectedCoSigners.isEmpty`
     /// meant unticking the last co-signer silently re-ticked everyone
     /// on the next snapshot — which arrives whenever anybody in the
@@ -231,8 +221,7 @@ public final class TreasuryFlow {
     /// Idempotent — the view calls it from `.task`, which re-runs on
     /// every re-identification of the view.
     public func start() async {
-        guard subscription == nil else { return }
-        let task = Task { [weak self] in
+        await subscription.start { [weak self] in
             guard let self else { return }
             self.onymDerivedAccount = await (self.identity.currentIdentity()?
                 .treasuryAccountID).flatMap { try? StellarAccountID(accountID: $0) }
@@ -240,22 +229,14 @@ public final class TreasuryFlow {
                 await self.apply(snapshot)
             }
         }
-        subscription = task
-        await task.value
     }
 
-    /// End the subscription.
-    ///
-    /// Needed because the task deliberately outlives the view: it holds
-    /// the flow strongly while it drains a stream that never finishes on
-    /// its own, so a flow nobody references any more stays alive and
-    /// subscribed for the rest of the run — still waking on every
-    /// snapshot, still reading the group and identity repositories on
-    /// the main actor. `TreasuryFlowCache` calls this before dropping an
-    /// entry; `ChatsFlow.stop()` exists for the same reason.
+    /// End the subscription — see `FlowSubscription.cancel()` for why a
+    /// flow nobody references still has to be told to stop.
+    /// `TreasuryFlowCache` calls this before dropping an entry;
+    /// `ChatsFlow.stop()` exists for the same reason.
     public func stop() {
-        subscription?.cancel()
-        subscription = nil
+        subscription.cancel()
     }
 
     private func apply(_ snapshot: TreasurySnapshot) async {

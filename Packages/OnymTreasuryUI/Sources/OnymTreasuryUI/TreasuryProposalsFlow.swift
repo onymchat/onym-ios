@@ -160,19 +160,10 @@ public final class TreasuryProposalsFlow {
     private let signing: TreasurySigningInteractor
     private let proposing: TreasuryProposalInteractor
     private let aliases: @Sendable (String) async -> String
-    /// The live subscription, if one is draining right now.
-    ///
-    /// Not a `started` flag. This flow is memoised for the lifetime of
-    /// the app (`TreasuryProposalsFlowCache`), and the thread's card is
-    /// hosted in a table-cell content configuration: scrolling the row
-    /// off screen calls `prepareForReuse`, which tears the hosted view
-    /// down and cancels the `.task` that called `start()`. That ends
-    /// the `AsyncStream` and unsubscribes from the repository. A
-    /// one-shot guard then made every later `start()` a no-op, so
-    /// `rows` froze at whatever it last saw — for that group, for the
-    /// rest of the process — and the treasury screen inherited the dead
-    /// flow. Scrolling past the row once was enough.
-    private var subscription: Task<Void, Never>?
+    /// The live subscription — shared with `TreasuryFlow`, see
+    /// `FlowSubscription`, because the same defect was found in one of
+    /// these two flows and fixed only there three times running.
+    private let subscription = FlowSubscription()
     private var declarations: [TreasurySignerDeclarationRecord] = []
     private var myBlsHex: String?
 
@@ -192,25 +183,17 @@ public final class TreasuryProposalsFlow {
         self.aliases = aliases
     }
 
-    /// Idempotent *while a stream is actually draining*, and resumable
-    /// once one is not. Safe to call from every `.task` that shows this
-    /// flow, however many times a view is rebuilt.
     /// Whether this group has a treasury, without opening a
     /// subscription — see `TreasuryRepository.hasTreasury`.
     public func groupHasTreasury() async -> Bool {
         await repository.hasTreasury(groupID: groupID)
     }
 
+    /// Idempotent — see `FlowSubscription.start`. Safe to call from
+    /// every `.task` that shows this flow, however many times the
+    /// thread's row is recycled and rebuilt.
     public func start() async {
-        guard subscription == nil else { return }
-        // Unstructured on purpose. An unstructured `Task` does not
-        // inherit the caller's cancellation, so the stream survives the
-        // `.task` that opened it being torn down — which is exactly
-        // what happens every time the thread's row is recycled. The
-        // flow is memoised for the app's lifetime and so is this: one
-        // subscription per group, opened once, and the guard above
-        // keeps a second view from opening another.
-        let task = Task { [weak self] in
+        await subscription.start { [weak self] in
             guard let self else { return }
             // A live read before the first draw, so the screen does not
             // sit on "checking…" while a reachable network answers.
@@ -219,26 +202,12 @@ public final class TreasuryProposalsFlow {
                 await self.apply(snapshot)
             }
         }
-        subscription = task
-        await task.value
     }
 
-    /// End the subscription.
-    ///
-    /// The same gap `TreasuryFlow.stop()` closes, in its sibling. The
-    /// task deliberately outlives the view, so it holds the flow
-    /// strongly while draining a stream the repository never finishes —
-    /// meaning a flow nobody references any more stays alive and
-    /// subscribed for the rest of the run, woken by every snapshot of a
-    /// group belonging to an identity that is no longer selected.
-    /// Dropping the dictionary's reference alone does not stop that.
-    ///
-    /// The tail `subscription = nil` inside the task went with it: left
-    /// in, it fires as the cancelled iteration unwinds and could null
-    /// out a subscription a subsequent `start()` had already installed.
+    /// End the subscription — see `FlowSubscription.cancel()`.
+    /// `TreasuryProposalsFlowCache` calls this before dropping an entry.
     public func stop() {
-        subscription?.cancel()
-        subscription = nil
+        subscription.cancel()
     }
 
     public func refresh() async {
