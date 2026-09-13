@@ -220,7 +220,7 @@ public struct CreateTreasuryView: View {
             EmptyView()
         } right: {
             HStack(spacing: 8) {
-                Text("\(value.wrappedValue)/\(maximum)")
+                Text(verbatim: "\(value.wrappedValue)/\(maximum)")
                     .font(OnymType.mono(size: 14))
                     .foregroundStyle(OnymTokens.text2)
                     .monospacedDigit()
@@ -327,8 +327,13 @@ public struct CreateTreasuryView: View {
         .accessibilityIdentifier("treasury.create.estimate")
     }
 
+    /// `label` is UI copy and must be a `LocalizedStringKey`; `detail`
+    /// is assembled from runtime numbers and stays verbatim. Taking
+    /// both as `String` picked `Text`'s non-localizing overload, so the
+    /// whole funding breakdown could never be translated even once the
+    /// catalog had the words — the bug `JoinConfirmView` documents.
     private func line(
-        _ label: String,
+        _ label: LocalizedStringKey,
         _ amount: StellarAmount,
         detail: String?,
         emphasised: Bool = false
@@ -345,7 +350,8 @@ public struct CreateTreasuryView: View {
                 }
             }
             Spacer()
-            Text("\(amount.decimalString) XLM")
+            // An amount, not copy.
+            Text(verbatim: "\(amount.decimalString) XLM")
                 .font(OnymType.mono(size: 14, weight: emphasised ? .semibold : .regular))
                 .foregroundStyle(emphasised ? OnymTokens.text : OnymTokens.text2)
         }
@@ -373,9 +379,9 @@ public struct CreateTreasuryView: View {
         .padding(.top, 20)
     }
 
-    private func bullet(_ text: String) -> some View {
+    private func bullet(_ text: LocalizedStringKey) -> some View {
         HStack(alignment: .top, spacing: 8) {
-            Text("\u{2022}")
+            Text(verbatim: "\u{2022}")
                 .font(OnymType.font(size: 13))
                 .foregroundStyle(OnymTokens.text3)
             Text(text)

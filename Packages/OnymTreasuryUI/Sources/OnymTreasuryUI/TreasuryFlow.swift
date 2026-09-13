@@ -97,12 +97,7 @@ public final class TreasuryFlow {
     /// What `spendableField` means, with the half-typed states a text
     /// field legitimately passes through treated as zero.
     var spendableAmount: StellarAmount? {
-        let trimmed = spendableField.trimmingCharacters(in: .whitespaces)
-        if trimmed.isEmpty || trimmed == "." { return StellarAmount(stroops: 0) }
-        if trimmed.hasSuffix(".") {
-            return try? StellarAmount(decimalString: String(trimmed.dropLast()))
-        }
-        return try? StellarAmount(decimalString: trimmed)
+        TreasurySignerSelection.spendableAmount(spendableField)
     }
     public var mediumThreshold: UInt32 = 1
     public var highThreshold: UInt32 = 1
@@ -177,7 +172,6 @@ public final class TreasuryFlow {
     private let broadcaster: TreasuryBroadcaster
     private let creation: TreasuryCreationInteractor
     private let network: @Sendable () -> StellarNetwork
-    private let horizon: @Sendable (StellarNetwork) -> any HorizonClient
     /// The live subscription, if one is draining.
     ///
     /// Not a `started` bool. The flow is memoised for the app's
@@ -208,10 +202,7 @@ public final class TreasuryFlow {
         identity: IdentityRepository,
         broadcaster: TreasuryBroadcaster,
         creation: TreasuryCreationInteractor,
-        network: @escaping @Sendable () -> StellarNetwork,
-        horizon: @escaping @Sendable (StellarNetwork) -> any HorizonClient = { network in
-            URLSessionHorizonClient(network: network)
-        }
+        network: @escaping @Sendable () -> StellarNetwork
     ) {
         self.groupID = groupID
         self.repository = repository
@@ -220,7 +211,6 @@ public final class TreasuryFlow {
         self.broadcaster = broadcaster
         self.creation = creation
         self.network = network
-        self.horizon = horizon
     }
 
     /// Idempotent — the view calls it from `.task`, which re-runs on
@@ -254,9 +244,33 @@ public final class TreasuryFlow {
     }
 
     private func apply(_ snapshot: TreasurySnapshot) async {
+        // Restored from disk, not held in memory. A creation handed to a
+        // wallet outlives this process and this identity selection, and
+        // losing it leaves a funded treasury the group is never told
+        // about — see `PendingTreasuryCreation`.
+        if case .idle = creationStage,
+           let pending = await repository.pendingCreation(groupID: groupID) {
+            creationStage = .awaitingWallet(
+                treasuryAccountID: pending.treasuryAccount.accountID,
+                creationTxHash: pending.creationTxHash,
+                coSigners: pending.coSigners,
+                thresholds: pending.thresholds
+            )
+        }
+
         treasury = snapshot.treasury
-        guard let group = await groups.currentGroups().first(where: { $0.id == groupID }),
-              let me = await identity.currentIdentity()
+        // Scoped to the owning identity. `currentGroups()` is every
+        // cached group across *all* identities, so an unscoped lookup
+        // could read `memberProfiles`, the name and the admin flag off
+        // another identity's copy while the treasury snapshot is scoped
+        // to the selected one — the roster and the co-signer list then
+        // disagree with what `create()` validates.
+        // `TreasuryCreationInteractor` guards the same case.
+        guard let me = await identity.currentIdentity(),
+              let owner = await identity.currentSelectedID(),
+              let group = await groups.currentGroups().first(where: {
+                  $0.id == groupID && $0.ownerIdentityID == owner
+              })
         else { return }
 
         groupName = group.name
@@ -282,7 +296,12 @@ public final class TreasuryFlow {
                 if lhs.isSelf != rhs.isSelf { return lhs.isSelf }
                 return lhs.alias.localizedCaseInsensitiveCompare(rhs.alias) == .orderedAscending
             }
+        let previous = mine?.account
         mine = snapshot.declarations.first { $0.memberBlsPubkeyHex == myHex }
+        // The funder card is drawn from `mine`, so re-declaring has to
+        // move it. It used to refresh only from `.task`, which does not
+        // re-run when the declaration changes underneath it.
+        if mine?.account != previous { await refreshFunder() }
 
         // Seed the signer set once, then leave the founder's choices
         // alone — re-seeding on every snapshot would undo a tick the
@@ -344,7 +363,11 @@ public final class TreasuryFlow {
             return
         }
         funderAccount = mine.account
-        let account = try? await horizon(network()).account(mine.account)
+        // Through the repository, which owns Horizon reads. A flow
+        // reaching past it contradicts the invariant stated on
+        // `TreasuryRepository`, and would be a second, uncached path to
+        // the same third party.
+        let account = await repository.account(mine.account, network: network())
         funderIsUnfunded = account == nil
         funderBalance = account?.balances
             .first { $0.asset == .native }?

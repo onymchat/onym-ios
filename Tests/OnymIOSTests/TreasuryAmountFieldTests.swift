@@ -19,16 +19,10 @@ final class TreasuryAmountFieldTests: XCTestCase {
     /// "That isn't an amount" for an empty field, when "nothing
     /// spendable" is a perfectly ordinary thing to want.
     func test_halfTypedAmounts_readAsZeroOrTheirValue() throws {
-        // Deliberately mirrors `TreasuryFlow.spendableAmount`; the flow
-        // needs a simulator's worth of collaborators to build.
-        func spendable(_ field: String) -> StellarAmount? {
-            let trimmed = field.trimmingCharacters(in: .whitespaces)
-            if trimmed.isEmpty || trimmed == "." { return StellarAmount(stroops: 0) }
-            if trimmed.hasSuffix(".") {
-                return try? StellarAmount(decimalString: String(trimmed.dropLast()))
-            }
-            return try? StellarAmount(decimalString: trimmed)
-        }
+        // The real implementation. The first version of this test
+        // re-declared the logic locally, so it passed no matter what
+        // the flow actually did — which is not a test.
+        let spendable = TreasurySignerSelection.spendableAmount
 
         XCTAssertEqual(spendable("")?.stroops, 0)
         XCTAssertEqual(spendable("   ")?.stroops, 0)

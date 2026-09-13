@@ -176,3 +176,43 @@ final class PersistedProposal {
         self.encryptedEnvelopeXDR = encryptedEnvelopeXDR
     }
 }
+
+/// A creation handed to the founder's wallet and awaiting confirmation.
+///
+/// On disk rather than in memory because losing it strands real money —
+/// see `PendingTreasuryCreation`. The configuration is stored so the
+/// eventual ledger check can insist on the same one that was asked for,
+/// which is the whole basis on which the group is later told this
+/// account is theirs.
+@Model
+final class PersistedPendingCreation {
+    #Unique<PersistedPendingCreation>([\.groupID, \.ownerIdentityIDString])
+
+    var groupID: String
+    var ownerIdentityIDString: String
+    var startedAt: Date
+
+    var encryptedTreasuryAccountID: Data
+    var encryptedNetwork: Data
+    var encryptedCreationTxHash: Data
+    /// JSON: the co-signer accounts and the three thresholds.
+    var encryptedConfiguration: Data
+
+    init(
+        groupID: String,
+        ownerIdentityIDString: String,
+        startedAt: Date,
+        encryptedTreasuryAccountID: Data,
+        encryptedNetwork: Data,
+        encryptedCreationTxHash: Data,
+        encryptedConfiguration: Data
+    ) {
+        self.groupID = groupID
+        self.ownerIdentityIDString = ownerIdentityIDString
+        self.startedAt = startedAt
+        self.encryptedTreasuryAccountID = encryptedTreasuryAccountID
+        self.encryptedNetwork = encryptedNetwork
+        self.encryptedCreationTxHash = encryptedCreationTxHash
+        self.encryptedConfiguration = encryptedConfiguration
+    }
+}

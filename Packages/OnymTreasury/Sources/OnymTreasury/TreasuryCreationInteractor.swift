@@ -227,6 +227,16 @@ public struct TreasuryCreationInteractor: Sendable {
             // also submit, which is why nothing is anchored here — the
             // group learns the treasury exists through `adopt`, after
             // the transaction is on the ledger.
+            await treasury.recordPendingCreation(PendingTreasuryCreation(
+                groupID: groupIDHex,
+                ownerIdentityID: owner,
+                treasuryAccount: treasuryKey.account,
+                network: network,
+                creationTxHash: hash.hexString,
+                coSigners: coSigners,
+                thresholds: thresholds,
+                startedAt: now
+            ))
             return .needsExternalWallet(
                 SEP0007Request(
                     envelope: envelope,
@@ -403,18 +413,21 @@ public struct TreasuryCreationInteractor: Sendable {
             return .failed("that account's thresholds cannot be met by its signers")
         }
 
-        // The creation hash is displayed as this treasury's origin and
-        // links out to an explorer, and until now it was whatever the
-        // caller passed. A hash that names no transaction — or names
-        // someone else's — is a provenance claim this app would be
-        // making on no evidence, which is the thing the rest of the
-        // treasury design refuses to do.
-        let history = (try? await horizon(network).transactions(
+        // The hash announced to the group must be one the group can look
+        // up, and it must name the transaction this app prepared. It is
+        // computed locally from the envelope handed to the wallet, and
+        // nothing else checks the wallet submitted *that* transaction —
+        // an equivalent one built by hand passes every configuration
+        // check above and anchors a hash that is on no ledger,
+        // permanently, because re-anchoring is refused.
+        let applied = (try? await horizon(network).transactions(
             for: account,
             limit: Self.creationHistoryDepth
         )) ?? []
-        guard history.contains(where: { $0.hash == creationTxHash }) else {
-            return .failed("that transaction is not in the account's history")
+        guard applied.contains(where: { $0.hash == creationTxHash && $0.successful }) else {
+            return .failed(
+                "that account exists, but not from the transaction this app prepared"
+            )
         }
 
         let created = Treasury(
@@ -429,6 +442,7 @@ public struct TreasuryCreationInteractor: Sendable {
             lastRefreshedAt: now
         )
         await treasury.anchor(created)
+        await treasury.clearPendingCreation(groupID: groupIDHex)
         await broadcaster.announceAnchor(created, now: now)
         return .created(created)
     }
