@@ -19,6 +19,17 @@ import OnymStellar
 /// and why `unsupportedOperation` exists.
 public enum TreasuryProposalVerifier {
 
+    /// The most a proposal may offer per operation, in stroops.
+    ///
+    /// A hundred times the protocol's base fee of 100 stroops — high
+    /// enough to clear any realistic surge, low enough that the worst
+    /// case is 0.001 XLM an operation rather than an unbounded transfer
+    /// to the validators. Deliberately a ceiling rather than an exact
+    /// match: a proposal built during a busy ledger legitimately pays
+    /// more than one built on a quiet one.
+    public static let maxFeePerOperation: UInt32 = 10_000
+
+
     /// What the verifier concluded.
     public enum Outcome: Equatable, Sendable {
         case accepted(TreasuryProposalKind)
@@ -74,6 +85,17 @@ public enum TreasuryProposalVerifier {
             if let source = operation.sourceAccount, source != treasury.account {
                 return .rejected(.foreignOperationSource)
             }
+        }
+
+        // The fee is a real spend that appears in no operation row, and
+        // the card is built from operations only. `fee = UInt32.max` on
+        // a one-stroop payment is ~429 XLM leaving the treasury with
+        // nothing on screen to show for it. Bounded here, and also
+        // shown by `TreasuryProposalDescription` when it is above the
+        // ordinary rate, so the two defences are independent.
+        let operationCount = UInt32(envelope.transaction.operations.count)
+        guard envelope.transaction.fee <= maxFeePerOperation * max(operationCount, 1) else {
+            return .rejected(.excessiveFee)
         }
 
         guard let kind = kind(of: envelope.transaction.operations) else {

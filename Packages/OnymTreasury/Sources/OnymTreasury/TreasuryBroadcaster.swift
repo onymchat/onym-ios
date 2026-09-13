@@ -182,8 +182,3 @@ public actor TreasuryBroadcaster {
         }
     }
 }
-
-extension Data {
-    /// Lowercase hex, matching the spelling every BLS pubkey key uses.
-    var hexString: String { map { String(format: "%02x", $0) }.joined() }
-}

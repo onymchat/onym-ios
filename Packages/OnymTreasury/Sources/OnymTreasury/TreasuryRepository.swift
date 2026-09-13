@@ -130,8 +130,28 @@ public actor TreasuryRepository {
         continuations[id] = nil
     }
 
+    /// Snapshot for the selected identity — what a screen wants.
     public func snapshot(groupID: String) async -> TreasurySnapshot {
-        guard let owner = currentIdentity?.rawValue.uuidString else {
+        await snapshot(groupID: groupID, ownerIdentityID: currentIdentity)
+    }
+
+    /// Snapshot for a **named** identity.
+    ///
+    /// The receive path needs this and the selected-identity version is
+    /// wrong for it. `InboxFanoutInteractor` dispatches for every
+    /// identity on the device, carrying the recipient in
+    /// `ownerIdentityID`; reading the *selected* one instead meant a
+    /// payload addressed to a non-selected identity saw no treasury at
+    /// all. A valid proposal was then stored permanently as
+    /// `.rejected(.noTreasury)`, the anchor path's "already has a
+    /// treasury" guard consulted the wrong row, and signatures were
+    /// dropped — none of it visible, and none of it re-checked when the
+    /// user later switched identity.
+    public func snapshot(
+        groupID: String,
+        ownerIdentityID: IdentityID?
+    ) async -> TreasurySnapshot {
+        guard let owner = ownerIdentityID?.rawValue.uuidString else {
             return TreasurySnapshot(
                 groupID: groupID,
                 treasury: nil,
@@ -181,7 +201,12 @@ public actor TreasuryRepository {
     }
 
     public func proposal(id: UUID) async -> StoredProposal? {
-        guard let owner = currentIdentity?.rawValue.uuidString else { return nil }
+        await proposal(id: id, ownerIdentityID: currentIdentity)
+    }
+
+    /// Same, for a named identity — see `snapshot(groupID:ownerIdentityID:)`.
+    public func proposal(id: UUID, ownerIdentityID: IdentityID?) async -> StoredProposal? {
+        guard let owner = ownerIdentityID?.rawValue.uuidString else { return nil }
         return await store.proposal(id: id, ownerIDString: owner)
     }
 
@@ -200,9 +225,12 @@ public actor TreasuryRepository {
         _ signature: Data,
         from signer: StellarAccountID,
         toProposal id: UUID,
+        ownerIdentityID: IdentityID? = nil,
         now: Date = Date()
     ) async -> Bool {
-        guard let owner = currentIdentity?.rawValue.uuidString,
+        // Defaults to the selected identity for the UI's calls; the
+        // receive path passes the envelope's actual recipient.
+        guard let owner = (ownerIdentityID ?? currentIdentity)?.rawValue.uuidString,
               var stored = await store.proposal(id: id, ownerIDString: owner)
         else { return false }
         do {

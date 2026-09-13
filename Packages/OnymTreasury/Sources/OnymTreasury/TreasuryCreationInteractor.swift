@@ -121,16 +121,14 @@ public struct TreasuryCreationInteractor: Sendable {
     /// Create the treasury for `groupIDHex`.
     ///
     /// - Parameters:
-    ///   - funder: the account paying. May be the founder's own
-    ///     Onym-derived account or one they hold elsewhere; the second
-    ///     case returns `needsExternalWallet` because this app cannot
-    ///     sign for it.
+    ///   - funder: the account paying. Which key signs for it is
+    ///     worked out from the account itself — see `signingKey(for:)` —
+    ///     so a caller cannot assert "this one is ours" and be wrong.
     ///   - coSigners: the declared accounts that will control it.
     ///   - thresholds: how many signatures it will take.
     public func create(
         groupIDHex: String,
         funder: StellarAccountID,
-        funderIsOnymDerived: Bool,
         coSigners: [StellarAccountID],
         thresholds: TreasuryThresholds,
         spendable: StellarAmount,
@@ -188,7 +186,8 @@ public struct TreasuryCreationInteractor: Sendable {
             return .failed("could not sign as the new account")
         }
 
-        guard funderIsOnymDerived else {
+        let funderKey = Self.signingKey(for: funder, of: me)
+        guard funderKey != .external else {
             // The founder's wallet supplies the other signature. It can
             // also submit, which is why nothing is anchored here — the
             // group learns the treasury exists through `adopt`, after
@@ -205,7 +204,16 @@ public struct TreasuryCreationInteractor: Sendable {
         }
 
         let hash = transaction.hash(network: network)
-        guard let signature = try? await identity.signWithTreasuryKey(hash) else {
+        let signature: Data?
+        switch funderKey {
+        case .treasury:
+            signature = try? await identity.signWithTreasuryKey(hash)
+        case .identity:
+            signature = try? await identity.signWithStellarKey(hash)
+        case .external:
+            signature = nil
+        }
+        guard let signature else {
             return .failed("could not sign")
         }
         guard (try? envelope.addSignature(signature, from: funder, network: network)) != nil
@@ -228,6 +236,33 @@ public struct TreasuryCreationInteractor: Sendable {
         } catch {
             return .failed("the network rejected the creation transaction")
         }
+    }
+
+    /// Which of this identity's keys can sign for `funder`.
+    ///
+    /// Worked out from the account rather than taken from the caller.
+    /// The previous shape was a `funderIsOnymDerived` flag and a
+    /// hardcoded `signWithTreasuryKey`, which silently assumed the
+    /// funder was always the treasury-derived account: pass the
+    /// identity's own `stellarAccountID` with the flag set and every
+    /// creation failed with "the funding signature did not verify",
+    /// because the two are different HKDF branches. A boolean a caller
+    /// can get wrong is replaced by a question only the account can
+    /// answer.
+    static func signingKey(for funder: StellarAccountID, of identity: Identity) -> FunderKey {
+        if funder.accountID == identity.treasuryAccountID { return .treasury }
+        if funder.accountID == identity.stellarAccountID { return .identity }
+        return .external
+    }
+
+    enum FunderKey: Equatable {
+        /// The treasury-scoped key — what a member declares when they
+        /// choose "the account Onym derives".
+        case treasury
+        /// The identity's general Stellar account.
+        case identity
+        /// Held outside Onym; the envelope goes to a wallet.
+        case external
     }
 
     /// Record a treasury whose creation transaction was submitted

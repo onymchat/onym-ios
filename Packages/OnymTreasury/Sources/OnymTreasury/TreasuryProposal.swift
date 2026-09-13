@@ -166,4 +166,7 @@ public enum TreasuryRejection: String, Codable, Equatable, Sendable {
     case malformed
     /// No treasury is anchored for this group yet.
     case noTreasury
+    /// The transaction offers a fee far above the going rate — a spend
+    /// that would appear in none of the operation rows.
+    case excessiveFee
 }

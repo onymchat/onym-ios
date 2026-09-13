@@ -96,7 +96,9 @@ public struct TreasuryPayloadReceiver: Sendable {
               let network = StellarNetwork(passphrase: payload.networkPassphrase)
         else { return }
 
-        let existing = await treasury.snapshot(groupID: group.id).treasury
+        let existing = await treasury
+            .snapshot(groupID: group.id, ownerIdentityID: ownerIdentityID)
+            .treasury
         guard existing == nil else { return }
 
         await treasury.anchor(Treasury(
@@ -126,7 +128,31 @@ public struct TreasuryPayloadReceiver: Sendable {
               profile.sendingPubkey == senderEd25519PublicKey
         else { return }
 
-        let snapshot = await treasury.snapshot(groupID: group.id)
+        // A proposal id is chosen by its sender, and the store keys on
+        // `(id, owner)`. Without this, a member could resend a proposal
+        // reusing an id already on the device: the envelope, the
+        // submitted hash and the rejection would be overwritten while
+        // the proposer, the kind and the creation date kept the
+        // original's — so an attacker's operations would render under
+        // an honest member's name, at a `kind` no longer matching the
+        // envelope (a signer change checked against the *medium*
+        // threshold), with the collected signatures dropped and an
+        // already-submitted proposal made actionable again.
+        //
+        // The first arrival wins. A genuine resend is a replay of bytes
+        // this device already holds, so ignoring it loses nothing;
+        // signatures arrive on their own payload.
+        if await treasury.proposal(
+            id: payload.proposalID,
+            ownerIdentityID: ownerIdentityID
+        ) != nil {
+            return
+        }
+
+        let snapshot = await treasury.snapshot(
+            groupID: group.id,
+            ownerIdentityID: ownerIdentityID
+        )
         let createdAt = Date(
             timeIntervalSince1970: TimeInterval(payload.sentAtMillis) / 1000
         )
@@ -212,6 +238,7 @@ public struct TreasuryPayloadReceiver: Sendable {
             payload.signature,
             from: signer,
             toProposal: payload.proposalID,
+            ownerIdentityID: ownerIdentityID,
             now: now
         )
     }

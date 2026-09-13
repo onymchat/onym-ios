@@ -69,6 +69,26 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
                 try JSONEncoder().encode(snapshot)
             )
             if let row = try self.fetchTreasury(treasury.groupID, owner) {
+                // Every column, not just the cached chain read. The
+                // partial version disagreed with `InMemoryTreasuryStore`,
+                // which replaces the value wholesale — two conformers of
+                // one protocol behaving differently, with the tests on
+                // the in-memory one unable to see it. It also meant an
+                // existing-but-undecodable row (reported as "no
+                // treasury") survived a re-anchor: `create` passed its
+                // `alreadyExists` guard, funded a second account, and
+                // the write that should have recorded it changed
+                // nothing.
+                row.createdAt = treasury.createdAt
+                row.encryptedAccountID = try StorageEncryption.encrypt(
+                    Data(treasury.account.accountID.utf8)
+                )
+                row.encryptedNetwork = try StorageEncryption.encrypt(
+                    Data(treasury.network.rawValue.utf8)
+                )
+                row.encryptedCreationTxHash = try StorageEncryption.encrypt(
+                    Data(treasury.creationTxHash.utf8)
+                )
                 row.encryptedChainSnapshot = encodedSnapshot
                 row.lastRefreshedAt = treasury.lastRefreshedAt
             } else {
