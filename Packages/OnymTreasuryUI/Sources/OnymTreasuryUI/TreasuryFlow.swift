@@ -137,9 +137,14 @@ public final class TreasuryFlow {
         /// Handed to the founder's wallet, waiting for them to sign and
         /// submit it there. `treasuryAccountID` is the account the
         /// envelope creates, kept so `confirmExternalCreation()` can
-        /// check the ledger for it afterwards.
+        /// check the ledger for it afterwards; `creationTxHash` is the
+        /// transaction the wallet will submit, kept so the anchor the
+        /// group receives names something it can look up; and
+        /// `thresholds` so the ledger check covers the whole
+        /// configuration rather than only the signer keys.
         case awaitingWallet(
             treasuryAccountID: String,
+            creationTxHash: String,
             coSigners: [StellarAccountID],
             thresholds: TreasuryThresholds
         )
@@ -466,7 +471,7 @@ public final class TreasuryFlow {
             creationError = "Only the founder can create the treasury."
         case .noDeclaredSigners:
             creationError = "Nobody has chosen a Stellar account yet."
-        case .needsExternalWallet(let request, let treasuryAccountID):
+        case .needsExternalWallet(let request, let treasuryAccountID, let creationTxHash):
             // The wallet signs and submits; nothing is anchored until
             // the founder comes back and `confirmExternalCreation`
             // finds the account on the ledger. Previously this opened
@@ -475,6 +480,7 @@ public final class TreasuryFlow {
             pendingWalletRequest = request
             creationStage = .awaitingWallet(
                 treasuryAccountID: treasuryAccountID,
+                creationTxHash: creationTxHash,
                 coSigners: coSigners,
                 thresholds: thresholds
             )
@@ -493,10 +499,18 @@ public final class TreasuryFlow {
     /// must be the one this screen chose. Taking the founder's word for
     /// it would mean anchoring a group to an account that might still
     /// be under one person's control.
+    ///
+    /// The rest of the group cannot run that check for themselves, so
+    /// the anchor they receive has to carry the creation transaction —
+    /// which is the envelope handed to the wallet, whose hash is fixed
+    /// before it is signed.
     public func confirmExternalCreation() async {
-        guard case .awaitingWallet(let accountID, let coSigners, let thresholds)
-            = creationStage
-        else { return }
+        guard case .awaitingWallet(
+            let accountID,
+            let creationTxHash,
+            let coSigners,
+            let thresholds
+        ) = creationStage else { return }
         isCreating = true
         creationError = nil
         defer { isCreating = false }
@@ -504,7 +518,7 @@ public final class TreasuryFlow {
         let outcome = await creation.adopt(
             groupIDHex: groupID,
             treasuryAccountID: accountID,
-            creationTxHash: "",
+            creationTxHash: creationTxHash,
             network: network(),
             expectedCoSigners: coSigners,
             expectedThresholds: thresholds

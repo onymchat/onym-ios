@@ -46,8 +46,13 @@ public enum TreasuryCreationOutcome: Equatable, Sendable {
     case alreadyExists
     /// The founder's funding account cannot sign here, so the creation
     /// envelope goes to their wallet. Once it applies, `adopt` records
-    /// the result.
-    case needsExternalWallet(SEP0007Request, treasuryAccountID: String)
+    /// the result — `creationTxHash` is carried along so that what the
+    /// group is eventually told names a transaction anyone can look up.
+    case needsExternalWallet(
+        SEP0007Request,
+        treasuryAccountID: String,
+        creationTxHash: String
+    )
     case notAdmin
     /// Nobody has declared a signer yet, so there would be no one to
     /// hand control to.
@@ -213,6 +218,10 @@ public struct TreasuryCreationInteractor: Sendable {
         }
 
         let funderKey = Self.signingKey(for: funder, of: me)
+        // Known before anyone signs: signatures live in the envelope,
+        // not in the transaction, so this is already the hash the ledger
+        // will record no matter who submits it.
+        let hash = transaction.hash(network: network)
         guard funderKey != .external else {
             // The founder's wallet supplies the other signature. It can
             // also submit, which is why nothing is anchored here — the
@@ -225,11 +234,11 @@ public struct TreasuryCreationInteractor: Sendable {
                     message: "Create a treasury for \(group.name)",
                     publicKey: funder
                 ),
-                treasuryAccountID: treasuryKey.account.accountID
+                treasuryAccountID: treasuryKey.account.accountID,
+                creationTxHash: hash.map { String(format: "%02x", $0) }.joined()
             )
         }
 
-        let hash = transaction.hash(network: network)
         let signature: Data?
         switch funderKey {
         case .treasury:
