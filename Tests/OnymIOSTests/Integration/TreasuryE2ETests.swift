@@ -431,6 +431,274 @@ final class TreasuryE2ETests: XCTestCase {
         }
     }
 
+    // MARK: - The split external path
+
+    /// The whole of it, with the wallet's half played by hand: Onym
+    /// builds a funding transaction, "the wallet" signs and submits it,
+    /// and Onym then configures the account and anchors it.
+    ///
+    /// The split exists because SEP-0007 wallets will not submit a
+    /// two-source envelope, so the part worth proving is that the
+    /// second half — which no wallet touches — actually locks the
+    /// account down against a ledger that enforces authorisation.
+    func test_externalCreation_isFundedByTheWalletAndLockedDownHere() async throws {
+        let world = try await makeExternalWorld()
+
+        guard case .needsExternalWallet(let request, let accountID, _) =
+            await world.side.creation.create(
+                groupIDHex: groupIDHex,
+                funder: world.funder,
+                coSigners: world.coSigners,
+                thresholds: world.thresholds,
+                spendable: StellarAmount(stroops: 0),
+                network: .testnet
+            )
+        else { return XCTFail("an external funder must hand off to a wallet") }
+
+        // What a wallet is given: one operation, one source, unsigned.
+        let funding = request.envelope.transaction
+        XCTAssertEqual(funding.operations.count, 1)
+        XCTAssertTrue(request.envelope.signatures.isEmpty)
+
+        // The wallet's half.
+        var walletEnvelope = request.envelope
+        try walletEnvelope.addSignature(
+            try world.funderKey.signature(for: funding.hash(network: .testnet)),
+            from: world.funder,
+            network: .testnet
+        )
+        _ = try await world.ledger.submit(walletEnvelope)
+
+        // Ours.
+        let outcome = await world.side.creation.completeExternalCreation(groupIDHex: groupIDHex)
+        guard case .created(let treasury) = outcome else {
+            return XCTFail("completion failed: \(outcome)")
+        }
+        XCTAssertEqual(treasury.account.accountID, accountID)
+
+        let onChain = try await world.ledger.account(treasury.account)
+        XCTAssertNil(TreasuryCreationInteractor.misconfiguration(
+            onChain,
+            account: treasury.account,
+            expectedCoSigners: world.coSigners,
+            expectedThresholds: world.thresholds
+        ))
+        // The seed dies with the row.
+        let pending = await world.side.repository.pendingCreation(groupID: groupIDHex)
+        XCTAssertNil(pending)
+    }
+
+    /// Run it again and it does not run again. The resume branch reads
+    /// the ledger, finds the account already configured, and stops at
+    /// "this group has one" rather than submitting a second lockdown.
+    func test_completingTwice_anchorsOnceAndStaysAnchored() async throws {
+        let world = try await makeExternalWorld()
+        try await fundExternally(world)
+        guard case .created(let treasury) =
+            await world.side.creation.completeExternalCreation(groupIDHex: groupIDHex)
+        else { return XCTFail("first completion failed") }
+
+        let again = await world.side.creation.completeExternalCreation(groupIDHex: groupIDHex)
+        XCTAssertEqual(again, .alreadyExists)
+        let anchored = await world.side.repository.snapshot(groupID: groupIDHex).treasury
+        XCTAssertEqual(anchored?.account, treasury.account)
+    }
+
+    /// The resume path proper: the configuration landed, the app died
+    /// before anchoring. Running again must anchor what is already on
+    /// the ledger rather than submit a second transaction the account's
+    /// sequence has moved past.
+    func test_aConfigurationThatLanded_isAnchoredOnTheNextRun() async throws {
+        let world = try await makeExternalWorld()
+        try await fundExternally(world)
+
+        // Configure by hand, exactly as the interactor would, then wipe
+        // nothing — the pending row still says the job is unfinished.
+        let loaded = await world.side.repository.pendingCreation(groupID: groupIDHex)
+        let pending = try XCTUnwrap(loaded)
+        let seed = try XCTUnwrap(pending.treasurySeed)
+        let key = try EphemeralTreasuryKey(seed: seed)
+        let account = try await world.ledger.account(pending.treasuryAccount)
+        let configuration = try TreasuryTransactionFactory.creationConfiguration(
+            treasury: pending.treasuryAccount,
+            treasurySequence: account.sequenceNumber,
+            coSigners: pending.coSigners,
+            thresholds: pending.thresholds,
+            baseFee: StellarAmount(stroops: 100),
+            timeBounds: StellarTimeBounds(minTime: 0, maxTime: 4_000_000_000)
+        )
+        var envelope = TransactionEnvelope(transaction: configuration)
+        try key.sign(&envelope, network: .testnet)
+        _ = try await world.ledger.submit(envelope)
+
+        guard case .created(let treasury) =
+            await world.side.creation.completeExternalCreation(groupIDHex: groupIDHex)
+        else { return XCTFail("the resume branch must anchor what is already configured") }
+        XCTAssertEqual(treasury.account, pending.treasuryAccount)
+        let cleared = await world.side.repository.pendingCreation(groupID: groupIDHex)
+        XCTAssertNil(cleared)
+    }
+
+    /// One tap on "Start over" after the wallet has funded the account
+    /// used to delete the only key that could ever reach it. It is
+    /// refused now, and the row survives the refusal.
+    func test_abandoning_isRefusedOnceTheFundingHasLanded() async throws {
+        let world = try await makeExternalWorld()
+        try await fundExternally(world)
+
+        let outcome = await world.side.creation.abandonExternalCreation(groupIDHex: groupIDHex)
+        guard case .accountAlreadyFunded = outcome else {
+            return XCTFail("abandoning a funded treasury must be refused, got \(outcome)")
+        }
+        let pending = await world.side.repository.pendingCreation(groupID: groupIDHex)
+        XCTAssertNotNil(pending?.treasurySeed, "the key must survive a refused abandon")
+
+        // And the way out of that state still works.
+        guard case .created = await world.side.creation
+            .completeExternalCreation(groupIDHex: groupIDHex)
+        else { return XCTFail("finishing must still be possible") }
+    }
+
+    /// Before the funding lands there is nothing to strand, so it is
+    /// discarded — which is the case the button exists for.
+    func test_abandoning_isAllowedBeforeTheWalletSendsAnything() async throws {
+        let world = try await makeExternalWorld()
+        let outcome = await world.side.creation.abandonExternalCreation(groupIDHex: groupIDHex)
+        XCTAssertEqual(outcome, .discarded)
+        let pending = await world.side.repository.pendingCreation(groupID: groupIDHex)
+        XCTAssertNil(pending)
+    }
+
+    /// A handoff begun before the split existed has no seed. It must
+    /// still finish, through the path that was written for it.
+    func test_aPendingRowWithNoSeed_fallsBackToAdopt() async throws {
+        let world = try await makeExternalWorld()
+        let loaded = await world.side.repository.pendingCreation(groupID: groupIDHex)
+        let pending = try XCTUnwrap(loaded)
+        await world.side.repository.recordPendingCreation(PendingTreasuryCreation(
+            groupID: pending.groupID,
+            ownerIdentityID: pending.ownerIdentityID,
+            treasuryAccount: pending.treasuryAccount,
+            network: pending.network,
+            creationTxHash: pending.creationTxHash,
+            coSigners: pending.coSigners,
+            thresholds: pending.thresholds,
+            startedAt: pending.startedAt
+        ))
+        // `adopt` refuses an account that is not on the ledger, which is
+        // the honest answer here and proves which path was taken: the
+        // split path's message names the wallet, `adopt`'s does not.
+        let outcome = await world.side.creation.completeExternalCreation(groupIDHex: groupIDHex)
+        guard case .failed(let reason) = outcome else {
+            return XCTFail("expected a refusal, got \(outcome)")
+        }
+        XCTAssertEqual(reason, "the treasury account is not on the ledger yet")
+    }
+
+    // MARK: - External-path harness
+
+    private struct ExternalWorld {
+        let side: Side
+        let ledger: LedgerHorizon
+        let funder: StellarAccountID
+        let funderKey: Curve25519.Signing.PrivateKey
+        let coSigners: [StellarAccountID]
+        let thresholds: TreasuryThresholds
+    }
+
+    /// A group whose founder funds from an account Onym cannot sign
+    /// for — which is what puts `create` on the external path.
+    private func makeExternalWorld() async throws -> ExternalWorld {
+        let adaLoaded = await ada.currentIdentity()
+        let boLoaded = await bo.currentIdentity()
+        let adaSelected = await ada.currentSelectedID()
+        let adaIdentity = try XCTUnwrap(adaLoaded)
+        let boIdentity = try XCTUnwrap(boLoaded)
+        let adaOwner = try XCTUnwrap(adaSelected)
+
+        let funderKey = Curve25519.Signing.PrivateKey()
+        let funder = try StellarAccountID(
+            publicKey: Data(funderKey.publicKey.rawRepresentation)
+        )
+        let ledger = LedgerHorizon()
+        await ledger.create(account: funder, balance: 1_000_000_000)
+
+        let side = try await makeSide(
+            identity: ada,
+            owner: adaOwner,
+            me: adaIdentity,
+            peer: boIdentity,
+            adminBlsHex: adaIdentity.blsPublicKey.hexString,
+            adminEd25519Hex: adaIdentity.stellarPublicKey.hexString,
+            ledger: ledger
+        )
+        // The founder declares the wallet account; the co-signer set is
+        // that plus Bo's.
+        let boSigner = try StellarAccountID(accountID: boIdentity.treasuryAccountID)
+        let declarations: [(StellarAccountID, Identity, IdentityRepository)] = [
+            (funder, adaIdentity, ada),
+            (boSigner, boIdentity, bo)
+        ]
+        for (account, identity, repo) in declarations {
+            await side.repository.record(TreasurySignerDeclarationRecord(
+                groupID: groupIDHex,
+                ownerIdentityID: adaOwner,
+                memberBlsPubkeyHex: identity.blsPublicKey.hexString,
+                account: account,
+                source: account == funder ? .external : .onym,
+                signature: try sign(
+                    identity: repo,
+                    account: account,
+                    sendingKey: identity.stellarPublicKey
+                ),
+                declarerSendingPublicKey: identity.stellarPublicKey,
+                declaredAt: Date()
+            ))
+        }
+        let world = ExternalWorld(
+            side: side,
+            ledger: ledger,
+            funder: funder,
+            funderKey: funderKey,
+            coSigners: [funder, boSigner],
+            thresholds: TreasuryThresholds(low: 1, medium: 2, high: 2)
+        )
+        guard case .needsExternalWallet = await side.creation.create(
+            groupIDHex: groupIDHex,
+            funder: funder,
+            coSigners: world.coSigners,
+            thresholds: world.thresholds,
+            spendable: StellarAmount(stroops: 0),
+            network: .testnet
+        ) else {
+            struct NotExternal: Error {}
+            throw NotExternal()
+        }
+        return world
+    }
+
+    /// Play the wallet: sign the funding transaction and submit it.
+    private func fundExternally(_ world: ExternalWorld) async throws {
+        let loaded = await world.side.repository.pendingCreation(groupID: groupIDHex)
+        let pending = try XCTUnwrap(loaded)
+        let account = try await world.ledger.account(world.funder)
+        let funding = try TreasuryTransactionFactory.creationFunding(
+            funder: world.funder,
+            funderSequence: account.sequenceNumber,
+            treasury: pending.treasuryAccount,
+            startingBalance: StellarAmount(stroops: 40_000_000),
+            baseFee: StellarAmount(stroops: 100),
+            timeBounds: StellarTimeBounds(minTime: 0, maxTime: 4_000_000_000)
+        )
+        var envelope = TransactionEnvelope(transaction: funding)
+        try envelope.addSignature(
+            try world.funderKey.signature(for: funding.hash(network: .testnet)),
+            from: world.funder,
+            network: .testnet
+        )
+        _ = try await world.ledger.submit(envelope)
+    }
+
     /// The fake refuses what the network refuses — the three checks it
     /// was missing, each of which could otherwise let a future change
     /// look correct against a more permissive ledger than production.

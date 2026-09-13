@@ -226,8 +226,6 @@ public enum TreasuryTransactionFactory {
         )
     }
 
-    /// The protocol's fee rule: base fee × operation count, for the
-    /// whole transaction.
     // MARK: - Split creation, for wallets that will not submit ours
 
     /// Step one: create the account, and nothing else.
@@ -331,6 +329,8 @@ public enum TreasuryTransactionFactory {
         StellarAmount(stroops: baseFee.stroops * Int64(signerCount + 1))
     }
 
+    /// The protocol's fee rule: base fee × operation count, for the
+    /// whole transaction.
     private static func fee(baseFee: StellarAmount, operations: Int) -> UInt32 {
         UInt32(clamping: baseFee.stroops * Int64(operations))
     }

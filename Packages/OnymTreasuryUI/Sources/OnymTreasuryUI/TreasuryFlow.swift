@@ -563,12 +563,12 @@ public final class TreasuryFlow {
     /// will not finish the job.
     ///
     /// A handoff has two ends and this app controls one of them. When
-    /// the far end stalls — a Confirm button that does nothing, a wallet
-    /// that cannot cope with an envelope that already carries a
-    /// signature — the founder was left with a screen that could only
-    /// wait. These bytes are the whole transaction, signed by the
-    /// treasury's own key and short one signature, and they can be
-    /// finished in any tool that speaks Stellar.
+    /// the far end stalls, the founder was left with a screen that
+    /// could only wait. These bytes are the transaction that funds the
+    /// account: one operation, unsigned, short exactly the founder's
+    /// signature, and finishable in any tool that speaks Stellar.
+    /// Locking the treasury down is a second transaction that never
+    /// goes near a wallet.
     ///
     /// Nil after a relaunch, for the same reason `canReopenWallet` is:
     /// the envelope is not persisted.

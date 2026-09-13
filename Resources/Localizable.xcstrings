@@ -11474,6 +11474,23 @@
         }
       }
     },
+    "Your wallet already funded this treasury, so starting over would strand it. Tap \"I've sent it\" to finish setting it up.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your wallet already funded this treasury, so starting over would strand it. Tap \"I've sent it\" to finish setting it up."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Кошелёк уже пополнил эту казну, и «начать заново» оставит средства без доступа. Нажмите «Я отправил», чтобы завершить настройку."
+          }
+        }
+      }
+    },
     "Your wallet only funds the account — that is all wallets will send. Sign it there, then come back: Onym locks the treasury down itself, checks the ledger, and only then tells the group.": {
       "extractionState": "manual",
       "localizations": {
