@@ -268,6 +268,26 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
                 Data(proposal.envelope.base64XDR.utf8)
             )
             if let row = try self.context.fetch(descriptor).first {
+                // Every column, for the reason the treasury branch
+                // above learned: a partial update disagrees with
+                // `InMemoryTreasuryStore`, which replaces wholesale. It
+                // is reachable, too — an undecodable row makes
+                // `proposal(id:ownerIDString:)` return nil, so the
+                // receiver's duplicate-id guard passes and this branch
+                // would graft new operations onto the old proposer name
+                // and kind, which is precisely what that guard exists
+                // to prevent.
+                row.createdAt = proposal.createdAt
+                row.kindRaw = proposal.kind.rawValue
+                row.encryptedProposerBlsPubkeyHex = try StorageEncryption.encrypt(
+                    Data(proposal.proposerBlsPubkeyHex.utf8)
+                )
+                row.encryptedTreasuryAccountID = try StorageEncryption.encrypt(
+                    Data(proposal.treasuryAccount.accountID.utf8)
+                )
+                row.encryptedNetwork = try StorageEncryption.encrypt(
+                    Data(proposal.network.rawValue.utf8)
+                )
                 row.encryptedEnvelopeXDR = envelope
                 row.submittedTxHash = proposal.submittedTxHash
                 row.rejectionRaw = stored.rejection?.rawValue

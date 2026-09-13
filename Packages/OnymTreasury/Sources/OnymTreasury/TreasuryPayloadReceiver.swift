@@ -60,6 +60,23 @@ public struct TreasuryPayloadReceiver: Sendable {
             declarerSendingPublicKey: profile.sendingPubkey
         ) else { return }
 
+        // Two re-declarations delivered out of order would otherwise
+        // leave the group on the older account — inbox delivery has no
+        // ordering guarantee, and `sentAtMillis` is outside the signed
+        // statement so it is the sender's word. That is enough for
+        // *monotonicity*, though: a sender can only make their own
+        // declaration harder to replace, never someone else's, because
+        // the statement binds the declarer. `declaredAt` is already
+        // stored, so the guard is nearly free.
+        let declaredAt = Date(
+            timeIntervalSince1970: TimeInterval(payload.sentAtMillis) / 1000
+        )
+        let existing = await treasury
+            .snapshot(groupID: group.id, ownerIdentityID: ownerIdentityID)
+            .declarations
+            .first { $0.memberBlsPubkeyHex == payload.declarerBlsPubkeyHex }
+        if let existing, existing.declaredAt > declaredAt { return }
+
         await treasury.record(TreasurySignerDeclarationRecord(
             groupID: group.id,
             ownerIdentityID: ownerIdentityID,
@@ -68,7 +85,7 @@ public struct TreasuryPayloadReceiver: Sendable {
             source: payload.source,
             signature: payload.signature,
             declarerSendingPublicKey: profile.sendingPubkey,
-            declaredAt: Date(timeIntervalSince1970: TimeInterval(payload.sentAtMillis) / 1000)
+            declaredAt: declaredAt
         ))
     }
 
@@ -111,6 +128,57 @@ public struct TreasuryPayloadReceiver: Sendable {
             createdAt: Date(timeIntervalSince1970: TimeInterval(payload.sentAtMillis) / 1000)
         ))
         await treasury.refresh(groupID: group.id, ownerIdentityID: ownerIdentityID)
+
+        // The anchor and the first proposal are independent envelopes
+        // with no ordering guarantee between them, so a founder who
+        // announces and immediately proposes leaves some members
+        // holding a proposal that arrived first and was refused for
+        // `noTreasury` — permanently, with no path back. The chat layer
+        // has `ChatMessageParkingLot` for exactly this shape; here the
+        // refused rows *are* the parking lot, so adopting the anchor
+        // re-runs them.
+        await reverifyRefusedProposals(group: group, ownerIdentityID: ownerIdentityID)
+    }
+
+    /// Re-run proposals this device turned down for want of a treasury.
+    ///
+    /// Only `.noTreasury` rows: every other refusal is a fact about the
+    /// bytes that a later anchor cannot change, and re-running them
+    /// would be a way to launder a refusal by sending an anchor
+    /// afterwards.
+    private func reverifyRefusedProposals(
+        group: ChatGroup,
+        ownerIdentityID: IdentityID
+    ) async {
+        let snapshot = await treasury.snapshot(
+            groupID: group.id,
+            ownerIdentityID: ownerIdentityID
+        )
+        guard let anchored = snapshot.treasury else { return }
+        for stored in snapshot.proposals where stored.rejection == .noTreasury {
+            let proposal = stored.proposal
+            guard let profile = group.memberProfiles[proposal.proposerBlsPubkeyHex]
+            else { continue }
+            _ = profile
+            let outcome = TreasuryProposalVerifier.verify(
+                envelope: proposal.envelope,
+                network: proposal.network,
+                treasury: anchored,
+                proposerBlsPubkeyHex: proposal.proposerBlsPubkeyHex,
+                group: group,
+                currentSequence: snapshot.account?.sequenceNumber
+            )
+            switch outcome {
+            case .accepted(let kind):
+                var revived = proposal
+                revived.kind = kind
+                await treasury.record(StoredProposal(proposal: revived, rejection: nil))
+            case .rejected(let reason):
+                await treasury.record(
+                    StoredProposal(proposal: proposal, rejection: reason)
+                )
+            }
+        }
     }
 
     // MARK: - Proposal
@@ -176,7 +244,8 @@ public struct TreasuryPayloadReceiver: Sendable {
             network: network,
             treasury: snapshot.treasury,
             proposerBlsPubkeyHex: payload.proposerBlsPubkeyHex,
-            group: group
+            group: group,
+            currentSequence: snapshot.account?.sequenceNumber
         )
 
         let kind: TreasuryProposalKind

@@ -46,6 +46,18 @@ public enum TreasuryProposalVerifier {
     /// proposal arriving full can never be signed by anybody.
     public static let maxInboundSignatures = 4
 
+    /// How far past the account's current sequence a proposal may
+    /// claim.
+    ///
+    /// Bounding `maxTime` closed one door to a frozen treasury and left
+    /// the other open: a proposal at `sequence + 10^9` is accepted, and
+    /// the one-open-proposal rule then answers `.sequenceContended` for
+    /// every new proposal on every honest device until it expires —
+    /// repeatable, for the cost of one message. A real proposal claims
+    /// the *next* sequence; a small window tolerates the race where two
+    /// devices read the account moments apart.
+    public static let maxSequenceLookahead: Int64 = 8
+
 
     /// What the verifier concluded.
     public enum Outcome: Equatable, Sendable {
@@ -70,6 +82,9 @@ public enum TreasuryProposalVerifier {
         treasury: Treasury?,
         proposerBlsPubkeyHex: String,
         group: ChatGroup,
+        /// The treasury's sequence as the chain last reported it. Nil
+        /// when this device has not managed a live read.
+        currentSequence: Int64? = nil,
         now: Date = Date()
     ) -> Outcome {
         guard let treasury else { return .rejected(.noTreasury) }
@@ -127,6 +142,21 @@ public enum TreasuryProposalVerifier {
         let latestPermitted = now.addingTimeInterval(maxLifetime).timeIntervalSince1970
         guard TimeInterval(bounds.maxTime) <= latestPermitted else {
             return .rejected(.expiresTooLate)
+        }
+
+        // The sequence number is attacker-controlled too, and unbounded
+        // it freezes the treasury exactly as a missing time bound does
+        // — through the other field. Checked only when a live account
+        // read is available; without one the caller cannot know the
+        // current sequence, and refusing on that basis would drop
+        // genuine proposals whenever the network is unreachable.
+        if let currentSequence {
+            let claimed = envelope.transaction.sequenceNumber
+            guard claimed > currentSequence,
+                  claimed <= currentSequence + maxSequenceLookahead
+            else {
+                return .rejected(.implausibleSequence)
+            }
         }
 
         // An envelope arriving with twenty junk signatures verifies

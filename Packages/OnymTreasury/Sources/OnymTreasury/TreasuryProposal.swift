@@ -49,7 +49,9 @@ public struct TreasuryProposal: Equatable, Sendable, Identifiable {
     public let proposerBlsPubkeyHex: String
     public let treasuryAccount: StellarAccountID
     public let network: StellarNetwork
-    public let kind: TreasuryProposalKind
+    /// Re-derived if the proposal is revived after its group's anchor
+    /// arrives late — see `TreasuryPayloadReceiver`.
+    public var kind: TreasuryProposalKind
     /// The transaction plus whatever signatures have been collected.
     public var envelope: TransactionEnvelope
     public let createdAt: Date
@@ -178,4 +180,7 @@ public enum TreasuryRejection: String, Codable, Equatable, Sendable {
     /// Arrived carrying more signatures than a proposal should, which
     /// would leave no room for the co-signers who still have to sign.
     case tooManySignatures
+    /// Claims a sequence number far beyond the treasury's next, which
+    /// would block every later proposal until it expired.
+    case implausibleSequence
 }

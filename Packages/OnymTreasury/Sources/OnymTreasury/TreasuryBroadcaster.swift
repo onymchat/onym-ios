@@ -57,6 +57,16 @@ public actor TreasuryBroadcaster {
               let owner = await identity.currentSelectedID()
         else { return false }
 
+        // A `.onym` declaration naming anything other than this
+        // identity's own treasury account produces a signer this device
+        // cannot sign for — and the failure surfaces three layers away
+        // as "signature did not verify", which is not a thing anyone
+        // can act on. The source is a claim about *which key signs*, so
+        // it is checkable here and nowhere else.
+        if source == .onym, account.accountID != me.treasuryAccountID {
+            return false
+        }
+
         let statement = TreasurySignerDeclaration.statement(
             groupID: group.groupIDData,
             signerAccount: account,

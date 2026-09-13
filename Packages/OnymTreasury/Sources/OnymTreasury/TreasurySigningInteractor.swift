@@ -140,22 +140,39 @@ public struct TreasurySigningInteractor: Sendable {
             return .failed("that transaction carried no signature we could use")
         }
 
+        // Located by verification rather than by hint, and the store's
+        // answer is believed rather than assumed. Picking the signature
+        // with `first(where: hint ==)` could match a *pre-existing* one
+        // from a colliding signer, and discarding `addSignature`'s
+        // result meant a harvest that stored nothing still reported
+        // `.signed`.
+        let hash = proposal.envelope.transaction.hash(network: proposal.network)
+        var accepted: [StellarAccountID] = []
         for signer in adopted {
-            guard let decorated = working.signatures.first(where: {
-                $0.hint == signer.signatureHint
+            guard let decorated = working.signatures.first(where: { candidate in
+                candidate.signature.count == 64
+                    && TransactionEnvelope.verifies(
+                        signature: candidate.signature,
+                        by: signer,
+                        over: hash
+                    )
             }) else { continue }
-            await treasury.addSignature(
+            guard await treasury.addSignature(
                 decorated.signature,
                 from: signer,
                 toProposal: proposalID,
                 now: now
-            )
+            ) else { continue }
+            accepted.append(signer)
             await broadcaster.broadcastSignature(
                 proposal: proposal,
                 signature: decorated.signature,
                 signer: signer,
                 now: now
             )
+        }
+        guard !accepted.isEmpty else {
+            return .failed("that transaction carried no signature we could use")
         }
         return .signed
     }

@@ -313,6 +313,15 @@ public struct TreasuryCreationInteractor: Sendable {
               let account = try? StellarAccountID(accountID: treasuryAccountID)
         else { return .failed("bad account") }
 
+        // The same guard `create` keeps, and the receive path keeps.
+        // Without it a second `adopt` with a different account silently
+        // re-points the founder's own device, which contradicts "a
+        // treasury is never re-anchored" on the one device that can
+        // still announce.
+        guard await treasury.snapshot(groupID: groupIDHex).treasury == nil else {
+            return .alreadyExists
+        }
+
         guard let onChain = try? await horizon(network).account(account) else {
             return .failed("the treasury account is not on the ledger yet")
         }
