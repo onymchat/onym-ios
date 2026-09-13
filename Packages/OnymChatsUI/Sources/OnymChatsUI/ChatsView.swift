@@ -34,8 +34,9 @@ public struct ChatsView: View {
     let makeModerationReportView: @MainActor (ReportableMessage) -> AnyView
     /// Passed down to the thread and on to `ChatMembersView`.
     let makeTreasuryView: (@MainActor (String) -> AnyView)?
-    /// The in-thread treasury block, same arrangement.
-    let makeTreasuryThreadSection: (@MainActor (String) -> AnyView)?
+    /// The in-thread treasury block, same arrangement. The callback is
+    /// how the section reports whether it has anything to draw.
+    let makeTreasuryThreadSection: (@MainActor (String, @escaping (Bool) -> Void) -> AnyView)?
 
     public init(
         flow: ChatsFlow,
@@ -55,7 +56,9 @@ public struct ChatsView: View {
         setGroupName: @escaping @MainActor (String, String) async -> Void,
         makeModerationReportView: @escaping @MainActor (ReportableMessage) -> AnyView,
         makeTreasuryView: (@MainActor (String) -> AnyView)? = nil,
-        makeTreasuryThreadSection: (@MainActor (String) -> AnyView)? = nil
+        makeTreasuryThreadSection: (
+            @MainActor (String, @escaping (Bool) -> Void) -> AnyView
+        )? = nil
     ) {
         self.flow = flow
         self.identitiesFlow = identitiesFlow

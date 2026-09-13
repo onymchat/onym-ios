@@ -70,8 +70,9 @@ public struct ChatThreadView: View {
     /// Passed straight through to `ChatMembersView`; see its note.
     var makeTreasuryView: (@MainActor (String) -> AnyView)?
     /// Builds the in-thread treasury block for a group id. Erased for
-    /// the same reason as the screen above it.
-    var makeTreasuryThreadSection: (@MainActor (String) -> AnyView)?
+    /// the same reason as the screen above it. The second argument is
+    /// how the section reports whether it is drawing anything.
+    var makeTreasuryThreadSection: (@MainActor (String, @escaping (Bool) -> Void) -> AnyView)?
     /// Drives the in-thread join-request rows. This replaced the separate
     /// "Join requests" screen: the founder now accepts or declines from
     /// inside the conversation the request is about, because a badged
@@ -97,7 +98,9 @@ public struct ChatThreadView: View {
         voiceLoader: ChatVoiceLoader,
         makeModerationReportView: @escaping @MainActor (ReportableMessage) -> AnyView,
         makeTreasuryView: (@MainActor (String) -> AnyView)? = nil,
-        makeTreasuryThreadSection: (@MainActor (String) -> AnyView)? = nil,
+        makeTreasuryThreadSection: (
+            @MainActor (String, @escaping (Bool) -> Void) -> AnyView
+        )? = nil,
         approveRequestsFlow: ApproveRequestsFlow,
         scrollToMessageID: UUID? = nil
     ) {
@@ -263,7 +266,7 @@ public struct ChatThreadView: View {
             onJoinRequestAccepted: { approveRequestsFlow.approve($0) },
             onJoinRequestDeclined: { approveRequestsFlow.decline($0) },
             makeTreasuryProposalCard: makeTreasuryThreadSection.map { make in
-                { make(groupID) }
+                { report in make(groupID, report) }
             }
         )
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -680,7 +683,11 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
     /// flow itself, draws whatever is waiting on signatures, and
     /// collapses to nothing when that is nothing — so neither this
     /// bridge nor the controller has to carry proposal state.
-    let makeTreasuryProposalCard: (() -> AnyView)?
+    /// Builds the thread's treasury block, handed a callback the
+    /// section calls with whether it is drawing anything — the
+    /// controller needs that for the empty state and cannot see
+    /// proposal state itself.
+    let makeTreasuryProposalCard: ((@escaping (Bool) -> Void) -> AnyView)?
 
     func makeUIViewController(context: Context) -> ChatThreadViewController {
         let vc = ChatThreadViewController()
@@ -705,7 +712,13 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         vc.onRemovePendingMedia = onRemovePendingMedia
         vc.onJoinRequestAccepted = onJoinRequestAccepted
         vc.onJoinRequestDeclined = onJoinRequestDeclined
-        vc.makeTreasuryProposalCard = makeTreasuryProposalCard
+        vc.makeTreasuryProposalCard = makeTreasuryProposalCard.map { make in
+            { [weak vc] in
+                make { hasContent in
+                    vc?.setTreasuryRowHasContent(hasContent)
+                }
+            }
+        }
         vc.loadViewIfNeeded()
         // Profiles before messages — the first sender-display build
         // reads the profiles to resolve names.
@@ -739,7 +752,13 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         vc.onRemovePendingMedia = onRemovePendingMedia
         vc.onJoinRequestAccepted = onJoinRequestAccepted
         vc.onJoinRequestDeclined = onJoinRequestDeclined
-        vc.makeTreasuryProposalCard = makeTreasuryProposalCard
+        vc.makeTreasuryProposalCard = makeTreasuryProposalCard.map { make in
+            { [weak vc] in
+                make { hasContent in
+                    vc?.setTreasuryRowHasContent(hasContent)
+                }
+            }
+        }
         vc.update(memberProfiles: memberProfiles)
         vc.update(invitationMessage: invitationMessage)
         vc.update(messages: messages)

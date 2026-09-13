@@ -132,6 +132,16 @@ final class ChatThreadViewController: UIViewController {
     /// render purely so the table could re-derive what the card already
     /// knows.
     private var showsTreasuryRow = false
+    /// Whether that row currently draws anything.
+    ///
+    /// The row is always in the snapshot when the subsystem is wired,
+    /// and collapses to zero height when nothing is waiting on
+    /// signatures — so its presence says nothing about whether the
+    /// thread is empty. Without this the onboarding panel drew on top
+    /// of a live proposal card in a thread with no messages, which is
+    /// the case the comment beside the join-request handling says that
+    /// was fixed for.
+    private var treasuryRowHasContent = false
     /// Stable id for that single row. Constant because there is exactly
     /// one per thread and the controller is per-thread.
     static let treasuryRowID = UUID(uuidString: "7C1E5A00-0000-4000-8000-000000000001")!
@@ -336,6 +346,7 @@ final class ChatThreadViewController: UIViewController {
         emptyStateHost.view.isHidden = !(
             sorted.isEmpty
                 && orderedJoinRequestIDs.isEmpty
+                && !treasuryRowHasContent
         )
 
         var snapshot = NSDiffableDataSourceSnapshot<Section, UUID>()
@@ -459,7 +470,7 @@ final class ChatThreadViewController: UIViewController {
         orderedJoinRequestIDs = ids
 
         emptyStateHost.view.isHidden = !(
-            orderedMessages.isEmpty && ids.isEmpty
+            orderedMessages.isEmpty && ids.isEmpty && !treasuryRowHasContent
         )
 
         var snapshot = NSDiffableDataSourceSnapshot<Section, UUID>()
@@ -914,6 +925,20 @@ final class ChatThreadViewController: UIViewController {
         )
         pruneMeasuredHeights(keeping: snapshot.itemIdentifiers)
         dataSource.apply(snapshot, animatingDifferences: false)
+    }
+
+    /// Told by the hosted treasury section whether it is drawing
+    /// anything. The controller cannot see proposal state, so the
+    /// emptiness has to be pushed back the same way the row's presence
+    /// is.
+    func setTreasuryRowHasContent(_ hasContent: Bool) {
+        guard hasContent != treasuryRowHasContent else { return }
+        treasuryRowHasContent = hasContent
+        emptyStateHost.view.isHidden = !(
+            orderedMessages.isEmpty
+                && orderedJoinRequestIDs.isEmpty
+                && !hasContent
+        )
     }
 
     private func configureDataSource() {

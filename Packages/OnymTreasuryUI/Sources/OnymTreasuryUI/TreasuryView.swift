@@ -66,12 +66,16 @@ public struct TreasuryView: View {
             }
         }
         .onChange(of: flow.walletRequest) { _, request in
-            guard let url = request?.url else { return }
+            // Only the surface that asked opens the link — see
+            // `TreasuryProposalsFlow.Surface`.
+            guard flow.walletRequestSurface == .screen, let url = request?.url else {
+                return
+            }
             openURL(url)
             flow.clearWalletRequest()
         }
         .reasonAlert("Treasury", reason: Binding(
-            get: { flow.actionError },
+            get: { flow.error(for: .screen) },
             set: { if $0 == nil { flow.clearError() } }
         ))
     }
@@ -80,7 +84,7 @@ public struct TreasuryView: View {
     /// proposal to bring a signature back to.
     private var pasteBinding: Binding<Bool> {
         Binding(
-            get: { flow.pasteTargetID != nil && flow.walletRequest == nil },
+            get: { flow.ownsPastePrompt(.screen) },
             set: { if !$0 { flow.pasteTargetID = nil } }
         )
     }
@@ -187,7 +191,7 @@ public struct TreasuryView: View {
             VStack(alignment: .leading, spacing: 10) {
                 SectionLabel("WAITING ON SIGNATURES")
                 ForEach(open) { row in
-                    TreasuryProposalCard(row: row, flow: flow)
+                    TreasuryProposalCard(row: row, flow: flow, surface: .screen)
                         .padding(.horizontal, 16)
                 }
             }

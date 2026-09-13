@@ -98,10 +98,29 @@ public final class TreasuryProposalsFlow {
     // MARK: - Transient
 
     public private(set) var actionError: String?
+    /// Which surface's action failed — the alert is presented by that
+    /// one, for the same reason the wallet link is.
+    public private(set) var actionErrorSurface: Surface?
     public private(set) var busyProposalID: UUID?
-    /// Set when signing needs the member's own wallet. The view opens
-    /// it and clears this.
+    /// Which surface asked for the current signature.
+    ///
+    /// The thread block and the treasury screen observe the *same*
+    /// memoised flow, and with the screen pushed from the thread both
+    /// are in the hierarchy at once. Without this, one `walletRequest`
+    /// assignment fired `openURL` from both — each `onChange` receives
+    /// the new value directly, so clearing it afterwards deduplicates
+    /// nothing — and both paste sheets went true, racing for one
+    /// presentation. Each view now answers only for signatures it
+    /// started.
+    public enum Surface: Equatable, Sendable {
+        case thread
+        case screen
+    }
+
+    /// Set when signing needs the member's own wallet, together with
+    /// the surface that asked. The matching view opens it and clears it.
     public private(set) var walletRequest: SEP0007Request?
+    public private(set) var walletRequestSurface: Surface?
     /// Shown after a handoff: where the signed transaction comes back.
     public var pastedXDR = ""
     public var pasteTargetID: UUID?
@@ -137,7 +156,19 @@ public final class TreasuryProposalsFlow {
     private let signing: TreasurySigningInteractor
     private let proposing: TreasuryProposalInteractor
     private let aliases: @Sendable (String) async -> String
-    private var started = false
+    /// The live subscription, if one is draining right now.
+    ///
+    /// Not a `started` flag. This flow is memoised for the lifetime of
+    /// the app (`TreasuryProposalsFlowCache`), and the thread's card is
+    /// hosted in a table-cell content configuration: scrolling the row
+    /// off screen calls `prepareForReuse`, which tears the hosted view
+    /// down and cancels the `.task` that called `start()`. That ends
+    /// the `AsyncStream` and unsubscribes from the repository. A
+    /// one-shot guard then made every later `start()` a no-op, so
+    /// `rows` froze at whatever it last saw — for that group, for the
+    /// rest of the process — and the treasury screen inherited the dead
+    /// flow. Scrolling past the row once was enough.
+    private var subscription: Task<Void, Never>?
     private var declarations: [TreasurySignerDeclarationRecord] = []
     private var myBlsHex: String?
 
@@ -157,16 +188,35 @@ public final class TreasuryProposalsFlow {
         self.aliases = aliases
     }
 
+    /// Idempotent *while a stream is actually draining*, and resumable
+    /// once one is not. Safe to call from every `.task` that shows this
+    /// flow, however many times a view is rebuilt.
     public func start() async {
-        guard !started else { return }
-        started = true
-        myBlsHex = await identity.currentIdentity()?.blsPublicKey.hexStringValue
-        // A live read before the first draw, so the screen does not sit
-        // on "checking…" while a perfectly reachable network answers.
-        await repository.refresh(groupID: groupID)
-        for await snapshot in repository.snapshots(groupID: groupID) {
-            await apply(snapshot)
+        guard subscription == nil else { return }
+        // Unstructured on purpose. An unstructured `Task` does not
+        // inherit the caller's cancellation, so the stream survives the
+        // `.task` that opened it being torn down — which is exactly
+        // what happens every time the thread's row is recycled. The
+        // flow is memoised for the app's lifetime and so is this: one
+        // subscription per group, opened once, and the guard above
+        // keeps a second view from opening another.
+        let task = Task { [weak self] in
+            guard let self else { return }
+            self.myBlsHex = await self.identity.currentIdentity()?
+                .blsPublicKey.hexStringValue
+            // A live read before the first draw, so the screen does not
+            // sit on "checking…" while a reachable network answers.
+            await self.repository.refresh(groupID: self.groupID)
+            for await snapshot in self.repository.snapshots(groupID: self.groupID) {
+                await self.apply(snapshot)
+            }
+            // Only reached if the repository ends the stream; the next
+            // `start()` then opens a fresh one rather than no-opping
+            // forever.
+            self.subscription = nil
         }
+        subscription = task
+        await task.value
     }
 
     public func refresh() async {
@@ -242,16 +292,19 @@ public final class TreasuryProposalsFlow {
 
     // MARK: - Acting
 
-    public func sign(_ id: UUID) async {
+    public func sign(_ id: UUID, from surface: Surface) async {
         busyProposalID = id
         actionError = nil
+        actionErrorSurface = surface
         defer { busyProposalID = nil }
         switch await signing.sign(proposalID: id) {
         case .signed:
             break
         case .needsExternalWallet(let request):
             walletRequest = request
+            walletRequestSurface = surface
             pasteTargetID = id
+            pasteSurface = surface
         case .notASigner:
             actionError = "You haven't chosen a Stellar account for this chat yet."
         case .expired:
@@ -265,9 +318,10 @@ public final class TreasuryProposalsFlow {
         }
     }
 
-    public func submit(_ id: UUID) async {
+    public func submit(_ id: UUID, from surface: Surface) async {
         busyProposalID = id
         actionError = nil
+        actionErrorSurface = surface
         defer { busyProposalID = nil }
         switch await signing.submit(proposalID: id) {
         case .submitted:
@@ -299,6 +353,7 @@ public final class TreasuryProposalsFlow {
         case .signed:
             pastedXDR = ""
             pasteTargetID = nil
+            pasteSurface = nil
         case .failed(let reason):
             actionError = reason
         default:
@@ -306,8 +361,30 @@ public final class TreasuryProposalsFlow {
         }
     }
 
-    public func clearWalletRequest() { walletRequest = nil }
-    public func clearError() { actionError = nil }
+    public func clearWalletRequest() {
+        walletRequest = nil
+        walletRequestSurface = nil
+    }
+
+    /// Whether `surface` is the one that should present the paste sheet
+    /// — the surface that asked, and only once the wallet link has been
+    /// handed off.
+    public func ownsPastePrompt(_ surface: Surface) -> Bool {
+        pasteTargetID != nil && walletRequest == nil && pasteSurface == surface
+    }
+
+    /// Remembered across `clearWalletRequest()`, which runs as soon as
+    /// the link is opened while the paste sheet is still owed.
+    public private(set) var pasteSurface: Surface?
+    public func clearError() {
+        actionError = nil
+        actionErrorSurface = nil
+    }
+
+    /// The message `surface` should show, if any.
+    public func error(for surface: Surface) -> String? {
+        actionErrorSurface == surface ? actionError : nil
+    }
 
     // MARK: - Composing
 

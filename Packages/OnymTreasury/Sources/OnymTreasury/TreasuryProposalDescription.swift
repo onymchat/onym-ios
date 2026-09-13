@@ -75,6 +75,7 @@ public struct TreasuryProposalDescription: Equatable, Sendable {
     /// Describe a proposal from the transaction this device decoded.
     public init(_ proposal: TreasuryProposal) {
         let operations = proposal.operations
+        let transactionFee = proposal.envelope.transaction.fee
         var lines: [Line] = []
         var title = "Treasury transaction"
         var caveat: String?
@@ -125,6 +126,21 @@ public struct TreasuryProposalDescription: Equatable, Sendable {
             // refused, and the honest rendering is to say nothing about
             // what it does.
             caveat = "This transaction isn't one this app knows how to describe. Don't sign it."
+        }
+
+        // The fee is a spend, and it is in none of the operation rows
+        // above. Shown only when it is above the ordinary rate, because
+        // a line reading "0.00001 XLM" on every card teaches people to
+        // skip it, and the one time it matters is the time it is large.
+        // `TreasuryProposalVerifier` refuses anything truly
+        // extravagant; this is what makes the rest visible.
+        let ordinaryFee = 100 * Int64(max(operations.count, 1))
+        if Int64(transactionFee) > ordinaryFee {
+            lines.append(Line(
+                label: "Network fee",
+                value: .amount(StellarAmount(stroops: Int64(transactionFee)), code: "XLM"),
+                isPrincipal: Int64(transactionFee) > ordinaryFee * 10
+            ))
         }
 
         // The count check is the backstop. Every branch above reads only

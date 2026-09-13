@@ -197,6 +197,10 @@ public struct TreasurySigningInteractor: Sendable {
             return nil
         }
         for (stored, candidates) in await treasury.openProposalsWithSigners() {
+            // Probe and adopt in one pass. Harvesting to find the match
+            // and then calling `adoptSignatures`, which re-fetches the
+            // proposal and harvests the same envelope again, doubled the
+            // Ed25519 work for every open proposal on the device.
             var working = stored.proposal.envelope
             let adopted = working.harvestSignatures(
                 from: returned,
@@ -204,12 +208,24 @@ public struct TreasurySigningInteractor: Sendable {
                 network: stored.proposal.network
             )
             guard !adopted.isEmpty else { continue }
-            let outcome = await adoptSignatures(
-                fromReturned: returned,
-                proposalID: stored.proposal.id,
-                now: now
-            )
-            if case .signed = outcome { return stored.proposal.id }
+            for signer in adopted {
+                guard let decorated = working.signatures.first(where: {
+                    $0.hint == signer.signatureHint
+                }) else { continue }
+                await treasury.addSignature(
+                    decorated.signature,
+                    from: signer,
+                    toProposal: stored.proposal.id,
+                    now: now
+                )
+                await broadcaster.broadcastSignature(
+                    proposal: stored.proposal,
+                    signature: decorated.signature,
+                    signer: signer,
+                    now: now
+                )
+            }
+            return stored.proposal.id
         }
         return nil
     }

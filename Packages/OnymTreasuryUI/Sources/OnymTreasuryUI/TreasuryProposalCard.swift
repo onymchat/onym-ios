@@ -15,10 +15,19 @@ import SwiftUI
 public struct TreasuryProposalCard: View {
     let row: TreasuryProposalRow
     @Bindable var flow: TreasuryProposalsFlow
+    /// Which surface this card is drawn on, so an external-wallet
+    /// handoff is presented by the view the person tapped on rather
+    /// than by both views observing this flow.
+    let surface: TreasuryProposalsFlow.Surface
 
-    public init(row: TreasuryProposalRow, flow: TreasuryProposalsFlow) {
+    public init(
+        row: TreasuryProposalRow,
+        flow: TreasuryProposalsFlow,
+        surface: TreasuryProposalsFlow.Surface
+    ) {
         self.row = row
         self.flow = flow
+        self.surface = surface
     }
 
     private var isBusy: Bool { flow.busyProposalID == row.id }
@@ -213,6 +222,8 @@ public struct TreasuryProposalCard: View {
             "This transaction couldn't be read."
         case .noTreasury:
             "This chat has no treasury."
+        case .excessiveFee:
+            "This offers a network fee far above the going rate \u{2014} money leaving the treasury that none of the rows above would show."
         }
     }
 
@@ -222,7 +233,7 @@ public struct TreasuryProposalCard: View {
             HStack(spacing: 10) {
                 if row.canSign {
                     Button {
-                        Task { await flow.sign(row.id) }
+                        Task { await flow.sign(row.id, from: surface) }
                     } label: {
                         Text("Sign")
                             .font(OnymType.font(size: 15, weight: .semibold))
@@ -234,7 +245,7 @@ public struct TreasuryProposalCard: View {
                 }
                 if row.canSubmit {
                     Button {
-                        Task { await flow.submit(row.id) }
+                        Task { await flow.submit(row.id, from: surface) }
                     } label: {
                         Text("Send it")
                             .font(OnymType.font(size: 15, weight: .semibold))

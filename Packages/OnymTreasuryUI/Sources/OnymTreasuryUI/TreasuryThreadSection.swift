@@ -21,9 +21,16 @@ import SwiftUI
 public struct TreasuryThreadSection: View {
     @State private var flow: TreasuryProposalsFlow
     @Environment(\.openURL) private var openURL
+    /// Reports whether this section is drawing anything, so the thread
+    /// controller knows not to lay the empty state over a live card.
+    private let onContentChanged: (Bool) -> Void
 
-    public init(flow: TreasuryProposalsFlow) {
+    public init(
+        flow: TreasuryProposalsFlow,
+        onContentChanged: @escaping (Bool) -> Void = { _ in }
+    ) {
         _flow = State(wrappedValue: flow)
+        self.onContentChanged = onContentChanged
     }
 
     /// Only what someone can still act on. A submitted or expired
@@ -53,7 +60,7 @@ public struct TreasuryThreadSection: View {
                     .foregroundStyle(OnymTokens.text3)
 
                     ForEach(open) { row in
-                        TreasuryProposalCard(row: row, flow: flow)
+                        TreasuryProposalCard(row: row, flow: flow, surface: .thread)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -61,19 +68,25 @@ public struct TreasuryThreadSection: View {
             }
         }
         .task { await flow.start() }
+        .onChange(of: open.isEmpty) { _, isEmpty in
+            onContentChanged(!isEmpty)
+        }
+        .onAppear { onContentChanged(!open.isEmpty) }
         .onChange(of: flow.walletRequest) { _, request in
-            guard let url = request?.url else { return }
+            guard flow.walletRequestSurface == .thread, let url = request?.url else {
+                return
+            }
             openURL(url)
             flow.clearWalletRequest()
         }
         .sheet(isPresented: Binding(
-            get: { flow.pasteTargetID != nil && flow.walletRequest == nil },
+            get: { flow.ownsPastePrompt(.thread) },
             set: { if !$0 { flow.pasteTargetID = nil } }
         )) {
             NavigationStack { PasteSignedTransactionView(flow: flow) }
         }
         .reasonAlert("Treasury", reason: Binding(
-            get: { flow.actionError },
+            get: { flow.error(for: .thread) },
             set: { if $0 == nil { flow.clearError() } }
         ))
     }
