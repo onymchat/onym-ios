@@ -47,7 +47,7 @@ public struct TreasurySetupView: View {
                     titleText: treasury.account.accountID,
                     titleMono: true,
                     subtitleKey: treasury.network == .testnet
-                        ? "Stellar testnet \u{2014} not real money"
+                        ? "Stellar testnet \u{2014} not real assets"
                         : "Stellar",
                     subtitleLineLimit: nil,
                     hasChevron: false,
@@ -66,7 +66,7 @@ public struct TreasurySetupView: View {
             SectionLabel("NO TREASURY YET")
             Card {
                 Row(
-                    title: "This chat holds no money",
+                    title: "This chat holds no assets",
                     subtitleKey: "A treasury is a Stellar account that several people in the chat have to agree to spend from.",
                     subtitleLineLimit: nil,
                     hasChevron: false,

@@ -7938,19 +7938,19 @@
         }
       }
     },
-    "Shared money": {
+    "Shared assets": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Shared money"
+            "value": "Shared assets"
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Общие деньги"
+            "value": "Общие активы"
           }
         }
       }
@@ -8485,36 +8485,36 @@
         }
       }
     },
-    "Stellar testnet — not real money": {
+    "Stellar testnet — not real assets": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Stellar testnet — not real money"
+            "value": "Stellar testnet — not real assets"
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Тестовая сеть Stellar — не настоящие деньги"
+            "value": "Тестовая сеть Stellar — не настоящие активы"
           }
         }
       }
     },
-    "Stellar testnet — this is not real money.": {
+    "Stellar testnet — these are not real assets.": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Stellar testnet — this is not real money."
+            "value": "Stellar testnet — these are not real assets."
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Тестовая сеть Stellar — это не настоящие деньги."
+            "value": "Тестовая сеть Stellar — это не настоящие активы."
           }
         }
       }
@@ -8990,6 +8990,40 @@
         }
       }
     },
+    "The assets come out of this account, and it is empty. Send XLM to it first — the address above is yours.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The assets come out of this account, and it is empty. Send XLM to it first — the address above is yours."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Активы спишутся с этого счёта, а он пуст. Сначала отправьте на него XLM — адрес выше принадлежит вам."
+          }
+        }
+      }
+    },
+    "The assets come out of this account.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The assets come out of this account."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Активы спишутся с этого счёта."
+          }
+        }
+      }
+    },
     "The file records what this device knows. There is no signature in it to check.": {
       "localizations": {
         "en": {
@@ -9088,40 +9122,6 @@
         }
       }
     },
-    "The money comes out of this account, and it is empty. Send XLM to it first — the address above is yours.": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The money comes out of this account, and it is empty. Send XLM to it first — the address above is yours."
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Деньги спишутся с этого счёта, а он пуст. Сначала отправьте на него XLM — адрес выше принадлежит вам."
-          }
-        }
-      }
-    },
-    "The money comes out of this account.": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The money comes out of this account."
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Деньги спишутся с этого счёта."
-          }
-        }
-      }
-    },
     "The next few screens set up the services this app runs on. Each one shows exactly what you're agreeing to before anything is turned on.": {
       "localizations": {
         "en": {
@@ -9203,19 +9203,19 @@
         }
       }
     },
-    "The treasury's own key is switched off as it is created. After that you cannot move its money alone, and neither can anyone else.": {
+    "The treasury's own key is switched off as it is created. After that you cannot move its assets alone, and neither can anyone else.": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The treasury's own key is switched off as it is created. After that you cannot move its money alone, and neither can anyone else."
+            "value": "The treasury's own key is switched off as it is created. After that you cannot move its assets alone, and neither can anyone else."
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Собственный ключ казны отключается прямо при её создании. После этого ни вы, ни кто-либо другой не сможет распоряжаться её деньгами в одиночку."
+            "value": "Собственный ключ казны отключается при её создании. После этого ни вы, ни кто-либо другой не сможет распоряжаться её активами в одиночку."
           }
         }
       }
@@ -9436,19 +9436,19 @@
         }
       }
     },
-    "This chat holds no money": {
+    "This chat holds no assets": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "This chat holds no money"
+            "value": "This chat holds no assets"
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "В этом чате нет денег"
+            "value": "В этом чате нет активов"
           }
         }
       }
@@ -9636,19 +9636,19 @@
         }
       }
     },
-    "This offers a network fee far above the going rate — money leaving the treasury that none of the rows above would show.": {
+    "This offers a network fee far above the going rate — assets leaving the treasury that none of the rows above would show.": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "This offers a network fee far above the going rate — money leaving the treasury that none of the rows above would show."
+            "value": "This offers a network fee far above the going rate — assets leaving the treasury that none of the rows above would show."
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Здесь предложена комиссия сети намного выше обычной — деньги уйдут из казны, и ни одна строка выше этого не покажет."
+            "value": "Здесь предложена комиссия сети намного выше обычной — активы уйдут из казны, и ни одна строка выше этого не покажет."
           }
         }
       }

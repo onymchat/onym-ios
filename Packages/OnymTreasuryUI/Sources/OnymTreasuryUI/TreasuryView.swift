@@ -98,7 +98,7 @@ public struct TreasuryView: View {
             SectionLabel("NO TREASURY")
             Card {
                 Row(
-                    title: "This chat holds no money",
+                    title: "This chat holds no assets",
                     subtitle: "The founder can set one up from the members screen.",
                     subtitleLineLimit: nil,
                     hasChevron: false,
@@ -153,7 +153,7 @@ public struct TreasuryView: View {
             // scanner put them there.
             if let treasury = flow.treasury {
                 if treasury.network == .testnet {
-                    Footnote("Stellar testnet \u{2014} this is not real money.")
+                    Footnote("Stellar testnet \u{2014} these are not real assets.")
                 } else {
                     Footnote("Part of this balance is a reserve Stellar locks while the account exists. It can't be spent.")
                 }
