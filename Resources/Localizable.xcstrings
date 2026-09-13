@@ -131,6 +131,23 @@
         }
       }
     },
+    "%@ issued by": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ issued by"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Эмитент %@"
+          }
+        }
+      }
+    },
     "%@ joined": {
       "extractionState": "manual",
       "localizations": {
@@ -209,6 +226,57 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ · "
+          }
+        }
+      }
+    },
+    "%@ — AUTH_IMMUTABLE cannot be undone": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ — AUTH_IMMUTABLE cannot be undone"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ — AUTH_IMMUTABLE нельзя отменить"
+          }
+        }
+      }
+    },
+    "%@ — AUTH_IMMUTABLE cannot be undone, and this app does not recognise every flag here": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ — AUTH_IMMUTABLE cannot be undone, and this app does not recognise every flag here"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ — AUTH_IMMUTABLE нельзя отменить, и приложение распознаёт здесь не все флаги"
+          }
+        }
+      }
+    },
+    "%@ — this app does not recognise every flag here": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ — this app does not recognise every flag here"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ — приложение распознаёт здесь не все флаги"
           }
         }
       }
@@ -344,6 +412,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Запросов на вступление: %lld"
+          }
+        }
+      }
+    },
+    "%lld of %lld signatures": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld of %lld signatures"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Подписей: %lld из %lld"
           }
         }
       }
@@ -518,6 +603,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "(Без названия)"
+          }
+        }
+      }
+    },
+    "(cleared)": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "(cleared)"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "(очищено)"
           }
         }
       }
@@ -887,6 +989,23 @@
         }
       }
     },
+    "ASSET CODE": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ASSET CODE"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "КОД АКТИВА"
+          }
+        }
+      }
+    },
     "Accept": {
       "extractionState": "manual",
       "localizations": {
@@ -969,6 +1088,23 @@
         }
       }
     },
+    "Add %lld co-signers": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add %lld co-signers"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Добавить %lld подписантов"
+          }
+        }
+      }
+    },
     "Add Custom URL": {
       "extractionState": "stale",
       "localizations": {
@@ -998,6 +1134,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "Добавить личность"
+          }
+        }
+      }
+    },
+    "Add a co-signer": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add a co-signer"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Добавить подписанта"
+          }
+        }
+      }
+    },
+    "Add co-signer": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add co-signer"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Добавить подписанта"
           }
         }
       }
@@ -1035,6 +1205,23 @@
         }
       }
     },
+    "Add my signature": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add my signature"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Добавить мою подпись"
+          }
+        }
+      }
+    },
     "Add your own provider URL": {
       "localizations": {
         "en": {
@@ -1047,6 +1234,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Добавить URL своего провайдера"
+          }
+        }
+      }
+    },
+    "Adding a co-signer takes the same agreement as any other change to who controls the treasury — the founder cannot do it alone.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adding a co-signer takes the same agreement as any other change to who controls the treasury — the founder cannot do it alone."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Добавление соподписанта требует того же согласия, что и любое изменение того, кто распоряжается казной, — основатель не может сделать это в одиночку."
           }
         }
       }
@@ -1232,6 +1436,23 @@
         }
       }
     },
+    "Amount": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Amount"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Сумма"
+          }
+        }
+      }
+    },
     "An authority never sees your messages. It only ever sees what a person chooses to report, and it can only act inside the terms you're about to read.": {
       "extractionState": "manual",
       "localizations": {
@@ -1312,6 +1533,74 @@
           "stringUnit": {
             "state": "translated",
             "value": "Якоря"
+          }
+        }
+      }
+    },
+    "Another transaction used this slot. Propose it again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Another transaction used this slot. Propose it again."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Этот слот занят другой транзакцией. Предложите заново."
+          }
+        }
+      }
+    },
+    "Another transaction went first, so this one can never be used. It needs proposing again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Another transaction went first, so this one can never be used. It needs proposing again."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Другая транзакция прошла первой, поэтому эта уже не сработает. Нужно предложить заново."
+          }
+        }
+      }
+    },
+    "Another transaction went first. This one can no longer be used.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Another transaction went first. This one can no longer be used."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Другая транзакция прошла первой. Эту больше нельзя использовать."
+          }
+        }
+      }
+    },
+    "Anyone can issue a token called anything. The issuer account is what tells a real one from a copy — get it from the issuer themselves, not from whoever asked you to add it.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anyone can issue a token called anything. The issuer account is what tells a real one from a copy — get it from the issuer themselves, not from whoever asked you to add it."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Выпустить токен с любым названием может кто угодно. Отличить настоящий от подделки позволяет только аккаунт эмитента — берите его у самого эмитента, а не у того, кто просит вас его добавить."
           }
         }
       }
@@ -1467,6 +1756,23 @@
         }
       }
     },
+    "Asset": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Asset"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Актив"
+          }
+        }
+      }
+    },
     "Authenticate to reveal your recovery phrase": {
       "extractionState": "stale",
       "localizations": {
@@ -1497,6 +1803,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Не удалось аутентифицироваться"
+          }
+        }
+      }
+    },
+    "BALANCE": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "BALANCE"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "БАЛАНС"
           }
         }
       }
@@ -1697,6 +2020,23 @@
         }
       }
     },
+    "Bring the signature back": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bring the signature back"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Принесите подпись обратно"
+          }
+        }
+      }
+    },
     "Bring your own contract": {
       "localizations": {
         "en": {
@@ -1878,6 +2218,125 @@
         }
       }
     },
+    "Change how many signatures are needed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Change how many signatures are needed"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Изменить требуемое число подписей"
+          }
+        }
+      }
+    },
+    "Change this account's settings": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Change this account's settings"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Изменить настройки этого счёта"
+          }
+        }
+      }
+    },
+    "Change who controls the treasury": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Change who controls the treasury"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Изменить, кто управляет казной"
+          }
+        }
+      }
+    },
+    "Check this address character by character. A payment that leaves the treasury cannot be recalled by anyone, including the people who signed it.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check this address character by character. A payment that leaves the treasury cannot be recalled by anyone, including the people who signed it."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Проверьте этот адрес символ за символом. Платёж, покинувший казну, не сможет отозвать никто — включая тех, кто его подписал."
+          }
+        }
+      }
+    },
+    "Checking what this treasury holds…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking what this treasury holds…"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Смотрим, что есть в этой казне…"
+          }
+        }
+      }
+    },
+    "Checking with the network…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking with the network…"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Сверяемся с сетью…"
+          }
+        }
+      }
+    },
+    "Checking…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking…"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Проверяем…"
+          }
+        }
+      }
+    },
     "Choose Photo": {
       "extractionState": "stale",
       "localizations": {
@@ -1907,6 +2366,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Выберите орган модерации и ознакомьтесь с его условиями."
+          }
+        }
+      }
+    },
+    "Choose at least one co-signer.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose at least one co-signer."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Выберите хотя бы одного соподписанта."
           }
         }
       }
@@ -2023,6 +2499,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Выберите свой счёт Stellar"
+          }
+        }
+      }
+    },
+    "Choose your own Stellar account first.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose your own Stellar account first."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Сначала выберите свой аккаунт Stellar."
           }
         }
       }
@@ -2259,6 +2752,23 @@
         }
       }
     },
+    "Couldn't confirm that treasury.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't confirm that treasury."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не удалось подтвердить эту казну."
+          }
+        }
+      }
+    },
     "Couldn't generate an invite: %@": {
       "localizations": {
         "en": {
@@ -2271,6 +2781,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Не удалось создать приглашение: %@"
+          }
+        }
+      }
+    },
+    "Couldn't record that account. Try again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't record that account. Try again."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не удалось записать этот аккаунт. Попробуйте ещё раз."
           }
         }
       }
@@ -2570,6 +3097,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "ПО УМОЛЧАНИЮ"
+          }
+        }
+      }
+    },
+    "DIDN'T GO THROUGH": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "DIDN'T GO THROUGH"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "НЕ ПРОШЛО"
           }
         }
       }
@@ -2918,6 +3462,40 @@
         }
       }
     },
+    "Enter an amount to send.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter an amount to send."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Укажите сумму к отправке."
+          }
+        }
+      }
+    },
+    "Enter an asset code and a valid issuer account.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter an asset code and a valid issuer account."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Укажите код актива и действительный аккаунт эмитента."
+          }
+        }
+      }
+    },
     "Enter the 12 or 24-word recovery phrase to restore an identity on this device.": {
       "localizations": {
         "en": {
@@ -2996,6 +3574,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Всё зашифровано"
+          }
+        }
+      }
+    },
+    "Expired without enough signatures.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Expired without enough signatures."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Истекло, так и не собрав подписей."
           }
         }
       }
@@ -3195,6 +3790,23 @@
         }
       }
     },
+    "Freeze this account's settings permanently": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Freeze this account's settings permanently"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Навсегда заморозить настройки этого счёта"
+          }
+        }
+      }
+    },
     "GROUP RULES": {
       "localizations": {
         "en": {
@@ -3359,6 +3971,23 @@
         }
       }
     },
+    "HISTORY": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HISTORY"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ИСТОРИЯ"
+          }
+        }
+      }
+    },
     "Have someone scan this code with Onym to open a private chat with %@.": {
       "extractionState": "stale",
       "localizations": {
@@ -3422,6 +4051,91 @@
           "stringUnit": {
             "state": "translated",
             "value": "Хранится в вашем кошельке"
+          }
+        }
+      }
+    },
+    "Hold %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hold %@"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Держать %@"
+          }
+        }
+      }
+    },
+    "Hold a new asset": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hold a new asset"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Добавить новый актив"
+          }
+        }
+      }
+    },
+    "Hold an asset": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hold an asset"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Хранить актив"
+          }
+        }
+      }
+    },
+    "Holding one more asset locks one more base reserve in the treasury for as long as the trustline is open.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Holding one more asset locks one more base reserve in the treasury for as long as the trustline is open."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Каждый дополнительный актив замораживает в казне ещё один базовый резерв — пока линия доверия открыта."
+          }
+        }
+      }
+    },
+    "Home domain": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Home domain"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Домашний домен"
           }
         }
       }
@@ -3525,6 +4239,23 @@
         }
       }
     },
+    "ISSUER": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ISSUER"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ЭМИТЕНТ"
+          }
+        }
+      }
+    },
     "Identity key created": {
       "extractionState": "manual",
       "localizations": {
@@ -3576,6 +4307,23 @@
         }
       }
     },
+    "If your wallet sent the transaction itself, there's nothing to do here — it will show up in the treasury's history shortly. Otherwise paste what it gave you.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "If your wallet sent the transaction itself, there's nothing to do here — it will show up in the treasury's history shortly. Otherwise paste what it gave you."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Если кошелёк сам отправил транзакцию, здесь делать нечего — она вскоре появится в истории казны. Иначе вставьте то, что он вам выдал."
+          }
+        }
+      }
+    },
     "Inbox %@": {
       "localizations": {
         "en": {
@@ -3588,6 +4336,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Входящие %@"
+          }
+        }
+      }
+    },
+    "Inflation destination": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inflation destination"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Адрес для инфляции"
           }
         }
       }
@@ -3636,6 +4401,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "Пригласите людей в чат — они появятся здесь."
+          }
+        }
+      }
+    },
+    "Issued by": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Issued by"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Эмитент"
+          }
+        }
+      }
+    },
+    "It takes %lld signature(s) to spend, and %lld to change who can.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "It takes %lld signature(s) to spend, and %lld to change who can."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Чтобы потратить, нужно подписей: %lld; чтобы изменить круг распоряжающихся — %lld."
           }
         }
       }
@@ -3821,6 +4620,40 @@
         }
       }
     },
+    "Limit": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Limit"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Лимит"
+          }
+        }
+      }
+    },
+    "Loading…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading…"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Загрузка…"
+          }
+        }
+      }
+    },
     "Locked reserve": {
       "extractionState": "manual",
       "localizations": {
@@ -3834,6 +4667,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Замороженный резерв"
+          }
+        }
+      }
+    },
+    "Locks one more base reserve in the treasury": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Locks one more base reserve in the treasury"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Блокирует ещё один базовый резерв в казне"
           }
         }
       }
@@ -3918,6 +4768,57 @@
           "stringUnit": {
             "state": "translated",
             "value": "Участники"
+          }
+        }
+      }
+    },
+    "Memo": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memo"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Памятка"
+          }
+        }
+      }
+    },
+    "Memo (hash)": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memo (hash)"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Памятка (хеш)"
+          }
+        }
+      }
+    },
+    "Memo (id)": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memo (id)"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Памятка (id)"
           }
         }
       }
@@ -4072,6 +4973,23 @@
         }
       }
     },
+    "NO TREASURY": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "NO TREASURY"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "КАЗНЫ НЕТ"
+          }
+        }
+      }
+    },
     "NO TREASURY YET": {
       "extractionState": "manual",
       "localizations": {
@@ -4089,6 +5007,23 @@
         }
       }
     },
+    "NOMINATE A CO-SIGNER": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "NOMINATE A CO-SIGNER"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ПРЕДЛОЖИТЬ СОПОДПИСАНТА"
+          }
+        }
+      }
+    },
     "Needed before you can co-sign anything": {
       "extractionState": "manual",
       "localizations": {
@@ -4102,6 +5037,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Нужно, прежде чем вы сможете что-либо подписывать"
+          }
+        }
+      }
+    },
+    "Needs the group's signatures before it goes": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Needs the group's signatures before it goes"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Уйдёт только после подписей участников"
           }
         }
       }
@@ -4170,6 +5122,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Новые группы заверяет ваш основной нотариус."
+          }
+        }
+      }
+    },
+    "New payment": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New payment"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Новый платёж"
           }
         }
       }
@@ -4322,6 +5291,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Провайдер каталога ещё не настроен. Добавьте собственного ниже или продолжайте со встроенными значениями по умолчанию."
+          }
+        }
+      }
+    },
+    "No limit": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No limit"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Без лимита"
           }
         }
       }
@@ -4554,6 +5540,23 @@
         }
       }
     },
+    "Nobody has chosen a Stellar account yet.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nobody has chosen a Stellar account yet."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Пока никто не выбрал аккаунт Stellar."
+          }
+        }
+      }
+    },
     "Nobody has chosen an account yet": {
       "extractionState": "manual",
       "localizations": {
@@ -4615,6 +5618,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Nostr (npub)"
+          }
+        }
+      }
+    },
+    "Not a valid address": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not a valid address"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Неверный адрес"
           }
         }
       }
@@ -4701,6 +5721,23 @@
         }
       }
     },
+    "Nothing has happened yet": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing has happened yet"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Пока ничего не происходило"
+          }
+        }
+      }
+    },
     "Nothing is final — every choice can change later in Settings.": {
       "localizations": {
         "en": {
@@ -4713,6 +5750,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ничего не окончательно — любой выбор можно изменить позже в настройках."
+          }
+        }
+      }
+    },
+    "Nothing yet": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing yet"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Пока ничего"
           }
         }
       }
@@ -4835,6 +5889,23 @@
         }
       }
     },
+    "Only the founder can create the treasury.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only the founder can create the treasury."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Создать казну может только основатель."
+          }
+        }
+      }
+    },
     "Only this chat sees this name. It doesn’t rename your identity.": {
       "extractionState": "manual",
       "localizations": {
@@ -4865,6 +5936,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Прочитать отправленное может только ваша группа."
+          }
+        }
+      }
+    },
+    "Only your signature is taken from this. The transaction itself is discarded and the signature is checked against the proposal already on this device — so a wallet that hands back something different simply won't count.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only your signature is taken from this. The transaction itself is discarded and the signature is checked against the proposal already on this device — so a wallet that hands back something different simply won't count."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Отсюда берётся только ваша подпись. Сама транзакция отбрасывается, а подпись сверяется с предложением, которое уже есть на этом устройстве, — так что кошелёк, вернувший что-то другое, просто не будет засчитан."
           }
         }
       }
@@ -5004,6 +6092,23 @@
         }
       }
     },
+    "Open a trustline so the treasury can receive it": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open a trustline so the treasury can receive it"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Откройте линию доверия, чтобы казна могла его получать"
+          }
+        }
+      }
+    },
     "Open my wallet again": {
       "extractionState": "manual",
       "localizations": {
@@ -5072,6 +6177,23 @@
         }
       }
     },
+    "PAY": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PAY"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ПЛАТЁЖ"
+          }
+        }
+      }
+    },
     "PRIMARY": {
       "extractionState": "manual",
       "localizations": {
@@ -5085,6 +6207,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "ОСНОВНОЙ"
+          }
+        }
+      }
+    },
+    "PROPOSE": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PROPOSE"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ПРЕДЛОЖИТЬ"
+          }
+        }
+      }
+    },
+    "Part of this balance is a reserve Stellar locks while the account exists. It can't be spent.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Part of this balance is a reserve Stellar locks while the account exists. It can't be spent."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Часть этого баланса — резерв, который Stellar удерживает, пока существует счёт. Его нельзя потратить."
           }
         }
       }
@@ -5167,6 +6323,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Вставьте или отсканируйте QR-код"
+          }
+        }
+      }
+    },
+    "Pay %@ %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pay %@ %@"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Выплата %@ %@"
           }
         }
       }
@@ -5304,6 +6477,40 @@
         }
       }
     },
+    "Propose": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Propose"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Предложить"
+          }
+        }
+      }
+    },
+    "Proposed by %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Proposed by %@"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Предложил(а) %@"
+          }
+        }
+      }
+    },
     "Provider confirmed": {
       "localizations": {
         "en": {
@@ -5369,6 +6576,40 @@
         }
       }
     },
+    "Put it back": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Put it back"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Вернуть"
+          }
+        }
+      }
+    },
+    "Put it to the group": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Put it to the group"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Вынести на общее решение"
+          }
+        }
+      }
+    },
     "Random": {
       "extractionState": "stale",
       "localizations": {
@@ -5418,6 +6659,23 @@
         }
       }
     },
+    "Read from Stellar, not from this app's records — it is what actually happened.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Read from Stellar, not from this app's records — it is what actually happened."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Читается из Stellar, а не из записей приложения, — это то, что произошло на самом деле."
+          }
+        }
+      }
+    },
     "Read the docs": {
       "extractionState": "stale",
       "localizations": {
@@ -5431,6 +6689,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Открыть документацию"
+          }
+        }
+      }
+    },
+    "Ready to send": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ready to send"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Готово к отправке"
           }
         }
       }
@@ -5587,6 +6862,23 @@
         }
       }
     },
+    "Remove %lld co-signers": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove %lld co-signers"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Убрать %lld подписантов"
+          }
+        }
+      }
+    },
     "Remove Photo": {
       "extractionState": "stale",
       "localizations": {
@@ -5600,6 +6892,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "Удалить фото"
+          }
+        }
+      }
+    },
+    "Remove a co-signer": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove a co-signer"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Убрать подписанта"
+          }
+        }
+      }
+    },
+    "Remove co-signer": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove co-signer"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Убрать подписанта"
           }
         }
       }
@@ -5699,6 +7025,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Срок запроса истёк, или он уже обработан."
+          }
+        }
+      }
+    },
+    "Reserve": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reserve"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Резерв"
           }
         }
       }
@@ -5980,6 +7323,23 @@
         }
       }
     },
+    "SET ASIDE": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SET ASIDE"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ОТЛОЖЕНО"
+          }
+        }
+      }
+    },
     "SETUP": {
       "localizations": {
         "en": {
@@ -6013,6 +7373,23 @@
         }
       }
     },
+    "SIGNED TRANSACTION": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SIGNED TRANSACTION"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ПОДПИСАННАЯ ТРАНЗАКЦИЯ"
+          }
+        }
+      }
+    },
     "SUGGESTED BY YOUR DIRECTORIES": {
       "extractionState": "manual",
       "localizations": {
@@ -6026,6 +7403,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "ПРЕДЛОЖЕНО ВАШИМИ КАТАЛОГАМИ"
+          }
+        }
+      }
+    },
+    "SWITCHED BACK ON — weight %lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SWITCHED BACK ON — weight %lld"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "СНОВА ВКЛЮЧЁН — вес %lld"
           }
         }
       }
@@ -6229,6 +7623,23 @@
         }
       }
     },
+    "Send a payment": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Send a payment"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Отправить платёж"
+          }
+        }
+      }
+    },
     "Send a request — the host will see it and decide whether to let you in.": {
       "localizations": {
         "en": {
@@ -6241,6 +7652,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Отправьте запрос — хост увидит его и решит, впустить ли вас."
+          }
+        }
+      }
+    },
+    "Send it": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Send it"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Отправить"
           }
         }
       }
@@ -6311,6 +7739,23 @@
         }
       }
     },
+    "Sent": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sent"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Отправлено"
+          }
+        }
+      }
+    },
     "Sent when you created the group. Each one can still be used to request to join.": {
       "localizations": {
         "en": {
@@ -6356,6 +7801,57 @@
           "stringUnit": {
             "state": "translated",
             "value": "Сервисы, опубликованные Onym и проверенные на этом устройстве. Готово за секунду."
+          }
+        }
+      }
+    },
+    "Set aside": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Set aside"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Отложить"
+          }
+        }
+      }
+    },
+    "Set aside on this phone only. Nobody else sees this, and putting one back makes it signable again.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Set aside on this phone only. Nobody else sees this, and putting one back makes it signable again."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Отложено только на этом телефоне. Никто другой этого не видит, а возврат снова делает предложение доступным для подписи."
+          }
+        }
+      }
+    },
+    "Set aside on this phone. It isn't holding up other proposals.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Set aside on this phone. It isn't holding up other proposals."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Отложено на этом телефоне. Оно не задерживает другие предложения."
           }
         }
       }
@@ -6475,6 +7971,23 @@
         }
       }
     },
+    "Sign": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Подписать"
+          }
+        }
+      }
+    },
     "Sign and send the transaction there, then come back and confirm. Onym checks the ledger before telling the group — it won't take your word for it.": {
       "extractionState": "manual",
       "localizations": {
@@ -6542,6 +8055,57 @@
         }
       }
     },
+    "Signatures for minor changes": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signatures for minor changes"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Подписи для мелких изменений"
+          }
+        }
+      }
+    },
+    "Signatures to change control": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signatures to change control"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Подписи для смены управления"
+          }
+        }
+      }
+    },
+    "Signatures to spend": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signatures to spend"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Подписи для траты"
+          }
+        }
+      }
+    },
     "Signed an earlier version of the rules": {
       "localizations": {
         "en": {
@@ -6570,6 +8134,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "Подписано в той редакции правил, что действовала при вступлении. С тех пор группа их изменила."
+          }
+        }
+      }
+    },
+    "Signed by %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signed by %@"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Подписали: %@"
+          }
+        }
+      }
+    },
+    "Signed elsewhere": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signed elsewhere"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Подписано вне Onym"
           }
         }
       }
@@ -6837,6 +8435,23 @@
         }
       }
     },
+    "Stays switched off": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stays switched off"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Остаётся выключенным"
+          }
+        }
+      }
+    },
     "Stellar": {
       "extractionState": "manual",
       "localizations": {
@@ -6887,6 +8502,23 @@
         }
       }
     },
+    "Stellar testnet — this is not real money.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stellar testnet — this is not real money."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Тестовая сеть Stellar — это не настоящие деньги."
+          }
+        }
+      }
+    },
     "Step %lld of %lld": {
       "localizations": {
         "en": {
@@ -6899,6 +8531,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Шаг %1$lld из %2$lld"
+          }
+        }
+      }
+    },
+    "Still %lld signature(s) short.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Still %lld signature(s) short."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не хватает ещё подписей: %lld."
           }
         }
       }
@@ -6916,6 +8565,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Подключение этого устройства к сети ещё настраивается. Нажмите «Повторить» через мгновение."
+          }
+        }
+      }
+    },
+    "Stop holding %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop holding %@"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Перестать держать %@"
           }
         }
       }
@@ -7016,6 +8682,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "АККАУНТ ЭТОГО ЧАТА"
+          }
+        }
+      }
+    },
+    "TO": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TO"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "КОМУ"
           }
         }
       }
@@ -7137,6 +8820,125 @@
         }
       }
     },
+    "That asset's issuer isn't a valid account ID.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "That asset's issuer isn't a valid account ID."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Эмитент этого актива — не действительный идентификатор аккаунта."
+          }
+        }
+      }
+    },
+    "That doesn't look like a signed Stellar transaction.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "That doesn't look like a signed Stellar transaction."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Это не похоже на подписанную транзакцию Stellar."
+          }
+        }
+      }
+    },
+    "That is not a valid Stellar account ID.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "That is not a valid Stellar account ID."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Это не действительный идентификатор аккаунта Stellar."
+          }
+        }
+      }
+    },
+    "That isn't a valid Stellar account ID.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "That isn't a valid Stellar account ID."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Это не действительный идентификатор аккаунта Stellar."
+          }
+        }
+      }
+    },
+    "That isn't an amount.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "That isn't an amount."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Это не сумма."
+          }
+        }
+      }
+    },
+    "That signed transaction didn't match anything waiting for a signature here. It may have already gone through, or expired.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "That signed transaction didn't match anything waiting for a signature here. It may have already gone through, or expired."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Эта подписанная транзакция не подошла ни к одному предложению, ожидающему подписи. Возможно, оно уже прошло или истекло."
+          }
+        }
+      }
+    },
+    "That signed transaction didn't match this proposal. It may have already gone through, or expired.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "That signed transaction didn't match this proposal. It may have already gone through, or expired."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Эта подписанная транзакция не соответствует данному предложению. Возможно, она уже прошла или истекла."
+          }
+        }
+      }
+    },
     "The account and every payment it makes are public on Stellar, forever.": {
       "extractionState": "manual",
       "localizations": {
@@ -7150,6 +8952,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Аккаунт и каждый его платёж публичны в Stellar — навсегда."
+          }
+        }
+      }
+    },
+    "The account's own key": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The account's own key"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Собственный ключ счёта"
           }
         }
       }
@@ -7199,6 +9018,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Первичная настройка запустится заново, чтобы вы могли пересмотреть, кто доставляет ваши сообщения, хранит ваши файлы, заверяет вашу историю и модерирует жалобы.\n\nНичего не удаляется: ваша идентичность, чаты и сообщения сохраняются, а текущий выбор остаётся в силе, пока вы его не измените."
+          }
+        }
+      }
+    },
+    "The founder can set one up from the members screen.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The founder can set one up from the members screen."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Основатель может создать её на экране участников."
           }
         }
       }
@@ -7384,6 +9220,23 @@
         }
       }
     },
+    "There's already a proposal waiting. Only one can go through at a time — finish or let that one lapse first.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "There's already a proposal waiting. Only one can go through at a time — finish or let that one lapse first."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Одно предложение уже ждёт. За раз может пройти только одно — завершите его или дождитесь, пока истечёт его срок."
+          }
+        }
+      }
+    },
     "There’s nothing to show about this member’s agreement any more.": {
       "localizations": {
         "en": {
@@ -7466,6 +9319,57 @@
         }
       }
     },
+    "This also acts on an account that isn't the treasury.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This also acts on an account that isn't the treasury."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Здесь затрагивается счёт, который не является казной."
+          }
+        }
+      }
+    },
+    "This arrived already carrying so many signatures that there is no room left for the people who still have to sign.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This arrived already carrying so many signatures that there is no room left for the people who still have to sign."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Это пришло уже с таким количеством подписей, что для тех, кому ещё предстоит подписать, места не осталось."
+          }
+        }
+      }
+    },
+    "This asks for something this app can't read, so it can't show you what you'd be signing.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This asks for something this app can't read, so it can't show you what you'd be signing."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Здесь запрашивается то, что приложение не может прочитать, поэтому оно не покажет, что именно вы подпишете."
+          }
+        }
+      }
+    },
     "This build runs without a service directory. Continue — the app uses its built-in defaults.": {
       "localizations": {
         "en": {
@@ -7494,6 +9398,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "Это действие нельзя отменить."
+          }
+        }
+      }
+    },
+    "This chat already has a treasury.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This chat already has a treasury."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "У этого чата уже есть казна."
+          }
+        }
+      }
+    },
+    "This chat has no treasury.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This chat has no treasury."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "У этого чата нет казны."
           }
         }
       }
@@ -7527,6 +9465,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Проверяется только формат адреса, а не контракт в сети. Нажмите «Использовать этот контракт», чтобы новые чаты %@ привязывались сюда; существующие чаты сохранят свой контракт."
+          }
+        }
+      }
+    },
+    "This claims a slot far beyond the treasury's next one, which would block everything else until it expired.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This claims a slot far beyond the treasury's next one, which would block everything else until it expired."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Здесь занят номер далеко за следующим для казны — это заблокирует всё остальное до истечения срока."
           }
         }
       }
@@ -7576,6 +9531,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Группа ещё не записана в сеть. Подождите несколько секунд и нажмите «Принять» ещё раз."
+          }
+        }
+      }
+    },
+    "This identity has no treasury key.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This identity has no treasury key."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "У этой личности нет ключа для казны."
           }
         }
       }
@@ -7647,6 +9619,40 @@
         }
       }
     },
+    "This never expires. It would hold the treasury's next slot for good, so nothing else could ever be sent.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This never expires. It would hold the treasury's next slot for good, so nothing else could ever be sent."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "У этого нет срока действия. Оно навсегда займёт следующий слот казны, и отправить что-либо ещё станет невозможно."
+          }
+        }
+      }
+    },
+    "This offers a network fee far above the going rate — money leaving the treasury that none of the rows above would show.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This offers a network fee far above the going rate — money leaving the treasury that none of the rows above would show."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Здесь предложена комиссия сети намного выше обычной — деньги уйдут из казны, и ни одна строка выше этого не покажет."
+          }
+        }
+      }
+    },
     "This permanently deletes every message stored on this device. Your chats stay in the list, but the messages inside them will be gone.\n\nOnym keeps no copy on its servers, and messages can’t be re-downloaded — relay copies are best-effort and may already have expired.": {
       "localizations": {
         "en": {
@@ -7663,6 +9669,23 @@
         }
       }
     },
+    "This proposal has expired.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This proposal has expired."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Срок действия этого предложения истёк."
+          }
+        }
+      }
+    },
     "This removes %@ and every message in it from this device. It can't be undone.": {
       "localizations": {
         "en": {
@@ -7675,6 +9698,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "Это удалит %@ и все сообщения в нём с этого устройства. Отменить будет нельзя."
+          }
+        }
+      }
+    },
+    "This spends a different account, not this chat's treasury. It was not shown for signing.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This spends a different account, not this chat's treasury. It was not shown for signing."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Здесь тратится другой счёт, а не казна этого чата. Для подписи это не предлагалось."
+          }
+        }
+      }
+    },
+    "This stays valid far longer than a proposal should.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This stays valid far longer than a proposal should."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Это действует намного дольше, чем положено предложению."
           }
         }
       }
@@ -7696,6 +9753,57 @@
         }
       }
     },
+    "This transaction couldn't be read.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This transaction couldn't be read."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Эту транзакцию не удалось прочитать."
+          }
+        }
+      }
+    },
+    "This transaction does %lld more thing(s) this summary doesn't show. Don't sign it unless you know what they are.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This transaction does %lld more thing(s) this summary doesn't show. Don't sign it unless you know what they are."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Эта транзакция делает ещё %lld действий, не показанных в сводке. Не подписывайте, если не знаете, что это."
+          }
+        }
+      }
+    },
+    "This transaction isn't one this app knows how to describe. Don't sign it.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This transaction isn't one this app knows how to describe. Don't sign it."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Эту транзакцию приложение не умеет описывать. Не подписывайте её."
+          }
+        }
+      }
+    },
     "This usually takes a few seconds. It’s safe to close this — we’ll finish in the background.": {
       "localizations": {
         "en": {
@@ -7708,6 +9816,57 @@
           "stringUnit": {
             "state": "translated",
             "value": "Обычно это занимает несколько секунд. Можно закрыть — мы доделаем в фоне."
+          }
+        }
+      }
+    },
+    "This was built for a different Stellar network.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This was built for a different Stellar network."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Это собрано для другой сети Stellar."
+          }
+        }
+      }
+    },
+    "Those numbers can't be met by the co-signers you chose.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Those numbers can't be met by the co-signers you chose."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Выбранные вами соподписанты не смогут набрать столько подписей."
+          }
+        }
+      }
+    },
+    "To": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "To"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Кому"
           }
         }
       }
@@ -7763,6 +9922,74 @@
         }
       }
     },
+    "Treasury transaction": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Treasury transaction"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Транзакция казны"
+          }
+        }
+      }
+    },
+    "Treasury — %lld waiting on signatures": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Treasury — %lld waiting on signatures"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Казна — %lld ждут подписи"
+          }
+        }
+      }
+    },
+    "Treasury — waiting on signatures": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Treasury — waiting on signatures"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Казна — ждём подписи"
+          }
+        }
+      }
+    },
+    "Treasury's own key": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Treasury's own key"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Собственный ключ казны"
+          }
+        }
+      }
+    },
     "Try Again": {
       "extractionState": "stale",
       "localizations": {
@@ -7792,6 +10019,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "Повторить"
+          }
+        }
+      }
+    },
+    "Turns off account flags": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Turns off account flags"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Выключает флаги аккаунта"
+          }
+        }
+      }
+    },
+    "Turns on account flags": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Turns on account flags"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Включает флаги аккаунта"
           }
         }
       }
@@ -8045,6 +10306,23 @@
         }
       }
     },
+    "WAITING ON SIGNATURES": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WAITING ON SIGNATURES"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ЖДЁТ ПОДПИСЕЙ"
+          }
+        }
+      }
+    },
     "WHAT THEY SIGNED": {
       "localizations": {
         "en": {
@@ -8057,6 +10335,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "ЧТО БЫЛО ПОДПИСАНО"
+          }
+        }
+      }
+    },
+    "WHO CONTROLS IT": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WHO CONTROLS IT"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "КТО ЕЙ РАСПОРЯЖАЕТСЯ"
           }
         }
       }
@@ -8124,6 +10419,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ждём ваш кошелёк"
+          }
+        }
+      }
+    },
+    "Waiting on %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting on %@"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ждём: %@"
           }
         }
       }
@@ -8258,6 +10570,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Кто переносит ваши запечатанные сообщения"
+          }
+        }
+      }
+    },
+    "Whoever sent this isn't a member of this chat.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Whoever sent this isn't a member of this chat."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Отправитель не состоит в этом чате."
           }
         }
       }
@@ -8463,6 +10792,23 @@
         }
       }
     },
+    "You haven't chosen a Stellar account for this chat yet.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You haven't chosen a Stellar account for this chat yet."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Вы ещё не выбрали аккаунт Stellar для этого чата."
+          }
+        }
+      }
+    },
     "You joined %@": {
       "extractionState": "manual",
       "localizations": {
@@ -8626,6 +10972,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Вы внутри!"
+          }
+        }
+      }
+    },
+    "You're not a member of this chat.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You're not a member of this chat."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Вы не участник этого чата."
           }
         }
       }
@@ -9027,6 +11390,23 @@
         }
       }
     },
+    "Your signature was added to the proposal.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your signature was added to the proposal."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ваша подпись добавлена к предложению."
+          }
+        }
+      }
+    },
     "Your signed agreement to the rules goes with it.": {
       "localizations": {
         "en": {
@@ -9301,6 +11681,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "хочет вступить в «%@»"
+          }
+        }
+      }
+    },
+    "weight %lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "weight %lld"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "вес %lld"
           }
         }
       }

@@ -424,6 +424,27 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
         }
     }
 
+    public func openProposals(ownerIDString: String) async -> [StoredProposal] {
+        await perform {
+            let descriptor = FetchDescriptor<PersistedProposal>(
+                predicate: #Predicate {
+                    $0.ownerIdentityIDString == ownerIDString
+                        && $0.submittedTxHash == nil
+                        && $0.rejectionRaw == nil
+                },
+                sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
+            )
+            // Dismissal is filtered here rather than in the predicate: a
+            // fourth clause puts `#Predicate` past what the type checker
+            // will do in reasonable time, and the set reaching this
+            // point is already one identity's unsubmitted, unrefused
+            // rows.
+            return try self.context.fetch(descriptor)
+                .filter { $0.dismissedAt == nil }
+                .compactMap { try? self.decode($0) }
+        } ?? []
+    }
+
     public func removeAll(ownerIDString: String) async {
         await perform {
             try self.context.delete(

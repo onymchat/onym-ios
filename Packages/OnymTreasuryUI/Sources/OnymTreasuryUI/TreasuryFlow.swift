@@ -187,20 +187,10 @@ public final class TreasuryFlow {
     private let broadcaster: TreasuryBroadcaster
     private let creation: TreasuryCreationInteractor
     private let network: @Sendable () -> StellarNetwork
-    /// The live subscription, if one is draining.
-    ///
-    /// Not a `started` bool. The flow is memoised for the app's
-    /// lifetime, and `start()` consumed the stream inline on the view's
-    /// `.task` — so popping the treasury screen cancelled the task, the
-    /// iteration ended, and the flag stayed true. Every later visit then
-    /// rendered state frozen at the moment of the last exit: other
-    /// members' declarations, the anchor broadcast, `mine` after a
-    /// re-declaration, none of it arriving. Same defect as the one
-    /// found in `TreasuryProposalsFlow`; it was here too and I missed
-    /// it. Every other flow in the app (`ChatsFlow`, `PendingChatsFlow`,
-    /// `ModerationSettingsFlow`) spawns a detached task and guards on
-    /// it being nil, for exactly this reason.
-    private var subscription: Task<Void, Never>?
+    /// The live subscription — shared with `TreasuryProposalsFlow`, see
+    /// `FlowSubscription`, because the same defect was found in one of
+    /// these two flows and fixed only there three times running.
+    private let subscription = FlowSubscription()
     /// Seeded once. Keying the seed off `selectedCoSigners.isEmpty`
     /// meant unticking the last co-signer silently re-ticked everyone
     /// on the next snapshot — which arrives whenever anybody in the
@@ -231,8 +221,7 @@ public final class TreasuryFlow {
     /// Idempotent — the view calls it from `.task`, which re-runs on
     /// every re-identification of the view.
     public func start() async {
-        guard subscription == nil else { return }
-        let task = Task { [weak self] in
+        await subscription.start { [weak self] in
             guard let self else { return }
             self.onymDerivedAccount = await (self.identity.currentIdentity()?
                 .treasuryAccountID).flatMap { try? StellarAccountID(accountID: $0) }
@@ -240,22 +229,14 @@ public final class TreasuryFlow {
                 await self.apply(snapshot)
             }
         }
-        subscription = task
-        await task.value
     }
 
-    /// End the subscription.
-    ///
-    /// Needed because the task deliberately outlives the view: it holds
-    /// the flow strongly while it drains a stream that never finishes on
-    /// its own, so a flow nobody references any more stays alive and
-    /// subscribed for the rest of the run — still waking on every
-    /// snapshot, still reading the group and identity repositories on
-    /// the main actor. `TreasuryFlowCache` calls this before dropping an
-    /// entry; `ChatsFlow.stop()` exists for the same reason.
+    /// End the subscription — see `FlowSubscription.cancel()` for why a
+    /// flow nobody references still has to be told to stop.
+    /// `TreasuryFlowCache` calls this before dropping an entry;
+    /// `ChatsFlow.stop()` exists for the same reason.
     public func stop() {
-        subscription?.cancel()
-        subscription = nil
+        subscription.cancel()
     }
 
     private func apply(_ snapshot: TreasurySnapshot) async {
@@ -344,7 +325,7 @@ public final class TreasuryFlow {
 
     public func declareOnymDerived() async {
         guard let account = onymDerivedAccount else {
-            declarationError = "This identity has no treasury key."
+            declarationError = String(localized: "This identity has no treasury key.")
             return
         }
         await declare(account: account, source: .onym)
@@ -352,7 +333,7 @@ public final class TreasuryFlow {
 
     public func declareExternal() async {
         guard let account = try? StellarAccountID(accountID: externalAccountField) else {
-            declarationError = "That is not a valid Stellar account ID."
+            declarationError = String(localized: "That is not a valid Stellar account ID.")
             return
         }
         await declare(account: account, source: .external)
@@ -368,7 +349,7 @@ public final class TreasuryFlow {
             source: source
         )
         if !ok {
-            declarationError = "Couldn't record that account. Try again."
+            declarationError = String(localized: "Couldn't record that account. Try again.")
         } else {
             externalAccountField = ""
         }
@@ -482,11 +463,11 @@ public final class TreasuryFlow {
         // with no purpose. Whoever is going to co-sign already has to
         // name an account; that is the one with money in it.
         guard let mine else {
-            creationError = "Choose your own Stellar account first."
+            creationError = String(localized: "Choose your own Stellar account first.")
             return
         }
         guard let spendable = spendableAmount else {
-            creationError = "That isn't an amount."
+            creationError = String(localized: "That isn't an amount.")
             return
         }
         // Built from the resolved list, not the tick list — see
@@ -496,7 +477,7 @@ public final class TreasuryFlow {
         // moment, and the thresholds were chosen against the old count.
         let coSigners = resolvedCoSigners
         guard !coSigners.isEmpty else {
-            creationError = "Choose at least one co-signer."
+            creationError = String(localized: "Choose at least one co-signer.")
             return
         }
         let thresholds = TreasurySignerSelection.clamped(
@@ -504,7 +485,9 @@ public final class TreasuryFlow {
             signerCount: coSigners.count
         )
         guard TreasurySignerSelection.isUsable(thresholds, signerCount: coSigners.count) else {
-            creationError = "Those numbers can't be met by the co-signers you chose."
+            creationError = String(
+                localized: "Those numbers can't be met by the co-signers you chose."
+            )
             return
         }
         mediumThreshold = thresholds.medium
@@ -532,11 +515,11 @@ public final class TreasuryFlow {
             creationError = nil
             creationStage = .created
         case .alreadyExists:
-            creationError = "This chat already has a treasury."
+            creationError = String(localized: "This chat already has a treasury.")
         case .notAdmin:
-            creationError = "Only the founder can create the treasury."
+            creationError = String(localized: "Only the founder can create the treasury.")
         case .noDeclaredSigners:
-            creationError = "Nobody has chosen a Stellar account yet."
+            creationError = String(localized: "Nobody has chosen a Stellar account yet.")
         case .needsExternalWallet(let request, let treasuryAccountID, let creationTxHash):
             // The wallet signs and submits; nothing is anchored until
             // the founder comes back and `confirmExternalCreation`
@@ -646,7 +629,7 @@ public final class TreasuryFlow {
         case .failed(let reason):
             creationError = reason
         case .notAdmin, .noDeclaredSigners, .needsExternalWallet:
-            creationError = "Couldn't confirm that treasury."
+            creationError = String(localized: "Couldn't confirm that treasury.")
         }
     }
 }

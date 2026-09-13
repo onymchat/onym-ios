@@ -285,6 +285,25 @@ public actor TreasuryRepository {
         await publish(groupID: stored.proposal.groupID)
     }
 
+    /// Open proposals across every group this identity is in, plus the
+    /// declared signers of each one's group — everything needed to try
+    /// a returned envelope against them.
+    public func openProposalsWithSigners() async -> [(StoredProposal, [StellarAccountID])] {
+        guard let owner = currentIdentity?.rawValue.uuidString else { return [] }
+        var result: [(StoredProposal, [StellarAccountID])] = []
+        var byGroup: [String: [StellarAccountID]] = [:]
+        for stored in await store.openProposals(ownerIDString: owner) {
+            let groupID = stored.proposal.groupID
+            if byGroup[groupID] == nil {
+                byGroup[groupID] = await store
+                    .declarations(groupID: groupID, ownerIDString: owner)
+                    .map(\.account)
+            }
+            result.append((stored, byGroup[groupID] ?? []))
+        }
+        return result
+    }
+
     public func markSubmitted(proposalID: UUID, txHash: String) async {
         guard let owner = currentIdentity?.rawValue.uuidString,
               var stored = await store.proposal(id: proposalID, ownerIDString: owner)
@@ -326,6 +345,18 @@ public actor TreasuryRepository {
         }
         await publish(groupID: groupID)
         return account
+    }
+
+    /// Whether this group has a treasury at all, without subscribing.
+    ///
+    /// The in-thread block is built for *every* thread, and a flow that
+    /// starts always means a permanent snapshot continuation and a
+    /// cached flow per group visited — growing for the life of the
+    /// process, almost all of it for chats that hold no money. One
+    /// store read answers the question instead.
+    public func hasTreasury(groupID: String) async -> Bool {
+        guard let owner = currentIdentity?.rawValue.uuidString else { return false }
+        return await store.treasury(groupID: groupID, ownerIDString: owner) != nil
     }
 
     /// The creation handed to a wallet and awaiting confirmation, if

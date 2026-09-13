@@ -58,6 +58,31 @@ public enum DeeplinkCapture {
         return IntroCapability.fromLink(rawURL)
     }
 
+    /// The return leg of a SEP-0007 handoff: a wallet handing a signed
+    /// treasury transaction back as `onym://tx?xdr=…`.
+    ///
+    /// Kept on its own allowlist rather than added to `allowed` above,
+    /// because the two carry different things and must not be confused.
+    /// A join capability materializes a group; this carries bytes that
+    /// are only ever *offered* to an existing proposal, where the
+    /// signature is checked against a transaction hash this device
+    /// computed for itself. Letting one route decode as the other would
+    /// mean a link could reach a code path chosen by whoever sent it.
+    ///
+    /// Returns the raw base64 rather than a parsed envelope: decoding
+    /// belongs to `OnymStellar`, which this package does not depend on,
+    /// and the caller has to hand it to `harvestSignatures` anyway.
+    public static func signedTransactionXDR(from url: URL?) -> String? {
+        guard let url,
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.scheme?.lowercased() == "onym",
+              components.host?.lowercased() == "tx",
+              let xdr = components.queryItems?.first(where: { $0.name == "xdr" })?.value,
+              !xdr.isEmpty
+        else { return nil }
+        return xdr
+    }
+
     private struct Pair: Hashable {
         let scheme: String
         let host: String
