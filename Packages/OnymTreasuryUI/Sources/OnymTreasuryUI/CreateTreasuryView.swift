@@ -15,7 +15,6 @@ import SwiftUI
 /// the money is gone. Both facts are on the screen, not in a help page.
 public struct CreateTreasuryView: View {
     @Bindable var flow: TreasuryFlow
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
 
     public init(flow: TreasuryFlow) {
@@ -31,15 +30,7 @@ public struct CreateTreasuryView: View {
                 funding
                 consequences
 
-                PrimaryButton(
-                    "Create the treasury",
-                    disabled: flow.isCreating || flow.selectedCoSigners.isEmpty
-                ) {
-                    Task { await flow.create() }
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 20)
-                .accessibilityIdentifier("treasury.create.submit")
+                stageAction
 
                 if let error = flow.creationError {
                     Text(error)
@@ -66,6 +57,55 @@ public struct CreateTreasuryView: View {
             guard let url = request?.url else { return }
             openURL(url)
             flow.clearWalletRequest()
+        }
+    }
+
+    /// The button, and what replaces it once creation has gone
+    /// somewhere. Previously success set an error to nil and stopped,
+    /// and the wallet handoff did nothing at all — both left the
+    /// founder on an enabled "Create the treasury" button with no idea
+    /// whether anything had happened.
+    @ViewBuilder
+    private var stageAction: some View {
+        switch flow.creationStage {
+        case .idle:
+            PrimaryButton(
+                "Create the treasury",
+                disabled: flow.isCreating || flow.resolvedCoSigners.isEmpty
+            ) {
+                Task { await flow.create() }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 20)
+            .accessibilityIdentifier("treasury.create.submit")
+
+        case .awaitingWallet:
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Waiting for your wallet")
+                    .font(OnymType.font(size: 14, weight: .semibold))
+                    .foregroundStyle(OnymTokens.text)
+                Text("Sign and send the transaction there, then come back and confirm. Onym checks the ledger before telling the group \u{2014} it won't take your word for it.")
+                    .font(OnymType.font(size: 13))
+                    .foregroundStyle(OnymTokens.text2)
+                PrimaryButton("I've sent it", disabled: flow.isCreating) {
+                    Task { await flow.confirmExternalCreation() }
+                }
+                .accessibilityIdentifier("treasury.create.confirm_external")
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 20)
+
+        case .created:
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(OnymTokens.green)
+                Text("The treasury exists. Everyone in the chat can see it now.")
+                    .font(OnymType.font(size: 14))
+                    .foregroundStyle(OnymTokens.text)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 20)
+            .accessibilityIdentifier("treasury.create.done")
         }
     }
 
@@ -150,7 +190,7 @@ public struct CreateTreasuryView: View {
                     last: true
                 )
             }
-            Footnote("Out of \(flow.selectedCoSigners.count) co-signers. Requiring everyone means one lost phone freezes the treasury for good \u{2014} there is no way to remove a key without its own signature.")
+            Footnote("Out of \(flow.resolvedCoSigners.count) co-signers. Requiring everyone means one lost phone freezes the treasury for good \u{2014} there is no way to remove a key without its own signature.")
         }
         .padding(.top, 8)
     }
@@ -162,7 +202,11 @@ public struct CreateTreasuryView: View {
         identifier: String,
         last: Bool = false
     ) -> some View {
-        let maximum = UInt32(max(flow.selectedCoSigners.count, 1))
+        // From the resolved co-signers, not the ticks: a member whose
+        // declaration stopped verifying is not a signer, and a
+        // threshold counted from headcount would exceed the weight that
+        // actually exists.
+        let maximum = UInt32(max(flow.resolvedCoSigners.count, 1))
         return Row(
             title: title,
             subtitle: subtitle,
@@ -179,6 +223,13 @@ public struct CreateTreasuryView: View {
                     .monospacedDigit()
                 Stepper(value: value, in: 1...max(maximum, 1)) { EmptyView() }
                     .labelsHidden()
+                    // The two steppers move independently, so this is
+                    // where "3 to spend, 1 to change who can spend"
+                    // gets caught — a setting any single co-signer
+                    // could use to take sole control of the account.
+                    .onChange(of: value.wrappedValue) { _, _ in
+                        flow.thresholdsChanged()
+                    }
                     .accessibilityIdentifier("treasury.create.threshold.\(identifier)")
                     .accessibilityLabel(title)
                     .accessibilityValue("\(value.wrappedValue) of \(maximum)")

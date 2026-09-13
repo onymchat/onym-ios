@@ -14,7 +14,6 @@ import SwiftUI
 /// money into it to use a treasury.
 public struct DeclareSignerView: View {
     @Bindable var flow: TreasuryFlow
-    @Environment(\.dismiss) private var dismiss
 
     public init(flow: TreasuryFlow) {
         self.flow = flow
@@ -84,8 +83,11 @@ public struct DeclareSignerView: View {
     private var onymOption: some View {
         VStack(alignment: .leading, spacing: 0) {
             SectionLabel("USE THE ONE ONYM DERIVES")
-            Card {
-                if let account = flow.onymDerivedAccount {
+            // No `Card` at all when there is no derived account, rather
+            // than an empty one: a bordered box with nothing in it reads
+            // as a loading failure.
+            if let account = flow.onymDerivedAccount {
+                Card {
                     Row(
                         titleText: account.accountID,
                         titleMono: true,

@@ -531,6 +531,11 @@ struct OnymIOSApp: App {
         self.inboxTransport = inboxTransport
         self.contractTransportFactory = contractTransportFactory
 
+        // Memoised per group — see `TreasuryFlowCache`. The screen is
+        // built inside a NavigationLink destination closure that runs on
+        // every re-render of the members screen.
+        let treasuryFlowCache = TreasuryFlowCache()
+
         // Built here rather than in the factory closure: it holds the
         // transport, and one broadcaster per app is what keeps a
         // declaration and the proposal that follows it going out over
@@ -1539,7 +1544,10 @@ struct OnymIOSApp: App {
                 )))
             },
             makeTreasuryView: { @MainActor groupID in
-                AnyView(TreasurySetupView(flow: TreasuryFlow(
+                if let existing = treasuryFlowCache.flows[groupID] {
+                    return AnyView(TreasurySetupView(flow: existing))
+                }
+                let flow = TreasuryFlow(
                     groupID: groupID,
                     repository: treasuryRepository,
                     groups: groupRepository,
@@ -1556,7 +1564,9 @@ struct OnymIOSApp: App {
                     // the user is actually on, and this closure outlives
                     // any one reading of it.
                     network: { UserDefaultsNetworkPreference().current().stellarNetwork }
-                )))
+                )
+                treasuryFlowCache.flows[groupID] = flow
+                return AnyView(TreasurySetupView(flow: flow))
             },
             makeModerationCaseFlow: { @MainActor notice in
                 ModerationCaseFlow(

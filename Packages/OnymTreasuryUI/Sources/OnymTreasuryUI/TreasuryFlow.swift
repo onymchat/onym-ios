@@ -95,6 +95,21 @@ public final class TreasuryFlow {
     /// Set when creation needs the founder's own wallet — the app
     /// cannot sign for an account it does not hold.
     public private(set) var pendingWalletRequest: SEP0007Request?
+    /// Where creation has got to. The screen used to end at
+    /// `creationError = nil` on success and at nothing at all on the
+    /// wallet handoff: the founder was left looking at an enabled
+    /// "Create the treasury" button with no signal either way.
+    public private(set) var creationStage: CreationStage = .idle
+
+    public enum CreationStage: Equatable, Sendable {
+        case idle
+        /// Handed to the founder's wallet, waiting for them to sign and
+        /// submit it there. `treasuryAccountID` is the account the
+        /// envelope creates, kept so `confirmExternalCreation()` can
+        /// check the ledger for it afterwards.
+        case awaitingWallet(treasuryAccountID: String, coSigners: [StellarAccountID])
+        case created
+    }
 
     /// Candidates for the signer set: everyone whose declaration this
     /// device could verify.
@@ -123,6 +138,14 @@ public final class TreasuryFlow {
     private let creation: TreasuryCreationInteractor
     private let network: @Sendable () -> StellarNetwork
     private var started = false
+    /// Seeded once. Keying the seed off `selectedCoSigners.isEmpty`
+    /// meant unticking the last co-signer silently re-ticked everyone
+    /// on the next snapshot — which arrives whenever anybody in the
+    /// group declares an account.
+    private var hasSeededSelection = false
+    /// Network parameters for the screen's lifetime. They do not change
+    /// between keystrokes, and the estimate is refreshed on every one.
+    private var cachedParameters: TreasuryFundingEstimate?
 
     public init(
         groupID: String,
@@ -188,10 +211,10 @@ public final class TreasuryFlow {
         // Seed the signer set once, then leave the founder's choices
         // alone — re-seeding on every snapshot would undo a tick the
         // moment anyone else's declaration arrived.
-        if selectedCoSigners.isEmpty {
+        if !hasSeededSelection, !nominatable.isEmpty {
+            hasSeededSelection = true
             selectedCoSigners = Set(nominatable.map(\.blsPubkeyHex))
-            let count = max(selectedCoSigners.count, 1)
-            let defaults = TreasuryThresholds.majority(of: count)
+            let defaults = TreasuryThresholds.majority(of: resolvedCoSigners.count)
             mediumThreshold = defaults.medium
             highThreshold = defaults.high
         }
@@ -233,17 +256,55 @@ public final class TreasuryFlow {
 
     // MARK: - Creation intents
 
+    /// Recomputed on every keystroke in the amount field, so the
+    /// network round trip behind it is made once and reused. Base fee
+    /// and base reserve are protocol parameters; they do not change
+    /// between two characters of a number.
     public func refreshEstimate() async {
         guard let spendable = try? StellarAmount(decimalString: spendableField) else {
             estimate = nil
             return
         }
-        estimate = await creation.estimate(
+        let signerCount = max(resolvedCoSigners.count, 1)
+        if let cached = cachedParameters, cached.signerCount == signerCount {
+            estimate = TreasuryFundingEstimate(
+                minimumBalance: cached.minimumBalance,
+                spendable: spendable,
+                fee: cached.fee,
+                baseReserve: cached.baseReserve,
+                signerCount: signerCount
+            )
+            return
+        }
+        let fresh = await creation.estimate(
             network: network(),
-            signerCount: max(selectedCoSigners.count, 1),
+            signerCount: signerCount,
             spendable: spendable
         )
+        cachedParameters = fresh
+        estimate = fresh
     }
+
+    /// The accounts the creation transaction will actually install —
+    /// deduplicated, and filtered to declarations this device can still
+    /// verify. Not the same length as `selectedCoSigners`, which is why
+    /// every threshold decision is taken from this.
+    public var resolvedCoSigners: [StellarAccountID] {
+        TreasurySignerSelection.accounts(
+            ticked: selectedCoSigners,
+            from: members.map {
+                ($0.blsPubkeyHex, $0.account ?? Self.placeholder, $0.standing.canBeNominated
+                    && $0.account != nil)
+            }
+        )
+    }
+
+    /// Never used — `nominatable` is false whenever the account is nil,
+    /// so this stands in only to keep the tuple non-optional.
+    private static let placeholder: StellarAccountID = {
+        // swiftlint:disable:next force_try
+        try! StellarAccountID(publicKey: Data(repeating: 0, count: 32))
+    }()
 
     public func toggle(_ member: TreasuryMemberRow) {
         if selectedCoSigners.contains(member.blsPubkeyHex) {
@@ -251,14 +312,27 @@ public final class TreasuryFlow {
         } else {
             selectedCoSigners.insert(member.blsPubkeyHex)
         }
-        // Keep the thresholds inside what the new set can actually
-        // reach. A threshold above the total weight is an account
-        // nobody can ever act on — reachable in two taps, and
-        // permanent, so it is clamped rather than validated at submit.
-        let count = UInt32(max(selectedCoSigners.count, 1))
-        mediumThreshold = min(max(mediumThreshold, 1), count)
-        highThreshold = min(max(highThreshold, 1), count)
+        clampThresholds()
     }
+
+    /// Keeps the thresholds inside what the resolved signer set can
+    /// reach, and `high` at or above `medium`. Both are reachable in a
+    /// couple of taps on screen and both are permanent — an account
+    /// whose threshold exceeds its total weight can never act again,
+    /// and one whose `high` is below its `medium` can be seized by any
+    /// single co-signer. See `TreasurySignerSelection.clamped`.
+    private func clampThresholds() {
+        let clamped = TreasurySignerSelection.clamped(
+            TreasuryThresholds(low: 1, medium: mediumThreshold, high: highThreshold),
+            signerCount: resolvedCoSigners.count
+        )
+        mediumThreshold = clamped.medium
+        highThreshold = clamped.high
+    }
+
+    /// Called by the steppers, which move one value at a time and can
+    /// therefore push `high` below `medium` on their own.
+    public func thresholdsChanged() { clampThresholds() }
 
     public func create() async {
         // The founder funds from the account they declared. Not from
@@ -276,13 +350,26 @@ public final class TreasuryFlow {
             creationError = "That isn't an amount."
             return
         }
-        let coSigners = nominatable
-            .filter { selectedCoSigners.contains($0.blsPubkeyHex) }
-            .compactMap(\.account)
+        // Built from the resolved list, not the tick list — see
+        // `resolvedCoSigners`. Clamping again here rather than trusting
+        // the steppers: a member can leave the group or their
+        // declaration can stop verifying between the last tap and this
+        // moment, and the thresholds were chosen against the old count.
+        let coSigners = resolvedCoSigners
         guard !coSigners.isEmpty else {
             creationError = "Choose at least one co-signer."
             return
         }
+        let thresholds = TreasurySignerSelection.clamped(
+            TreasuryThresholds(low: 1, medium: mediumThreshold, high: highThreshold),
+            signerCount: coSigners.count
+        )
+        guard TreasurySignerSelection.isUsable(thresholds, signerCount: coSigners.count) else {
+            creationError = "Those numbers can't be met by the co-signers you chose."
+            return
+        }
+        mediumThreshold = thresholds.medium
+        highThreshold = thresholds.high
 
         isCreating = true
         creationError = nil
@@ -291,35 +378,71 @@ public final class TreasuryFlow {
         let outcome = await creation.create(
             groupIDHex: groupID,
             funder: mine.account,
-            // An externally-held funding account means the app cannot
-            // sign the creation envelope, so it goes out to the
-            // founder's wallet instead — the `needsExternalWallet`
-            // branch below.
-            funderIsOnymDerived: mine.source == .onym,
             coSigners: coSigners,
-            thresholds: TreasuryThresholds(
-                low: 1,
-                medium: mediumThreshold,
-                high: highThreshold
-            ),
+            thresholds: thresholds,
             spendable: spendable,
             network: network()
         )
         switch outcome {
         case .created:
             creationError = nil
+            creationStage = .created
         case .alreadyExists:
             creationError = "This chat already has a treasury."
         case .notAdmin:
             creationError = "Only the founder can create the treasury."
         case .noDeclaredSigners:
             creationError = "Nobody has chosen a Stellar account yet."
-        case .needsExternalWallet(let request, _):
+        case .needsExternalWallet(let request, let treasuryAccountID):
+            // The wallet signs and submits; nothing is anchored until
+            // the founder comes back and `confirmExternalCreation`
+            // finds the account on the ledger. Previously this opened
+            // the URL and ended — the group never learned the treasury
+            // existed, and the screen looked like nothing had happened.
             pendingWalletRequest = request
+            creationStage = .awaitingWallet(
+                treasuryAccountID: treasuryAccountID,
+                coSigners: coSigners
+            )
         case .failed(let reason):
             creationError = reason
         }
     }
 
     public func clearWalletRequest() { pendingWalletRequest = nil }
+
+    /// After a wallet handoff: check the ledger and, if the account is
+    /// there and configured as asked, anchor it and tell the group.
+    ///
+    /// `adopt` verifies before believing — the account must exist, its
+    /// master key must actually be switched off, and its signer set
+    /// must be the one this screen chose. Taking the founder's word for
+    /// it would mean anchoring a group to an account that might still
+    /// be under one person's control.
+    public func confirmExternalCreation() async {
+        guard case .awaitingWallet(let accountID, let coSigners) = creationStage else {
+            return
+        }
+        isCreating = true
+        creationError = nil
+        defer { isCreating = false }
+
+        let outcome = await creation.adopt(
+            groupIDHex: groupID,
+            treasuryAccountID: accountID,
+            creationTxHash: "",
+            network: network(),
+            expectedCoSigners: coSigners
+        )
+        switch outcome {
+        case .created:
+            creationStage = .created
+        case .failed(let reason):
+            creationError = reason
+        case .alreadyExists:
+            creationStage = .created
+        case .notAdmin, .noDeclaredSigners, .needsExternalWallet:
+            creationError = "Couldn't confirm that treasury."
+        }
+    }
 }
