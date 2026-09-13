@@ -64,6 +64,12 @@ public enum TreasuryCreationOutcome: Equatable, Sendable {
     /// Nobody has declared a signer yet, so there would be no one to
     /// hand control to.
     case noDeclaredSigners
+    /// This group's treasury is a different account, and the funding
+    /// this device handed to a wallet went somewhere else. Carries the
+    /// account so the founder can be told where their money is; it has
+    /// been configured to the co-signer set, so the same people can
+    /// move it.
+    case fundedAnotherAccount(StellarAccountID)
     case failed(String)
 }
 
@@ -103,7 +109,7 @@ public struct TreasuryCreationInteractor: Sendable {
     /// a fee-bump vote. Ten times a few hundred stroops costs the
     /// founder nothing worth naming and is the difference between a
     /// treasury and an account nobody can finish.
-    static let configurationFeeMargin: Int64 = 10
+    public static let configurationFeeMargin: Int64 = 10
 
     public init(
         treasury: TreasuryRepository,
@@ -140,9 +146,20 @@ public struct TreasuryCreationInteractor: Sendable {
             ),
             spendable: spendable,
             // One operation per signer, plus the create and the
-            // lockdown.
+            // lockdown — and, for the external path, the margin the
+            // funding transaction actually sends along for the
+            // configuration it cannot pay for itself.
+            //
+            // The screen prints this sum so a founder can check it. A
+            // figure smaller than what their wallet is asked for is
+            // worse than no figure: a funder holding exactly the
+            // estimate fails to fund, having done what the screen said.
             fee: StellarAmount(
                 stroops: parameters.baseFee.stroops * Int64(signerCount + 2)
+                    + TreasuryTransactionFactory.configurationFee(
+                        signerCount: signerCount,
+                        baseFee: parameters.baseFee
+                    ).stroops * Self.configurationFeeMargin
             ),
             baseReserve: parameters.baseReserve,
             signerCount: signerCount
@@ -407,6 +424,10 @@ public struct TreasuryCreationInteractor: Sendable {
         /// the key in that row is the only one that can configure or
         /// spend it.
         case accountAlreadyFunded(StellarAccountID)
+        /// The ledger could not be reached, so whether anything was
+        /// funded is unknown — and an unknown is not permission to
+        /// delete the only key. Nothing was deleted.
+        case couldNotTell
     }
 
     /// Throw away a handoff — unless the funding already landed.
@@ -426,12 +447,27 @@ public struct TreasuryCreationInteractor: Sendable {
         guard let pending = await treasury.pendingCreation(groupID: groupIDHex) else {
             return .discarded
         }
-        if pending.treasurySeed != nil,
-           (try? await horizon(pending.network).account(pending.treasuryAccount)) != nil {
-            return .accountAlreadyFunded(pending.treasuryAccount)
+        guard pending.treasurySeed != nil else {
+            // No key to strand: an older row, or one for the in-app
+            // path. Nothing on the ledger depends on it.
+            await treasury.clearPendingCreation(groupID: groupIDHex)
+            return .discarded
         }
-        await treasury.clearPendingCreation(groupID: groupIDHex)
-        return .discarded
+        do {
+            _ = try await horizon(pending.network).account(pending.treasuryAccount)
+            return .accountAlreadyFunded(pending.treasuryAccount)
+        } catch HorizonError.accountNotFound {
+            // The one answer that means "nothing was funded". Any other
+            // failure is Horizon being unreachable or unhappy, and
+            // `try?` treated those as proof of absence — tap Start over
+            // in a tunnel after the wallet had funded the account and
+            // the key went with it. Permanently unreachable funds,
+            // caused by the guard meant to prevent exactly that.
+            await treasury.clearPendingCreation(groupID: groupIDHex)
+            return .discarded
+        } catch {
+            return .couldNotTell
+        }
     }
 
     /// Finish a split creation: configure the account the wallet
@@ -461,7 +497,27 @@ public struct TreasuryCreationInteractor: Sendable {
         // tap — this already worked — and "nothing is waiting for a
         // wallet here" is a confusing way to say "it is done".
         if let anchored = await treasury.snapshot(groupID: groupIDHex).treasury {
-            if let pendingRow, pendingRow.treasuryAccount == anchored.account {
+            if let pendingRow, pendingRow.treasuryAccount != anchored.account {
+                // Someone else's anchor arrived while this founder's
+                // funding was in flight, so their XLM is sitting in an
+                // account that is not this group's treasury.
+                //
+                // Keeping the seed was necessary and not sufficient:
+                // every later call returned `.alreadyExists` before
+                // reaching the seed, so the row was preserved and
+                // unreachable by any code path — the funds strandable
+                // by inaction rather than by deletion. This configures
+                // that account anyway. It cannot become the group's
+                // treasury, but it can become an account the co-signers
+                // jointly control and can empty, rather than one whose
+                // only key is a secret this app promised to destroy.
+                return await configureStrandedFunding(
+                    pending: pendingRow,
+                    groupIDHex: groupIDHex,
+                    now: now
+                )
+            }
+            if pendingRow != nil {
                 await treasury.clearPendingCreation(groupID: groupIDHex)
             }
             return .alreadyExists
@@ -489,10 +545,21 @@ public struct TreasuryCreationInteractor: Sendable {
         }
 
         let client = horizon(pending.network)
-        guard let onChain = try? await client.account(pending.treasuryAccount) else {
+        let onChain: HorizonAccount
+        do {
+            onChain = try await client.account(pending.treasuryAccount)
+        } catch HorizonError.accountNotFound {
             return .failed(
                 "the treasury account is not on the ledger yet. If your wallet has "
                 + "not sent the funding transaction, it has not gone through."
+            )
+        } catch {
+            // Not the same thing, and it was being reported as if it
+            // were: telling a founder their wallet did not send it,
+            // when what actually happened is that this device could not
+            // reach Horizon, is an accusation on a network blip.
+            return .failed(
+                "could not reach the network to check. Nothing has been changed; try again."
             )
         }
 
@@ -525,9 +592,21 @@ public struct TreasuryCreationInteractor: Sendable {
                 .map(\.balance.stroops) ?? 0
             let spendableOnFees = max(held - reserve, 0)
             let wanted = parameters.baseFee.stroops * operationCount
-            let baseFee = wanted <= spendableOnFees
-                ? parameters.baseFee
-                : StellarAmount(stroops: max(spendableOnFees / operationCount, 0))
+            guard wanted <= spendableOnFees else {
+                // Refused with the reason, rather than clamped below
+                // what the network charges. A fee under the base rate
+                // is not an attempt — it is a submission the network
+                // declines for a reason the founder would then see as
+                // an opaque failure. Saying what is wrong is the only
+                // useful thing left, because nothing here can add funds
+                // to the account.
+                return .failed(
+                    "the treasury holds \(StellarAmount(stroops: held).decimalString) XLM, "
+                    + "which does not cover its reserve and the fee for locking it down. "
+                    + "Send it a little more and try again."
+                )
+            }
+            let baseFee = parameters.baseFee
             guard let configuration = try? TreasuryTransactionFactory.creationConfiguration(
                 treasury: pending.treasuryAccount,
                 treasurySequence: onChain.sequenceNumber,
@@ -604,6 +683,63 @@ public struct TreasuryCreationInteractor: Sendable {
         await treasury.clearPendingCreation(groupID: groupIDHex)
         await broadcaster.announceAnchor(created, now: now)
         return .created(created)
+    }
+
+    /// Configure an account whose funding landed but which can never
+    /// be this group's treasury, because another one was anchored
+    /// first.
+    ///
+    /// The point is reachability, not ownership: after this the account
+    /// is controlled by the co-signers at the thresholds the founder
+    /// chose, so the money can be moved by the same people who would
+    /// have controlled the treasury. Doing nothing would leave it under
+    /// an ephemeral key with no route to use it.
+    private func configureStrandedFunding(
+        pending: PendingTreasuryCreation,
+        groupIDHex: String,
+        now: Date
+    ) async -> TreasuryCreationOutcome {
+        guard let seed = pending.treasurySeed,
+              let key = try? EphemeralTreasuryKey(seed: seed),
+              key.account == pending.treasuryAccount
+        else { return .alreadyExists }
+        let client = horizon(pending.network)
+        guard let onChain = try? await client.account(pending.treasuryAccount) else {
+            // Nothing was funded after all, or the ledger is
+            // unreachable. Either way the row stays: it is the only
+            // copy of the key, and an unreachable Horizon is not proof.
+            return .alreadyExists
+        }
+        if Self.misconfiguration(
+            onChain,
+            account: pending.treasuryAccount,
+            expectedCoSigners: pending.coSigners,
+            expectedThresholds: pending.thresholds
+        ) == nil {
+            await treasury.clearPendingCreation(groupID: groupIDHex)
+            return .fundedAnotherAccount(pending.treasuryAccount)
+        }
+        guard let parameters = try? await client.networkParameters(),
+              let configuration = try? TreasuryTransactionFactory.creationConfiguration(
+                  treasury: pending.treasuryAccount,
+                  treasurySequence: onChain.sequenceNumber,
+                  coSigners: pending.coSigners,
+                  thresholds: pending.thresholds,
+                  baseFee: parameters.baseFee,
+                  timeBounds: StellarTimeBounds(
+                      minTime: 0,
+                      maxTime: UInt64(
+                          now.addingTimeInterval(Self.creationWindow).timeIntervalSince1970
+                      )
+                  )
+              )
+        else { return .alreadyExists }
+        var envelope = TransactionEnvelope(transaction: configuration)
+        guard (try? key.sign(&envelope, network: pending.network)) != nil,
+              (try? await client.submit(envelope)) != nil
+        else { return .alreadyExists }
+        await treasury.clearPendingCreation(groupID: groupIDHex)
+        return .fundedAnotherAccount(pending.treasuryAccount)
     }
 
     /// Why an account on the ledger is not the treasury this group

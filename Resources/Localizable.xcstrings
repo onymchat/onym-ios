@@ -2802,6 +2802,23 @@
         }
       }
     },
+    "Couldn't reach the network to check whether your wallet already sent the funding. Nothing was changed — try again in a moment.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't reach the network to check whether your wallet already sent the funding. Nothing was changed — try again in a moment."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не удалось связаться с сетью и проверить, отправил ли кошелёк пополнение. Ничего не изменено — попробуйте позже."
+          }
+        }
+      }
+    },
     "Couldn't record that account. Try again.": {
       "extractionState": "manual",
       "localizations": {
@@ -9432,6 +9449,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Это действие нельзя отменить."
+          }
+        }
+      }
+    },
+    "This chat already has a treasury, so your funding went to a different account: %@. It is now controlled by the same co-signers, who can move it.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This chat already has a treasury, so your funding went to a different account: %@. It is now controlled by the same co-signers, who can move it."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "У этого чата уже есть казна, поэтому ваше пополнение ушло на другой счёт: %@. Теперь им управляют те же подписанты, и они могут распорядиться средствами."
           }
         }
       }

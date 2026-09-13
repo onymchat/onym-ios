@@ -595,6 +595,111 @@ final class TreasuryE2ETests: XCTestCase {
         XCTAssertEqual(reason, "the treasury account is not on the ledger yet")
     }
 
+    /// An unreachable Horizon is not proof that nothing was funded, so
+    /// it must not be treated as permission to delete the only key.
+    func test_abandoning_refusesWhenTheLedgerCannotBeReached() async throws {
+        let world = try await makeExternalWorld()
+        try await fundExternally(world)
+        let loaded = await world.side.repository.pendingCreation(groupID: groupIDHex)
+        let pending = try XCTUnwrap(loaded)
+
+        // A side whose Horizon answers nothing but errors.
+        let broken = FakeHorizonClient()
+        await broken.setAccountError(.invalidResponse(statusCode: 503, body: "down"))
+        let adaLoaded = await ada.currentIdentity()
+        let boLoaded = await bo.currentIdentity()
+        let adaSelected = await ada.currentSelectedID()
+        let adaIdentity = try XCTUnwrap(adaLoaded)
+        let offline = try await makeSide(
+            identity: ada,
+            owner: try XCTUnwrap(adaSelected),
+            me: adaIdentity,
+            peer: try XCTUnwrap(boLoaded),
+            adminBlsHex: adaIdentity.blsPublicKey.hexString,
+            adminEd25519Hex: adaIdentity.stellarPublicKey.hexString,
+            ledger: broken
+        )
+        await offline.repository.recordPendingCreation(pending)
+
+        let outcome = await offline.creation.abandonExternalCreation(groupIDHex: groupIDHex)
+        XCTAssertEqual(outcome, .couldNotTell)
+        let survived = await offline.repository.pendingCreation(groupID: groupIDHex)
+        XCTAssertNotNil(survived?.treasurySeed, "an unreachable ledger must not cost the key")
+    }
+
+    /// Another admin's anchor lands mid-handoff. The founder's funding
+    /// is in an account that cannot become this group's treasury — and
+    /// leaving it under an ephemeral key with no route to use it is the
+    /// failure to avoid, so it gets configured to the co-signers.
+    func test_fundingStrandedByAnotherAnchor_isStillConfigured() async throws {
+        let world = try await makeExternalWorld()
+        try await fundExternally(world)
+        let loaded = await world.side.repository.pendingCreation(groupID: groupIDHex)
+        let pending = try XCTUnwrap(loaded)
+
+        // Someone else's treasury, anchored first.
+        let other = try StellarAccountID(
+            publicKey: Data(Curve25519.Signing.PrivateKey().publicKey.rawRepresentation)
+        )
+        await world.side.repository.anchor(Treasury(
+            account: other,
+            groupID: groupIDHex,
+            ownerIdentityID: pending.ownerIdentityID,
+            network: .testnet,
+            creationTxHash: "elsewhere",
+            createdAt: Date()
+        ))
+
+        let outcome = await world.side.creation.completeExternalCreation(groupIDHex: groupIDHex)
+        XCTAssertEqual(outcome, .fundedAnotherAccount(pending.treasuryAccount))
+
+        // Reachable by the co-signers, not by an ephemeral key nobody
+        // kept.
+        let onChain = try await world.ledger.account(pending.treasuryAccount)
+        XCTAssertNil(TreasuryCreationInteractor.misconfiguration(
+            onChain,
+            account: pending.treasuryAccount,
+            expectedCoSigners: pending.coSigners,
+            expectedThresholds: pending.thresholds
+        ))
+        let cleared = await world.side.repository.pendingCreation(groupID: groupIDHex)
+        XCTAssertNil(cleared)
+    }
+
+    /// Funded to exactly its reserve, a treasury cannot pay for its own
+    /// lockdown. That is a sentence, not an opaque submission failure.
+    func test_aTreasuryFundedToTheReserve_saysItCannotAffordTheLockdown() async throws {
+        let world = try await makeExternalWorld()
+        // (2 + 2 signers) × 0.5 XLM, and not one stroop more.
+        try await fundExternally(world, stroops: 20_000_000)
+
+        let outcome = await world.side.creation.completeExternalCreation(groupIDHex: groupIDHex)
+        guard case .failed(let reason) = outcome else {
+            return XCTFail("expected a refusal, got \(outcome)")
+        }
+        XCTAssertTrue(reason.contains("does not cover its reserve"), reason)
+        // And the row survives, because sending it more is a real fix.
+        let pending = await world.side.repository.pendingCreation(groupID: groupIDHex)
+        XCTAssertNotNil(pending?.treasurySeed)
+    }
+
+    /// The screen prints this sum for a founder to check. It has to be
+    /// what the wallet is actually asked for, margin included.
+    func test_theEstimate_includesTheMarginTheFundingSends() async throws {
+        let world = try await makeExternalWorld()
+        let estimate = await world.side.creation.estimate(
+            network: .testnet,
+            signerCount: 2,
+            spendable: StellarAmount(stroops: 0)
+        )
+        let quoted = try XCTUnwrap(estimate).fee.stroops
+        let configuration = TreasuryTransactionFactory.configurationFee(
+            signerCount: 2,
+            baseFee: StellarAmount(stroops: 100)
+        ).stroops * TreasuryCreationInteractor.configurationFeeMargin
+        XCTAssertGreaterThanOrEqual(quoted, configuration)
+    }
+
     // MARK: - External-path harness
 
     private struct ExternalWorld {
@@ -678,7 +783,10 @@ final class TreasuryE2ETests: XCTestCase {
     }
 
     /// Play the wallet: sign the funding transaction and submit it.
-    private func fundExternally(_ world: ExternalWorld) async throws {
+    private func fundExternally(
+        _ world: ExternalWorld,
+        stroops: Int64 = 40_000_000
+    ) async throws {
         let loaded = await world.side.repository.pendingCreation(groupID: groupIDHex)
         let pending = try XCTUnwrap(loaded)
         let account = try await world.ledger.account(world.funder)
@@ -686,7 +794,7 @@ final class TreasuryE2ETests: XCTestCase {
             funder: world.funder,
             funderSequence: account.sequenceNumber,
             treasury: pending.treasuryAccount,
-            startingBalance: StellarAmount(stroops: 40_000_000),
+            startingBalance: StellarAmount(stroops: stroops),
             baseFee: StellarAmount(stroops: 100),
             timeBounds: StellarTimeBounds(minTime: 0, maxTime: 4_000_000_000)
         )
@@ -867,7 +975,7 @@ final class TreasuryE2ETests: XCTestCase {
         peer: Identity,
         adminBlsHex: String,
         adminEd25519Hex: String,
-        ledger: LedgerHorizon
+        ledger: any HorizonClient
     ) async throws -> Side {
         let groups = GroupRepository(store: SwiftDataGroupStore.inMemory())
         await groups.setCurrentIdentity(owner)
