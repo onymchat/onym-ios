@@ -38,6 +38,10 @@ struct OnymIOSApp: App {
     private let contractsRepository: ContractsRepository
     private let groupRepository: GroupRepository
     private let treasuryRepository: TreasuryRepository
+    /// Stored as well as captured: the factory closure in `init` needs
+    /// the local, and the identity-change listener in `body` needs the
+    /// same instance to clear it.
+    private let treasuryFlowCache: TreasuryFlowCache
     private let treasuryBroadcaster: TreasuryBroadcaster
     private let messageRepository: MessageRepository
     private let imageLoader: ChatImageLoader
@@ -535,6 +539,7 @@ struct OnymIOSApp: App {
         // built inside a NavigationLink destination closure that runs on
         // every re-render of the members screen.
         let treasuryFlowCache = TreasuryFlowCache()
+        self.treasuryFlowCache = treasuryFlowCache
 
         // Built here rather than in the factory closure: it holds the
         // transport, and one broadcaster per app is what keeps a
@@ -1544,7 +1549,7 @@ struct OnymIOSApp: App {
                 )))
             },
             makeTreasuryView: { @MainActor groupID in
-                if let existing = treasuryFlowCache.flows[groupID] {
+                if let existing = treasuryFlowCache.flow(for: groupID) {
                     return AnyView(TreasurySetupView(flow: existing))
                 }
                 let flow = TreasuryFlow(
@@ -1565,7 +1570,7 @@ struct OnymIOSApp: App {
                     // any one reading of it.
                     network: { UserDefaultsNetworkPreference().current().stellarNetwork }
                 )
-                treasuryFlowCache.flows[groupID] = flow
+                treasuryFlowCache.store(flow, for: groupID)
                 return AnyView(TreasurySetupView(flow: flow))
             },
             makeModerationCaseFlow: { @MainActor notice in
@@ -1919,6 +1924,11 @@ struct OnymIOSApp: App {
                         await pendingChatRepository.setCurrentIdentity(id)
                         await pendingVerificationStore.setCurrentIdentity(id)
                         await treasuryRepository.setCurrentIdentity(id)
+                        // Treasury flows hold the previous identity's
+                        // roster, admin flag and declaration; keeping
+                        // them across a switch would show the next
+                        // identity the last one's view of the chat.
+                        treasuryFlowCache.clear()
                     }
                 }
                 .task {

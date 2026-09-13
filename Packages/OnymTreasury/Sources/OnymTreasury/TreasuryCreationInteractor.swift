@@ -313,6 +313,7 @@ public struct TreasuryCreationInteractor: Sendable {
         creationTxHash: String,
         network: StellarNetwork,
         expectedCoSigners: [StellarAccountID],
+        expectedThresholds: TreasuryThresholds,
         now: Date = Date()
     ) async -> TreasuryCreationOutcome {
         guard let owner = await identity.currentSelectedID(),
@@ -339,9 +340,36 @@ public struct TreasuryCreationInteractor: Sendable {
         guard masterWeight == 0 else {
             return .failed("that account can still be controlled by its own key")
         }
-        let onChainSigners = Set(onChain.signers.filter { $0.weight > 0 }.map(\.key))
-        guard onChainSigners == Set(expectedCoSigners) else {
+        let live = onChain.signers.filter { $0.weight > 0 }
+        guard Set(live.map(\.key)) == Set(expectedCoSigners) else {
             return .failed("that account's signers are not the ones this group chose")
+        }
+        // Weights and thresholds, not just the key set.
+        //
+        // This path exists because the founder's wallet submits the
+        // transaction, which means nothing here observed what was
+        // actually sent. Comparing only *which* keys are signers let a
+        // founder ignore the SEP-0007 envelope, submit their own
+        // `createAccount` with the same signer keys but weight 3 on
+        // their own, or `med`/`high` of 1 — and have it anchored and
+        // announced to the group as an account nobody controls alone.
+        // The check has to cover the whole configuration or it covers
+        // nothing.
+        guard live.allSatisfy({ $0.weight == 1 }) else {
+            return .failed("that account gives some signers more weight than others")
+        }
+        guard onChain.thresholds.medium == expectedThresholds.medium,
+              onChain.thresholds.high == expectedThresholds.high,
+              onChain.thresholds.low == expectedThresholds.low
+        else {
+            return .failed("that account needs a different number of signatures than this group chose")
+        }
+
+        // And it must not already be this group's treasury under
+        // another row — `create` has an `alreadyExists` guard and this
+        // had none, so a second confirmation re-anchored unconditionally.
+        if await treasury.snapshot(groupID: groupIDHex).treasury != nil {
+            return .alreadyExists
         }
 
         // The thresholds this account actually carries have to be

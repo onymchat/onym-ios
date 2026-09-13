@@ -86,10 +86,41 @@ public final class TreasuryFlow {
     /// everyone who has declared, because the ordinary case is "all of
     /// us" and un-ticking is easier than ticking.
     public var selectedCoSigners: Set<String> = []
+    /// Empty reads as zero. `StellarAmount(decimalString:)` rejects ""
+    /// and "1.", so clearing the field or typing a decimal point made
+    /// the whole funding breakdown vanish mid-keystroke, and an empty
+    /// field failed `create()` with "That isn't an amount" rather than
+    /// meaning "no spendable balance", which is a perfectly ordinary
+    /// thing to want.
     public var spendableField = "0"
+
+    /// What `spendableField` means, with the half-typed states a text
+    /// field legitimately passes through treated as zero.
+    var spendableAmount: StellarAmount? {
+        let trimmed = spendableField.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty || trimmed == "." { return StellarAmount(stroops: 0) }
+        if trimmed.hasSuffix(".") {
+            return try? StellarAmount(decimalString: String(trimmed.dropLast()))
+        }
+        return try? StellarAmount(decimalString: trimmed)
+    }
     public var mediumThreshold: UInt32 = 1
     public var highThreshold: UInt32 = 1
     public private(set) var estimate: TreasuryFundingEstimate?
+    /// The account creation will debit, and what it currently holds.
+    ///
+    /// The screen itemises "You send N XLM" and never said *from
+    /// where*. The funder is silently the declared account, and for the
+    /// option the declaration screen lists first — the Onym-derived one
+    /// — that account is empty by construction, so creation failed on
+    /// the Horizon read with an unexplained "could not read the funding
+    /// account". On a screen whose whole thesis is telling the founder
+    /// what they are giving up, the address being debited belongs on it.
+    public private(set) var funderAccount: StellarAccountID?
+    public private(set) var funderBalance: StellarAmount?
+    /// Set when the funding account does not exist on the ledger yet,
+    /// which on Stellar is what "unfunded" looks like.
+    public private(set) var funderIsUnfunded = false
     public private(set) var isCreating = false
     public private(set) var creationError: String?
     /// Set when creation needs the founder's own wallet — the app
@@ -107,7 +138,11 @@ public final class TreasuryFlow {
         /// submit it there. `treasuryAccountID` is the account the
         /// envelope creates, kept so `confirmExternalCreation()` can
         /// check the ledger for it afterwards.
-        case awaitingWallet(treasuryAccountID: String, coSigners: [StellarAccountID])
+        case awaitingWallet(
+            treasuryAccountID: String,
+            coSigners: [StellarAccountID],
+            thresholds: TreasuryThresholds
+        )
         case created
     }
 
@@ -137,7 +172,21 @@ public final class TreasuryFlow {
     private let broadcaster: TreasuryBroadcaster
     private let creation: TreasuryCreationInteractor
     private let network: @Sendable () -> StellarNetwork
-    private var started = false
+    private let horizon: @Sendable (StellarNetwork) -> any HorizonClient
+    /// The live subscription, if one is draining.
+    ///
+    /// Not a `started` bool. The flow is memoised for the app's
+    /// lifetime, and `start()` consumed the stream inline on the view's
+    /// `.task` — so popping the treasury screen cancelled the task, the
+    /// iteration ended, and the flag stayed true. Every later visit then
+    /// rendered state frozen at the moment of the last exit: other
+    /// members' declarations, the anchor broadcast, `mine` after a
+    /// re-declaration, none of it arriving. Same defect as the one
+    /// found in `TreasuryProposalsFlow`; it was here too and I missed
+    /// it. Every other flow in the app (`ChatsFlow`, `PendingChatsFlow`,
+    /// `ModerationSettingsFlow`) spawns a detached task and guards on
+    /// it being nil, for exactly this reason.
+    private var subscription: Task<Void, Never>?
     /// Seeded once. Keying the seed off `selectedCoSigners.isEmpty`
     /// meant unticking the last co-signer silently re-ticked everyone
     /// on the next snapshot — which arrives whenever anybody in the
@@ -154,7 +203,10 @@ public final class TreasuryFlow {
         identity: IdentityRepository,
         broadcaster: TreasuryBroadcaster,
         creation: TreasuryCreationInteractor,
-        network: @escaping @Sendable () -> StellarNetwork
+        network: @escaping @Sendable () -> StellarNetwork,
+        horizon: @escaping @Sendable (StellarNetwork) -> any HorizonClient = { network in
+            URLSessionHorizonClient(network: network)
+        }
     ) {
         self.groupID = groupID
         self.repository = repository
@@ -163,18 +215,24 @@ public final class TreasuryFlow {
         self.broadcaster = broadcaster
         self.creation = creation
         self.network = network
+        self.horizon = horizon
     }
 
     /// Idempotent — the view calls it from `.task`, which re-runs on
     /// every re-identification of the view.
     public func start() async {
-        guard !started else { return }
-        started = true
-        onymDerivedAccount = await (identity.currentIdentity()?.treasuryAccountID)
-            .flatMap { try? StellarAccountID(accountID: $0) }
-        for await snapshot in repository.snapshots(groupID: groupID) {
-            await apply(snapshot)
+        guard subscription == nil else { return }
+        let task = Task { [weak self] in
+            guard let self else { return }
+            self.onymDerivedAccount = await (self.identity.currentIdentity()?
+                .treasuryAccountID).flatMap { try? StellarAccountID(accountID: $0) }
+            for await snapshot in self.repository.snapshots(groupID: self.groupID) {
+                await self.apply(snapshot)
+            }
+            self.subscription = nil
         }
+        subscription = task
+        await task.value
     }
 
     private func apply(_ snapshot: TreasurySnapshot) async {
@@ -260,8 +318,23 @@ public final class TreasuryFlow {
     /// network round trip behind it is made once and reused. Base fee
     /// and base reserve are protocol parameters; they do not change
     /// between two characters of a number.
+    /// Reads the funding account so the screen can name it and say
+    /// whether it can actually pay.
+    public func refreshFunder() async {
+        guard let mine else {
+            funderAccount = nil
+            return
+        }
+        funderAccount = mine.account
+        let account = try? await horizon(network()).account(mine.account)
+        funderIsUnfunded = account == nil
+        funderBalance = account?.balances
+            .first { $0.asset == .native }?
+            .balance
+    }
+
     public func refreshEstimate() async {
-        guard let spendable = try? StellarAmount(decimalString: spendableField) else {
+        guard let spendable = spendableAmount else {
             estimate = nil
             return
         }
@@ -346,7 +419,7 @@ public final class TreasuryFlow {
             creationError = "Choose your own Stellar account first."
             return
         }
-        guard let spendable = try? StellarAmount(decimalString: spendableField) else {
+        guard let spendable = spendableAmount else {
             creationError = "That isn't an amount."
             return
         }
@@ -402,7 +475,8 @@ public final class TreasuryFlow {
             pendingWalletRequest = request
             creationStage = .awaitingWallet(
                 treasuryAccountID: treasuryAccountID,
-                coSigners: coSigners
+                coSigners: coSigners,
+                thresholds: thresholds
             )
         case .failed(let reason):
             creationError = reason
@@ -420,9 +494,9 @@ public final class TreasuryFlow {
     /// it would mean anchoring a group to an account that might still
     /// be under one person's control.
     public func confirmExternalCreation() async {
-        guard case .awaitingWallet(let accountID, let coSigners) = creationStage else {
-            return
-        }
+        guard case .awaitingWallet(let accountID, let coSigners, let thresholds)
+            = creationStage
+        else { return }
         isCreating = true
         creationError = nil
         defer { isCreating = false }
@@ -432,15 +506,16 @@ public final class TreasuryFlow {
             treasuryAccountID: accountID,
             creationTxHash: "",
             network: network(),
-            expectedCoSigners: coSigners
+            expectedCoSigners: coSigners,
+            expectedThresholds: thresholds
         )
         switch outcome {
         case .created:
             creationStage = .created
-        case .failed(let reason):
-            creationError = reason
         case .alreadyExists:
             creationStage = .created
+        case .failed(let reason):
+            creationError = reason
         case .notAdmin, .noDeclaredSigners, .needsExternalWallet:
             creationError = "Couldn't confirm that treasury."
         }

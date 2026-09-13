@@ -46,7 +46,10 @@ public struct CreateTreasuryView: View {
         .background(OnymTokens.bg)
         .navigationTitle("New treasury")
         .navigationBarTitleDisplayMode(.inline)
-        .task { await flow.refreshEstimate() }
+        .task {
+            await flow.refreshEstimate()
+            await flow.refreshFunder()
+        }
         .onChange(of: flow.selectedCoSigners) { _, _ in
             Task { await flow.refreshEstimate() }
         }
@@ -240,6 +243,39 @@ public struct CreateTreasuryView: View {
     private var funding: some View {
         VStack(alignment: .leading, spacing: 0) {
             SectionLabel("FUNDING")
+            // The account being debited, named.
+            //
+            // The screen itemised "You send N XLM" and never said from
+            // where. For the option the declaration screen lists first
+            // — the Onym-derived account — that address is empty by
+            // construction, so creation failed on the Horizon read with
+            // an unexplained "could not read the funding account". On a
+            // screen whose thesis is telling the founder what they are
+            // giving up, this belongs on it.
+            if let funder = flow.funderAccount {
+                Card {
+                    Row(
+                        titleText: funder.accountID,
+                        titleMono: true,
+                        subtitle: flow.funderIsUnfunded
+                            ? "This account has nothing in it yet"
+                            : flow.funderBalance.map { "\($0.decimalString) XLM available" },
+                        subtitleLineLimit: nil,
+                        hasChevron: false,
+                        last: true
+                    ) {
+                        IconTile(
+                            symbol: flow.funderIsUnfunded
+                                ? "exclamationmark.triangle.fill"
+                                : "arrow.up.circle.fill",
+                            bg: flow.funderIsUnfunded ? OnymTile.amber : OnymTile.blue
+                        )
+                    } right: { EmptyView() }
+                }
+                Footnote(verbatim: flow.funderIsUnfunded
+                    ? "The money comes out of this account, and it is empty. Send XLM to it first \u{2014} the address above is yours."
+                    : "The money comes out of this account.")
+            }
             Card {
                 Row(
                     title: "Spendable balance",
