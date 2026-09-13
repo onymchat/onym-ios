@@ -632,26 +632,22 @@ public final class TreasuryFlow {
     /// which is the envelope handed to the wallet, whose hash is fixed
     /// before it is signed.
     public func confirmExternalCreation() async {
-        guard case .awaitingWallet(
-            let accountID,
-            let creationTxHash,
-            let coSigners,
-            let thresholds,
-            let network,
-            _
-        ) = creationStage else { return }
+        // Only that the stage is the waiting one. What the handoff was
+        // for lives in the persisted pending row, which is where the
+        // interactor reads it — the stage's copy was a second source of
+        // the same truth and is no longer consulted here.
+        guard case .awaitingWallet = creationStage else { return }
         isCreating = true
         creationError = nil
         defer { isCreating = false }
 
-        let outcome = await creation.adopt(
-            groupIDHex: groupID,
-            treasuryAccountID: accountID,
-            creationTxHash: creationTxHash,
-            network: network,
-            expectedCoSigners: coSigners,
-            expectedThresholds: thresholds
-        )
+        // The interactor owns what "finish this" means now: the wallet
+        // only funded the account, and locking it down is this app's
+        // half of the job. It reads the ledger before each step, so
+        // tapping twice or coming back tomorrow resumes rather than
+        // repeats — and it falls back to `adopt` for a handoff that
+        // predates the split.
+        let outcome = await creation.completeExternalCreation(groupIDHex: groupID)
         switch outcome {
         case .created:
             creationStage = .created

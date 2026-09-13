@@ -215,10 +215,62 @@ public struct TreasuryCreationInteractor: Sendable {
             maxTime: UInt64(now.addingTimeInterval(Self.creationWindow).timeIntervalSince1970)
         )
 
-        // Generated here and never persisted. After the last operation
-        // applies this key controls nothing; see `EphemeralTreasuryKey`.
+        // Generated here. On the in-app path it is never persisted and
+        // controls nothing after the last operation applies; on the
+        // split path it outlives this call and the reasons are in
+        // `PendingTreasuryCreation.treasurySeed`.
         guard let treasuryKey = try? EphemeralTreasuryKey() else {
             return .failed("could not generate a treasury key")
+        }
+
+        let funderKey = Self.signingKey(for: funder, of: me)
+        if funderKey == .external {
+            // Split, because a SEP-0007 wallet will not submit the
+            // atomic envelope — see `TreasuryTransactionFactory
+            // .creationFunding`. Step one is one operation from one
+            // source, handed over unsigned, which is a shape wallets
+            // do submit. Step two is this app's to run.
+            //
+            // The treasury pays for step two out of what step one sends
+            // it, so the funding covers the minimum balance, what the
+            // group wants spendable, and that fee.
+            let configurationFee = TreasuryTransactionFactory.configurationFee(
+                signerCount: coSigners.count,
+                baseFee: parameters.baseFee
+            )
+            guard let funding = try? TreasuryTransactionFactory.creationFunding(
+                funder: funder,
+                funderSequence: funderAccount.sequenceNumber,
+                treasury: treasuryKey.account,
+                startingBalance: StellarAmount(
+                    stroops: starting.stroops + configurationFee.stroops
+                ),
+                baseFee: parameters.baseFee,
+                timeBounds: bounds
+            ) else { return .failed("could not build the funding transaction") }
+
+            let fundingEnvelope = TransactionEnvelope(transaction: funding)
+            await treasury.recordPendingCreation(PendingTreasuryCreation(
+                groupID: groupIDHex,
+                ownerIdentityID: owner,
+                treasuryAccount: treasuryKey.account,
+                network: network,
+                creationTxHash: funding.hash(network: network).hexString,
+                coSigners: coSigners,
+                thresholds: thresholds,
+                startedAt: now,
+                treasurySeed: treasuryKey.seedForPendingCreation()
+            ))
+            return .needsExternalWallet(
+                SEP0007Request(
+                    envelope: fundingEnvelope,
+                    network: network,
+                    message: "Fund a treasury for \(group.name)",
+                    publicKey: funder
+                ),
+                treasuryAccountID: treasuryKey.account.accountID,
+                creationTxHash: funding.hash(network: network).hexString
+            )
         }
 
         guard let transaction = try? TreasuryTransactionFactory.creation(
@@ -240,38 +292,10 @@ public struct TreasuryCreationInteractor: Sendable {
             return .failed("could not sign as the new account")
         }
 
-        let funderKey = Self.signingKey(for: funder, of: me)
         // Known before anyone signs: signatures live in the envelope,
         // not in the transaction, so this is already the hash the ledger
         // will record no matter who submits it.
         let hash = transaction.hash(network: network)
-        guard funderKey != .external else {
-            // The founder's wallet supplies the other signature. It can
-            // also submit, which is why nothing is anchored here — the
-            // group learns the treasury exists through `adopt`, after
-            // the transaction is on the ledger.
-            await treasury.recordPendingCreation(PendingTreasuryCreation(
-                groupID: groupIDHex,
-                ownerIdentityID: owner,
-                treasuryAccount: treasuryKey.account,
-                network: network,
-                creationTxHash: hash.hexString,
-                coSigners: coSigners,
-                thresholds: thresholds,
-                startedAt: now
-            ))
-            return .needsExternalWallet(
-                SEP0007Request(
-                    envelope: envelope,
-                    network: network,
-                    message: "Create a treasury for \(group.name)",
-                    publicKey: funder
-                ),
-                treasuryAccountID: treasuryKey.account.accountID,
-                creationTxHash: hash.map { String(format: "%02x", $0) }.joined()
-            )
-        }
-
         let signature: Data?
         switch funderKey {
         case .treasury:
@@ -348,6 +372,163 @@ public struct TreasuryCreationInteractor: Sendable {
     /// short; the depth is here to bound the read rather than to cover
     /// an account with years behind it.
     static let creationHistoryDepth = 200
+
+    /// Finish a split creation: configure the account the wallet
+    /// funded, then anchor it.
+    ///
+    /// Runs entirely here, because only this device can. Step two is
+    /// sourced by the treasury and signed by the treasury's own key,
+    /// which exists nowhere else — a wallet has nothing to contribute
+    /// and, as `creationFunding` explains, would not submit it anyway.
+    ///
+    /// Written to be run again. Every step reads the ledger first and
+    /// does only what is not yet done, so a crash, a dead network or a
+    /// founder who closed the app mid-way resumes rather than restarts:
+    /// an account that exists is not re-created, a configuration that
+    /// landed is not re-sent, and a treasury already anchored is left
+    /// alone.
+    public func completeExternalCreation(
+        groupIDHex: String,
+        now: Date = Date()
+    ) async -> TreasuryCreationOutcome {
+        guard let owner = await identity.currentSelectedID() else {
+            return .failed("no identity")
+        }
+        guard let pending = await treasury.pendingCreation(groupID: groupIDHex) else {
+            return .failed("nothing is waiting for a wallet here")
+        }
+        guard await treasury.snapshot(groupID: groupIDHex).treasury == nil else {
+            await treasury.clearPendingCreation(groupID: groupIDHex)
+            return .alreadyExists
+        }
+        guard let seed = pending.treasurySeed,
+              let treasuryKey = try? EphemeralTreasuryKey(seed: seed),
+              treasuryKey.account == pending.treasuryAccount
+        else {
+            // An older pending row from the atomic external path, or a
+            // seed that no longer matches the account it belongs to.
+            // `adopt` is the right handler for the first and the only
+            // honest answer to the second.
+            return await adopt(
+                groupIDHex: groupIDHex,
+                treasuryAccountID: pending.treasuryAccount.accountID,
+                creationTxHash: pending.creationTxHash,
+                network: pending.network,
+                expectedCoSigners: pending.coSigners,
+                expectedThresholds: pending.thresholds,
+                now: now
+            )
+        }
+
+        let client = horizon(pending.network)
+        guard let onChain = try? await client.account(pending.treasuryAccount) else {
+            return .failed(
+                "the treasury account is not on the ledger yet. If your wallet has "
+                + "not sent the funding transaction, it has not gone through."
+            )
+        }
+
+        // Already configured — either a retry after the submission
+        // landed, or a second tap. Verified below either way.
+        let alreadyConfigured = Self.isConfigured(
+            onChain,
+            account: pending.treasuryAccount,
+            coSigners: pending.coSigners,
+            thresholds: pending.thresholds
+        )
+
+        var record = pending
+        if !alreadyConfigured {
+            guard let parameters = try? await client.networkParameters() else {
+                return .failed("could not read the network's fee and reserve")
+            }
+            guard let configuration = try? TreasuryTransactionFactory.creationConfiguration(
+                treasury: pending.treasuryAccount,
+                treasurySequence: onChain.sequenceNumber,
+                coSigners: pending.coSigners,
+                thresholds: pending.thresholds,
+                baseFee: parameters.baseFee,
+                timeBounds: StellarTimeBounds(
+                    minTime: 0,
+                    maxTime: UInt64(
+                        now.addingTimeInterval(Self.creationWindow).timeIntervalSince1970
+                    )
+                )
+            ) else { return .failed("could not build the configuration transaction") }
+
+            var envelope = TransactionEnvelope(transaction: configuration)
+            guard (try? treasuryKey.sign(&envelope, network: pending.network)) != nil else {
+                return .failed("could not sign as the treasury account")
+            }
+            let submitted: String
+            do {
+                submitted = try await client.submit(envelope)
+            } catch {
+                return .failed(
+                    "the network refused the transaction that locks the treasury down. "
+                    + "The account exists and holds the funds; try again."
+                )
+            }
+            // Recorded before anything else, because it is the one fact
+            // the account cannot be re-read for.
+            record = pending.recording(configurationTxHash: submitted)
+            await treasury.recordPendingCreation(record)
+        }
+
+        // Re-read rather than believe the submission. What gets anchored
+        // is the account as the ledger describes it.
+        guard let configured = try? await client.account(pending.treasuryAccount),
+              Self.isConfigured(
+                  configured,
+                  account: pending.treasuryAccount,
+                  coSigners: pending.coSigners,
+                  thresholds: pending.thresholds
+              )
+        else {
+            return .failed(
+                "the treasury was funded but is not locked down yet. Nothing has been "
+                + "announced to the group; try again."
+            )
+        }
+
+        let created = Treasury(
+            account: pending.treasuryAccount,
+            groupID: groupIDHex,
+            ownerIdentityID: owner,
+            network: pending.network,
+            // The transaction that made it a treasury, which is this
+            // device's own and therefore known exactly. Step one's hash
+            // was a prediction, and a wallet is free to renumber it.
+            creationTxHash: record.configurationTxHash ?? pending.creationTxHash,
+            createdAt: now,
+            lastKnownSigners: configured.signers,
+            lastKnownThresholds: configured.thresholds,
+            lastRefreshedAt: now
+        )
+        await treasury.anchor(created)
+        // The seed dies here, with the row that held it.
+        await treasury.clearPendingCreation(groupID: groupIDHex)
+        await broadcaster.announceAnchor(created, now: now)
+        return .created(created)
+    }
+
+    /// Whether the ledger shows the configuration this group asked for:
+    /// the account's own key switched off, exactly the co-signers
+    /// chosen, and the thresholds they chose.
+    static func isConfigured(
+        _ onChain: HorizonAccount,
+        account: StellarAccountID,
+        coSigners: [StellarAccountID],
+        thresholds: TreasuryThresholds
+    ) -> Bool {
+        let master = onChain.signers.first { $0.key == account }
+        guard master == nil || master?.weight == 0 else { return false }
+        guard Set(onChain.signers.filter { $0.weight > 0 }.map(\.key)) == Set(coSigners)
+        else { return false }
+        return onChain.thresholds.low == thresholds.low
+            && onChain.thresholds.medium == thresholds.medium
+            && onChain.thresholds.high == thresholds.high
+    }
 
     public func adopt(
         groupIDHex: String,

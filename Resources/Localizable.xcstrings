@@ -4341,19 +4341,19 @@
         }
       }
     },
-    "If your wallet won't finish, copy the transaction and submit it anywhere that takes signed Stellar XDR. It is already signed by the new account; yours is the signature it still needs.": {
+    "If your wallet won't send it, copy the transaction and submit it anywhere that takes signed Stellar XDR. It needs one signature — yours.": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "If your wallet won't finish, copy the transaction and submit it anywhere that takes signed Stellar XDR. It is already signed by the new account; yours is the signature it still needs."
+            "value": "If your wallet won't send it, copy the transaction and submit it anywhere that takes signed Stellar XDR. It needs one signature — yours."
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Если кошелёк не доводит дело до конца, скопируйте транзакцию и отправьте её любым инструментом, принимающим подписанный Stellar XDR. Она уже подписана новым счётом; не хватает только вашей подписи."
+            "value": "Если кошелёк не отправляет, скопируйте транзакцию и отправьте её любым инструментом, принимающим подписанный Stellar XDR. Нужна одна подпись — ваша."
           }
         }
       }
@@ -8022,23 +8022,6 @@
         }
       }
     },
-    "Sign and send the transaction there, then come back and confirm. Onym checks the ledger before telling the group — it won't take your word for it.": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sign and send the transaction there, then come back and confirm. Onym checks the ledger before telling the group — it won't take your word for it."
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Подпишите и отправьте транзакцию там, затем вернитесь и подтвердите. Onym сверится с реестром, прежде чем сообщать чату, — на слово он не поверит."
-          }
-        }
-      }
-    },
     "Sign in first.": {
       "extractionState": "manual",
       "localizations": {
@@ -8469,19 +8452,19 @@
         }
       }
     },
-    "Starting over forgets this handoff on this phone. If your wallet did send it, create again — Onym checks the ledger and will find the account rather than make a second one.": {
+    "Starting over forgets this handoff, and the key that finishes it. Do it only if the funding was never sent — an account that was funded and not locked down cannot be recovered afterwards.": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Starting over forgets this handoff on this phone. If your wallet did send it, create again — Onym checks the ledger and will find the account rather than make a second one."
+            "value": "Starting over forgets this handoff, and the key that finishes it. Do it only if the funding was never sent — an account that was funded and not locked down cannot be recovered afterwards."
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "«Начать заново» забудет эту передачу на этом телефоне. Если кошелёк всё же отправил транзакцию, создайте снова — Onym проверит реестр и найдёт счёт, а не создаст второй."
+            "value": "«Начать заново» забудет эту передачу и ключ, который её завершает. Делайте это, только если пополнение так и не было отправлено: счёт, который пополнили, но не закрыли, восстановить потом нельзя."
           }
         }
       }
@@ -11487,6 +11470,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ваши файлы загружаются только через активный сервис. Остальные в списке — узлы, которым вы доверяете скачивание того, что вам присылают."
+          }
+        }
+      }
+    },
+    "Your wallet only funds the account — that is all wallets will send. Sign it there, then come back: Onym locks the treasury down itself, checks the ledger, and only then tells the group.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your wallet only funds the account — that is all wallets will send. Sign it there, then come back: Onym locks the treasury down itself, checks the ledger, and only then tells the group."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Кошелёк только пополняет счёт — большего кошельки не отправляют. Подпишите там и возвращайтесь: Onym сам закроет казну, проверит реестр и только потом сообщит группе."
           }
         }
       }

@@ -227,6 +227,106 @@ final class TreasuryCreationTests: XCTestCase {
         StellarTimeBounds(minTime: 0, maxTime: 4_000_000_000)
     }
 
+    // MARK: - The split external path
+
+    /// The property the whole split exists for.
+    ///
+    /// A SEP-0007 wallet decides what to do with a transaction by
+    /// counting its source accounts: Sunce's `getAllSources` collects
+    /// the transaction's source plus every operation's, and anything
+    /// above one goes to a co-signing coordinator instead of to
+    /// Horizon. One operation from one source is what gets submitted,
+    /// so that is what step one has to be — and this is the assertion
+    /// that fails if anyone ever adds a second operation to it.
+    func test_theFundingStep_isOneOperationFromOneSource() throws {
+        let funding = try TreasuryTransactionFactory.creationFunding(
+            funder: funder,
+            funderSequence: 10,
+            treasury: treasury,
+            startingBalance: StellarAmount(stroops: 20_000_000),
+            baseFee: baseFee,
+            timeBounds: bounds
+        )
+        XCTAssertEqual(funding.operations.count, 1)
+        XCTAssertEqual(sources(of: funding).count, 1)
+        XCTAssertEqual(funding.sourceAccount.accountID, funder.accountID)
+        guard case .createAccount(let destination, _) = funding.operations[0].body else {
+            return XCTFail("step one must create the account")
+        }
+        XCTAssertEqual(destination, treasury)
+        // Not signed here. The wallet adds exactly one signature, and
+        // Sunce refuses a co-signing submission that carries any other
+        // number — an envelope pre-signed by the treasury key is the
+        // shape that made Confirm do nothing.
+        XCTAssertTrue(TransactionEnvelope(transaction: funding).signatures.isEmpty)
+    }
+
+    /// Step two is sourced by the treasury and says so once, on the
+    /// transaction — not per operation, which would count as a second
+    /// source in exactly the wallets this split is for.
+    func test_theConfigurationStep_isSourcedByTheTreasuryAlone() throws {
+        let configuration = try makeConfiguration(coSigners: [coSignerA, coSignerB])
+        XCTAssertEqual(configuration.sourceAccount.accountID, treasury.accountID)
+        XCTAssertEqual(sources(of: configuration).count, 1)
+        XCTAssertTrue(
+            configuration.operations.allSatisfy { $0.sourceAccount == nil },
+            "an explicit per-operation source is a second source account"
+        )
+        XCTAssertEqual(configuration.operations.count, 3)
+    }
+
+    /// The same ordering rule the atomic transaction keeps: the master
+    /// key carries the weight that authorises everything above it, so
+    /// switching it off is the last thing that happens.
+    func test_theConfigurationStep_locksTheMasterKeyLast() throws {
+        let configuration = try makeConfiguration(coSigners: [coSignerA, coSignerB])
+        guard case .setOptions(let last) = configuration.operations.last?.body else {
+            return XCTFail("expected a setOptions last")
+        }
+        XCTAssertEqual(last.masterWeight, 0)
+        XCTAssertEqual(last.mediumThreshold, 2)
+        XCTAssertNil(last.signer, "the lockdown must not also add a signer")
+        for operation in configuration.operations.dropLast() {
+            guard case .setOptions(let fields) = operation.body else {
+                return XCTFail("expected setOptions")
+            }
+            XCTAssertNil(fields.masterWeight, "nothing before the last may disarm the key")
+            XCTAssertNotNil(fields.signer)
+        }
+    }
+
+    /// The treasury pays for step two out of what step one sent it, so
+    /// the funding has to cover this on top of the minimum balance.
+    /// Funded to exactly the minimum, an account cannot afford the
+    /// transaction that makes it a treasury.
+    func test_theConfigurationFee_isOnePerOperation() {
+        let fee = TreasuryTransactionFactory.configurationFee(
+            signerCount: 2,
+            baseFee: baseFee
+        )
+        XCTAssertEqual(fee.stroops, baseFee.stroops * 3)
+        let configuration = try? makeConfiguration(coSigners: [coSignerA, coSignerB])
+        XCTAssertEqual(UInt32(fee.stroops), configuration?.fee)
+    }
+
+    private func makeConfiguration(coSigners: [StellarAccountID]) throws -> StellarTransaction {
+        try TreasuryTransactionFactory.creationConfiguration(
+            treasury: treasury,
+            treasurySequence: 4,
+            coSigners: coSigners,
+            thresholds: TreasuryThresholds.majority(of: coSigners.count),
+            baseFee: baseFee,
+            timeBounds: bounds
+        )
+    }
+
+    /// Every account that authorises part of a transaction — the same
+    /// set a wallet counts.
+    private func sources(of transaction: StellarTransaction) -> Set<String> {
+        Set([transaction.sourceAccount.accountID]
+            + transaction.operations.compactMap { $0.sourceAccount?.accountID })
+    }
+
     private func makeCreation(
         coSigners: [StellarAccountID],
         treasury override: StellarAccountID? = nil

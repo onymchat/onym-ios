@@ -327,6 +327,15 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
         let low: UInt32
         let medium: UInt32
         let high: UInt32
+        /// Both optional, and decoded as such: rows written before the
+        /// split path existed have neither, and a schema that cannot
+        /// read its own older rows is a migration nobody planned.
+        ///
+        /// They ride inside this blob rather than in new columns for
+        /// the same reason — and because the seed must be encrypted,
+        /// which this already is.
+        var treasurySeed: Data?
+        var configurationTxHash: String?
     }
 
     public func pendingCreation(
@@ -360,7 +369,9 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
                     medium: configuration.medium,
                     high: configuration.high
                 ),
-                startedAt: row.startedAt
+                startedAt: row.startedAt,
+                treasurySeed: configuration.treasurySeed,
+                configurationTxHash: configuration.configurationTxHash
             )
         } ?? nil
     }
@@ -379,7 +390,9 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
                     coSigners: record.coSigners.map(\.accountID),
                     low: record.thresholds.low,
                     medium: record.thresholds.medium,
-                    high: record.thresholds.high
+                    high: record.thresholds.high,
+                    treasurySeed: record.treasurySeed,
+                    configurationTxHash: record.configurationTxHash
                 ))
             )
             let account = try StorageEncryption.encrypt(
