@@ -165,7 +165,12 @@ final class TreasuryDescriptionTests: XCTestCase {
         let line = try XCTUnwrap(
             description.lines.first { $0.label.key == "Turns on account flags" }
         )
-        guard case .text(let text) = line.value else { return XCTFail("expected text") }
+        // `.copy`, because the line is a flag word *and* a sentence
+        // about it — "AUTH_IMMUTABLE cannot be undone" is this app
+        // talking, not bytes off the wire, and only the `.copy` half
+        // can be translated.
+        guard case .copy(let resource) = line.value else { return XCTFail("expected copy") }
+        let text = String(localized: resource)
         XCTAssertTrue(text.contains("AUTH_IMMUTABLE"), text)
         XCTAssertTrue(text.contains("cannot be undone"), text)
         XCTAssertTrue(line.isPrincipal)
@@ -184,6 +189,9 @@ final class TreasuryDescriptionTests: XCTestCase {
         let line = try XCTUnwrap(
             description.lines.first { $0.label.key == "Turns off account flags" }
         )
+        // `.text` here and `.copy` above, deliberately: a flag word
+        // with nothing to say about it is data, and `AUTH_REVOCABLE`
+        // carries no warning the way `AUTH_IMMUTABLE` does.
         guard case .text(let text) = line.value else { return XCTFail("expected text") }
         XCTAssertTrue(text.contains("AUTH_REVOCABLE"), text)
         XCTAssertTrue(line.isPrincipal)
