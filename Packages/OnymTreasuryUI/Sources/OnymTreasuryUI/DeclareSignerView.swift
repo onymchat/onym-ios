@@ -30,7 +30,7 @@ public struct DeclareSignerView: View {
                         Row(
                             titleText: mine.account.abbreviated,
                             titleMono: true,
-                            subtitle: mine.source == .onym
+                            subtitleKey: mine.source == .onym
                                 ? "Derived by Onym — this app can sign"
                                 : "Held in your own wallet",
                             hasChevron: false,

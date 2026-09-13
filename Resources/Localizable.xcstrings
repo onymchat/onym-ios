@@ -2718,6 +2718,23 @@
         }
       }
     },
+    "Doesn't check out": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Doesn't check out"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не сходится"
+          }
+        }
+      }
+    },
     "Done": {
       "localizations": {
         "en": {
@@ -4089,6 +4106,23 @@
         }
       }
     },
+    "No account yet": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No account yet"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Счёта пока нет"
+          }
+        }
+      }
+    },
     "No central server": {
       "extractionState": "stale",
       "localizations": {
@@ -4817,6 +4851,23 @@
         }
       }
     },
+    "Onym key": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Onym key"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ключ Onym"
+          }
+        }
+      }
+    },
     "Onym never sees this key. When there is something to sign, it hands the transaction to your wallet and takes back only the signature.": {
       "extractionState": "manual",
       "localizations": {
@@ -4864,6 +4915,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "Из %lld соподписантов. Требовать подписи всех — значит заморозить казну навсегда из-за одного потерянного телефона: удалить ключ без его же подписи нельзя."
+          }
+        }
+      }
+    },
+    "Own wallet": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Own wallet"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Свой кошелёк"
+          }
+        }
+      }
+    },
+    "Own wallet — signed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Own wallet — signed"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Свой кошелёк — подписано"
           }
         }
       }
@@ -6976,6 +7061,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "Возможно, владелец группы не в сети или это приглашение больше не действует. Попросите новую ссылку."
+          }
+        }
+      }
+    },
+    "The money comes out of this account, and it is empty. Send XLM to it first — the address above is yours.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The money comes out of this account, and it is empty. Send XLM to it first — the address above is yours."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Деньги спишутся с этого счёта, а он пуст. Сначала отправьте на него XLM — адрес выше принадлежит вам."
+          }
+        }
+      }
+    },
+    "The money comes out of this account.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The money comes out of this account."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Деньги спишутся с этого счёта."
           }
         }
       }

@@ -137,11 +137,18 @@ public final class TreasuryFlow {
         /// group receives names something it can look up; and
         /// `thresholds` so the ledger check covers the whole
         /// configuration rather than only the signer keys.
+        /// `network` is carried too, and read back on confirm. It is
+        /// the network the envelope was *built for*, which the Settings
+        /// toggle can no longer be relied on to name: a founder who
+        /// switches between handing off and confirming would otherwise
+        /// have the ledger check run against the wrong Horizon and be
+        /// told their perfectly good treasury is not on the ledger.
         case awaitingWallet(
             treasuryAccountID: String,
             creationTxHash: String,
             coSigners: [StellarAccountID],
-            thresholds: TreasuryThresholds
+            thresholds: TreasuryThresholds,
+            network: StellarNetwork
         )
         case created
     }
@@ -248,13 +255,22 @@ public final class TreasuryFlow {
         // wallet outlives this process and this identity selection, and
         // losing it leaves a funded treasury the group is never told
         // about — see `PendingTreasuryCreation`.
+        //
+        // Only when this group has no treasury yet. A pending row can
+        // outlive the handoff — the anchor arrives by broadcast, or a
+        // second confirm returns `alreadyExists` — and restoring from it
+        // then puts "waiting for your wallet" on a group that already
+        // has one, on every launch. `snapshot.treasury` is the cheaper
+        // and more direct guard than anything the row could carry.
         if case .idle = creationStage,
+           snapshot.treasury == nil,
            let pending = await repository.pendingCreation(groupID: groupID) {
             creationStage = .awaitingWallet(
                 treasuryAccountID: pending.treasuryAccount.accountID,
                 creationTxHash: pending.creationTxHash,
                 coSigners: pending.coSigners,
-                thresholds: pending.thresholds
+                thresholds: pending.thresholds,
+                network: pending.network
             )
         }
 
@@ -489,13 +505,18 @@ public final class TreasuryFlow {
         creationError = nil
         defer { isCreating = false }
 
+        // Read once and used for both the build and the stage that
+        // outlives it: the Settings toggle is a live value, and a
+        // transaction built for one network must never be confirmed
+        // against another.
+        let buildNetwork = network()
         let outcome = await creation.create(
             groupIDHex: groupID,
             funder: mine.account,
             coSigners: coSigners,
             thresholds: thresholds,
             spendable: spendable,
-            network: network()
+            network: buildNetwork
         )
         switch outcome {
         case .created:
@@ -518,7 +539,8 @@ public final class TreasuryFlow {
                 treasuryAccountID: treasuryAccountID,
                 creationTxHash: creationTxHash,
                 coSigners: coSigners,
-                thresholds: thresholds
+                thresholds: thresholds,
+                network: buildNetwork
             )
         case .failed(let reason):
             creationError = reason
@@ -545,7 +567,8 @@ public final class TreasuryFlow {
             let accountID,
             let creationTxHash,
             let coSigners,
-            let thresholds
+            let thresholds,
+            let network
         ) = creationStage else { return }
         isCreating = true
         creationError = nil
@@ -555,7 +578,7 @@ public final class TreasuryFlow {
             groupIDHex: groupID,
             treasuryAccountID: accountID,
             creationTxHash: creationTxHash,
-            network: network(),
+            network: network,
             expectedCoSigners: coSigners,
             expectedThresholds: thresholds
         )

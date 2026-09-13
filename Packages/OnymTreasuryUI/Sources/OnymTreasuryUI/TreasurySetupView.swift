@@ -46,7 +46,7 @@ public struct TreasurySetupView: View {
                 Row(
                     titleText: treasury.account.accountID,
                     titleMono: true,
-                    subtitle: treasury.network == .testnet
+                    subtitleKey: treasury.network == .testnet
                         ? "Stellar testnet \u{2014} not real money"
                         : "Stellar",
                     subtitleLineLimit: nil,
@@ -67,7 +67,7 @@ public struct TreasurySetupView: View {
             Card {
                 Row(
                     title: "This chat holds no money",
-                    subtitle: "A treasury is a Stellar account that several people in the chat have to agree to spend from.",
+                    subtitleKey: "A treasury is a Stellar account that several people in the chat have to agree to spend from.",
                     subtitleLineLimit: nil,
                     hasChevron: false,
                     last: true
@@ -83,7 +83,7 @@ public struct TreasurySetupView: View {
                     Card {
                         Row(
                             title: "Create a treasury",
-                            subtitle: flow.nominatable.isEmpty
+                            subtitleKey: flow.nominatable.isEmpty
                                 ? "Waiting for people to choose their accounts"
                                 : "\(flow.nominatable.count) ready to co-sign",
                             last: true
@@ -112,8 +112,14 @@ public struct TreasurySetupView: View {
                 Card {
                     Row(
                         title: flow.mine == nil ? "Choose your Stellar account" : "Your Stellar account",
-                        subtitle: flow.mine.map(subtitle(for:))
-                            ?? "Needed before you can co-sign anything",
+                        // Runtime data when there is an account (the
+                        // address), UI copy when there is not — so the
+                        // two go through different parameters rather
+                        // than one `String?` that means both.
+                        subtitle: flow.mine.map(subtitle(for:)),
+                        subtitleKey: flow.mine == nil
+                            ? "Needed before you can co-sign anything"
+                            : nil,
                         subtitleMono: flow.mine != nil,
                         last: true
                     ) {
@@ -146,7 +152,11 @@ public struct TreasurySetupView: View {
                     let mark = TreasurySignerMark(member.standing)
                     Row(
                         titleText: member.isSelf ? "\(member.alias) (you)" : member.alias,
-                        subtitle: member.account?.abbreviated ?? mark.text,
+                        // The address when there is one, the standing's
+                        // label when there is not — runtime data and UI
+                        // copy through their own parameters.
+                        subtitle: member.account?.abbreviated,
+                        subtitleKey: member.account == nil ? mark.text : nil,
                         subtitleMono: member.account != nil,
                         hasChevron: false,
                         last: index == flow.members.count - 1
@@ -155,7 +165,7 @@ public struct TreasurySetupView: View {
                     } right: {
                         if member.account != nil {
                             Chip(
-                                text: mark.text,
+                                key: mark.text,
                                 fg: mark.color,
                                 bg: mark.color.opacity(0.14)
                             )
@@ -180,7 +190,11 @@ public struct TreasurySetupView: View {
 /// twice before handing it a share of control.
 public struct TreasurySignerMark: Equatable, Sendable {
     public let symbol: String
-    public let text: String
+    /// UI copy, so a key rather than a `String` — the same reason
+    /// `Row.subtitleKey` and `Chip(key:)` exist. As a `String` these
+    /// five labels rendered English under `ru` while sitting in the
+    /// catalog looking translated.
+    public let text: LocalizedStringKey
     public let color: Color
     public let tile: Color
 

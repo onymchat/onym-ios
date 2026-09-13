@@ -344,7 +344,16 @@ public struct TreasuryCreationInteractor: Sendable {
         // re-points the founder's own device, which contradicts "a
         // treasury is never re-anchored" on the one device that can
         // still announce.
+        //
+        // The pending row goes too, and that is the point of clearing it
+        // here rather than only on success. This group has a treasury;
+        // whatever the wallet was asked to do is finished business. Left
+        // behind, the row outlives the handoff and `TreasuryFlow`
+        // restores `awaitingWallet` from it on the next launch — "waiting
+        // for your wallet" on a group whose treasury already exists,
+        // again on every launch after that.
         guard await treasury.snapshot(groupID: groupIDHex).treasury == nil else {
+            await treasury.clearPendingCreation(groupID: groupIDHex)
             return .alreadyExists
         }
 
@@ -382,13 +391,6 @@ public struct TreasuryCreationInteractor: Sendable {
               onChain.thresholds.low == expectedThresholds.low
         else {
             return .failed("that account needs a different number of signatures than this group chose")
-        }
-
-        // And it must not already be this group's treasury under
-        // another row — `create` has an `alreadyExists` guard and this
-        // had none, so a second confirmation re-anchored unconditionally.
-        if await treasury.snapshot(groupID: groupIDHex).treasury != nil {
-            return .alreadyExists
         }
 
         // The thresholds this account actually carries have to be

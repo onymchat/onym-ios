@@ -131,7 +131,7 @@ public struct CreateTreasuryView: View {
                 Card {
                     Row(
                         title: "Nobody has chosen an account yet",
-                        subtitle: "Each person picks their own Stellar account first.",
+                        subtitleKey: "Each person picks their own Stellar account first.",
                         subtitleLineLimit: nil,
                         hasChevron: false,
                         last: true
@@ -200,7 +200,7 @@ public struct CreateTreasuryView: View {
 
     private func stepper(
         title: LocalizedStringKey,
-        subtitle: String,
+        subtitle: LocalizedStringKey,
         value: Binding<UInt32>,
         identifier: String,
         last: Bool = false
@@ -212,7 +212,7 @@ public struct CreateTreasuryView: View {
         let maximum = UInt32(max(flow.resolvedCoSigners.count, 1))
         return Row(
             title: title,
-            subtitle: subtitle,
+            subtitleKey: subtitle,
             hasChevron: false,
             inset: 20,
             last: last
@@ -257,9 +257,14 @@ public struct CreateTreasuryView: View {
                     Row(
                         titleText: funder.accountID,
                         titleMono: true,
+                        // The unfunded line is UI copy; the balance is
+                        // runtime data with a number in it.
                         subtitle: flow.funderIsUnfunded
-                            ? "This account has nothing in it yet"
+                            ? nil
                             : flow.funderBalance.map { "\($0.decimalString) XLM available" },
+                        subtitleKey: flow.funderIsUnfunded
+                            ? "This account has nothing in it yet"
+                            : nil,
                         subtitleLineLimit: nil,
                         hasChevron: false,
                         last: true
@@ -272,14 +277,20 @@ public struct CreateTreasuryView: View {
                         )
                     } right: { EmptyView() }
                 }
-                Footnote(verbatim: flow.funderIsUnfunded
-                    ? "The money comes out of this account, and it is empty. Send XLM to it first \u{2014} the address above is yours."
-                    : "The money comes out of this account.")
+                // Two catalog keys chosen by a branch, not one string
+                // built by a branch: `Footnote(verbatim:)` is the
+                // non-localizing overload, and both of these are
+                // ordinary English sentences with nothing interpolated.
+                if flow.funderIsUnfunded {
+                    Footnote("The money comes out of this account, and it is empty. Send XLM to it first \u{2014} the address above is yours.")
+                } else {
+                    Footnote("The money comes out of this account.")
+                }
             }
             Card {
                 Row(
                     title: "Spendable balance",
-                    subtitle: "XLM the treasury can actually pay out",
+                    subtitleKey: "XLM the treasury can actually pay out",
                     hasChevron: false,
                     inset: 20,
                     last: true
