@@ -112,6 +112,96 @@ final class TreasuryDescriptionTests: XCTestCase {
         XCTAssertTrue(text.contains("SWITCHED BACK ON"), text)
     }
 
+    /// The memo, which had no coverage at all — the whole `switch`
+    /// could have been deleted with nothing failing, on the field the
+    /// source itself calls out as the one that decides which customer
+    /// an exchange credits.
+    func test_aTextMemo_isShownAsPrincipal() throws {
+        let description = try describe(
+            [payment()],
+            memo: .text("order-4417")
+        )
+        let line = try XCTUnwrap(description.lines.first { $0.label == "Memo" })
+        XCTAssertEqual(line.value, .text("order-4417"))
+        XCTAssertTrue(line.isPrincipal, "a memo routes money and must stand out")
+    }
+
+    func test_anIdMemo_isShown() throws {
+        let description = try describe([payment()], memo: .id(902_144))
+        let line = try XCTUnwrap(description.lines.first { $0.label == "Memo (id)" })
+        XCTAssertEqual(line.value, .text("902144"))
+    }
+
+    func test_aHashMemo_isShown() throws {
+        let description = try describe(
+            [payment()],
+            memo: .hash(Data(repeating: 0xAB, count: 32))
+        )
+        let line = try XCTUnwrap(description.lines.first { $0.label == "Memo (hash)" })
+        XCTAssertEqual(line.value, .text(String(repeating: "ab", count: 32)))
+    }
+
+    func test_noMemo_addsNoLine() throws {
+        let description = try describe([payment()])
+        XCTAssertFalse(description.lines.contains { $0.label.hasPrefix("Memo") })
+    }
+
+    /// The fields `StellarOperation` decodes so a co-signer can see
+    /// them. A one-op `setOptions{setFlags:}` is *accepted* by the
+    /// verifier, and used to render with an empty details box and no
+    /// caveat — a tidy summary of a control change it did not describe.
+    func test_accountFlags_areNamedRatherThanOmitted() throws {
+        let description = try describe([
+            StellarOperation(body: .setOptions(SetOptionsFields(setFlags: 0x4))),
+        ])
+        let line = try XCTUnwrap(
+            description.lines.first { $0.label == "Turns on account flags" }
+        )
+        guard case .text(let text) = line.value else { return XCTFail("expected text") }
+        XCTAssertTrue(text.contains("AUTH_IMMUTABLE"), text)
+        XCTAssertTrue(text.contains("cannot be undone"), text)
+        XCTAssertTrue(line.isPrincipal)
+    }
+
+    func test_aHomeDomainChange_isShown() throws {
+        let description = try describe([
+            StellarOperation(body: .setOptions(SetOptionsFields(homeDomain: "example.com"))),
+        ])
+        XCTAssertTrue(description.lines.contains {
+            $0.label == "Home domain" && $0.value == .text("example.com")
+        })
+    }
+
+    /// Two co-signers, two addresses. `Line.id` was the label, and
+    /// `describeControl` labels every added account identically, so
+    /// `ForEach` collapsed them into one row — with the whole
+    /// `setOptions` run counted as explained, so no caveat fired.
+    func test_twoAddedCoSigners_renderAsTwoDistinctLines() throws {
+        let first = TreasuryTestKeys.account(24)
+        let second = TreasuryTestKeys.account(25)
+        let description = try describe([
+            StellarOperation(body: .setOptions(SetOptionsFields(
+                signer: StellarSigner(key: first, weight: 1)
+            ))),
+            StellarOperation(body: .setOptions(SetOptionsFields(
+                signer: StellarSigner(key: second, weight: 1)
+            ))),
+        ])
+        let added = description.lines.filter { $0.label == "Add co-signer" }
+        XCTAssertEqual(added.count, 2)
+        XCTAssertEqual(Set(added.map(\.id)).count, 2, "both rows must survive ForEach")
+        XCTAssertTrue(added.contains { $0.value == .account(first) })
+        XCTAssertTrue(added.contains { $0.value == .account(second) })
+    }
+
+    /// And identity is derived, so an identically-derived description
+    /// stays equal — otherwise every snapshot re-identifies every line
+    /// and tears down the address the card asks people to check.
+    func test_twoIdenticalDescriptions_areEqual() throws {
+        let operations = [payment()]
+        XCTAssertEqual(try describe(operations), try describe(operations))
+    }
+
     // MARK: - The rule
 
     /// The test this type exists for. An operation the summary did not
@@ -168,12 +258,24 @@ final class TreasuryDescriptionTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func describe(_ operations: [StellarOperation]) throws -> TreasuryProposalDescription {
+    private func payment() -> StellarOperation {
+        StellarOperation(body: .payment(
+            destination: recipient,
+            asset: .native,
+            amount: StellarAmount(stroops: 1)
+        ))
+    }
+
+    private func describe(
+        _ operations: [StellarOperation],
+        memo: StellarMemo = .none
+    ) throws -> TreasuryProposalDescription {
         let transaction = try StellarTransaction(
             sourceAccount: treasury,
             fee: 100,
             sequenceNumber: 1,
             timeBounds: nil,
+            memo: memo,
             operations: operations
         )
         return TreasuryProposalDescription(TreasuryProposal(

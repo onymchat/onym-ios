@@ -324,6 +324,59 @@ final class TreasuryE2ETests: XCTestCase {
         }
     }
 
+    /// "Applies whole or not at all" — asserted, not just claimed.
+    ///
+    /// The fake mutated per operation with no rollback, so after the
+    /// `tx_bad_auth` above the treasury existed half-configured. That
+    /// is the exact property the atomic-creation design rests on, which
+    /// makes it the last thing the fake should get wrong.
+    func test_aRefusedCreation_leavesNothingBehind() async throws {
+        let loaded = await ada.currentIdentity()
+        let adaIdentity = try XCTUnwrap(loaded)
+        let adaSigner = try StellarAccountID(accountID: adaIdentity.treasuryAccountID)
+        let ledger = LedgerHorizon()
+        await ledger.create(account: adaSigner, balance: 1_000_000_000)
+
+        let treasuryKey = try EphemeralTreasuryKey()
+        let transaction = try StellarTransaction(
+            sourceAccount: adaSigner,
+            fee: 300,
+            sequenceNumber: 2,
+            timeBounds: StellarTimeBounds(minTime: 0, maxTime: 4_000_000_000),
+            operations: [
+                StellarOperation(body: .createAccount(
+                    destination: treasuryKey.account,
+                    startingBalance: StellarAmount(stroops: 20_000_000)
+                )),
+                StellarOperation(sourceAccount: treasuryKey.account, body: .setOptions(
+                    SetOptionsFields(masterWeight: 0, lowThreshold: 1,
+                                     mediumThreshold: 1, highThreshold: 1)
+                )),
+                StellarOperation(sourceAccount: treasuryKey.account, body: .setOptions(
+                    SetOptionsFields(signer: StellarSigner(key: adaSigner, weight: 1))
+                )),
+            ]
+        )
+        var envelope = TransactionEnvelope(transaction: transaction)
+        try treasuryKey.sign(&envelope, network: .testnet)
+        let signature = try await ada.signWithTreasuryKey(
+            transaction.hash(network: .testnet)
+        )
+        try envelope.addSignature(signature, from: adaSigner, network: .testnet)
+
+        _ = try? await ledger.submit(envelope)
+
+        // The account the first operation would have created must not
+        // exist, and the funder must not have been debited.
+        do {
+            _ = try await ledger.account(treasuryKey.account)
+            XCTFail("a refused creation left a half-configured account behind")
+        } catch {}
+        let funder = try await ledger.account(adaSigner)
+        XCTAssertEqual(funder.balances.first?.balance.stroops, 1_000_000_000)
+        XCTAssertEqual(funder.sequenceNumber, 1, "a refused transaction consumed a sequence")
+    }
+
     /// And the other half: an under-signed payment is refused by the
     /// ledger, not only by the client-side readiness check.
     func test_anUnderSignedPayment_isRefusedByTheLedger() async throws {
@@ -583,7 +636,11 @@ private actor LedgerHorizon: HorizonClient {
         case .payment, .changeTrust:
             return max(account.thresholds.medium, 1)
         case .createAccount:
-            return max(account.thresholds.low, 1)
+            // Medium, which is where the protocol puts it. Harmless in
+            // these tests — every account is 1/1/1 at that point — but
+            // wrong in a fake whose stated job is refusing what the
+            // network refuses.
+            return max(account.thresholds.medium, 1)
         }
     }
 
@@ -647,6 +704,23 @@ private actor LedgerHorizon: HorizonClient {
     }
 
     func submit(_ envelope: TransactionEnvelope) async throws -> String {
+        // Snapshot, so a rejected transaction leaves nothing behind.
+        //
+        // Operations were applied one at a time with no rollback, so
+        // after the `tx_bad_auth` in the lockdown-first test the
+        // treasury existed half-configured — and "applies whole or not
+        // at all" is the property the creation design rests on, which
+        // makes it the last thing this fake should get wrong.
+        let restore = accounts
+        do {
+            return try apply(envelope)
+        } catch {
+            accounts = restore
+            throw error
+        }
+    }
+
+    private func apply(_ envelope: TransactionEnvelope) throws -> String {
         let transaction = envelope.transaction
         let sourceID = transaction.sourceAccount.accountID
         guard var source = accounts[sourceID] else {
@@ -655,7 +729,6 @@ private actor LedgerHorizon: HorizonClient {
         guard transaction.sequenceNumber == source.sequence + 1 else {
             throw HorizonError.submissionFailed(resultCodes: ["tx_bad_seq"], body: "")
         }
-
 
         // Each operation is authorised against the account state *at
         // that point in the transaction*, then applied — which is what
@@ -667,21 +740,30 @@ private actor LedgerHorizon: HorizonClient {
         // and the payment applied with no signatures at all.
         for operation in transaction.operations {
             let actingID = operation.sourceAccount?.accountID ?? sourceID
-            if let acting = accounts[actingID] {
-                let required = threshold(for: operation, on: acting)
-                let weight = acting.signers.reduce(UInt32(0)) { total, entry in
-                    guard let key = try? StellarAccountID(accountID: entry.key),
-                          envelope.hasSignature(from: key, network: network)
-                    else { return total }
-                    return total + entry.value
-                }
-                guard weight >= required else {
-                    throw HorizonError.submissionFailed(
-                        resultCodes: ["tx_bad_auth"],
-                        body: "\(actingID) needs \(required), has \(weight)"
-                    )
-                }
+            // An operation naming an account that does not exist yet is
+            // `op_no_account`, not something to skip silently — which
+            // let a creation with its `setOptions` ops *before* the
+            // `createAccount` submit successfully with them dropped.
+            guard let acting = accounts[actingID] else {
+                throw HorizonError.submissionFailed(
+                    resultCodes: ["op_no_account"],
+                    body: actingID
+                )
             }
+            let required = threshold(for: operation, on: acting)
+            let weight = acting.signers.reduce(UInt32(0)) { total, entry in
+                guard let key = try? StellarAccountID(accountID: entry.key),
+                      envelope.hasSignature(from: key, network: network)
+                else { return total }
+                return total + entry.value
+            }
+            guard weight >= required else {
+                throw HorizonError.submissionFailed(
+                    resultCodes: ["tx_bad_auth"],
+                    body: "\(actingID) needs \(required), has \(weight)"
+                )
+            }
+
             switch operation.body {
             case .createAccount(let destination, let startingBalance):
                 accounts[destination.accountID] = Account(

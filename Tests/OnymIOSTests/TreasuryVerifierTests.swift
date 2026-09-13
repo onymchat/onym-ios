@@ -250,21 +250,59 @@ final class TreasuryVerifierTests: XCTestCase {
     }
 
     /// A signature from an account nobody declared carries no weight
-    /// on-chain, so it must carry none here either.
+    /// here, even when the chain would give it weight.
+    ///
+    /// The first version of this put the signer in neither the declared
+    /// list nor the on-chain one — and `HorizonAccount.weight(of:)`
+    /// filters by the on-chain list itself, so the answer was zero
+    /// whether or not `standing` consulted `declaredSigners` at all.
+    /// Deleting the `signers(among:)` filter left it green. The signer
+    /// is on-chain at weight 1 now, and only the declaration is
+    /// missing, so the filter is the only thing keeping this at zero.
     func test_aSignatureFromAnUndeclaredAccount_addsNoWeight() throws {
+        let undeclared = TreasuryTestKeys.account(7)
+        let declared = TreasuryTestKeys.account(4)
         var proposal = try makeProposal(sequence: 1)
         try proposal.envelope.sign(with: TreasuryTestKeys.key(7), network: .testnet)
+
         let standing = TreasuryProposalVerifier.standing(
             of: proposal,
             account: account(
                 sequence: 0,
-                signers: [StellarSigner(key: TreasuryTestKeys.account(4), weight: 1)],
+                signers: [
+                    StellarSigner(key: declared, weight: 1),
+                    // On-chain, and would be counted if the declaration
+                    // filter were not there.
+                    StellarSigner(key: undeclared, weight: 1),
+                ],
                 thresholds: .init(low: 1, medium: 1, high: 1)
             ),
-            declaredSigners: [TreasuryTestKeys.account(4)],
+            declaredSigners: [declared],
             now: Date()
         )
         XCTAssertEqual(standing, .collecting(weight: 0, required: 1))
+    }
+
+    /// The positive half of the PR's headline refusals: a proposal that
+    /// simply ran out of time. Only the *ordering* against `superseded`
+    /// was pinned, so the expiry arm could have been deleted and only
+    /// that test's setup would have noticed.
+    func test_aProposalPastItsTimeBound_readsAsExpired() throws {
+        let proposal = try makeProposal(
+            sequence: 1,
+            expiresAt: Date().addingTimeInterval(-60)
+        )
+        let standing = TreasuryProposalVerifier.standing(
+            of: proposal,
+            account: account(
+                sequence: 0,
+                signers: [],
+                thresholds: .init(low: 1, medium: 1, high: 1)
+            ),
+            declaredSigners: [],
+            now: Date()
+        )
+        XCTAssertEqual(standing, .expired)
     }
 
     // MARK: - Helpers
