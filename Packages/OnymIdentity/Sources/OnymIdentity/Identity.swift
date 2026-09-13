@@ -23,6 +23,27 @@ public struct Identity: Sendable, Equatable {
     /// Stellar StrKey account ID (`G...`), used as `callerAddress` on
     /// every Soroban contract call.
     public let stellarAccountID: String
+    /// 32-byte Ed25519 public key (raw representation) used **only** as
+    /// a Stellar treasury co-signer, and deliberately not
+    /// `stellarPublicKey`.
+    ///
+    /// Stellar signs a 32-byte transaction hash directly, with no
+    /// domain separator of its own. `stellarPublicKey` already signs
+    /// moderation mandates, gate-check sessions, rules agreements and
+    /// envelope headers; any present or future flow that can be induced
+    /// to sign 32 attacker-chosen bytes with that key would be a way to
+    /// forge a treasury payment. A separate HKDF branch removes the
+    /// question rather than leaving it to be re-audited every time
+    /// another signing surface is added.
+    ///
+    /// It costs nothing: a Stellar *signer* key is only ever a public
+    /// key in an account's signer list, so this one never needs to be a
+    /// funded account.
+    public let treasuryPublicKey: Data
+    /// Stellar StrKey (`G…`) for `treasuryPublicKey` — what a member
+    /// declares to their group and what appears in the treasury's
+    /// signer list.
+    public let treasuryAccountID: String
     /// 32-byte X25519 public key (raw representation). Permanent ECDH
     /// key — senders ECDH against this to encrypt invitations to us.
     public let inboxPublicKey: Data

@@ -20,6 +20,8 @@ import OnymOnboarding
 import OnymBackup
 import OnymBackupUI
 import OnymBilling
+import OnymStellar
+import OnymTreasury
 
 @main
 struct OnymIOSApp: App {
@@ -34,6 +36,7 @@ struct OnymIOSApp: App {
     private let relayerRepository: RelayerRepository
     private let contractsRepository: ContractsRepository
     private let groupRepository: GroupRepository
+    private let treasuryRepository: TreasuryRepository
     private let messageRepository: MessageRepository
     private let imageLoader: ChatImageLoader
     private let videoLoader: ChatVideoLoader
@@ -483,6 +486,16 @@ struct OnymIOSApp: App {
             ?? SwiftDataMessageStore.inMemory()
         let messageRepository = MessageRepository(store: messageStore)
         self.messageRepository = messageRepository
+
+        // Same in-memory fallback as the stores above: a device that
+        // cannot open its treasury store still runs for the session
+        // rather than refusing to start. It will re-read the chain on
+        // every launch, which is where the authoritative state lives
+        // anyway — the store is a cache of what the ledger already says.
+        let treasuryStore: any TreasuryStore = (try? SwiftDataTreasuryStore.onDisk())
+            ?? InMemoryTreasuryStore()
+        let treasuryRepository = TreasuryRepository(store: treasuryStore)
+        self.treasuryRepository = treasuryRepository
 
         // Inbox transport for invitation send. The endpoint list comes
         // from `NostrRelaysRepository` — read at app boot in the
@@ -1844,6 +1857,7 @@ struct OnymIOSApp: App {
                         await incomingInvitations.setCurrentIdentity(initialID)
                         await pendingChatRepository.setCurrentIdentity(initialID)
                         await pendingVerificationStore.setCurrentIdentity(initialID)
+                        await treasuryRepository.setCurrentIdentity(initialID)
                     }
                     // Replay groups + invitations only after their identity
                     // filters are ready, so every startup subscriber sees
@@ -1860,6 +1874,7 @@ struct OnymIOSApp: App {
                         await incomingInvitations.setCurrentIdentity(id)
                         await pendingChatRepository.setCurrentIdentity(id)
                         await pendingVerificationStore.setCurrentIdentity(id)
+                        await treasuryRepository.setCurrentIdentity(id)
                     }
                 }
                 .task {
@@ -1873,6 +1888,10 @@ struct OnymIOSApp: App {
                         await incomingInvitations.removeForOwner(removed)
                         await pendingChatRepository.removeForOwner(removed)
                         await pendingVerificationStore.removeForOwner(removed)
+                        // Treasury rows are identity-scoped like the
+                        // rest: a removed identity's declared signer and
+                        // its proposals go with it.
+                        await treasuryRepository.removeForOwner(removed)
                         // Cascade-wipe the removed identity's intro
                         // privkeys so an attacker who restores a
                         // backup post-removal can't decrypt
@@ -1966,7 +1985,11 @@ struct OnymIOSApp: App {
                             identity: identityRepository,
                             inboxTransport: inboxTransport
                         ),
-                        readReceiptsEnabled: { ReadReceiptsPreference.isEnabled }
+                        readReceiptsEnabled: { ReadReceiptsPreference.isEnabled },
+                        treasury: TreasuryPayloadReceiver(
+                            treasury: treasuryRepository,
+                            groups: groupRepository
+                        )
                     )
                     // Close the loop for the Retry on a snapshot parked
                     // because *this* device couldn't read the chain. The
