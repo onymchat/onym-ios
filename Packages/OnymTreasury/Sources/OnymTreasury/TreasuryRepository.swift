@@ -285,6 +285,25 @@ public actor TreasuryRepository {
         await publish(groupID: stored.proposal.groupID)
     }
 
+    /// Open proposals across every group this identity is in, plus the
+    /// declared signers of each one's group — everything needed to try
+    /// a returned envelope against them.
+    public func openProposalsWithSigners() async -> [(StoredProposal, [StellarAccountID])] {
+        guard let owner = currentIdentity?.rawValue.uuidString else { return [] }
+        var result: [(StoredProposal, [StellarAccountID])] = []
+        var byGroup: [String: [StellarAccountID]] = [:]
+        for stored in await store.openProposals(ownerIDString: owner) {
+            let groupID = stored.proposal.groupID
+            if byGroup[groupID] == nil {
+                byGroup[groupID] = await store
+                    .declarations(groupID: groupID, ownerIDString: owner)
+                    .map(\.account)
+            }
+            result.append((stored, byGroup[groupID] ?? []))
+        }
+        return result
+    }
+
     public func markSubmitted(proposalID: UUID, txHash: String) async {
         guard let owner = currentIdentity?.rawValue.uuidString,
               var stored = await store.proposal(id: proposalID, ownerIDString: owner)

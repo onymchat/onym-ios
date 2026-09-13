@@ -177,6 +177,43 @@ public struct TreasurySigningInteractor: Sendable {
         return .signed
     }
 
+    /// Take a signed transaction handed back by a wallet when we do not
+    /// know which proposal it belongs to — the SEP-0007 return leg,
+    /// where the link carries an envelope and nothing else.
+    ///
+    /// Attribution is by verification, not by trust: the envelope is
+    /// offered to every open proposal, and the signature can only check
+    /// out against the one transaction hash it was actually made over.
+    /// A signature matching none is adopted nowhere, which is the right
+    /// outcome for a link from anywhere.
+    ///
+    /// Returns the proposal it belonged to, if any.
+    @discardableResult
+    public func adoptReturned(
+        base64XDR: String,
+        now: Date = Date()
+    ) async -> UUID? {
+        guard let returned = try? TransactionEnvelope(base64XDR: base64XDR) else {
+            return nil
+        }
+        for (stored, candidates) in await treasury.openProposalsWithSigners() {
+            var working = stored.proposal.envelope
+            let adopted = working.harvestSignatures(
+                from: returned,
+                candidates: candidates,
+                network: stored.proposal.network
+            )
+            guard !adopted.isEmpty else { continue }
+            let outcome = await adoptSignatures(
+                fromReturned: returned,
+                proposalID: stored.proposal.id,
+                now: now
+            )
+            if case .signed = outcome { return stored.proposal.id }
+        }
+        return nil
+    }
+
     /// Submit a proposal that has reached its threshold.
     ///
     /// Re-reads the account first, always. The signer set and the

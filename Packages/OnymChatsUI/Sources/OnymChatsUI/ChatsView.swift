@@ -34,6 +34,8 @@ public struct ChatsView: View {
     let makeModerationReportView: @MainActor (ReportableMessage) -> AnyView
     /// Passed down to the thread and on to `ChatMembersView`.
     let makeTreasuryView: (@MainActor (String) -> AnyView)?
+    /// The in-thread treasury block, same arrangement.
+    let makeTreasuryThreadSection: (@MainActor (String) -> AnyView)?
 
     public init(
         flow: ChatsFlow,
@@ -52,7 +54,8 @@ public struct ChatsView: View {
         setGroupAvatar: @escaping @MainActor (String, Data?) async -> Void,
         setGroupName: @escaping @MainActor (String, String) async -> Void,
         makeModerationReportView: @escaping @MainActor (ReportableMessage) -> AnyView,
-        makeTreasuryView: (@MainActor (String) -> AnyView)? = nil
+        makeTreasuryView: (@MainActor (String) -> AnyView)? = nil,
+        makeTreasuryThreadSection: (@MainActor (String) -> AnyView)? = nil
     ) {
         self.flow = flow
         self.identitiesFlow = identitiesFlow
@@ -71,6 +74,7 @@ public struct ChatsView: View {
         self.setGroupName = setGroupName
         self.makeModerationReportView = makeModerationReportView
         self.makeTreasuryView = makeTreasuryView
+        self.makeTreasuryThreadSection = makeTreasuryThreadSection
     }
 
     @State private var showCreateGroup = false
@@ -507,6 +511,7 @@ public struct ChatsView: View {
             voiceLoader: voiceLoader,
             makeModerationReportView: makeModerationReportView,
             makeTreasuryView: makeTreasuryView,
+            makeTreasuryThreadSection: makeTreasuryThreadSection,
             approveRequestsFlow: approveRequestsFlow
         )
     }

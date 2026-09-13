@@ -338,7 +338,8 @@ struct RootView: View {
                         setGroupAvatar: dependencies.setGroupAvatar,
                         setGroupName: dependencies.setGroupName,
                         makeModerationReportView: dependencies.makeModerationReportView,
-                        makeTreasuryView: dependencies.makeTreasuryView
+                        makeTreasuryView: dependencies.makeTreasuryView,
+                        makeTreasuryThreadSection: dependencies.makeTreasuryThreadSection
                     )
                     .chatThreadBottomAccessory {
                         moderationCaseBanner
@@ -401,6 +402,7 @@ struct RootView: View {
                             voiceLoader: dependencies.voiceLoader,
                             makeModerationReportView: dependencies.makeModerationReportView,
                             makeTreasuryView: dependencies.makeTreasuryView,
+                            makeTreasuryThreadSection: dependencies.makeTreasuryThreadSection,
                             approveRequestsFlow: dependencies.approveRequestsFlow,
                             scrollToMessageID: result.messageID
                         )

@@ -1,0 +1,256 @@
+import OnymDesign
+import OnymDesignTokens
+import OnymStellar
+import OnymTreasury
+import SwiftUI
+
+/// One proposal, as a co-signer sees it.
+///
+/// The same view in the chat thread and on the treasury screen — one
+/// rendering, so the two cannot describe the same transaction
+/// differently. Everything it draws comes from
+/// `TreasuryProposalDescription`, which is built from the transaction
+/// this device decoded; nothing the proposer typed appears anywhere on
+/// it, because there is nothing the proposer typed.
+public struct TreasuryProposalCard: View {
+    let row: TreasuryProposalRow
+    @Bindable var flow: TreasuryProposalsFlow
+
+    public init(row: TreasuryProposalRow, flow: TreasuryProposalsFlow) {
+        self.row = row
+        self.flow = flow
+    }
+
+    private var isBusy: Bool { flow.busyProposalID == row.id }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            header
+            if let caveat = row.description.caveat {
+                warning(caveat)
+            }
+            details
+            progress
+            actions
+        }
+        .padding(14)
+        .background(OnymTokens.surface)
+        .clipShape(OnymRadius.shape(OnymRadius.card))
+        .overlay(
+            OnymRadius.shape(OnymRadius.card)
+                .stroke(
+                    row.description.caveat == nil ? OnymTokens.hairline : OnymTokens.red,
+                    lineWidth: row.description.caveat == nil ? 1 : 1.5
+                )
+        )
+        .accessibilityIdentifier("treasury.proposal.\(row.id.uuidString)")
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            IconTile(symbol: symbol, bg: tile)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.description.title)
+                    .font(OnymType.font(size: 15, weight: .semibold))
+                    .foregroundStyle(OnymTokens.text)
+                Text("Proposed by \(row.proposerAlias)")
+                    .font(OnymType.font(size: 12))
+                    .foregroundStyle(OnymTokens.text3)
+            }
+            Spacer()
+        }
+    }
+
+    private var symbol: String {
+        switch row.standing {
+        case .submitted: "checkmark.seal.fill"
+        case .superseded, .expired: "clock.badge.xmark"
+        case .rejected: "exclamationmark.triangle.fill"
+        default: "signature"
+        }
+    }
+
+    private var tile: Color {
+        switch row.standing {
+        case .submitted: OnymTile.green
+        case .superseded, .expired: OnymTile.gray
+        case .rejected: OnymTile.red
+        default: OnymTile.blue
+        }
+    }
+
+    /// The decoded operations, laid out so the parts that decide where
+    /// money goes are the parts that catch the eye.
+    private var details: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(row.description.lines) { line in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(line.label)
+                        .font(OnymType.font(size: 11))
+                        .foregroundStyle(OnymTokens.text3)
+                    value(line)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(OnymTokens.surface2)
+        .clipShape(OnymRadius.shape(OnymRadius.inset))
+    }
+
+    @ViewBuilder
+    private func value(_ line: TreasuryProposalDescription.Line) -> some View {
+        switch line.value {
+        case .text(let text):
+            Text(text)
+                .font(OnymType.font(size: line.isPrincipal ? 15 : 13,
+                                    weight: line.isPrincipal ? .semibold : .regular))
+                .foregroundStyle(OnymTokens.text)
+        case .amount(let amount, let code):
+            Text("\(amount.decimalString) \(code)")
+                .font(OnymType.mono(size: line.isPrincipal ? 17 : 13,
+                                    weight: line.isPrincipal ? .semibold : .regular))
+                .foregroundStyle(OnymTokens.text)
+                .monospacedDigit()
+        case .account(let account):
+            // Full address, monospaced, selectable. An abbreviated
+            // recipient is one nobody can actually check, and checking
+            // the recipient is the single most important thing a
+            // co-signer does.
+            Text(account.accountID)
+                .font(OnymType.mono(size: 12))
+                .foregroundStyle(OnymTokens.text)
+                .textSelection(.enabled)
+                // Wrapped in full, never truncated: a recipient address
+                // that ends in an ellipsis is one nobody can check, and
+                // checking it is the most important thing a co-signer
+                // does on this card.
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func warning(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(OnymTokens.red)
+            Text(text)
+                .font(OnymType.font(size: 13, weight: .medium))
+                .foregroundStyle(OnymTokens.red)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(OnymTokens.red.opacity(0.10))
+        .clipShape(OnymRadius.shape(OnymRadius.inset))
+        .accessibilityIdentifier("treasury.proposal.caveat")
+    }
+
+    @ViewBuilder
+    private var progress: some View {
+        switch row.standing {
+        case .none:
+            Text("Checking with the network\u{2026}")
+                .font(OnymType.font(size: 12))
+                .foregroundStyle(OnymTokens.text3)
+
+        case .collecting(let weight, let required):
+            VStack(alignment: .leading, spacing: 4) {
+                Text("\(weight) of \(required) signatures")
+                    .font(OnymType.font(size: 13, weight: .medium))
+                    .foregroundStyle(OnymTokens.text2)
+                if !row.waitingOn.isEmpty {
+                    Text("Waiting on \(row.waitingOn.joined(separator: ", "))")
+                        .font(OnymType.font(size: 12))
+                        .foregroundStyle(OnymTokens.text3)
+                }
+            }
+
+        case .ready:
+            Chip(text: "Ready to send", fg: OnymTokens.green, bg: OnymTokens.green.opacity(0.14))
+
+        case .submitted(let hash):
+            VStack(alignment: .leading, spacing: 4) {
+                Chip(text: "Sent", fg: OnymTokens.green, bg: OnymTokens.green.opacity(0.14))
+                Text(hash)
+                    .font(OnymType.mono(size: 11))
+                    .foregroundStyle(OnymTokens.text3)
+                    .textSelection(.enabled)
+                    .onymLineLimit(1, relaxing: false)
+            }
+
+        case .superseded:
+            Text("Another transaction went first, so this one can never be used. It needs proposing again.")
+                .font(OnymType.font(size: 12))
+                .foregroundStyle(OnymTokens.text3)
+
+        case .expired:
+            Text("Expired without enough signatures.")
+                .font(OnymType.font(size: 12))
+                .foregroundStyle(OnymTokens.text3)
+
+        case .rejected(let reason):
+            Text(explain(reason))
+                .font(OnymType.font(size: 12, weight: .medium))
+                .foregroundStyle(OnymTokens.red)
+        }
+    }
+
+    /// Each refusal says what was actually wrong. "Invalid" would leave
+    /// a member unable to tell a peer on the wrong network setting from
+    /// someone trying something.
+    private func explain(_ reason: TreasuryRejection) -> String {
+        switch reason {
+        case .notThisTreasury:
+            "This spends a different account, not this chat's treasury. It was not shown for signing."
+        case .wrongNetwork:
+            "This was built for a different Stellar network."
+        case .unsupportedOperation:
+            "This asks for something this app can't read, so it can't show you what you'd be signing."
+        case .foreignOperationSource:
+            "This also acts on an account that isn't the treasury."
+        case .proposerNotAMember:
+            "Whoever sent this isn't a member of this chat."
+        case .malformed:
+            "This transaction couldn't be read."
+        case .noTreasury:
+            "This chat has no treasury."
+        }
+    }
+
+    @ViewBuilder
+    private var actions: some View {
+        if row.canSign || row.canSubmit {
+            HStack(spacing: 10) {
+                if row.canSign {
+                    Button {
+                        Task { await flow.sign(row.id) }
+                    } label: {
+                        Text("Sign")
+                            .font(OnymType.font(size: 15, weight: .semibold))
+                            .frame(maxWidth: .infinity, minHeight: 42)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isBusy)
+                    .accessibilityIdentifier("treasury.proposal.sign.\(row.id.uuidString)")
+                }
+                if row.canSubmit {
+                    Button {
+                        Task { await flow.submit(row.id) }
+                    } label: {
+                        Text("Send it")
+                            .font(OnymType.font(size: 15, weight: .semibold))
+                            .frame(maxWidth: .infinity, minHeight: 42)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(OnymTokens.green)
+                    .disabled(isBusy)
+                    .accessibilityIdentifier("treasury.proposal.submit.\(row.id.uuidString)")
+                }
+            }
+        }
+        if !row.signedBy.isEmpty {
+            Text("Signed by \(row.signedBy.joined(separator: ", "))")
+                .font(OnymType.font(size: 12))
+                .foregroundStyle(OnymTokens.text3)
+        }
+    }
+}

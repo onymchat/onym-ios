@@ -97,6 +97,8 @@ struct AppDependencies {
     /// report sheet above: the chats layer presents whatever this
     /// returns and stays free of any OnymTreasuryUI dependency.
     let makeTreasuryView: @MainActor (String) -> AnyView
+    /// The in-thread treasury block, same arrangement as above.
+    let makeTreasuryThreadSection: @MainActor (String) -> AnyView
     /// Case screen for a served notice — carries both the caseId and
     /// the mandateRef the repository resolves standing by.
     let makeModerationCaseFlow: @MainActor (CaseNotice) -> ModerationCaseFlow

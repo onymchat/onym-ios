@@ -422,6 +422,19 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
             try self.context.save()
             return ()
         }
+
+    public func openProposals(ownerIDString: String) async -> [StoredProposal] {
+        await perform {
+            let descriptor = FetchDescriptor<PersistedProposal>(
+                predicate: #Predicate {
+                    $0.ownerIdentityIDString == ownerIDString
+                        && $0.submittedTxHash == nil
+                        && $0.rejectionRaw == nil
+                },
+                sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
+            )
+            return try self.context.fetch(descriptor).compactMap { try? self.decode($0) }
+        } ?? []
     }
 
     public func removeAll(ownerIDString: String) async {

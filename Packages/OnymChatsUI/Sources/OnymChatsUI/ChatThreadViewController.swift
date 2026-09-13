@@ -118,6 +118,28 @@ final class ChatThreadViewController: UIViewController {
     /// Display order for the request rows — oldest first, so they sit at
     /// the bottom of the thread in arrival order like any other row.
     private var orderedJoinRequestIDs: [UUID] = []
+    /// The treasury's proposals occupy **one** row, not one row each.
+    ///
+    /// The row hosts a SwiftUI view that observes the treasury flow and
+    /// draws whatever is currently waiting on signatures — collapsing to
+    /// nothing when that is nothing. So this controller never learns how
+    /// many proposals exist, never diffs them, and never reconfigures
+    /// the row when a signature arrives from another member: the hosted
+    /// view is already watching.
+    ///
+    /// The alternative — a synthetic id per proposal — would have meant
+    /// threading proposal state through the SwiftUI bridge on every
+    /// render purely so the table could re-derive what the card already
+    /// knows.
+    private var showsTreasuryRow = false
+    /// Stable id for that single row. Constant because there is exactly
+    /// one per thread and the controller is per-thread.
+    static let treasuryRowID = UUID(uuidString: "7C1E5A00-0000-4000-8000-000000000001")!
+    /// Builds the hosted view. Nil when the treasury subsystem isn't
+    /// wired, in which case the row never appears.
+    var makeTreasuryProposalCard: (() -> AnyView)?
+
+    private var treasuryRowIDs: [UUID] { showsTreasuryRow ? [Self.treasuryRowID] : [] }
     /// The parent group's member profiles, keyed by BLS pubkey hex —
     /// the source for resolving a sender's alias. Pushed by the SwiftUI
     /// wrapper via `update(memberProfiles:)`; updated live as joiners
@@ -311,13 +333,18 @@ final class ChatThreadViewController: UIViewController {
         // pending join request counts — a founder whose only content is
         // "Alice wants to join" should see that, not the onboarding
         // panel sitting on top of it.
-        emptyStateHost.view.isHidden = !(sorted.isEmpty && orderedJoinRequestIDs.isEmpty)
+        emptyStateHost.view.isHidden = !(
+            sorted.isEmpty
+                && orderedJoinRequestIDs.isEmpty
+        )
 
         var snapshot = NSDiffableDataSourceSnapshot<Section, UUID>()
         snapshot.appendSections([.main])
         // Requests pin below the messages: they're the live thing
         // awaiting action, and the thread is read bottom-up.
-        snapshot.appendItems(sorted.map(\.id) + orderedJoinRequestIDs)
+        snapshot.appendItems(
+            sorted.map(\.id) + treasuryRowIDs + orderedJoinRequestIDs
+        )
         if !changedIDs.isEmpty {
             snapshot.reconfigureItems(changedIDs)
         }
@@ -431,11 +458,15 @@ final class ChatThreadViewController: UIViewController {
         joinRequestsByID = byID
         orderedJoinRequestIDs = ids
 
-        emptyStateHost.view.isHidden = !(orderedMessages.isEmpty && ids.isEmpty)
+        emptyStateHost.view.isHidden = !(
+            orderedMessages.isEmpty && ids.isEmpty
+        )
 
         var snapshot = NSDiffableDataSourceSnapshot<Section, UUID>()
         snapshot.appendSections([.main])
-        snapshot.appendItems(orderedMessages.map(\.id) + ids)
+        snapshot.appendItems(
+            orderedMessages.map(\.id) + treasuryRowIDs + ids
+        )
         if !changed.isEmpty {
             snapshot.reconfigureItems(changed)
         }
@@ -828,6 +859,10 @@ final class ChatThreadViewController: UIViewController {
             ChatJoinRequestCell.self,
             forCellReuseIdentifier: ChatJoinRequestCell.reuseID
         )
+        tableView.register(
+            ChatTreasuryProposalCell.self,
+            forCellReuseIdentifier: ChatTreasuryProposalCell.reuseID
+        )
         tableView.keyboardDismissMode = .interactive
         tableView.delegate = self
         view.addSubview(tableView)
@@ -865,10 +900,38 @@ final class ChatThreadViewController: UIViewController {
         emptyStateHost.rootView = makeEmptyState()
     }
 
+    /// Show or hide the treasury row. Called by the SwiftUI wrapper on
+    /// every render; a no-op after the first, since the row's presence
+    /// depends only on whether the subsystem is wired.
+    func setShowsTreasuryRow(_ shows: Bool) {
+        guard shows != showsTreasuryRow else { return }
+        showsTreasuryRow = shows
+
+        var snapshot = NSDiffableDataSourceSnapshot<Section, UUID>()
+        snapshot.appendSections([.main])
+        snapshot.appendItems(
+            orderedMessages.map(\.id) + treasuryRowIDs + orderedJoinRequestIDs
+        )
+        pruneMeasuredHeights(keeping: snapshot.itemIdentifiers)
+        dataSource.apply(snapshot, animatingDifferences: false)
+    }
+
     private func configureDataSource() {
         dataSource = UITableViewDiffableDataSource<Section, UUID>(
             tableView: tableView
         ) { [weak self] tableView, indexPath, id in
+            // The treasury row is a synthetic id too, and is checked
+            // before messages for the same reason as join requests.
+            if id == ChatThreadViewController.treasuryRowID,
+               let card = self?.makeTreasuryProposalCard?() {
+                let cell = tableView.dequeueReusableCell(
+                    withIdentifier: ChatTreasuryProposalCell.reuseID,
+                    for: indexPath
+                )
+                (cell as? ChatTreasuryProposalCell)?.configure(card: card)
+                return cell
+            }
+
             // Join-request rows are checked first: they're synthetic ids
             // that never appear in `messagesByID`.
             if let request = self?.joinRequestsByID[id] {

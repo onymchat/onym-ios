@@ -553,6 +553,77 @@ struct OnymIOSApp: App {
         )
         self.treasuryBroadcaster = treasuryBroadcaster
 
+        // One place that builds a proposals flow, used by both the
+        // treasury screen and the in-thread block — so the two always
+        // observe the same repository with the same collaborators.
+        //
+        // Aliases resolve through the group roster rather than being
+        // stored on the proposal: a proposal names a member by BLS key,
+        // and the alias beside it should be whatever that member is
+        // called now, not whatever they were called when they proposed.
+        //
+        // Memoised per group, and that is load-bearing rather than an
+        // optimisation. The in-thread block is built from a table
+        // cell's content configuration, which is rebuilt every time the
+        // row is dequeued; a factory that minted a fresh flow per call
+        // would leave a trail of flows each draining its own snapshot
+        // stream, and the card's `@State` would keep whichever one it
+        // saw first while later renders built others.
+        let makeTreasuryFlow: @MainActor (String) -> TreasuryFlow = { @MainActor groupID in
+            if let existing = treasuryFlowCache.flow(for: groupID) { return existing }
+            let flow = TreasuryFlow(
+                groupID: groupID,
+                repository: treasuryRepository,
+                groups: groupRepository,
+                identity: repository,
+                broadcaster: treasuryBroadcaster,
+                creation: TreasuryCreationInteractor(
+                    treasury: treasuryRepository,
+                    identity: repository,
+                    groups: groupRepository,
+                    broadcaster: treasuryBroadcaster
+                ),
+                // Read at call time, not captured: the treasury a group
+                // creates should follow the Settings toggle the user is
+                // actually on, and this closure outlives any one
+                // reading of it.
+                network: { UserDefaultsNetworkPreference().current().stellarNetwork }
+            )
+            treasuryFlowCache.store(flow, for: groupID)
+            return flow
+        }
+
+        let proposalsFlowCache = TreasuryProposalsFlowCache()
+        let makeTreasuryProposalsFlow: @MainActor (String) -> TreasuryProposalsFlow = {
+            @MainActor groupID in
+            if let existing = proposalsFlowCache.flows[groupID] { return existing }
+            let flow = TreasuryProposalsFlow(
+                groupID: groupID,
+                repository: treasuryRepository,
+                identity: repository,
+                signing: TreasurySigningInteractor(
+                    treasury: treasuryRepository,
+                    identity: repository,
+                    broadcaster: treasuryBroadcaster
+                ),
+                proposing: TreasuryProposalInteractor(
+                    treasury: treasuryRepository,
+                    identity: repository,
+                    broadcaster: treasuryBroadcaster
+                ),
+                aliases: { blsHex in
+                    let groups = await groupRepository.currentGroups()
+                    let alias = groups.first { $0.id == groupID }?
+                        .memberProfiles[blsHex]?.alias
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    return (alias?.isEmpty == false ? alias : nil)
+                        ?? String(localized: "(unnamed)")
+                }
+            )
+            proposalsFlowCache.flows[groupID] = flow
+            return flow
+        }
+
         // DEBUG deeplink injection for UI tests (see `initialDeeplinkURL`).
         #if DEBUG
         if args.contains("--ui-testing"),
@@ -1549,29 +1620,16 @@ struct OnymIOSApp: App {
                 )))
             },
             makeTreasuryView: { @MainActor groupID in
-                if let existing = treasuryFlowCache.flow(for: groupID) {
-                    return AnyView(TreasurySetupView(flow: existing))
-                }
-                let flow = TreasuryFlow(
-                    groupID: groupID,
-                    repository: treasuryRepository,
-                    groups: groupRepository,
-                    identity: repository,
-                    broadcaster: treasuryBroadcaster,
-                    creation: TreasuryCreationInteractor(
-                        treasury: treasuryRepository,
-                        identity: repository,
-                        groups: groupRepository,
-                        broadcaster: treasuryBroadcaster
-                    ),
-                    // Read at call time, not captured: the treasury a
-                    // group creates should follow the Settings toggle
-                    // the user is actually on, and this closure outlives
-                    // any one reading of it.
-                    network: { UserDefaultsNetworkPreference().current().stellarNetwork }
-                )
-                treasuryFlowCache.store(flow, for: groupID)
-                return AnyView(TreasurySetupView(flow: flow))
+                AnyView(TreasuryHomeView(
+                    setup: makeTreasuryFlow(groupID),
+                    proposals: makeTreasuryProposalsFlow(groupID)
+                ))
+            },
+            makeTreasuryThreadSection: { @MainActor groupID, onContentChanged in
+                AnyView(TreasuryThreadSection(
+                    flow: makeTreasuryProposalsFlow(groupID),
+                    onContentChanged: onContentChanged
+                ))
             },
             makeModerationCaseFlow: { @MainActor notice in
                 ModerationCaseFlow(
@@ -2191,6 +2249,23 @@ struct OnymIOSApp: App {
                     // guards against forged ACTION_VIEW analogues.
                     if let cap = DeeplinkCapture.introCapability(from: url) {
                         pendingCapability = cap
+                        return
+                    }
+                    // A wallet handing a signed treasury transaction
+                    // back (`onym://tx?xdr=…`). The link names no group
+                    // and no proposal, so attribution is by
+                    // verification: the interactor offers it to every
+                    // open proposal and only the one whose transaction
+                    // hash the signature was made over can accept it.
+                    // A link from anywhere else therefore does nothing.
+                    if let xdr = DeeplinkCapture.signedTransactionXDR(from: url) {
+                        Task {
+                            await TreasurySigningInteractor(
+                                treasury: treasuryRepository,
+                                identity: identityRepository,
+                                broadcaster: treasuryBroadcaster
+                            ).adoptReturned(base64XDR: xdr)
+                        }
                     }
                 }
                 .task {
