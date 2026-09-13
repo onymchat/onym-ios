@@ -24,6 +24,10 @@ actor FakeHorizonClient: HorizonClient {
     /// what was submitted.
     private var history: [HorizonTransaction] = []
     private var submitError: HorizonError?
+    /// When set, `account` throws this instead of answering — for the
+    /// tests that need "Horizon is unreachable" to be distinguishable
+    /// from "the account is not there".
+    private var accountError: HorizonError?
 
     init() {}
 
@@ -34,9 +38,12 @@ actor FakeHorizonClient: HorizonClient {
     /// When set, `submit` throws this instead of succeeding.
     func setSubmitError(_ error: HorizonError?) { submitError = error }
 
+    func setAccountError(_ error: HorizonError?) { accountError = error }
+
     func setTransactions(_ transactions: [HorizonTransaction]) { history = transactions }
 
     func account(_ id: StellarAccountID) async throws -> HorizonAccount {
+        if let accountError { throw accountError }
         guard let account = accounts[id.accountID] else {
             throw HorizonError.accountNotFound(id.accountID)
         }

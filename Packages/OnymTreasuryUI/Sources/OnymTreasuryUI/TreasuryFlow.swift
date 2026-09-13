@@ -121,6 +121,10 @@ public final class TreasuryFlow {
     /// Set when creation needs the founder's own wallet — the app
     /// cannot sign for an account it does not hold.
     public private(set) var pendingWalletRequest: SEP0007Request?
+    /// Reconciliation reads a ledger, and snapshots arrive on every
+    /// change; once per flow is enough to resolve a state that only
+    /// changes when someone acts.
+    private var hasReconciledStrandedFunding = false
     /// Where creation has got to. The screen used to end at
     /// `creationError = nil` on success and at nothing at all on the
     /// wallet handoff: the founder was left looking at an enabled
@@ -263,6 +267,7 @@ public final class TreasuryFlow {
                 request: nil
             )
         }
+        await reconcileStrandedFunding(snapshot)
 
         treasury = snapshot.treasury
         // Scoped to the owning identity. `currentGroups()` is every
@@ -516,6 +521,12 @@ public final class TreasuryFlow {
             creationStage = .created
         case .alreadyExists:
             creationError = String(localized: "This chat already has a treasury.")
+        case .fundedAnotherAccount:
+            // `create` returns `.alreadyExists` long before it reaches
+            // the external path, so this cannot happen here. Named
+            // rather than defaulted, so adding a case stays a compiler
+            // error somewhere useful.
+            creationError = String(localized: "This chat already has a treasury.")
         case .notAdmin:
             creationError = String(localized: "Only the founder can create the treasury.")
         case .noDeclaredSigners:
@@ -563,12 +574,12 @@ public final class TreasuryFlow {
     /// will not finish the job.
     ///
     /// A handoff has two ends and this app controls one of them. When
-    /// the far end stalls — a Confirm button that does nothing, a wallet
-    /// that cannot cope with an envelope that already carries a
-    /// signature — the founder was left with a screen that could only
-    /// wait. These bytes are the whole transaction, signed by the
-    /// treasury's own key and short one signature, and they can be
-    /// finished in any tool that speaks Stellar.
+    /// the far end stalls, the founder was left with a screen that
+    /// could only wait. These bytes are the transaction that funds the
+    /// account: one operation, unsigned, short exactly the founder's
+    /// signature, and finishable in any tool that speaks Stellar.
+    /// Locking the treasury down is a second transaction that never
+    /// goes near a wallet.
     ///
     /// Nil after a relaunch, for the same reason `canReopenWallet` is:
     /// the envelope is not persisted.
@@ -597,61 +608,100 @@ public final class TreasuryFlow {
         pendingWalletRequest = request
     }
 
-    /// Give up on a handoff and go back to the form.
+    /// Finish a handoff the create screen can no longer reach.
     ///
-    /// The pending row is written before the wallet opens, and until now
-    /// nothing ever set `creationStage` back to `.idle`. A wallet that
-    /// refused the transaction, an envelope that timed out, or a founder
-    /// who simply wanted different co-signers left the group pinned to
-    /// "Waiting for your wallet" on every launch, with one button that
-    /// could only ever fail.
+    /// When another admin's anchor lands mid-handoff, this group has a
+    /// treasury and `CreateTreasuryView` stops being presented at all —
+    /// so the one button that could finish the founder's funded account
+    /// is gone, while the row and its key persist. That is the state
+    /// `configureStrandedFunding` was written to resolve, reachable
+    /// only if something outside the create screen triggers it.
     ///
-    /// Safe because nothing has happened on-chain that this discards: if
-    /// the wallet *did* submit, the account exists and `adopt` finds it
-    /// — the founder can create again and the ledger check will confirm
-    /// the existing account rather than build a second one. What is
-    /// thrown away is this device's memory of an unfinished handoff.
+    /// This is that trigger: opening the treasury screen. Once per flow,
+    /// and only when a seeded row disagrees with the anchor, because a
+    /// snapshot arrives on every change and this reads a ledger.
+    private func reconcileStrandedFunding(_ snapshot: TreasurySnapshot) async {
+        guard !hasReconciledStrandedFunding,
+              let anchored = snapshot.treasury,
+              let pending = await repository.pendingCreation(groupID: groupID),
+              pending.treasurySeed != nil,
+              pending.treasuryAccount != anchored.account
+        else { return }
+        hasReconciledStrandedFunding = true
+        if case .fundedAnotherAccount(let account) = await creation
+            .completeExternalCreation(groupIDHex: groupID) {
+            creationError = String(
+                localized: "This chat already has a treasury, so your funding went to a different account: \(account.abbreviated). It is now controlled by the same co-signers, who can move it."
+            )
+        }
+    }
+
+    /// Give up on a handoff — unless the wallet already funded it.
+    ///
+    /// The pending row is written before the wallet opens, and until a
+    /// while ago nothing set `creationStage` back to `.idle`: a wallet
+    /// that refused, an envelope that lapsed, or a founder who wanted
+    /// different co-signers left the group pinned to "Waiting for your
+    /// wallet" with one button that could only fail.
+    ///
+    /// What this is *not* is safe by construction. The doc here used to
+    /// claim it was — nothing on-chain discarded, `adopt` would find the
+    /// account, create again and it is confirmed — and the split made
+    /// every clause of that false. The wallet only funds the account
+    /// now; the key that configures it lives in the pending row and
+    /// exists nowhere else. Once the funding lands, forgetting the row
+    /// puts the founder's XLM beyond everyone, permanently.
+    ///
+    /// So the interactor decides, against the ledger, and this reports
+    /// what it decided.
     public func abandonExternalCreation() async {
-        await repository.clearPendingCreation(groupID: groupID)
-        pendingWalletRequest = nil
-        creationError = nil
-        creationStage = .idle
+        switch await creation.abandonExternalCreation(groupIDHex: groupID) {
+        case .discarded:
+            pendingWalletRequest = nil
+            creationError = nil
+            creationStage = .idle
+        case .accountAlreadyFunded:
+            creationError = String(
+                localized: "Your wallet already funded this treasury, so starting over would strand it. Tap \"I've sent it\" to finish setting it up."
+            )
+        case .couldNotTell:
+            creationError = String(
+                localized: "Couldn't reach the network to check whether your wallet already sent the funding. Nothing was changed \u{2014} try again in a moment."
+            )
+        }
     }
 
     /// After a wallet handoff: check the ledger and, if the account is
     /// there and configured as asked, anchor it and tell the group.
     ///
-    /// `adopt` verifies before believing — the account must exist, its
-    /// master key must actually be switched off, and its signer set
-    /// must be the one this screen chose. Taking the founder's word for
-    /// it would mean anchoring a group to an account that might still
-    /// be under one person's control.
+    /// The wallet's half was the funding. This runs the other half —
+    /// the signers and the lockdown — and then verifies before
+    /// believing: the account must exist, its master key must actually
+    /// be switched off, its signers must be the ones this screen chose
+    /// at the weights it chose, and the thresholds must be reachable by
+    /// them. Taking anyone's word for it would mean anchoring a group
+    /// to an account that might still be under one person's control.
     ///
-    /// The rest of the group cannot run that check for themselves, so
-    /// the anchor they receive has to carry the creation transaction —
-    /// which is the envelope handed to the wallet, whose hash is fixed
-    /// before it is signed.
+    /// Re-runnable on purpose: every step reads the ledger and does only
+    /// what is not yet done, so a second tap, a dead network or a
+    /// relaunch resumes rather than repeats.
     public func confirmExternalCreation() async {
-        guard case .awaitingWallet(
-            let accountID,
-            let creationTxHash,
-            let coSigners,
-            let thresholds,
-            let network,
-            _
-        ) = creationStage else { return }
+        // Only that the stage is the waiting one. What the handoff was
+        // for lives in the persisted pending row, which is where the
+        // interactor reads it — the stage's copy was a second source of
+        // the same truth and is no longer consulted here.
+        guard case .awaitingWallet = creationStage else { return }
         isCreating = true
         creationError = nil
         defer { isCreating = false }
 
-        let outcome = await creation.adopt(
-            groupIDHex: groupID,
-            treasuryAccountID: accountID,
-            creationTxHash: creationTxHash,
-            network: network,
-            expectedCoSigners: coSigners,
-            expectedThresholds: thresholds
-        )
+        // The interactor owns what "finish this" means now: the wallet
+        // only funded the account, and locking it down is this app's
+        // half of the job. It reads the ledger before each step, so
+        // tapping twice or coming back tomorrow resumes rather than
+        // repeats — and it falls back to `adopt` for a handoff that
+        // predates the split.
+        let outcome = await creation.completeExternalCreation(groupIDHex: groupID)
         switch outcome {
         case .created:
             creationStage = .created
@@ -659,6 +709,16 @@ public final class TreasuryFlow {
             creationStage = .created
         case .failed(let reason):
             creationError = reason
+        case .fundedAnotherAccount(let account):
+            // Not "created", which is what this used to say for any
+            // already-anchored group: the founder's money is in an
+            // account that is not the treasury, and telling them it
+            // exists would hide that. It has been configured to the
+            // co-signers, so the same people can move it.
+            creationStage = .idle
+            creationError = String(
+                localized: "This chat already has a treasury, so your funding went to a different account: \(account.abbreviated). It is now controlled by the same co-signers, who can move it."
+            )
         case .notAdmin, .noDeclaredSigners, .needsExternalWallet:
             creationError = String(localized: "Couldn't confirm that treasury.")
         }

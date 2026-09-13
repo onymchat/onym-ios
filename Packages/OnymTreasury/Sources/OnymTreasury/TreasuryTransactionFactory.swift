@@ -226,6 +226,109 @@ public enum TreasuryTransactionFactory {
         )
     }
 
+    // MARK: - Split creation, for wallets that will not submit ours
+
+    /// Step one: create the account, and nothing else.
+    ///
+    /// One operation, one source account, and handed over unsigned —
+    /// which is the whole point of it existing.
+    ///
+    /// `creation(…)` is a better transaction: it applies whole or not at
+    /// all, so there is no moment when a funded treasury is missing its
+    /// signers. It is also a transaction a SEP-0007 wallet will not
+    /// submit. Sunce reads every operation's source, finds two
+    /// (`getAllSources` in `Generic/lib/stellar.ts`), and routes
+    /// anything with more than one to its multisig *coordinator* rather
+    /// than to Horizon — then refuses outright because the envelope
+    /// already carries the treasury key's signature and its co-signing
+    /// path expects exactly one. Both rules are reasonable for the case
+    /// they were written for. Neither can be satisfied by an atomic
+    /// creation, because that transaction is necessarily sourced by two
+    /// accounts: the funder pays and holds the sequence number, and only
+    /// the new account can configure itself.
+    ///
+    /// So the external path is split, and the cost is named in
+    /// `PendingTreasuryCreation`: between this transaction and
+    /// `creationConfiguration`, the treasury exists under a key that
+    /// only the founder's device holds.
+    public static func creationFunding(
+        funder: StellarAccountID,
+        funderSequence: Int64,
+        treasury: StellarAccountID,
+        startingBalance: StellarAmount,
+        baseFee: StellarAmount,
+        timeBounds: StellarTimeBounds
+    ) throws -> StellarTransaction {
+        try StellarTransaction(
+            sourceAccount: funder,
+            fee: fee(baseFee: baseFee, operations: 1),
+            sequenceNumber: funderSequence + 1,
+            timeBounds: timeBounds,
+            operations: [
+                StellarOperation(body: .createAccount(
+                    destination: treasury,
+                    startingBalance: startingBalance
+                )),
+            ]
+        )
+    }
+
+    /// Step two: everything `creation` does after the account exists,
+    /// sourced by the account itself.
+    ///
+    /// No operation names a source, because the transaction's source is
+    /// already the treasury — one source account, which is what keeps a
+    /// wallet from treating it as somebody else's multisig. Nothing
+    /// hands this one to a wallet, though: it is signed by the ephemeral
+    /// key and submitted by the app, which is the only party that can.
+    ///
+    /// The treasury pays its own fee here, so `minimumBalance` is not
+    /// the whole of what step one must fund — see `configurationFee`.
+    public static func creationConfiguration(
+        treasury: StellarAccountID,
+        treasurySequence: Int64,
+        coSigners: [StellarAccountID],
+        thresholds: TreasuryThresholds,
+        baseFee: StellarAmount,
+        timeBounds: StellarTimeBounds
+    ) throws -> StellarTransaction {
+        var operations: [StellarOperation] = coSigners.map { coSigner in
+            StellarOperation(body: .setOptions(SetOptionsFields(
+                signer: StellarSigner(key: coSigner, weight: 1)
+            )))
+        }
+        // Last, for the same reason as in `creation`: until it applies,
+        // the master key still carries the weight that authorises
+        // everything above it.
+        operations.append(StellarOperation(body: .setOptions(SetOptionsFields(
+            masterWeight: 0,
+            lowThreshold: thresholds.low,
+            mediumThreshold: thresholds.medium,
+            highThreshold: thresholds.high
+        ))))
+        return try StellarTransaction(
+            sourceAccount: treasury,
+            fee: fee(baseFee: baseFee, operations: operations.count),
+            sequenceNumber: treasurySequence + 1,
+            timeBounds: timeBounds,
+            operations: operations
+        )
+    }
+
+    /// What step two costs the treasury, which step one has to fund on
+    /// top of the minimum balance.
+    ///
+    /// Missed, this is not a rounding error: an account funded to
+    /// exactly its minimum cannot pay for the transaction that adds its
+    /// signers, and the split leaves it stuck one transaction short of
+    /// being a treasury.
+    public static func configurationFee(
+        signerCount: Int,
+        baseFee: StellarAmount
+    ) -> StellarAmount {
+        StellarAmount(stroops: baseFee.stroops * Int64(signerCount + 1))
+    }
+
     /// The protocol's fee rule: base fee × operation count, for the
     /// whole transaction.
     private static func fee(baseFee: StellarAmount, operations: Int) -> UInt32 {
@@ -258,6 +361,34 @@ public final class EphemeralTreasuryKey {
             publicKey: Data(privateKey.publicKey.rawRepresentation)
         )
     }
+
+    /// Rebuild a key that had to be written down.
+    ///
+    /// Only the split external path stores one, and only between
+    /// creating the account and configuring it — see
+    /// `PendingTreasuryCreation.treasurySeed` for why that window
+    /// exists and what it costs.
+    public init(seed: Data) throws {
+        let privateKey = try Curve25519.Signing.PrivateKey(rawRepresentation: seed)
+        self.seed = seed
+        self.account = try StellarAccountID(
+            publicKey: Data(privateKey.publicKey.rawRepresentation)
+        )
+    }
+
+    /// The seed, for the one caller that must survive a relaunch.
+    ///
+    /// Named for what it is rather than offered as a property, because
+    /// the type's whole argument is that this value has no business
+    /// leaving it. The split path is the exception the argument did not
+    /// survive contact with: an account created and not yet configured
+    /// is controlled by this key alone, and losing it between the two
+    /// transactions strands the founder's funds permanently. Written
+    /// down is worse than never written; written down is not as bad as
+    /// unrecoverable.
+    ///
+    /// Callers must encrypt at rest and delete on completion.
+    public func seedForPendingCreation() -> Data { seed }
 
     /// Sign `envelope` in place. The private key is reconstructed for
     /// the call and not handed out — there is no accessor for it, which

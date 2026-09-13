@@ -88,7 +88,7 @@ public struct CreateTreasuryView: View {
                 Text("Waiting for your wallet")
                     .font(OnymType.font(size: 14, weight: .semibold))
                     .foregroundStyle(OnymTokens.text)
-                Text("Sign and send the transaction there, then come back and confirm. Onym checks the ledger before telling the group \u{2014} it won't take your word for it.")
+                Text("Your wallet only funds the account \u{2014} that is all wallets will send. Sign it there, then come back: Onym locks the treasury down itself, checks the ledger, and only then tells the group.")
                     .font(OnymType.font(size: 13))
                     .foregroundStyle(OnymTokens.text2)
                 PrimaryButton("I've sent it", disabled: flow.isCreating) {
@@ -117,7 +117,7 @@ public struct CreateTreasuryView: View {
                             .font(OnymType.font(size: 14, weight: .medium))
                     }
                     .accessibilityIdentifier("treasury.create.copy_xdr")
-                    Footnote("If your wallet won't finish, copy the transaction and submit it anywhere that takes signed Stellar XDR. It is already signed by the new account; yours is the signature it still needs.")
+                    Footnote("If your wallet won't send it, copy the transaction and submit it anywhere that takes signed Stellar XDR. It needs one signature \u{2014} yours.")
                 }
                 // The way out. Without it this screen had one button,
                 // and it could only ever fail for a transaction the
@@ -131,7 +131,7 @@ public struct CreateTreasuryView: View {
                         .foregroundStyle(OnymTokens.text3)
                 }
                 .accessibilityIdentifier("treasury.create.abandon_external")
-                Footnote("Starting over forgets this handoff on this phone. If your wallet did send it, create again \u{2014} Onym checks the ledger and will find the account rather than make a second one.")
+                Footnote("Starting over forgets this handoff, and the key that finishes it. Do it only if the funding was never sent \u{2014} an account that was funded and not locked down cannot be recovered afterwards.")
             }
             .padding(.horizontal, 20)
             .padding(.top, 20)

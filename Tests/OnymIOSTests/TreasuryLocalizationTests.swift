@@ -395,10 +395,22 @@ final class TreasuryLocalizationTests: XCTestCase {
             options: .regularExpression
         ) {
             let expression = result[match]
-            let isInteger = ["count", "wrappedValue", "maximum", "Int("]
+            // Matched as whole members, not as substrings. "count" is
+            // inside "account", so `\(account.abbreviated)` — an
+            // address — was read as an integer and the scanner then
+            // demanded a `%lld` key the catalog will never hold.
+            let isInteger = [".count", ".wrappedValue", ".maximum", "Int("]
                 .contains { expression.contains($0) }
             result.replaceSubrange(match, with: isInteger ? "%lld" : "%@")
         }
+        // Escapes the compiler resolves before SwiftUI ever sees the
+        // key. A literal written `Tap \"I've sent it\"` is looked up
+        // with plain quotes, and comparing the source spelling against
+        // the catalog reports a string that is present as missing.
+        // Backslash last, so it cannot re-escape what came before it.
+        result = result.replacingOccurrences(of: "\\\"", with: "\"")
+        result = result.replacingOccurrences(of: "\\n", with: "\n")
+        result = result.replacingOccurrences(of: "\\\\", with: "\\")
         return result
     }
 }
