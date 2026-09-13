@@ -353,6 +353,29 @@ public actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelop
         return try privateKey.signature(for: message)
     }
 
+    /// Ed25519 detached signature over `message` with the identity's
+    /// **treasury** signing key.
+    ///
+    /// `message` is a Stellar transaction hash and nothing else. The
+    /// caller is `OnymTreasury`, which computes that hash from a
+    /// transaction it decoded itself — this repository never sees the
+    /// transaction, and nothing above it should treat this as a
+    /// general-purpose signing seam. Same posture as
+    /// `signWithStellarKey`: the private key is derived per call and
+    /// only the signature leaves.
+    public func signWithTreasuryKey(_ message: Data) throws -> Data {
+        guard let currentID else {
+            throw IdentityError.identityNotLoaded
+        }
+        guard let snapshot = try keychain.read(currentID) else {
+            throw IdentityError.identityNotLoaded
+        }
+        let privateKey = try Self.treasurySigningPrivateKey(
+            fromNostrSecret: snapshot.nostrSecretKey
+        )
+        return try privateKey.signature(for: message)
+    }
+
     /// Ed25519 detached signature over `message` with the signing key
     /// of whichever stored identity's derived Stellar public key is
     /// `publicKeyHex` — NOT the currently-selected identity. The
@@ -927,6 +950,7 @@ public actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelop
             throw IdentityError.sdkFailure(String(describing: error))
         }
         let stellarPub = stellarPublicKey(fromNostrSecret: snapshot.nostrSecretKey)
+        let treasuryPub = treasuryPublicKey(fromNostrSecret: snapshot.nostrSecretKey)
         let inboxPub = inboxPublicKey(fromNostrSecret: snapshot.nostrSecretKey)
         let phrase = snapshot.entropy.map(Bip39.mnemonicFromEntropy)
         return Identity(
@@ -934,6 +958,8 @@ public actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelop
             blsPublicKey: blsPub,
             stellarPublicKey: stellarPub,
             stellarAccountID: StellarStrKey.encodeAccountID(stellarPub),
+            treasuryPublicKey: treasuryPub,
+            treasuryAccountID: StellarStrKey.encodeAccountID(treasuryPub),
             inboxPublicKey: inboxPub,
             inboxTag: inboxTag(from: inboxPub),
             recoveryPhrase: phrase
@@ -943,6 +969,35 @@ public actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelop
     private static func stellarPublicKey(fromNostrSecret nostrSecret: Data) -> Data {
         let privateKey = (try? stellarSigningPrivateKey(fromNostrSecret: nostrSecret))!
         return Data(privateKey.publicKey.rawRepresentation)
+    }
+
+    private static func treasuryPublicKey(fromNostrSecret nostrSecret: Data) -> Data {
+        let privateKey = (try? treasurySigningPrivateKey(fromNostrSecret: nostrSecret))!
+        return Data(privateKey.publicKey.rawRepresentation)
+    }
+
+    /// Same construction as `stellarSigningPrivateKey`, different
+    /// `info`. The separation is the point — see
+    /// `Identity.treasuryPublicKey` for why this key must not be the
+    /// one that signs mandates and rules agreements.
+    ///
+    /// Derived from the Nostr secret rather than through
+    /// `deriveSeedScopedKey`, which would restrict treasuries to
+    /// identities that have a recovery phrase. An identity imported
+    /// from raw key material can still be a co-signer, and this key
+    /// survives a phrase restore either way because the Nostr secret
+    /// does.
+    private static func treasurySigningPrivateKey(
+        fromNostrSecret nostrSecret: Data
+    ) throws -> Curve25519.Signing.PrivateKey {
+        let derived = HKDF<SHA256>.deriveKey(
+            inputKeyMaterial: SymmetricKey(data: nostrSecret),
+            salt: Data("app.onym.ios".utf8),
+            info: Data("stellar-treasury-ed25519-v1".utf8),
+            outputByteCount: 32
+        )
+        let seed = derived.withUnsafeBytes { Data($0) }
+        return try Curve25519.Signing.PrivateKey(rawRepresentation: seed)
     }
 
     private static func stellarSigningPrivateKey(

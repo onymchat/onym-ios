@@ -128,7 +128,7 @@ public struct TransactionEnvelope: Equatable, Sendable {
         network: StellarNetwork
     ) throws {
         let hash = transaction.hash(network: network)
-        guard Self.verify(signature: signature, by: signer, over: hash) else {
+        guard Self.verifies(signature: signature, by: signer, over: hash) else {
             throw StellarError.signatureDoesNotVerify
         }
         // Already have it: nothing to do, and saying so is not an error.
@@ -192,7 +192,7 @@ public struct TransactionEnvelope: Equatable, Sendable {
             // success with nobody in it. At most twenty Ed25519 checks
             // buys removing a silent-drop path.
             for candidate in candidates {
-                guard Self.verify(signature: decorated.signature, by: candidate, over: hash),
+                guard Self.verifies(signature: decorated.signature, by: candidate, over: hash),
                       !carriesSignature(from: candidate, over: hash)
                 else { continue }
                 // `append` refuses past the protocol's cap, and a
@@ -235,11 +235,15 @@ public struct TransactionEnvelope: Equatable, Sendable {
     /// not a lookup.
     private func carriesSignature(from signer: StellarAccountID, over hash: Data) -> Bool {
         signatures.contains { decorated in
-            Self.verify(signature: decorated.signature, by: signer, over: hash)
+            Self.verifies(signature: decorated.signature, by: signer, over: hash)
         }
     }
 
-    private static func verify(
+    /// Public so callers holding a hash they computed themselves can
+    /// identify which declared signer produced a given signature —
+    /// `TreasurySigningInteractor` needs that, and a four-byte hint is
+    /// not an answer to it.
+    public static func verifies(
         signature: Data,
         by signer: StellarAccountID,
         over hash: Data

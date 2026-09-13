@@ -4,7 +4,7 @@ import os
 
 /// Shared open-with-recovery policy for the app's SwiftData stores
 /// (`Groups.store`, `Messages.store`, `Invitations.store`,
-/// `IntroRequests.store`).
+/// `IntroRequests.store`, `Treasury.store`).
 ///
 /// History: each store used to answer ANY `ModelContainer` open error
 /// by deleting the SQLite trio and retrying — silently. On 2026-08-16

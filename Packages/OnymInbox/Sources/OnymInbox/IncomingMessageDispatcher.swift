@@ -3,6 +3,7 @@ import OnymChain
 import OnymChatsCore
 import OnymIdentity
 import OnymGroup
+import OnymTreasury
 
 /// Receive-side fan-out target for the inbox pump. Inspects every
 /// inbound message after decryption and routes it to the right
@@ -86,6 +87,12 @@ public struct IncomingMessageDispatcher: Sendable {
     /// Defaulted so existing constructions get the behaviour without
     /// a new parameter.
     let parkedMessages: ChatMessageParkingLot
+    /// Applies the four treasury payloads. Optional because a build or
+    /// a test without a treasury store has nothing to apply them to —
+    /// and a nil receiver means those payloads fall through to the
+    /// opaque-invitation safety net rather than being dropped, which is
+    /// the same treatment any other unrecognised plaintext gets.
+    let treasury: TreasuryPayloadReceiver?
 
     /// Mints the membership notices this device is entitled to render:
     /// "X joined" off a verified announcement, "You joined X" off a
@@ -108,7 +115,8 @@ public struct IncomingMessageDispatcher: Sendable {
         groupStateRefresher: any GroupStateRefreshing = NoopGroupStateRefresher(),
         receiptSender: any ChatReceiptSending = NoopChatReceiptSender(),
         readReceiptsEnabled: @escaping @Sendable () -> Bool = { true },
-        parkedMessages: ChatMessageParkingLot = ChatMessageParkingLot()
+        parkedMessages: ChatMessageParkingLot = ChatMessageParkingLot(),
+        treasury: TreasuryPayloadReceiver? = nil
     ) {
         self.envelopeDecrypter = envelopeDecrypter
         self.identities = identities
@@ -121,6 +129,7 @@ public struct IncomingMessageDispatcher: Sendable {
         self.receiptSender = receiptSender
         self.readReceiptsEnabled = readReceiptsEnabled
         self.parkedMessages = parkedMessages
+        self.treasury = treasury
     }
 
     public func dispatch(
@@ -236,6 +245,56 @@ public struct IncomingMessageDispatcher: Sendable {
                 senderEd25519PublicKey: envelope.senderEd25519PublicKey
             )
             return
+        }
+
+        // Fast path 2.5: the four treasury payloads. Every one carries
+        // a required `treasury` key whose value is its own
+        // discriminator, and their decoders check it before reading
+        // anything else — so none of them can steal another payload and
+        // no other payload decodes as one of these. Tried as a group
+        // because they share that key; `TreasuryPayloadReceiver` does
+        // the provenance checks each kind needs.
+        if let treasury {
+            if let declaration = try? JSONDecoder().decode(
+                TreasurySignerDeclarationPayload.self,
+                from: envelope.plaintext
+            ) {
+                await treasury.apply(
+                    declaration,
+                    ownerIdentityID: ownerIdentityID,
+                    senderEd25519PublicKey: envelope.senderEd25519PublicKey
+                )
+                return
+            }
+            if let anchor = try? JSONDecoder().decode(
+                TreasuryAnchorPayload.self,
+                from: envelope.plaintext
+            ) {
+                await treasury.apply(
+                    anchor,
+                    ownerIdentityID: ownerIdentityID,
+                    senderEd25519PublicKey: envelope.senderEd25519PublicKey
+                )
+                return
+            }
+            if let proposal = try? JSONDecoder().decode(
+                TreasuryProposalPayload.self,
+                from: envelope.plaintext
+            ) {
+                await treasury.apply(
+                    proposal,
+                    ownerIdentityID: ownerIdentityID,
+                    senderEd25519PublicKey: envelope.senderEd25519PublicKey
+                )
+                return
+            }
+            if let signature = try? JSONDecoder().decode(
+                TreasurySignaturePayload.self,
+                from: envelope.plaintext
+            ) {
+                await treasury.apply(signature, ownerIdentityID: ownerIdentityID)
+                return
+            }
         }
 
         // Fast path: chat receipt — a peer acking one of OUR messages
