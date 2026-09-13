@@ -61,7 +61,11 @@ struct ProposePaymentView: View {
                             .accessibilityIdentifier("treasury.payment.destination")
                         if !flow.paymentDestination.isEmpty {
                             Chip(
-                                text: flow.paymentDestinationIsValid
+                                // `key:`, for the reason
+                                // `DeclareSignerView` gives: `text:` is
+                                // the verbatim initialiser, and both
+                                // arms here are UI copy.
+                                key: flow.paymentDestinationIsValid
                                     ? "Valid address"
                                     : "Not a valid address",
                                 fg: flow.paymentDestinationIsValid
