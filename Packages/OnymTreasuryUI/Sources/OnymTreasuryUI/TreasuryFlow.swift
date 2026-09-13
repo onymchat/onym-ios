@@ -325,7 +325,7 @@ public final class TreasuryFlow {
 
     public func declareOnymDerived() async {
         guard let account = onymDerivedAccount else {
-            declarationError = "This identity has no treasury key."
+            declarationError = String(localized: "This identity has no treasury key.")
             return
         }
         await declare(account: account, source: .onym)
@@ -333,7 +333,7 @@ public final class TreasuryFlow {
 
     public func declareExternal() async {
         guard let account = try? StellarAccountID(accountID: externalAccountField) else {
-            declarationError = "That is not a valid Stellar account ID."
+            declarationError = String(localized: "That is not a valid Stellar account ID.")
             return
         }
         await declare(account: account, source: .external)
@@ -349,7 +349,7 @@ public final class TreasuryFlow {
             source: source
         )
         if !ok {
-            declarationError = "Couldn't record that account. Try again."
+            declarationError = String(localized: "Couldn't record that account. Try again.")
         } else {
             externalAccountField = ""
         }
@@ -463,11 +463,11 @@ public final class TreasuryFlow {
         // with no purpose. Whoever is going to co-sign already has to
         // name an account; that is the one with money in it.
         guard let mine else {
-            creationError = "Choose your own Stellar account first."
+            creationError = String(localized: "Choose your own Stellar account first.")
             return
         }
         guard let spendable = spendableAmount else {
-            creationError = "That isn't an amount."
+            creationError = String(localized: "That isn't an amount.")
             return
         }
         // Built from the resolved list, not the tick list — see
@@ -477,7 +477,7 @@ public final class TreasuryFlow {
         // moment, and the thresholds were chosen against the old count.
         let coSigners = resolvedCoSigners
         guard !coSigners.isEmpty else {
-            creationError = "Choose at least one co-signer."
+            creationError = String(localized: "Choose at least one co-signer.")
             return
         }
         let thresholds = TreasurySignerSelection.clamped(
@@ -485,7 +485,9 @@ public final class TreasuryFlow {
             signerCount: coSigners.count
         )
         guard TreasurySignerSelection.isUsable(thresholds, signerCount: coSigners.count) else {
-            creationError = "Those numbers can't be met by the co-signers you chose."
+            creationError = String(
+                localized: "Those numbers can't be met by the co-signers you chose."
+            )
             return
         }
         mediumThreshold = thresholds.medium
@@ -513,11 +515,11 @@ public final class TreasuryFlow {
             creationError = nil
             creationStage = .created
         case .alreadyExists:
-            creationError = "This chat already has a treasury."
+            creationError = String(localized: "This chat already has a treasury.")
         case .notAdmin:
-            creationError = "Only the founder can create the treasury."
+            creationError = String(localized: "Only the founder can create the treasury.")
         case .noDeclaredSigners:
-            creationError = "Nobody has chosen a Stellar account yet."
+            creationError = String(localized: "Nobody has chosen a Stellar account yet.")
         case .needsExternalWallet(let request, let treasuryAccountID, let creationTxHash):
             // The wallet signs and submits; nothing is anchored until
             // the founder comes back and `confirmExternalCreation`
@@ -627,7 +629,7 @@ public final class TreasuryFlow {
         case .failed(let reason):
             creationError = reason
         case .notAdmin, .noDeclaredSigners, .needsExternalWallet:
-            creationError = "Couldn't confirm that treasury."
+            creationError = String(localized: "Couldn't confirm that treasury.")
         }
     }
 }

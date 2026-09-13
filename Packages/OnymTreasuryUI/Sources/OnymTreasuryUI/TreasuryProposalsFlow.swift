@@ -314,11 +314,13 @@ public final class TreasuryProposalsFlow {
             pasteTargetID = id
             pasteSurface = surface
         case .notASigner:
-            actionError = "You haven't chosen a Stellar account for this chat yet."
+            actionError = String(localized: "You haven't chosen a Stellar account for this chat yet.")
         case .expired:
-            actionError = "This proposal has expired."
+            actionError = String(localized: "This proposal has expired.")
         case .superseded:
-            actionError = "Another transaction went first. This one can no longer be used."
+            actionError = String(
+                localized: "Another transaction went first. This one can no longer be used."
+            )
         case .failed(let reason):
             actionError = reason
         case .submitted, .notEnoughWeight:
@@ -335,11 +337,15 @@ public final class TreasuryProposalsFlow {
         case .submitted:
             await loadHistory()
         case .notEnoughWeight(let weight, let required):
-            actionError = "Still \(required - weight) signature(s) short."
+            actionError = String(
+                localized: "Still \(Int(required) - Int(weight)) signature(s) short."
+            )
         case .superseded:
-            actionError = "Another transaction used this slot. Propose it again."
+            actionError = String(
+                localized: "Another transaction used this slot. Propose it again."
+            )
         case .expired:
-            actionError = "This proposal has expired."
+            actionError = String(localized: "This proposal has expired.")
         case .failed(let reason):
             actionError = reason
         case .signed, .needsExternalWallet, .notASigner:
@@ -352,7 +358,7 @@ public final class TreasuryProposalsFlow {
         guard let id = pasteTargetID else { return }
         pasteError = nil
         guard let returned = try? TransactionEnvelope(base64XDR: pastedXDR) else {
-            pasteError = "That doesn't look like a signed Stellar transaction."
+            pasteError = String(localized: "That doesn't look like a signed Stellar transaction.")
             return
         }
         busyProposalID = id
@@ -457,13 +463,13 @@ public final class TreasuryProposalsFlow {
         guard let destination = try? StellarAccountID(
             accountID: normalized(paymentDestination)
         ) else {
-            composeError = "That isn't a valid Stellar account ID."
+            composeError = String(localized: "That isn't a valid Stellar account ID.")
             return
         }
         guard let amount = try? StellarAmount(decimalString: paymentAmount.trimmed),
               amount.stroops > 0
         else {
-            composeError = "Enter an amount to send."
+            composeError = String(localized: "Enter an amount to send.")
             return
         }
         let asset: StellarAsset
@@ -474,7 +480,7 @@ public final class TreasuryProposalsFlow {
                 accountID: normalized(paymentAssetIssuer)
             ), let credit = try? StellarAsset(code: paymentAssetCode.trimmed, issuer: issuer)
             else {
-                composeError = "That asset's issuer isn't a valid account ID."
+                composeError = String(localized: "That asset's issuer isn't a valid account ID.")
                 return
             }
             asset = credit
@@ -495,7 +501,7 @@ public final class TreasuryProposalsFlow {
         guard let issuer = try? StellarAccountID(accountID: normalized(trustlineIssuer)),
               let asset = try? StellarAsset(code: trustlineCode.trimmed, issuer: issuer)
         else {
-            composeError = "Enter an asset code and a valid issuer account."
+            composeError = String(localized: "Enter an asset code and a valid issuer account.")
             return
         }
         isComposing = true
@@ -521,11 +527,13 @@ public final class TreasuryProposalsFlow {
             trustlineIssuer = ""
             composeError = nil
         case .noTreasury:
-            composeError = "This chat has no treasury."
+            composeError = String(localized: "This chat has no treasury.")
         case .notAMember:
-            composeError = "You're not a member of this chat."
+            composeError = String(localized: "You're not a member of this chat.")
         case .sequenceContended:
-            composeError = "There's already a proposal waiting. Only one can go through at a time \u{2014} finish or let that one lapse first."
+            composeError = String(
+                localized: "There's already a proposal waiting. Only one can go through at a time \u{2014} finish or let that one lapse first."
+            )
         case .failed(let reason):
             composeError = reason
         }

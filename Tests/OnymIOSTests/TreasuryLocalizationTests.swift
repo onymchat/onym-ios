@@ -78,6 +78,14 @@ final class TreasuryLocalizationTests: XCTestCase {
             // multi-line ternary, and the body of a `switch` case that
             // returns one implicitly.
             #"\n\s*[?:]?\s*""# + body + #"""#,
+            // The one call site that produces a `String` rather than a
+            // key. A flow's `actionError` / `composeError` / `pasteError`
+            // is handed to `reasonAlert` and to the compose sheets,
+            // both of which render it with `Text(_: String)` — the
+            // non-localizing overload — so the flow has to do the
+            // lookup itself. These are keys like any other and belong
+            // in the catalog.
+            #"String\(\s*localized:\s*""# + body + #"""#,
         ]
     }
 
@@ -238,10 +246,30 @@ final class TreasuryLocalizationTests: XCTestCase {
             // label alone: `text:` is not used for anything else in
             // these files.
             #"text:\s*""# + body + #"""#,
+            // The value chosen by a branch. `Footnote(verbatim: network
+            // == .testnet ? "…" : "…")` put two English sentences on the
+            // balance card and matched neither pattern above, because
+            // what follows the colon is a condition rather than a quote
+            // — so the check walked past two keys the catalog already
+            // held a Russian translation for. `CreateTreasuryView`
+            // states the rule the right way round: two catalog keys
+            // chosen by a branch, not one string built by a branch.
+            #"verbatim:[^"\n]*\?\s*""# + body + #"""#,
+            #"titleText:[^"\n]*\?\s*""# + body + #"""#,
+            #"text:[^"\n]*\?\s*""# + body + #"""#,
         ]
         var offenders: [String] = []
         for url in sources {
+            // Continuation lines folded back in, so a ternary written
+            // across three lines — which is how every one of them is
+            // written once the arms are sentences — reads as the single
+            // expression it is.
             let source = try String(contentsOf: url, encoding: .utf8)
+                .replacingOccurrences(
+                    of: #"\n\s*([?:])"#,
+                    with: " $1",
+                    options: .regularExpression
+                )
             for pattern in patterns {
                 let regex = try NSRegularExpression(pattern: pattern)
                 let range = NSRange(source.startIndex..., in: source)
@@ -263,6 +291,44 @@ final class TreasuryLocalizationTests: XCTestCase {
         XCTAssertTrue(
             offenders.isEmpty,
             "literal sentences behind a non-localizing initialiser:\n" +
+                offenders.sorted().joined(separator: "\n")
+        )
+    }
+
+    /// A message on its way to a screen is a `String`, and a `String`
+    /// is rendered by `Text(_: String)` — the non-localizing overload,
+    /// which is what `reasonAlert` and both compose sheets use. So a
+    /// bare literal assigned to one is English in every language.
+    ///
+    /// This is the shape neither scanner above can see, and the reason
+    /// is worth stating: they ask whether a *key* is in the catalog,
+    /// and these were never keys. Twenty-five of them — every refusal
+    /// the two treasury flows can give a co-signer, from "you haven't
+    /// chosen a Stellar account" to "another transaction went first" —
+    /// were plain literals while the catalog check passed.
+    ///
+    /// `String(localized:)` makes them keys, and the pattern above
+    /// then holds them to the same catalog rule as everything else.
+    func test_noTreasuryFlowMessage_bypassesTheCatalog() throws {
+        let sources = try treasuryUISources()
+        let regex = try NSRegularExpression(
+            pattern: #"[A-Za-z]*(?:[Ee]rror|[Mm]essage)\s*=\s*""#
+        )
+        var offenders: [String] = []
+        for url in sources {
+            let source = try String(contentsOf: url, encoding: .utf8)
+            let range = NSRange(source.startIndex..., in: source)
+            for match in regex.matches(in: source, range: range) {
+                guard let matched = Range(match.range, in: source) else { continue }
+                let line = source[..<matched.lowerBound]
+                    .split(separator: "\n", omittingEmptySubsequences: false)
+                    .count
+                offenders.append("\(url.lastPathComponent):\(line): \(source[matched])")
+            }
+        }
+        XCTAssertTrue(
+            offenders.isEmpty,
+            "flow messages assigned a literal instead of String(localized:):\n" +
                 offenders.sorted().joined(separator: "\n")
         )
     }

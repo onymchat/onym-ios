@@ -282,22 +282,41 @@ public struct TreasuryProposalDescription: Equatable, Sendable {
     /// `AUTH_IMMUTABLE` is the one to read twice: it freezes the
     /// account's authorisation settings permanently and cannot be
     /// undone by anyone, including everyone at once.
-    private static func describeFlags(_ flags: UInt32) -> String {
+    ///
+    /// Returns a `Value` rather than a `String` because the two halves
+    /// of this line are the two things this type keeps apart. The flag
+    /// names are protocol constants and must read the same in every
+    /// language; the warnings beside them are sentences this app wrote
+    /// and must not. Joined into one `String` they went out through
+    /// `.text`, which is rendered verbatim — so "cannot be undone", on
+    /// the one flag nobody can take back, and "flags this app does not
+    /// recognise", on the one case where a co-signer is being asked to
+    /// sign something this device could not name, were English under
+    /// every locale.
+    private static func describeFlags(_ flags: UInt32) -> Line.Value {
         var named: [String] = []
         if flags & 0x1 != 0 { named.append("AUTH_REQUIRED") }
         if flags & 0x2 != 0 { named.append("AUTH_REVOCABLE") }
-        if flags & 0x4 != 0 { named.append("AUTH_IMMUTABLE (cannot be undone)") }
+        if flags & 0x4 != 0 { named.append("AUTH_IMMUTABLE") }
         if flags & 0x8 != 0 { named.append("AUTH_CLAWBACK_ENABLED") }
-        if flags & ~UInt32(0xF) != 0 {
-            named.append("flags this app does not recognise")
-        }
         // `0` is a real value a proposal can carry — `setFlags: 0`
-        // turns nothing on — and rendering it as `0x0` reads like a
-        // flag word nobody recognised rather than like nothing.
-        if flags == 0 { return "\u{2014}" }
-        return named.isEmpty
+        // turns nothing on — and `0x0` reads like a flag word nobody
+        // recognised rather than like nothing. Ahead of the split
+        // below, which has no case for "there is nothing here".
+        if flags == 0 { return .copy("\u{2014}") }
+        let names = named.isEmpty
             ? "0x\(String(flags, radix: 16))"
             : named.joined(separator: ", ")
+        switch (flags & 0x4 != 0, flags & ~UInt32(0xF) != 0) {
+        case (true, true):
+            return .copy("\(names) \u{2014} AUTH_IMMUTABLE cannot be undone, and this app does not recognise every flag here")
+        case (true, false):
+            return .copy("\(names) \u{2014} AUTH_IMMUTABLE cannot be undone")
+        case (false, true):
+            return .copy("\(names) \u{2014} this app does not recognise every flag here")
+        case (false, false):
+            return .text(names)
+        }
     }
 
     private static func describeControl(
@@ -393,14 +412,14 @@ public struct TreasuryProposalDescription: Equatable, Sendable {
         if let setFlags {
             lines.append(Line(
                 label: "Turns on account flags",
-                value: .text(Self.describeFlags(setFlags)),
+                value: Self.describeFlags(setFlags),
                 isPrincipal: true
             ))
         }
         if let clearFlags {
             lines.append(Line(
                 label: "Turns off account flags",
-                value: .text(Self.describeFlags(clearFlags)),
+                value: Self.describeFlags(clearFlags),
                 isPrincipal: true
             ))
         }

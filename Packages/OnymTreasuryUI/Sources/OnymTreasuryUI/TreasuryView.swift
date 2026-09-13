@@ -145,10 +145,18 @@ public struct TreasuryView: View {
                     }
                 }
             }
+            // Two catalog keys chosen by a branch, not one string built
+            // by a branch — the rule `CreateTreasuryView` already states.
+            // `Footnote(verbatim:)` is the non-localizing overload, so
+            // both of these rendered English under `ru` even though the
+            // catalog has held a Russian translation for each since the
+            // scanner put them there.
             if let treasury = flow.treasury {
-                Footnote(verbatim: treasury.network == .testnet
-                    ? "Stellar testnet \u{2014} this is not real money."
-                    : "Part of this balance is a reserve Stellar locks while the account exists. It can't be spent.")
+                if treasury.network == .testnet {
+                    Footnote("Stellar testnet \u{2014} this is not real money.")
+                } else {
+                    Footnote("Part of this balance is a reserve Stellar locks while the account exists. It can't be spent.")
+                }
             }
         }
         .padding(.top, 8)
@@ -173,14 +181,18 @@ public struct TreasuryView: View {
                             bg: signer.weight == 0 ? OnymTile.gray : OnymTile.green
                         )
                     } right: {
-                        Text(verbatim: "weight \(signer.weight)")
+                        // A key, not runtime data: "weight" is a word
+                        // this app chose. Cast, so the placeholder is
+                        // `%lld` rather than whatever SwiftUI picks for
+                        // a `UInt32` — see the card's signature count.
+                        Text("weight \(Int(signer.weight))")
                             .font(OnymType.mono(size: 12))
                             .foregroundStyle(OnymTokens.text3)
                     }
                 }
             }
             if let thresholds = flow.thresholds {
-                Footnote(verbatim: "It takes \(thresholds.medium) signature(s) to spend, and \(thresholds.high) to change who can.")
+                Footnote("It takes \(Int(thresholds.medium)) signature(s) to spend, and \(Int(thresholds.high)) to change who can.")
             }
         }
         .padding(.top, 8)
