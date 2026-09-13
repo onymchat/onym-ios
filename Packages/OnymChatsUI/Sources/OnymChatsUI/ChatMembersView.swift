@@ -374,7 +374,7 @@ struct ChatMembersView: View {
                 } label: {
                     Card {
                         Row(
-                            title: "Shared money",
+                            title: "Shared assets",
                             subtitle: "A Stellar account this chat controls together",
                             last: true
                         ) {

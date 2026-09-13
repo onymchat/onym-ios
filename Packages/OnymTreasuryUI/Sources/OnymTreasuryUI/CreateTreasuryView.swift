@@ -302,9 +302,9 @@ public struct CreateTreasuryView: View {
                 // non-localizing overload, and both of these are
                 // ordinary English sentences with nothing interpolated.
                 if flow.funderIsUnfunded {
-                    Footnote("The money comes out of this account, and it is empty. Send XLM to it first \u{2014} the address above is yours.")
+                    Footnote("The assets come out of this account, and it is empty. Send XLM to it first \u{2014} the address above is yours.")
                 } else {
-                    Footnote("The money comes out of this account.")
+                    Footnote("The assets come out of this account.")
                 }
             }
             Card {
@@ -393,7 +393,7 @@ public struct CreateTreasuryView: View {
             Text("What this does, permanently")
                 .font(OnymType.font(size: 14, weight: .semibold))
                 .foregroundStyle(OnymTokens.text)
-            bullet("The treasury's own key is switched off as it is created. After that you cannot move its money alone, and neither can anyone else.")
+            bullet("The treasury's own key is switched off as it is created. After that you cannot move its assets alone, and neither can anyone else.")
             bullet("Adding or removing a co-signer later is a proposal the current co-signers have to approve \u{2014} including yours.")
             bullet("If enough co-signers lose their keys to reach the numbers above, the balance is locked away for good. Nobody can undo that.")
             bullet("The account and every payment it makes are public on Stellar, forever.")
