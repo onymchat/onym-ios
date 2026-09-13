@@ -205,18 +205,73 @@ final class HorizonWireTests: XCTestCase {
         XCTAssertEqual(hash, "deadbeef")
     }
 
-    func test_networkParameters_parse() async throws {
-        let json = #"{"base_fee_in_stroops": 100, "base_reserve_in_stroops": 5000000}"#
-        let parameters = try await client(returning: json).networkParameters()
+    /// Read from the latest ledger, which is where Horizon keeps these
+    /// two, and asserted against a response captured from the live
+    /// network rather than one written here.
+    ///
+    /// The version of this test it replaces handed the client a body it
+    /// had composed itself and asked only whether the client could read
+    /// it back. It could. What neither the test nor the client knew was
+    /// that no Horizon endpoint serves that body: the root document has
+    /// no `base_fee_in_stroops` and no `base_reserve_in_stroops`, so
+    /// `networkParameters()` threw on every real call — and the
+    /// treasury's creation path reported that as "could not read the
+    /// funding account", sending a founder to check an account that was
+    /// funded and fine.
+    func test_networkParameters_readsTheLatestLedger() async throws {
+        let parameters = try await client(returningFixture: "horizon-ledgers")
+            .networkParameters()
         XCTAssertEqual(parameters.baseFee.stroops, 100)
         XCTAssertEqual(parameters.baseReserve.decimalString, "0.5")
+        // The address, not just the shape. A stub that answers every
+        // URL cannot tell the two apart, and that is the gap this whole
+        // bug lived in.
+        XCTAssertEqual(StubURLProtocol.requestedPaths, ["/ledgers?order=desc&limit=1"])
+    }
+
+    /// The root document, captured live, does not carry what the old
+    /// implementation read from it — so this cannot quietly come back.
+    func test_theHorizonRoot_carriesNoFeeOrReserve() async throws {
+        let body = try fixture("horizon-root")
+        let json = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: body) as? [String: Any]
+        )
+        XCTAssertFalse(json.keys.contains("base_fee_in_stroops"), "\(json.keys.sorted())")
+        XCTAssertFalse(json.keys.contains("base_reserve_in_stroops"))
+        // And fed to the client, it is an error rather than a guess.
+        await assertThrows(
+            try await client(
+                returning: String(decoding: body, as: UTF8.self)
+            ).networkParameters()
+        )
+    }
+
+    func test_aLedgerPageWithNoLedgers_failsTheRead() async throws {
+        await assertThrows(
+            try await client(returning: #"{"_embedded": {"records": []}}"#)
+                .networkParameters()
+        )
     }
 
     // MARK: - Helpers
 
+    /// A response captured from the live network, by name.
+    private func fixture(_ name: String) throws -> Data {
+        let url = try XCTUnwrap(
+            Bundle.module.url(forResource: name, withExtension: "json", subdirectory: "Fixtures")
+                ?? Bundle.module.url(forResource: name, withExtension: "json")
+        )
+        return try Data(contentsOf: url)
+    }
+
+    private func client(returningFixture name: String) throws -> URLSessionHorizonClient {
+        client(returning: String(decoding: try fixture(name), as: UTF8.self))
+    }
+
     private func client(returning body: String, status: Int = 200) -> URLSessionHorizonClient {
         StubURLProtocol.body = Data(body.utf8)
         StubURLProtocol.status = status
+        StubURLProtocol.requestedPaths = []
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [StubURLProtocol.self]
         return URLSessionHorizonClient(
@@ -289,11 +344,23 @@ final class HorizonWireTests: XCTestCase {
 final class StubURLProtocol: URLProtocol {
     nonisolated(unsafe) static var body = Data()
     nonisolated(unsafe) static var status = 200
+    /// Every path asked for, in order.
+    ///
+    /// The stub answers any URL with one body, which is convenient and
+    /// was also how a test came to pass against an endpoint that does
+    /// not exist: `networkParameters()` asked Horizon's root for fields
+    /// only a ledger carries, and a stub that answers everything
+    /// happily returned the fields the test had written itself. A test
+    /// that pins a shape has to pin the address it came from too.
+    nonisolated(unsafe) static var requestedPaths: [String] = []
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
+        if let url = request.url {
+            Self.requestedPaths.append(url.path + (url.query.map { "?\($0)" } ?? ""))
+        }
         let response = HTTPURLResponse(
             url: request.url!,
             statusCode: Self.status,

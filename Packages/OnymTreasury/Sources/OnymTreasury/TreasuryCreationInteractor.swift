@@ -178,9 +178,22 @@ public struct TreasuryCreationInteractor: Sendable {
         }
 
         let client = horizon(network)
-        guard let parameters = try? await client.networkParameters(),
-              let funderAccount = try? await client.account(funder)
-        else { return .failed("could not read the funding account") }
+        // Two reads, two messages. One guard over both said "could not
+        // read the funding account" whenever *either* failed, so a
+        // network-parameters bug arrived on screen as an accusation
+        // about the founder's account — and a founder looking at a
+        // funded account has no way to act on that. An error that names
+        // the wrong thing costs more than one that says less.
+        guard let parameters = try? await client.networkParameters() else {
+            return .failed("could not read the network's fee and reserve")
+        }
+        guard let funderAccount = try? await client.account(funder) else {
+            return .failed(
+                "could not read the funding account \(funder.abbreviated) on "
+                + "\(network == .testnet ? "testnet" : "mainnet"). A brand-new account "
+                + "does not exist on the ledger until something funds it."
+            )
+        }
 
         let minimum = TreasuryTransactionFactory.minimumBalance(
             signerCount: coSigners.count,
