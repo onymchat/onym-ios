@@ -201,8 +201,12 @@ public struct TreasuryProposalInteractor: Sendable {
         }
 
         // Anything still open has already claimed the next sequence.
+        // Except one this device set aside: a dismissal exists exactly
+        // so a proposal nobody intends to sign stops holding the
+        // sequence hostage until its time bound runs out.
         if let contender = snapshot.proposals.first(where: { stored in
             stored.rejection == nil
+                && stored.dismissedAt == nil
                 && stored.proposal.submittedTxHash == nil
                 && stored.proposal.sequenceNumber > account.sequenceNumber
                 && (stored.proposal.expiresAt.map { $0 > now } ?? true)

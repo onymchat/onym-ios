@@ -291,6 +291,7 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
                 row.encryptedEnvelopeXDR = envelope
                 row.submittedTxHash = proposal.submittedTxHash
                 row.rejectionRaw = stored.rejection?.rawValue
+                row.dismissedAt = stored.dismissedAt
             } else {
                 self.context.insert(PersistedProposal(
                     id: idString,
@@ -300,6 +301,7 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
                     kindRaw: proposal.kind.rawValue,
                     rejectionRaw: stored.rejection?.rawValue,
                     submittedTxHash: proposal.submittedTxHash,
+                    dismissedAt: stored.dismissedAt,
                     encryptedProposerBlsPubkeyHex: try StorageEncryption.encrypt(
                         Data(proposal.proposerBlsPubkeyHex.utf8)
                     ),
@@ -442,7 +444,8 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
         )
         return StoredProposal(
             proposal: proposal,
-            rejection: row.rejectionRaw.flatMap(TreasuryRejection.init(rawValue:))
+            rejection: row.rejectionRaw.flatMap(TreasuryRejection.init(rawValue:)),
+            dismissedAt: row.dismissedAt
         )
     }
 

@@ -140,12 +140,18 @@ public struct TreasuryPayloadReceiver: Sendable {
         await reverifyRefusedProposals(group: group, ownerIdentityID: ownerIdentityID)
     }
 
-    /// Re-run proposals this device turned down for want of a treasury.
+    /// Re-run proposals this device turned down for a reason that was
+    /// never about the bytes.
     ///
-    /// Only `.noTreasury` rows: every other refusal is a fact about the
-    /// bytes that a later anchor cannot change, and re-running them
-    /// would be a way to launder a refusal by sending an anchor
-    /// afterwards.
+    /// `TreasuryRejection.isAboutTheLedger` draws the line, and only
+    /// those rows are re-run: every other refusal is a fact about the
+    /// transaction that no later message can change, and re-running
+    /// them would be a way to launder a refusal by sending an anchor
+    /// afterwards. `implausibleSequence` joins `noTreasury` here
+    /// because it is decided against a cached account read — a device
+    /// whose snapshot had fallen more than the lookahead behind refused
+    /// proposals the network would accept, and without this the refusal
+    /// was permanent.
     private func reverifyRefusedProposals(
         group: ChatGroup,
         ownerIdentityID: IdentityID
@@ -155,18 +161,23 @@ public struct TreasuryPayloadReceiver: Sendable {
             ownerIdentityID: ownerIdentityID
         )
         guard let anchored = snapshot.treasury else { return }
-        for stored in snapshot.proposals where stored.rejection == .noTreasury {
+        // The live read, not the cached one. Re-running a sequence
+        // refusal against the same stale snapshot that produced it
+        // would reach the same answer every time.
+        let currentSequence = await treasury.refresh(
+            groupID: group.id,
+            ownerIdentityID: ownerIdentityID
+        )?.sequenceNumber ?? snapshot.account?.sequenceNumber
+        for stored in snapshot.proposals
+        where stored.rejection?.isAboutTheLedger == true {
             let proposal = stored.proposal
-            guard let profile = group.memberProfiles[proposal.proposerBlsPubkeyHex]
-            else { continue }
-            _ = profile
             let outcome = TreasuryProposalVerifier.verify(
                 envelope: proposal.envelope,
                 network: proposal.network,
                 treasury: anchored,
                 proposerBlsPubkeyHex: proposal.proposerBlsPubkeyHex,
                 group: group,
-                currentSequence: snapshot.account?.sequenceNumber
+                currentSequence: currentSequence
             )
             switch outcome {
             case .accepted(let kind):
@@ -239,13 +250,32 @@ public struct TreasuryPayloadReceiver: Sendable {
             return
         }
 
+        // Read the account before judging the sequence, when there is
+        // one to read. `snapshot.account` is a cache that only `refresh`
+        // fills — anchor, submit, an explicit pull on the treasury
+        // screen — and nothing on the receive path filled it. A device
+        // that had not looked at the ledger in a while compared a
+        // genuine proposal against a sequence long since passed and
+        // refused it for being implausible. The refusal survives a
+        // failed read, in which case `currentSequence` is whatever was
+        // cached and the guard stays as forgiving as it was.
+        let currentSequence: Int64?
+        if snapshot.treasury != nil {
+            currentSequence = await treasury.refresh(
+                groupID: group.id,
+                ownerIdentityID: ownerIdentityID
+            )?.sequenceNumber ?? snapshot.account?.sequenceNumber
+        } else {
+            currentSequence = snapshot.account?.sequenceNumber
+        }
+
         let outcome = TreasuryProposalVerifier.verify(
             envelope: envelope,
             network: network,
             treasury: snapshot.treasury,
             proposerBlsPubkeyHex: payload.proposerBlsPubkeyHex,
             group: group,
-            currentSequence: snapshot.account?.sequenceNumber
+            currentSequence: currentSequence
         )
 
         let kind: TreasuryProposalKind

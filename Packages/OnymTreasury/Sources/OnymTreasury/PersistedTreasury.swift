@@ -132,6 +132,11 @@ final class PersistedProposal {
     var rejectionRaw: String?
     /// Non-nil once the network applied it.
     var submittedTxHash: String?
+    /// Set when this device put the proposal aside. Unencrypted and
+    /// nullable: it is a timestamp about a row that already exists, it
+    /// names nobody, and a new optional column is the one schema change
+    /// SwiftData migrates without a plan.
+    var dismissedAt: Date?
 
     var encryptedProposerBlsPubkeyHex: Data
     var encryptedTreasuryAccountID: Data
@@ -151,6 +156,7 @@ final class PersistedProposal {
         kindRaw: String,
         rejectionRaw: String?,
         submittedTxHash: String?,
+        dismissedAt: Date? = nil,
         encryptedProposerBlsPubkeyHex: Data,
         encryptedTreasuryAccountID: Data,
         encryptedNetwork: Data,
@@ -163,6 +169,7 @@ final class PersistedProposal {
         self.kindRaw = kindRaw
         self.rejectionRaw = rejectionRaw
         self.submittedTxHash = submittedTxHash
+        self.dismissedAt = dismissedAt
         self.encryptedProposerBlsPubkeyHex = encryptedProposerBlsPubkeyHex
         self.encryptedTreasuryAccountID = encryptedTreasuryAccountID
         self.encryptedNetwork = encryptedNetwork

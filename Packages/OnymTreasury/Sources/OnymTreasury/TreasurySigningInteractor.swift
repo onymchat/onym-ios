@@ -192,12 +192,9 @@ public struct TreasurySigningInteractor: Sendable {
         guard let account = await treasury.refresh(groupID: proposal.groupID) else {
             return .failed("could not read the treasury account")
         }
-        let snapshot = await treasury.snapshot(groupID: proposal.groupID)
-
         switch TreasuryProposalVerifier.standing(
             of: proposal,
             account: account,
-            declaredSigners: snapshot.declarations.map(\.account),
             now: now
         ) {
         case .ready:
@@ -212,6 +209,12 @@ public struct TreasurySigningInteractor: Sendable {
             return .submitted(txHash: hash)
         case .rejected(let reason):
             return .failed("refused: \(reason.rawValue)")
+        case .dismissed:
+            // Reachable: the proposal can be set aside while a submit
+            // is in flight. Submitting something this device has
+            // explicitly put down would be the wrong way to resolve
+            // that race.
+            return .failed("set aside on this device")
         }
 
         do {

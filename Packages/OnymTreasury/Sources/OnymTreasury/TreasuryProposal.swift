@@ -134,11 +134,22 @@ public enum TreasuryProposalStanding: Equatable, Sendable {
     /// looking at it, and the proposal is kept rather than dropped so
     /// that a refusal is visible instead of silent.
     case rejected(reason: TreasuryRejection)
+    /// Set aside on this device.
+    ///
+    /// Local and reversible: it changes nothing for anyone else and
+    /// signs nothing. It exists because an open proposal holds the
+    /// treasury's next sequence number, so a single one nobody intends
+    /// to sign blocks every other proposal until its time bound runs
+    /// out — up to a week. Everything else that can freeze a treasury
+    /// this way is refused at the boundary; this is the case where the
+    /// proposal is perfectly valid and the group simply changed its
+    /// mind, and the answer to that cannot be "wait".
+    case dismissed
 
     public var isActionable: Bool {
         switch self {
         case .collecting, .ready: true
-        case .submitted, .superseded, .expired, .rejected: false
+        case .submitted, .superseded, .expired, .rejected, .dismissed: false
         }
     }
 }
@@ -183,4 +194,28 @@ public enum TreasuryRejection: String, Codable, Equatable, Sendable {
     /// Claims a sequence number far beyond the treasury's next, which
     /// would block every later proposal until it expired.
     case implausibleSequence
+
+    /// Whether this refusal was decided against something outside the
+    /// envelope — the ledger — rather than against the bytes.
+    ///
+    /// The distinction decides what may be re-run. Almost every reason
+    /// here is a permanent fact about a transaction: an operation
+    /// outside the allowlist is outside it forever, and re-checking
+    /// would be a way to launder a refusal by sending an anchor
+    /// afterwards. These two are not. `noTreasury` says this device had
+    /// nothing to compare against; `implausibleSequence` says the
+    /// account's sequence, as this device last read it, was too far
+    /// from the one claimed. Both change when the device learns more,
+    /// and leaving them permanent means a proposal the network would
+    /// accept sits refused for good because a snapshot was stale.
+    public var isAboutTheLedger: Bool {
+        switch self {
+        case .noTreasury, .implausibleSequence:
+            true
+        case .notThisTreasury, .wrongNetwork, .unsupportedOperation,
+             .foreignOperationSource, .proposerNotAMember, .malformed,
+             .excessiveFee, .noExpiry, .expiresTooLate, .tooManySignatures:
+            false
+        }
+    }
 }

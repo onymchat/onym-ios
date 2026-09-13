@@ -301,6 +301,12 @@ public struct TreasuryCreationInteractor: Sendable {
     /// the founder's word for it would mean anchoring the group to an
     /// account that might still be under one person's control — which
     /// is the single thing this design exists to rule out.
+    /// How far back `adopt` looks for the creating transaction. A
+    /// treasury being adopted has just been created, so its history is
+    /// short; the depth is here to bound the read rather than to cover
+    /// an account with years behind it.
+    static let creationHistoryDepth = 200
+
     public func adopt(
         groupIDHex: String,
         treasuryAccountID: String,
@@ -336,6 +342,42 @@ public struct TreasuryCreationInteractor: Sendable {
         let onChainSigners = Set(onChain.signers.filter { $0.weight > 0 }.map(\.key))
         guard onChainSigners == Set(expectedCoSigners) else {
             return .failed("that account's signers are not the ones this group chose")
+        }
+
+        // The thresholds this account actually carries have to be
+        // reachable by the signers it actually has.
+        //
+        // `create` builds both halves itself and checks them; `adopt`
+        // takes an account a wallet configured, and nothing so far
+        // looked at its thresholds at all. An account whose `high`
+        // exceeds the total weight of its signer set can never change
+        // its own signers again — no quorum can reach the threshold
+        // that authorises it — so anchoring one would hand the group a
+        // treasury it can spend from until the day it needs to replace
+        // a lost key, and then never again.
+        let totalWeight = onChain.signers
+            .filter { $0.key != account }
+            .reduce(UInt64(0)) { $0 + UInt64($1.weight) }
+        let thresholds = onChain.thresholds
+        guard thresholds.high >= thresholds.medium,
+              thresholds.medium > 0,
+              UInt64(thresholds.high) <= totalWeight
+        else {
+            return .failed("that account's thresholds cannot be met by its signers")
+        }
+
+        // The creation hash is displayed as this treasury's origin and
+        // links out to an explorer, and until now it was whatever the
+        // caller passed. A hash that names no transaction — or names
+        // someone else's — is a provenance claim this app would be
+        // making on no evidence, which is the thing the rest of the
+        // treasury design refuses to do.
+        let history = (try? await horizon(network).transactions(
+            for: account,
+            limit: Self.creationHistoryDepth
+        )) ?? []
+        guard history.contains(where: { $0.hash == creationTxHash }) else {
+            return .failed("that transaction is not in the account's history")
         }
 
         let created = Treasury(

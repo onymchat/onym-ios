@@ -52,10 +52,19 @@ public protocol TreasuryStore: Sendable {
 public struct StoredProposal: Equatable, Sendable {
     public var proposal: TreasuryProposal
     public var rejection: TreasuryRejection?
+    /// When this device set the proposal aside. Local to the device and
+    /// never broadcast — dismissing is not a vote, and telling the
+    /// group would make it look like one.
+    public var dismissedAt: Date?
 
-    public init(proposal: TreasuryProposal, rejection: TreasuryRejection? = nil) {
+    public init(
+        proposal: TreasuryProposal,
+        rejection: TreasuryRejection? = nil,
+        dismissedAt: Date? = nil
+    ) {
         self.proposal = proposal
         self.rejection = rejection
+        self.dismissedAt = dismissedAt
     }
 }
 

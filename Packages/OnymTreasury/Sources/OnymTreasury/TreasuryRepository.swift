@@ -46,11 +46,16 @@ public struct TreasurySnapshot: Equatable, Sendable {
     public func standing(of stored: StoredProposal, now: Date) -> TreasuryProposalStanding? {
         if let rejection = stored.rejection { return .rejected(reason: rejection) }
         if let hash = stored.proposal.submittedTxHash { return .submitted(txHash: hash) }
+        // After `submitted`, deliberately: a proposal that was set aside
+        // and then submitted by someone else did apply, and showing it
+        // as merely ignored would be false. Before everything else,
+        // because a dismissal is this device's answer and nothing about
+        // weight or expiry changes it.
+        if stored.dismissedAt != nil { return .dismissed }
         guard let account else { return nil }
         return TreasuryProposalVerifier.standing(
             of: stored.proposal,
             account: account,
-            declaredSigners: declarations.map(\.account),
             now: now
         )
     }
@@ -251,6 +256,33 @@ public actor TreasuryRepository {
         )
         await publish(groupID: stored.proposal.groupID)
         return true
+    }
+
+    /// Set a proposal aside on this device.
+    ///
+    /// Local only — nothing is sent, and the proposal stays exactly as
+    /// valid as it was. What changes is that it stops contending for
+    /// the treasury's next sequence number, so the group can propose
+    /// something else without waiting out a time bound they have
+    /// already decided against. Reversible by `restore`, because a
+    /// one-way door here would be its own kind of block.
+    public func dismiss(proposalID: UUID, now: Date = Date()) async {
+        await setDismissal(proposalID: proposalID, to: now)
+    }
+
+    /// Undo a dismissal, putting the proposal back in contention.
+    public func restore(proposalID: UUID) async {
+        await setDismissal(proposalID: proposalID, to: nil)
+    }
+
+    private func setDismissal(proposalID: UUID, to date: Date?) async {
+        guard var stored = await proposal(id: proposalID) else { return }
+        // A proposal that already applied is history, not a decision
+        // anyone still has in front of them.
+        guard stored.proposal.submittedTxHash == nil else { return }
+        stored.dismissedAt = date
+        await store.upsert(stored)
+        await publish(groupID: stored.proposal.groupID)
     }
 
     public func markSubmitted(proposalID: UUID, txHash: String) async {

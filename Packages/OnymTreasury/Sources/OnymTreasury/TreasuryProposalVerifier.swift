@@ -150,6 +150,13 @@ public enum TreasuryProposalVerifier {
         // read is available; without one the caller cannot know the
         // current sequence, and refusing on that basis would drop
         // genuine proposals whenever the network is unreachable.
+        //
+        // Unlike every other refusal here, this one is a fact about a
+        // *ledger read*, not about the bytes: the same envelope is
+        // plausible or not depending on where the account's sequence
+        // has got to. That makes it the one rejection that must stay
+        // re-verifiable — see `TreasuryRejection.isAboutTheLedger` and
+        // the re-verification it gates.
         if let currentSequence {
             let claimed = envelope.transaction.sequenceNumber
             guard claimed > currentSequence,
@@ -242,10 +249,19 @@ public enum TreasuryProposalVerifier {
     /// `account` must be a live read. Passing a cached snapshot would
     /// make `.ready` a claim about a signer set that may have changed,
     /// and `.ready` is the answer that causes a submission.
+    /// Candidates come from `account.signers` — the live set the chain
+    /// will actually weigh — and not from this device's declarations.
+    ///
+    /// Declaration broadcast is best-effort by design, so the two sets
+    /// differ exactly when a device missed a message. Counting over
+    /// declarations meant such a device reported `.collecting` and
+    /// refused to submit a proposal the network would have accepted,
+    /// with no way for the user to tell why. Declarations still say
+    /// *who* a signer is; they were never the authority on *whether*
+    /// one counts.
     public static func standing(
         of proposal: TreasuryProposal,
         account: HorizonAccount,
-        declaredSigners: [StellarAccountID],
         now: Date
     ) -> TreasuryProposalStanding {
         if let hash = proposal.submittedTxHash {
@@ -261,7 +277,7 @@ public enum TreasuryProposalVerifier {
         if let expiresAt = proposal.expiresAt, expiresAt <= now {
             return .expired
         }
-        let signed = proposal.signers(among: declaredSigners)
+        let signed = proposal.signers(among: account.signers.map(\.key))
         let weight = account.weight(of: signed)
         let required = proposal.kind.requiredWeight(from: account.thresholds)
         return weight >= required
