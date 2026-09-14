@@ -11,8 +11,13 @@ import OnymStellar
 /// could show people is the thing being redesigned away.
 public struct TreasuryCoSigner: Equatable, Sendable, Identifiable {
     public let account: StellarAccountID
-    /// Stellar's cap is 255. Zero is not a co-signer — it is how the
-    /// protocol spells removal — so it is refused at construction.
+    /// Stellar's cap, and the only ceiling this type imposes. It is
+    /// not the enumeration cap: raising how many signers get a written
+    /// sentence must not quietly raise how much one of them can count.
+    public static let maximumWeight: UInt32 = 255
+
+    /// How far this signature carries. Never zero — zero is not a
+    /// light co-signer, it is how Stellar spells removal.
     public let weight: UInt32
     /// Roster key, for putting a face and a name on the row. Nil for a
     /// signer the ledger reports that this group cannot name.
@@ -20,13 +25,30 @@ public struct TreasuryCoSigner: Equatable, Sendable, Identifiable {
 
     public var id: String { account.accountID }
 
-    public init(
+    /// A co-signer of weight one, which is the default and was the
+    /// only thing the design before this could express.
+    public init(account: StellarAccountID, memberBlsPubkeyHex: String? = nil) {
+        self.account = account
+        self.weight = 1
+        self.memberBlsPubkeyHex = memberBlsPubkeyHex
+    }
+
+    /// Refused rather than clamped, for weights outside 1...255.
+    ///
+    /// The doc used to claim zero was refused while the code quietly
+    /// turned it into one. That is the difference between a stale or
+    /// hostile persisted row failing loudly and it silently becoming a
+    /// signer — and it is why "weight 0 until confirmed", if it is ever
+    /// chosen, has to be a state this type names rather than a number
+    /// it swallows.
+    public init?(
         account: StellarAccountID,
-        weight: UInt32 = 1,
+        weight: UInt32,
         memberBlsPubkeyHex: String? = nil
     ) {
+        guard weight >= 1, weight <= Self.maximumWeight else { return nil }
         self.account = account
-        self.weight = min(max(weight, 1), 255)
+        self.weight = weight
         self.memberBlsPubkeyHex = memberBlsPubkeyHex
     }
 }
@@ -76,11 +98,31 @@ public struct TreasuryQuorum: Equatable, Sendable {
             && UInt64(thresholds.high) <= UInt64(totalWeight)
     }
 
-    /// Whether every co-signer has to sign for anything to happen — the
-    /// state where one lost phone freezes the account permanently,
-    /// because a key cannot be removed without its own signature.
+    /// Whether every co-signer has to sign for anything to be spent.
+    ///
+    /// Arithmetic, not equality. The old test was `medium >= total`,
+    /// which misses unanimity whenever the weights are uneven: two
+    /// signers at 2 with the bar at 3 need both signatures, and
+    /// `3 >= 4` is false. What makes it unanimous is that dropping the
+    /// *lightest* signer already puts the rest under the bar.
     public var requiresEveryone: Bool {
-        thresholds.medium >= totalWeight && !coSigners.isEmpty
+        guard !coSigners.isEmpty else { return false }
+        let lightest = coSigners.map(\.weight).min() ?? 0
+        return totalWeight - lightest < thresholds.medium
+    }
+
+    /// The co-signers whose loss would freeze the treasury permanently.
+    ///
+    /// This is the fact the warning is actually about, and it is
+    /// governed by `high`, not `medium`: a key is removed by changing
+    /// the signer set, which the ledger charges at the high threshold —
+    /// and it cannot be removed without its own signature. So the
+    /// question is whether the *others* can still reach `high` without
+    /// them. Three signers at 1 with high 3 is already the
+    /// frozen-forever case, and the old check said nothing about it
+    /// because it only compared `medium`.
+    public var signersWhoseLossWouldFreezeIt: [TreasuryCoSigner] {
+        coSigners.filter { totalWeight - $0.weight < thresholds.high }
     }
 
     /// The minimal sets of co-signers that reach `threshold`.
@@ -88,6 +130,13 @@ public struct TreasuryQuorum: Equatable, Sendable {
     /// Minimal, meaning no member of a returned set can be dropped and
     /// still clear the bar. Listing every superset would be true and
     /// useless: "you and Aino" already implies "you, Aino and Mira".
+    /// Whether this signer set is small enough to be written out as a
+    /// sentence. Past the ceiling the screens show the numbers — which
+    /// is a different thing from saying nobody can reach the bar.
+    public var isEnumerable: Bool {
+        !coSigners.isEmpty && coSigners.count <= Self.maximumEnumerated
+    }
+
     public func minimalCombinations(reaching threshold: UInt32) -> [[TreasuryCoSigner]] {
         guard !coSigners.isEmpty, threshold > 0,
               coSigners.count <= Self.maximumEnumerated,

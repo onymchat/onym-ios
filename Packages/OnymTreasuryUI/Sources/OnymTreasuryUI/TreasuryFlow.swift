@@ -270,7 +270,6 @@ public final class TreasuryFlow {
             )
         }
         await reconcileStrandedFunding(snapshot)
-        await publishOnymAccountIfUndeclared()
 
         treasury = snapshot.treasury
         // Scoped to the owning identity. `currentGroups()` is every
@@ -286,6 +285,11 @@ public final class TreasuryFlow {
                   $0.id == groupID && $0.ownerIdentityID == owner
               })
         else { return }
+
+        // After the guard, deliberately. Publishing ran before it, so a
+        // group this identity does not own — one that fails the check
+        // above — still had an address broadcast into it.
+        await publishOnymAccountIfUndeclared(snapshot, me: me)
 
         groupName = group.name
         isAdmin = group.isAdmin(blsPublicKey: me.blsPublicKey)
@@ -356,8 +360,27 @@ public final class TreasuryFlow {
     /// one who wants off a treasury that already exists needs the
     /// group's agreement, because by then Stellar is holding the
     /// answer, not this app.
-    private func publishOnymAccountIfUndeclared() async {
-        guard let account = onymDerivedAccount, mine == nil else { return }
+    private func publishOnymAccountIfUndeclared(
+        _ snapshot: TreasurySnapshot,
+        me: Identity
+    ) async {
+        // Against the snapshot, not against `mine`.
+        //
+        // `mine` is assigned further down this same function, so a
+        // guard on it was reading the *previous* snapshot: every
+        // snapshot arriving before a declaration round-tripped
+        // re-broadcast it, and a member who had just chosen an external
+        // wallet could have the Onym account published over the top of
+        // it. The declarations in the snapshot are the answer to "has
+        // this member already chosen", and they are in hand here.
+        let myKey = me.blsPublicKey.hexString
+        guard snapshot.declarations.first(where: {
+            $0.memberBlsPubkeyHex.lowercased() == myKey.lowercased()
+        }) == nil else { return }
+        // And not into a treasury that already exists: its signer set
+        // is fixed on the ledger, so a new declaration adds nobody and
+        // publishes an address for nothing.
+        guard snapshot.treasury == nil, let account = onymDerivedAccount else { return }
         _ = await broadcaster.declareSigner(
             groupIDHex: groupID,
             account: account,
@@ -467,11 +490,25 @@ public final class TreasuryFlow {
         )
         return accounts.map { account in
             let member = members.first { $0.account == account }
-            return TreasuryCoSigner(
-                account: account,
-                weight: member.flatMap { weights[$0.blsPubkeyHex] } ?? 1,
-                memberBlsPubkeyHex: member?.blsPubkeyHex
-            )
+            let chosen = member.flatMap { weights[$0.blsPubkeyHex] }
+            // A weight the domain refuses falls back to one rather than
+            // dropping the person: the co-signer set is what the
+            // founder ticked, and a signer vanishing because a stepper
+            // produced an out-of-range number would be a worse lie than
+            // a signer counted once.
+            guard let chosen,
+                  let weighted = TreasuryCoSigner(
+                      account: account,
+                      weight: chosen,
+                      memberBlsPubkeyHex: member?.blsPubkeyHex
+                  )
+            else {
+                return TreasuryCoSigner(
+                    account: account,
+                    memberBlsPubkeyHex: member?.blsPubkeyHex
+                )
+            }
+            return weighted
         }
     }
 
@@ -492,6 +529,21 @@ public final class TreasuryFlow {
         )
     }
 
+    /// Roster keys to names, so a quorum sentence can say "Aino"
+    /// rather than "GBOIQE…". This is what `TreasuryCoSigner`'s roster
+    /// key is carried for.
+    public var memberNames: [String: String] {
+        Dictionary(
+            members.map { ($0.blsPubkeyHex, $0.alias) },
+            uniquingKeysWith: { first, _ in first }
+        )
+    }
+
+    /// This device's own roster key, so the sentence can say "you".
+    public var myBlsPubkeyHex: String? {
+        members.first { $0.isSelf }?.blsPubkeyHex
+    }
+
     /// What one person's signature counts for. One is the default and
     /// the only value the old design could express.
     public func weight(of member: TreasuryMemberRow) -> UInt32 {
@@ -499,7 +551,7 @@ public final class TreasuryFlow {
     }
 
     public func setWeight(_ weight: UInt32, for member: TreasuryMemberRow) {
-        weights[member.blsPubkeyHex] = min(max(weight, 1), 255)
+        weights[member.blsPubkeyHex] = min(max(weight, 1), TreasuryCoSigner.maximumWeight)
         clampThresholdsToWeight()
     }
 
@@ -529,7 +581,7 @@ public final class TreasuryFlow {
         } else {
             selectedCoSigners.insert(member.blsPubkeyHex)
         }
-        clampThresholds()
+        clampThresholdsToWeight()
     }
 
     /// Keeps the thresholds inside what the resolved signer set can
@@ -537,19 +589,21 @@ public final class TreasuryFlow {
     /// couple of taps on screen and both are permanent — an account
     /// whose threshold exceeds its total weight can never act again,
     /// and one whose `high` is below its `medium` can be seized by any
-    /// single co-signer. See `TreasurySignerSelection.clamped`.
-    private func clampThresholds() {
-        let clamped = TreasurySignerSelection.clamped(
-            TreasuryThresholds(low: 1, medium: mediumThreshold, high: highThreshold),
-            signerCount: resolvedCoSigners.count
-        )
-        mediumThreshold = clamped.medium
-        highThreshold = clamped.high
-    }
+     /// One clamp, and it counts weight.
+    ///
+    /// There were two: this one, against the headcount, and a
+    /// weight-aware twin. `create()` used the twin; the steppers and
+    /// the co-signer toggles — every control a founder actually touches
+    /// — called this one, so each tap snapped the bar back to the
+    /// number of people. Weights above 1 were settable and then
+    /// immediately undone: "you and Aino together", two signers at 2
+    /// with the bar at 4, could not be expressed at all.
+    ///
+    /// The twin is `clampThresholdsToWeight`, and it is now the only
+    /// one. Two functions with one job is how the first version got
+    /// converted and the second did not.
+    public func thresholdsChanged() { clampThresholdsToWeight() }
 
-    /// Called by the steppers, which move one value at a time and can
-    /// therefore push `high` below `medium` on their own.
-    public func thresholdsChanged() { clampThresholds() }
 
     public func create() async {
         // The founder funds from the account they declared. Not from

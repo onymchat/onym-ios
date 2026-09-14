@@ -75,8 +75,16 @@ public struct TreasuryHistoryEvent: Equatable, Sendable, Identifiable {
             case .createAccount(let destination, _) where destination == treasury:
                 kind = .created
             case .payment(let destination, let asset, let amount):
+                // The operation's own source when it has one, and the
+                // transaction's only as the fallback the protocol
+                // defines. They differ on any envelope where an
+                // operation names its own source — which is exactly the
+                // shape a treasury creation takes — and attributing the
+                // payment to the wrong account puts somebody else's
+                // name on money they did not send.
+                let payer = operation.sourceAccount ?? transaction.sourceAccount
                 kind = destination == treasury
-                    ? .received(amount: amount, asset: asset, from: transaction.sourceAccount)
+                    ? .received(amount: amount, asset: asset, from: payer)
                     : .sent(amount: amount, asset: asset, to: destination)
             case .changeTrust(let asset, let limit):
                 kind = limit.stroops == 0 ? .stoppedHolding(asset) : .startedHolding(asset)

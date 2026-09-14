@@ -1639,6 +1639,23 @@
         }
       }
     },
+    "Any signatures adding up to %lld of %lld.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Any signatures adding up to %lld of %lld."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Любые подписи, дающие в сумме %lld из %lld."
+          }
+        }
+      }
+    },
     "Anyone can issue a token called anything. The issuer account is what tells a real one from a copy — get it from the issuer themselves, not from whoever asked you to add it.": {
       "extractionState": "manual",
       "localizations": {
@@ -3647,23 +3664,6 @@
         }
       }
     },
-    "Everyone, every time. One lost phone freezes this account forever — a key cannot be removed without its own signature, so the weight left behind can never clear the bar again.": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Everyone, every time. One lost phone freezes this account forever — a key cannot be removed without its own signature, so the weight left behind can never clear the bar again."
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Все и каждый раз. Один потерянный телефон заморозит этот счёт навсегда: ключ нельзя убрать без его же подписи, и оставшегося веса уже никогда не хватит."
-          }
-        }
-      }
-    },
     "Everything is encrypted": {
       "localizations": {
         "en": {
@@ -4371,6 +4371,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ключ личности создан"
+          }
+        }
+      }
+    },
+    "If any one of these phones is lost, this account freezes forever — a key cannot be removed without its own signature, so the weight left behind can never clear the bar for changing who can spend.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "If any one of these phones is lost, this account freezes forever — a key cannot be removed without its own signature, so the weight left behind can never clear the bar for changing who can spend."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Если потерять любой из этих телефонов, счёт замрёт навсегда: ключ нельзя убрать без его же подписи, и оставшегося веса уже не хватит, чтобы изменить круг тех, кто может тратить."
           }
         }
       }
@@ -12072,6 +12089,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "вес %lld"
+          }
+        }
+      }
+    },
+    "you": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "you"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "вы"
           }
         }
       }

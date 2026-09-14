@@ -18,7 +18,7 @@ final class TreasuryQuorumTests: XCTestCase {
         high: UInt32? = nil
     ) -> TreasuryQuorum {
         TreasuryQuorum(
-            coSigners: weights.enumerated().map {
+            coSigners: weights.enumerated().compactMap {
                 TreasuryCoSigner(account: account(UInt8($0.offset + 40)), weight: $0.element)
             },
             thresholds: TreasuryThresholds(low: 1, medium: medium, high: high ?? medium)
@@ -89,17 +89,60 @@ final class TreasuryQuorumTests: XCTestCase {
         XCTAssertFalse(dominant.canBeExcluded(dominant.coSigners[0]))
     }
 
-    /// Requiring everyone is the setting that freezes the account the
-    /// day one phone is lost, because a key cannot be removed without
-    /// its own signature.
-    func test_requiringEveryone_isDetected() {
+    /// Unanimity is arithmetic, not equality.
+    ///
+    /// The first version tested `medium >= totalWeight`, which misses
+    /// every uneven set: two signers at 2 with the bar at 3 need both
+    /// signatures, and 3 >= 4 is false.
+    func test_requiringEveryone_isArithmeticNotEquality() {
         XCTAssertTrue(quorum(weights: [1, 1, 1], medium: 3).requiresEveryone)
         XCTAssertFalse(quorum(weights: [1, 1, 1], medium: 2).requiresEveryone)
+        XCTAssertTrue(
+            quorum(weights: [2, 2], medium: 3).requiresEveryone,
+            "both signatures are needed at 3 of 4, and equality never sees it"
+        )
+        XCTAssertFalse(quorum(weights: [3, 1], medium: 3).requiresEveryone)
+    }
+
+    /// The freeze is governed by the bar for *changing* the signer set,
+    /// because that is what removing a lost key costs — and a key
+    /// cannot be removed without its own signature.
+    func test_theFreezeWarning_followsTheBarForChangingControl() {
+        // Three at 1, spending needs 2, changing needs 3. Perfectly
+        // ordinary to spend from, and already frozen: losing anyone
+        // leaves 2, which can never reach 3 to remove them.
+        let trap = quorum(weights: [1, 1, 1], medium: 2, high: 3)
+        XCTAssertFalse(trap.requiresEveryone, "spending does not need everyone")
+        XCTAssertEqual(
+            trap.signersWhoseLossWouldFreezeIt.count,
+            3,
+            "losing any one of them makes removal impossible"
+        )
+
+        let safe = quorum(weights: [1, 1, 1, 1], medium: 2, high: 2)
+        XCTAssertTrue(safe.signersWhoseLossWouldFreezeIt.isEmpty)
+    }
+
+    /// Not enumerated is not unreachable. A nine-signer treasury with a
+    /// reachable bar must not be described as impossible.
+    func test_aLargeSignerSet_isStillReachable() {
+        let many = quorum(weights: Array(repeating: 1, count: 9), medium: 5)
+        XCTAssertTrue(many.isReachable)
+        XCTAssertFalse(many.isEnumerable)
+        XCTAssertTrue(many.minimalCombinations(reaching: 5).isEmpty)
+    }
+
+    /// Zero is how Stellar spells removal, not a light co-signer.
+    func test_aWeightOutsideTheRange_isRefusedRatherThanClamped() {
+        XCTAssertNil(TreasuryCoSigner(account: account(9), weight: 0))
+        XCTAssertNil(TreasuryCoSigner(account: account(9), weight: 256))
+        XCTAssertEqual(TreasuryCoSigner(account: account(9), weight: 255)?.weight, 255)
+        XCTAssertEqual(TreasuryCoSigner(account: account(9)).weight, 1)
     }
 
     /// Beyond the enumeration ceiling it answers with numbers rather
     /// than a sentence nobody could read — and must not hang doing it.
-    func test_aLargeSignerSet_stopsEnumerating() {
+    func test_aVeryLargeSignerSet_stopsEnumerating() {
         let many = quorum(weights: Array(repeating: 1, count: 15), medium: 8)
         XCTAssertTrue(many.isReachable)
         XCTAssertTrue(many.minimalCombinations(reaching: 8).isEmpty)

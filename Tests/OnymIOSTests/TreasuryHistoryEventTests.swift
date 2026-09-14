@@ -14,7 +14,7 @@ final class TreasuryHistoryEventTests: XCTestCase {
     private let treasury = TreasuryTestKeys.account(1)
     private let other = TreasuryTestKeys.account(2)
 
-    private func row(
+    func row(
         _ operations: [StellarOperation],
         source: StellarAccountID? = nil,
         successful: Bool = true
@@ -124,5 +124,33 @@ final class TreasuryHistoryEventTests: XCTestCase {
         XCTAssertEqual(event.kind, .other)
         XCTAssertEqual(event.hash, "dead")
         XCTAssertFalse(event.successful)
+    }
+}
+
+extension TreasuryHistoryEventTests {
+    /// A payment whose operation names its own source is attributed to
+    /// that account, not to whoever paid the transaction's fee. They
+    /// differ on every envelope a treasury creation produces, and
+    /// getting it backwards puts someone else's name on the money.
+    func test_anOperationWithItsOwnSource_isAttributedToThatAccount() throws {
+        let payer = TreasuryTestKeys.account(7)
+        let row = try row(
+            [
+                StellarOperation(body: .createAccount(
+                    destination: TreasuryTestKeys.account(8),
+                    startingBalance: StellarAmount(stroops: 10)
+                )),
+                StellarOperation(sourceAccount: payer, body: .payment(
+                    destination: TreasuryTestKeys.account(1),
+                    asset: .native,
+                    amount: StellarAmount(stroops: 500)
+                )),
+            ],
+            source: TreasuryTestKeys.account(2)
+        )
+        guard case .received(_, _, let from) =
+            TreasuryHistoryEvent(row, treasury: TreasuryTestKeys.account(1)).kind
+        else { return XCTFail("expected received") }
+        XCTAssertEqual(from, payer, "the operation's source is who sent it")
     }
 }

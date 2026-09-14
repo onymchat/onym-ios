@@ -368,11 +368,20 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
                 ),
                 network: try self.network(row.encryptedNetwork),
                 creationTxHash: try self.string(row.encryptedCreationTxHash),
+                // A weight this type refuses is a row that cannot be
+                // read back honestly — the alternative is quietly
+                // turning a 0 into a signer of weight 1, which is how a
+                // stale or tampered row becomes authority nobody
+                // granted.
                 coSigners: try configuration.coSigners.map { accountID in
-                    TreasuryCoSigner(
-                        account: try StellarAccountID(accountID: accountID),
-                        weight: configuration.weights?[accountID] ?? 1
-                    )
+                    let account = try StellarAccountID(accountID: accountID)
+                    guard let weight = configuration.weights?[accountID] else {
+                        return TreasuryCoSigner(account: account)
+                    }
+                    guard let coSigner = TreasuryCoSigner(account: account, weight: weight) else {
+                        throw TreasuryStoreError.unreadableWeight(accountID)
+                    }
+                    return coSigner
                 },
                 thresholds: TreasuryThresholds(
                     low: configuration.low,
@@ -649,4 +658,8 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
 
 enum TreasuryStoreError: Error, Equatable {
     case undecodable(String)
+    /// A stored signer weight outside 1...255. Refused rather than
+    /// clamped: a zero silently becoming one is authority nobody
+    /// granted.
+    case unreadableWeight(String)
 }

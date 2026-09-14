@@ -240,7 +240,10 @@ public struct CreateTreasuryView: View {
                     get: { flow.weight(of: member) },
                     set: { flow.setWeight($0, for: member) }
                 ),
-                in: 1...UInt32(TreasuryQuorum.maximumEnumerated)
+                // The protocol's ceiling, not the enumeration cap —
+                // those are unrelated numbers that happened to be
+                // usable in the same place.
+                in: 1...TreasuryCoSigner.maximumWeight
             ) { EmptyView() }
                 .labelsHidden()
                 .accessibilityIdentifier("treasury.create.weight.\(member.blsPubkeyHex)")
@@ -285,7 +288,11 @@ public struct CreateTreasuryView: View {
                 SectionLabel("RIGHT NOW, SPENDING TAKES")
                 Card {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(Self.spendingSentence(quorum))
+                        Text(Self.spendingSentence(
+                            quorum,
+                            names: flow.memberNames,
+                            me: flow.myBlsPubkeyHex
+                        ))
                             .font(OnymType.font(size: 16.5, weight: .medium))
                             .foregroundStyle(OnymTokens.text)
                             .fixedSize(horizontal: false, vertical: true)
@@ -297,8 +304,13 @@ public struct CreateTreasuryView: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
                 }
-                if quorum.requiresEveryone {
-                    Footnote("Everyone, every time. One lost phone freezes this account forever \u{2014} a key cannot be removed without its own signature, so the weight left behind can never clear the bar again.")
+                // Governed by the bar for *changing* the signer set,
+                // which is what removing a lost key costs — not by the
+                // spending bar, which is what the first version
+                // checked and which says nothing about three signers
+                // at 1 with high 3.
+                if !quorum.signersWhoseLossWouldFreezeIt.isEmpty {
+                    Footnote("If any one of these phones is lost, this account freezes forever \u{2014} a key cannot be removed without its own signature, so the weight left behind can never clear the bar for changing who can spend.")
                 }
             }
             .padding(.top, 8)
@@ -308,15 +320,33 @@ public struct CreateTreasuryView: View {
     /// "You and Aino together — or either of you plus both Mira and
     /// Sam." Built from the minimal combinations, because a list of
     /// every set that clears the bar is true and unreadable.
-    static func spendingSentence(_ quorum: TreasuryQuorum) -> String {
-        let combinations = quorum.minimalCombinations(reaching: quorum.thresholds.medium)
-        guard !combinations.isEmpty else {
+    ///
+    /// `names` is why `TreasuryCoSigner` carries a roster key at all.
+    /// The first version of this rendered `account.abbreviated` and
+    /// produced "GBOIQE… and GCXRT…", which is the sentence the
+    /// redesign exists to replace, written in a nicer font.
+    static func spendingSentence(
+        _ quorum: TreasuryQuorum,
+        names: [String: String],
+        me: String?
+    ) -> String {
+        // Unreachable and not-enumerated are different facts, and the
+        // first version reported both as "nobody can reach this bar" —
+        // a false statement about a perfectly good nine-signer
+        // treasury.
+        guard quorum.isReachable else {
             return String(
                 localized: "Nobody can reach this bar \u{2014} lower it or give someone more weight."
             )
         }
+        let combinations = quorum.minimalCombinations(reaching: quorum.thresholds.medium)
+        guard !combinations.isEmpty else {
+            return String(
+                localized: "Any signatures adding up to \(Int(quorum.thresholds.medium)) of \(Int(quorum.totalWeight))."
+            )
+        }
         let spelled = combinations.prefix(3).map { combination in
-            Self.names(combination, in: quorum)
+            Self.names(combination, names: names, me: me)
         }
         if combinations.count > spelled.count {
             return spelled.joined(separator: ", or ")
@@ -325,8 +355,16 @@ public struct CreateTreasuryView: View {
         return spelled.joined(separator: ", or ")
     }
 
-    private static func names(_ group: [TreasuryCoSigner], in quorum: TreasuryQuorum) -> String {
-        let labels = group.map { $0.account.abbreviated }
+    private static func names(
+        _ group: [TreasuryCoSigner],
+        names: [String: String],
+        me: String?
+    ) -> String {
+        let labels = group.map { coSigner -> String in
+            guard let key = coSigner.memberBlsPubkeyHex else { return coSigner.account.abbreviated }
+            if key == me { return String(localized: "you") }
+            return names[key] ?? coSigner.account.abbreviated
+        }
         if labels.count == 1 { return labels[0] }
         return labels.dropLast().joined(separator: ", ")
             + String(localized: " and ") + (labels.last ?? "")
