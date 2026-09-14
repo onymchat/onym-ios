@@ -23,7 +23,7 @@ public struct PendingTreasuryCreation: Equatable, Sendable {
     public let treasuryAccount: StellarAccountID
     public let network: StellarNetwork
     public let creationTxHash: String
-    public let coSigners: [StellarAccountID]
+    public let coSigners: [TreasuryCoSigner]
     public let thresholds: TreasuryThresholds
     public let startedAt: Date
 
@@ -60,7 +60,7 @@ public struct PendingTreasuryCreation: Equatable, Sendable {
         treasuryAccount: StellarAccountID,
         network: StellarNetwork,
         creationTxHash: String,
-        coSigners: [StellarAccountID],
+        coSigners: [TreasuryCoSigner],
         thresholds: TreasuryThresholds,
         startedAt: Date,
         treasurySeed: Data? = nil,

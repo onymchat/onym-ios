@@ -81,6 +81,17 @@ public final class TreasuryProposalsFlow {
     public private(set) var signers: [StellarSigner] = []
     public private(set) var thresholds: HorizonThresholds?
     public private(set) var history: [HorizonTransaction] = []
+
+    /// History as events rather than hashes.
+    ///
+    /// Derived here rather than stored, so it cannot drift from what
+    /// the ledger returned — and decoded from each transaction's own
+    /// envelope, which is the only description of a transaction that
+    /// nobody could have written for us.
+    public var events: [TreasuryHistoryEvent] {
+        guard let account = treasury?.account else { return [] }
+        return history.map { TreasuryHistoryEvent($0, treasury: account) }
+    }
     public private(set) var isLoadingHistory = false
     private var hasLoadedHistory = false
     /// Nil until a live account read has succeeded. The screen draws

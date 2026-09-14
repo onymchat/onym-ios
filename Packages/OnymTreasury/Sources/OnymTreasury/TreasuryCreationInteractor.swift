@@ -177,7 +177,7 @@ public struct TreasuryCreationInteractor: Sendable {
     public func create(
         groupIDHex: String,
         funder: StellarAccountID,
-        coSigners: [StellarAccountID],
+        coSigners: [TreasuryCoSigner],
         thresholds: TreasuryThresholds,
         spendable: StellarAmount,
         network: StellarNetwork,
@@ -204,17 +204,17 @@ public struct TreasuryCreationInteractor: Sendable {
         // be produced *after* real money moved in. A screen is not the
         // place this invariant can live, because a screen is not the
         // only caller.
-        let deduplicated = Array(
-            NSOrderedSet(array: coSigners.map(\.accountID)).compactMap { $0 as? String }
-        )
+        let deduplicated = Set(coSigners.map(\.account.accountID))
         guard deduplicated.count == coSigners.count else {
             return .failed("Two co-signers named the same account.")
         }
-        guard TreasurySignerSelection.isUsable(
-            thresholds,
-            signerCount: coSigners.count
-        ) else {
-            return .failed("Those thresholds can't be met by that many co-signers.")
+        // Against the weights, not the headcount. With everyone at 1
+        // those were the same number; they stop being the same the
+        // moment one person counts double, and the threshold that
+        // matters is the one the ledger will enforce.
+        let quorum = TreasuryQuorum(coSigners: coSigners, thresholds: thresholds)
+        guard quorum.isReachable else {
+            return .failed("Those numbers can't be met by the co-signers you chose.")
         }
         guard await treasury.snapshot(groupID: groupIDHex).treasury == nil else {
             return .alreadyExists
@@ -836,10 +836,17 @@ public struct TreasuryCreationInteractor: Sendable {
     /// thresholds above the signers' total weight make an account that
     /// can never change its own signers again — spendable until a key
     /// is lost, and then never.
+    /// An account and the weight it carries, for comparing a ledger's
+    /// signer set against the one a group chose.
+    private struct Pair: Hashable {
+        let account: StellarAccountID
+        let weight: UInt32
+    }
+
     public static func misconfiguration(
         _ onChain: HorizonAccount,
         account: StellarAccountID,
-        expectedCoSigners: [StellarAccountID],
+        expectedCoSigners: [TreasuryCoSigner],
         expectedThresholds: TreasuryThresholds
     ) -> String? {
         // Master weight zero shows up as the account's own key being
@@ -850,12 +857,23 @@ public struct TreasuryCreationInteractor: Sendable {
         guard masterWeight == 0 else {
             return "that account can still be controlled by its own key"
         }
+        // Keys *and* weights, as a set of pairs.
+        //
+        // The weight check used to be "everybody is 1", which was true
+        // of every treasury this app could build and stopped being true
+        // the moment weights became a thing a founder sets. What has to
+        // hold is that the ledger shows the configuration this group
+        // chose — so an account where the founder quietly gave
+        // themselves 3 still fails, while a treasury the group
+        // deliberately weighted 2/2/1/1 passes.
         let live = onChain.signers.filter { $0.weight > 0 }
-        guard Set(live.map(\.key)) == Set(expectedCoSigners) else {
+        let onLedger = Set(live.map { Pair(account: $0.key, weight: $0.weight) })
+        let chosen = Set(expectedCoSigners.map { Pair(account: $0.account, weight: $0.weight) })
+        guard Set(live.map(\.key)) == Set(expectedCoSigners.map(\.account)) else {
             return "that account's signers are not the ones this group chose"
         }
-        guard live.allSatisfy({ $0.weight == 1 }) else {
-            return "that account gives some signers more weight than others"
+        guard onLedger == chosen else {
+            return "that account weights its signers differently from what this group chose"
         }
         guard onChain.thresholds.low == expectedThresholds.low,
               onChain.thresholds.medium == expectedThresholds.medium,
@@ -878,7 +896,7 @@ public struct TreasuryCreationInteractor: Sendable {
         treasuryAccountID: String,
         creationTxHash: String,
         network: StellarNetwork,
-        expectedCoSigners: [StellarAccountID],
+        expectedCoSigners: [TreasuryCoSigner],
         expectedThresholds: TreasuryThresholds,
         now: Date = Date()
     ) async -> TreasuryCreationOutcome {

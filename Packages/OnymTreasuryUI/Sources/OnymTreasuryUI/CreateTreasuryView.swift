@@ -198,10 +198,19 @@ public struct CreateTreasuryView: View {
                                     : OnymTile.indigo
                             )
                         } right: {
-                            Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(
-                                    selected ? OnymAccent.blue.color : OnymTokens.text3
-                                )
+                            HStack(spacing: 10) {
+                                // The weight, and only while they are on
+                                // it. A stepper beside somebody who is
+                                // not a co-signer sets a number that
+                                // governs nothing.
+                                if selected {
+                                    weightStepper(for: member)
+                                }
+                                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(
+                                        selected ? OnymAccent.blue.color : OnymTokens.text3
+                                    )
+                            }
                         }
                         .accessibilityIdentifier("treasury.create.cosigner.\(member.blsPubkeyHex)")
                     }
@@ -210,6 +219,31 @@ public struct CreateTreasuryView: View {
             if flow.hasUnprovenCoSigners {
                 Footnote("Some of these accounts are held outside Onym and haven't signed anything yet, so nobody has confirmed they can. If one of them can't, the treasury may end up short of signatures.")
             }
+        }
+    }
+
+    /// How far one person's signature carries.
+    ///
+    /// Everyone is one by default, which is what the old design could
+    /// express and the only thing it could express. The gloss under the
+    /// name — "counts double", "one signature" — is where the word
+    /// `weight` is taught; the number is beside it, never instead of
+    /// it.
+    private func weightStepper(for member: TreasuryMemberRow) -> some View {
+        let weight = flow.weight(of: member)
+        return HStack(spacing: 8) {
+            Text(weight == 1 ? "one signature" : "counts \(Int(weight))")
+                .font(OnymType.font(size: 12))
+                .foregroundStyle(OnymTokens.text3)
+            Stepper(
+                value: Binding(
+                    get: { flow.weight(of: member) },
+                    set: { flow.setWeight($0, for: member) }
+                ),
+                in: 1...UInt32(TreasuryQuorum.maximumEnumerated)
+            ) { EmptyView() }
+                .labelsHidden()
+                .accessibilityIdentifier("treasury.create.weight.\(member.blsPubkeyHex)")
         }
     }
 
@@ -231,9 +265,71 @@ public struct CreateTreasuryView: View {
                     last: true
                 )
             }
-            Footnote("Out of \(flow.resolvedCoSigners.count) co-signers. Requiring everyone means one lost phone freezes the treasury for good \u{2014} there is no way to remove a key without its own signature.")
+            quorumReadout
+            Footnote("Out of \(Int(flow.quorum.totalWeight)) total weight. The second bar is deliberately higher than the first \u{2014} changing who holds the keys should be harder than spending.")
         }
         .padding(.top, 8)
+    }
+
+    /// What it takes to spend, as a sentence naming people.
+    ///
+    /// The screen this replaces showed "1/1" twice, with nothing to say
+    /// what either number governed or who could satisfy it. This
+    /// recomputes on every tap, and the arithmetic sits under the
+    /// sentence rather than in place of it.
+    @ViewBuilder
+    private var quorumReadout: some View {
+        let quorum = flow.quorum
+        if !quorum.coSigners.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                SectionLabel("RIGHT NOW, SPENDING TAKES")
+                Card {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(Self.spendingSentence(quorum))
+                            .font(OnymType.font(size: 16.5, weight: .medium))
+                            .foregroundStyle(OnymTokens.text)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("\(Int(quorum.thresholds.medium)) of \(Int(quorum.totalWeight)) weight")
+                            .font(OnymType.font(size: 13))
+                            .foregroundStyle(OnymTokens.text3)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                }
+                if quorum.requiresEveryone {
+                    Footnote("Everyone, every time. One lost phone freezes this account forever \u{2014} a key cannot be removed without its own signature, so the weight left behind can never clear the bar again.")
+                }
+            }
+            .padding(.top, 8)
+        }
+    }
+
+    /// "You and Aino together — or either of you plus both Mira and
+    /// Sam." Built from the minimal combinations, because a list of
+    /// every set that clears the bar is true and unreadable.
+    static func spendingSentence(_ quorum: TreasuryQuorum) -> String {
+        let combinations = quorum.minimalCombinations(reaching: quorum.thresholds.medium)
+        guard !combinations.isEmpty else {
+            return String(
+                localized: "Nobody can reach this bar \u{2014} lower it or give someone more weight."
+            )
+        }
+        let spelled = combinations.prefix(3).map { combination in
+            Self.names(combination, in: quorum)
+        }
+        if combinations.count > spelled.count {
+            return spelled.joined(separator: ", or ")
+                + String(localized: " \u{2014} and other combinations")
+        }
+        return spelled.joined(separator: ", or ")
+    }
+
+    private static func names(_ group: [TreasuryCoSigner], in quorum: TreasuryQuorum) -> String {
+        let labels = group.map { $0.account.abbreviated }
+        if labels.count == 1 { return labels[0] }
+        return labels.dropLast().joined(separator: ", ")
+            + String(localized: " and ") + (labels.last ?? "")
     }
 
     private func stepper(
@@ -247,7 +343,12 @@ public struct CreateTreasuryView: View {
         // declaration stopped verifying is not a signer, and a
         // threshold counted from headcount would exceed the weight that
         // actually exists.
-        let maximum = UInt32(max(flow.resolvedCoSigners.count, 1))
+        // Against the total weight, not the headcount. With everyone
+        // at 1 those were the same number; with anyone at 2 they are
+        // not, and the bar the ledger enforces is the weight one. The
+        // ceiling is what makes an unreachable threshold unreachable
+        // rather than merely discouraged.
+        let maximum = max(flow.quorum.totalWeight, 1)
         return Row(
             title: title,
             subtitleKey: subtitle,

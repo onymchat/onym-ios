@@ -140,7 +140,7 @@ final class TreasuryE2ETests: XCTestCase {
         let created = await adaSide.creation.create(
             groupIDHex: groupIDHex,
             funder: adaSigner,
-            coSigners: [adaSigner, boSigner],
+            coSigners: [adaSigner, boSigner].map { TreasuryCoSigner(account: $0) },
             thresholds: TreasuryThresholds(low: 1, medium: 2, high: 2),
             spendable: try StellarAmount(decimalString: "100"),
             network: .testnet
@@ -473,7 +473,7 @@ final class TreasuryE2ETests: XCTestCase {
         XCTAssertNil(TreasuryCreationInteractor.misconfiguration(
             onChain,
             account: treasury.account,
-            expectedCoSigners: world.coSigners,
+            expectedCoSigners: world.coSigners.map { TreasuryCoSigner(account: $0) },
             expectedThresholds: world.thresholds
         ))
         // The seed dies with the row.
@@ -742,7 +742,7 @@ final class TreasuryE2ETests: XCTestCase {
         let outcome = await world.side.creation.create(
             groupIDHex: groupIDHex,
             funder: world.funder,
-            coSigners: world.coSigners,
+            coSigners: world.coSigners.map { TreasuryCoSigner(account: $0) },
             thresholds: world.thresholds,
             spendable: StellarAmount(stroops: 0),
             network: .testnet
@@ -852,7 +852,7 @@ final class TreasuryE2ETests: XCTestCase {
         let outcome = await world.side.creation.create(
             groupIDHex: groupIDHex,
             funder: world.funder,
-            coSigners: world.coSigners,
+            coSigners: world.coSigners.map { TreasuryCoSigner(account: $0) },
             thresholds: world.thresholds,
             spendable: StellarAmount(stroops: 0),
             network: .testnet

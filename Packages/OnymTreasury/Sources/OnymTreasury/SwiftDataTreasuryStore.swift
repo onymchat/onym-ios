@@ -324,6 +324,13 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
 
     private struct PendingConfiguration: Codable {
         let coSigners: [String]
+        /// Weight per co-signer account, keyed the same way.
+        ///
+        /// Optional, and absent on rows written before weights existed
+        /// — those were all-1 by construction, which is what the
+        /// decoder falls back to. A schema that cannot read its own
+        /// older rows is a migration nobody planned.
+        var weights: [String: UInt32]?
         let low: UInt32
         let medium: UInt32
         let high: UInt32
@@ -361,8 +368,11 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
                 ),
                 network: try self.network(row.encryptedNetwork),
                 creationTxHash: try self.string(row.encryptedCreationTxHash),
-                coSigners: try configuration.coSigners.map {
-                    try StellarAccountID(accountID: $0)
+                coSigners: try configuration.coSigners.map { accountID in
+                    TreasuryCoSigner(
+                        account: try StellarAccountID(accountID: accountID),
+                        weight: configuration.weights?[accountID] ?? 1
+                    )
                 },
                 thresholds: TreasuryThresholds(
                     low: configuration.low,
@@ -387,7 +397,11 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
             )
             let configuration = try StorageEncryption.encrypt(
                 try JSONEncoder().encode(PendingConfiguration(
-                    coSigners: record.coSigners.map(\.accountID),
+                    coSigners: record.coSigners.map(\.account.accountID),
+                    weights: Dictionary(
+                        record.coSigners.map { ($0.account.accountID, $0.weight) },
+                        uniquingKeysWith: { first, _ in first }
+                    ),
                     low: record.thresholds.low,
                     medium: record.thresholds.medium,
                     high: record.thresholds.high,
