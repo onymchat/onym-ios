@@ -334,6 +334,18 @@ public struct CreateTreasuryView: View {
         // first version reported both as "nobody can reach this bar" —
         // a false statement about a perfectly good nine-signer
         // treasury.
+        // Two different failures, and only one of them has those
+        // remedies. A bar above the total weight is fixed by lowering
+        // it or adding weight; `high` below `medium` is fixed by
+        // raising `high`, and telling someone to lower the spending bar
+        // would send them the wrong way. `clampThresholdsToWeight`
+        // keeps them ordered today, so the second is latent — which is
+        // exactly when copy quietly starts lying.
+        guard quorum.thresholds.high >= quorum.thresholds.medium else {
+            return String(
+                localized: "Changing who can spend is set lower than spending itself, which would let one person take the account over."
+            )
+        }
         guard quorum.isReachable else {
             return String(
                 localized: "Nobody can reach this bar \u{2014} lower it or give someone more weight."
@@ -348,11 +360,16 @@ public struct CreateTreasuryView: View {
         let spelled = combinations.prefix(3).map { combination in
             Self.names(combination, names: names, me: me)
         }
+        // Localised, like the other two joiners. A plain Swift literal
+        // here produced "вы и Aino, or либо…" — half a sentence in each
+        // language, which `LocalizationCatalogTests` cannot see because
+        // it only checks keys that are already in the catalog.
+        let separator = String(localized: ", or ")
         if combinations.count > spelled.count {
-            return spelled.joined(separator: ", or ")
+            return spelled.joined(separator: separator)
                 + String(localized: " \u{2014} and other combinations")
         }
-        return spelled.joined(separator: ", or ")
+        return spelled.joined(separator: separator)
     }
 
     private static func names(

@@ -125,11 +125,6 @@ public struct TreasuryQuorum: Equatable, Sendable {
         coSigners.filter { totalWeight - $0.weight < thresholds.high }
     }
 
-    /// The minimal sets of co-signers that reach `threshold`.
-    ///
-    /// Minimal, meaning no member of a returned set can be dropped and
-    /// still clear the bar. Listing every superset would be true and
-    /// useless: "you and Aino" already implies "you, Aino and Mira".
     /// Whether this signer set is small enough to be written out as a
     /// sentence. Past the ceiling the screens show the numbers — which
     /// is a different thing from saying nobody can reach the bar.
@@ -137,6 +132,14 @@ public struct TreasuryQuorum: Equatable, Sendable {
         !coSigners.isEmpty && coSigners.count <= Self.maximumEnumerated
     }
 
+    /// The minimal sets of co-signers that reach `threshold`.
+    ///
+    /// Minimal, meaning no member of a returned set can be dropped and
+    /// still clear the bar. Listing every superset would be true and
+    /// useless: "you and Aino" already implies "you, Aino and Mira".
+    ///
+    /// Empty above `maximumEnumerated`, which is not a claim that
+    /// nothing reaches the bar — see `isEnumerable`.
     public func minimalCombinations(reaching threshold: UInt32) -> [[TreasuryCoSigner]] {
         guard !coSigners.isEmpty, threshold > 0,
               coSigners.count <= Self.maximumEnumerated,
@@ -165,13 +168,16 @@ public struct TreasuryQuorum: Equatable, Sendable {
     }
 
     /// Whether one co-signer can be outvoted — that is, whether any
-    /// combination that clears the spending bar excludes them.
+    /// combination that clears the spending bar excludes them. Nil when
+    /// the set is too large to enumerate.
     ///
-    /// The screens use this to say "no payment can happen without you
-    /// or Aino", which is the fact a person reasons about when they are
-    /// being asked to give up weight.
-    public func canBeExcluded(_ coSigner: TreasuryCoSigner) -> Bool {
-        minimalCombinations(reaching: thresholds.medium)
+    /// Optional on purpose. `false` is the strong claim — "no payment
+    /// can happen without you" — and returning it for a set where
+    /// nothing was computed would state it about precisely the
+    /// treasuries this never looked at.
+    public func canBeExcluded(_ coSigner: TreasuryCoSigner) -> Bool? {
+        guard isEnumerable else { return nil }
+        return minimalCombinations(reaching: thresholds.medium)
             .contains { !$0.contains(coSigner) }
     }
 }

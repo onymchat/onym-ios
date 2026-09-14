@@ -299,8 +299,18 @@ public struct TreasuryCreationInteractor: Sendable {
             // account a wallet may already have funded — the same loss
             // `abandonExternalCreation` refuses, reached by a different
             // button. Only UI stage ordering stood between them.
-            if let existing = await treasury.pendingCreation(groupID: groupIDHex),
-               existing.treasurySeed != nil {
+            // A row that will not read counts as one that exists: the
+            // question here is "is a handoff already out there", and an
+            // unreadable row is not an answer of no.
+            let existingRow = try? await treasury.pendingCreation(groupID: groupIDHex)
+            if existingRow == nil,
+               await treasury.hasUnreadablePendingCreation(groupID: groupIDHex) {
+                return .failed(
+                    "a treasury handoff for this chat is on this device and cannot be read. "
+                    + "Nothing has been changed."
+                )
+            }
+            if let existing = existingRow, existing.treasurySeed != nil {
                 return .failed(
                     "a treasury handoff for this chat is already waiting. Finish it, or "
                     + "start over from that screen, before creating another."
@@ -459,8 +469,14 @@ public struct TreasuryCreationInteractor: Sendable {
     /// exists. The way out of that state is `completeExternalCreation`,
     /// which finishes the job the wallet started.
     public func abandonExternalCreation(groupIDHex: String) async -> AbandonOutcome {
-        guard let pending = await treasury.pendingCreation(groupID: groupIDHex) else {
-            return .discarded
+        // Unreadable is not "nothing to keep". Discarding a row this
+        // build cannot parse would delete a key for an account that may
+        // already be funded, which is the whole reason this method asks
+        // a ledger at all.
+        guard let pending = try? await treasury.pendingCreation(groupID: groupIDHex) else {
+            return await treasury.hasUnreadablePendingCreation(groupID: groupIDHex)
+                ? .couldNotTell
+                : .discarded
         }
         guard pending.treasurySeed != nil else {
             // No key to strand: an older row, or one for the in-app
@@ -506,7 +522,7 @@ public struct TreasuryCreationInteractor: Sendable {
         guard let owner = await identity.currentSelectedID() else {
             return .failed("no identity")
         }
-        let pendingRow = await treasury.pendingCreation(groupID: groupIDHex)
+        let pendingRow = try? await treasury.pendingCreation(groupID: groupIDHex)
         // The anchored treasury is checked before the pending row, not
         // after. A founder who taps twice has no row left by the second
         // tap — this already worked — and "nothing is waiting for a

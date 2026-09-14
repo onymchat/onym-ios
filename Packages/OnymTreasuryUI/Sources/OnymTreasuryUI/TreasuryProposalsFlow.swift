@@ -84,13 +84,20 @@ public final class TreasuryProposalsFlow {
 
     /// History as events rather than hashes.
     ///
-    /// Derived here rather than stored, so it cannot drift from what
-    /// the ledger returned — and decoded from each transaction's own
-    /// envelope, which is the only description of a transaction that
-    /// nobody could have written for us.
-    public var events: [TreasuryHistoryEvent] {
-        guard let account = treasury?.account else { return [] }
-        return history.map { TreasuryHistoryEvent($0, treasury: account) }
+    /// Decoded from each transaction's own envelope — the only
+    /// description of a transaction nobody could have written for us —
+    /// and stored rather than computed on access. As a computed
+    /// property every read re-decoded the whole history, and a
+    /// `ForEach` that also reads `events.count` per row made one render
+    /// n+1 full base64-plus-XDR passes over it.
+    public private(set) var events: [TreasuryHistoryEvent] = []
+
+    private func rebuildEvents() {
+        guard let account = treasury?.account else {
+            events = []
+            return
+        }
+        events = history.map { TreasuryHistoryEvent($0, treasury: account) }
     }
     public private(set) var isLoadingHistory = false
     private var hasLoadedHistory = false
@@ -230,6 +237,7 @@ public final class TreasuryProposalsFlow {
         isLoadingHistory = true
         defer { isLoadingHistory = false }
         history = await repository.history(groupID: groupID)
+        rebuildEvents()
     }
 
     private func apply(_ snapshot: TreasurySnapshot) async {
@@ -240,6 +248,10 @@ public final class TreasuryProposalsFlow {
         myBlsHex = await identity.currentIdentity()?.blsPublicKey.hexString
 
         treasury = snapshot.treasury
+        // The account decides direction for every payment in the list,
+        // so the events are rebuilt when it arrives — not only when the
+        // history does.
+        rebuildEvents()
         declarations = snapshot.declarations
         hasLiveAccount = snapshot.account != nil
         balances = snapshot.account?.balances ?? []

@@ -26,6 +26,7 @@ public struct TreasurySetupView: View {
                 } else {
                     absent
                 }
+                addressDisclosure
                 yourAccount
                 roster
             }
@@ -35,6 +36,56 @@ public struct TreasurySetupView: View {
         .navigationTitle("Treasury")
         .navigationBarTitleDisplayMode(.inline)
         .task { await flow.start() }
+    }
+
+    /// What was published about you, and what that cannot be undone.
+    ///
+    /// The address is broadcast without anyone asking, which is what
+    /// lets a founder create a treasury before everyone has linked a
+    /// wallet. The trade is only defensible if the person it is made
+    /// about is told, in the second person, and told the part that
+    /// cannot be retracted — so this is a screen, not a banner, and it
+    /// does not go away until it is read.
+    ///
+    /// This is the small half of the board's 1c. The thread event and
+    /// the leaving flow are not built yet, and this is deliberately the
+    /// thing that had to exist before the publishing did.
+    @ViewBuilder
+    private var addressDisclosure: some View {
+        if let mine = flow.mine, mine.source == .onym, !flow.hasSeenAddressDisclosure {
+            VStack(alignment: .leading, spacing: 0) {
+                SectionLabel("YOUR ADDRESS IS NOW PUBLIC")
+                Card {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Onym published the Stellar account it keeps for you to this chat, so a treasury can be set up without waiting for everyone.")
+                            .font(OnymType.font(size: 14))
+                            .foregroundStyle(OnymTokens.text)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(verbatim: mine.account.accountID)
+                            .font(OnymType.mono(size: 11.5))
+                            .foregroundStyle(OnymTokens.text2)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("It is on Stellar's public ledger beside this chat's treasury, and it stays there. Leaving a treasury later does not remove that record \u{2014} nothing can.")
+                            .font(OnymType.font(size: 13))
+                            .foregroundStyle(OnymTokens.text2)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("You can name a different wallet below. If a treasury already exists, coming off it takes the other co-signers' agreement.")
+                            .font(OnymType.font(size: 13))
+                            .foregroundStyle(OnymTokens.text2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 14)
+                }
+                PrimaryButton("Got it") { flow.acknowledgeAddressDisclosure() }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .accessibilityIdentifier("treasury.address_disclosure.ack")
+            }
+            .padding(.top, 8)
+        }
     }
 
     // MARK: - Treasury state

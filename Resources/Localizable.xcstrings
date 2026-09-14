@@ -708,6 +708,23 @@
         }
       }
     },
+    ", or ": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": ", or "
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": ", либо "
+          }
+        }
+      }
+    },
     ", or share a QR code from there.": {
       "localizations": {
         "en": {
@@ -919,6 +936,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Казна для этого чата"
+          }
+        }
+      }
+    },
+    "A treasury handoff is saved on this phone and this version cannot read it. Nothing has been changed.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A treasury handoff is saved on this phone and this version cannot read it. Nothing has been changed."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "На этом телефоне сохранена передача казны, которую эта версия не может прочитать. Ничего не изменено."
           }
         }
       }
@@ -2333,6 +2367,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Изменить, кто управляет казной"
+          }
+        }
+      }
+    },
+    "Changing who can spend is set lower than spending itself, which would let one person take the account over.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Changing who can spend is set lower than spending itself, which would let one person take the account over."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Планка для смены тех, кто может тратить, ниже планки для трат — так один человек сможет забрать счёт себе."
           }
         }
       }
@@ -3990,6 +4041,23 @@
         }
       }
     },
+    "Got it": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Got it"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Понятно"
+          }
+        }
+      }
+    },
     "Group integrity": {
       "extractionState": "manual",
       "localizations": {
@@ -4554,6 +4622,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Эмитент"
+          }
+        }
+      }
+    },
+    "It is on Stellar's public ledger beside this chat's treasury, and it stays there. Leaving a treasury later does not remove that record — nothing can.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "It is on Stellar's public ledger beside this chat's treasury, and it stays there. Leaving a treasury later does not remove that record — nothing can."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Он в публичном реестре Stellar рядом с казной этого чата и останется там. Выход из казны позже не удалит эту запись — ничто не удалит."
           }
         }
       }
@@ -6224,6 +6309,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Этот ключ Onym не видит никогда. Когда нужно что-то подписать, он передаёт транзакцию в ваш кошелёк и забирает только подпись."
+          }
+        }
+      }
+    },
+    "Onym published the Stellar account it keeps for you to this chat, so a treasury can be set up without waiting for everyone.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Onym published the Stellar account it keeps for you to this chat, so a treasury can be set up without waiting for everyone."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Onym опубликовал в этом чате счёт Stellar, который хранит для вас, чтобы казну можно было создать, не дожидаясь всех."
           }
         }
       }
@@ -11049,6 +11151,23 @@
         }
       }
     },
+    "YOUR ADDRESS IS NOW PUBLIC": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "YOUR ADDRESS IS NOW PUBLIC"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ВАШ АДРЕС ТЕПЕРЬ ПУБЛИЧЕН"
+          }
+        }
+      }
+    },
     "YOUR CHOICE": {
       "extractionState": "manual",
       "localizations": {
@@ -11111,6 +11230,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Можно не закрывать этот экран — если заявку одобрят, чат появится сам."
+          }
+        }
+      }
+    },
+    "You can name a different wallet below. If a treasury already exists, coming off it takes the other co-signers' agreement.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You can name a different wallet below. If a treasury already exists, coming off it takes the other co-signers' agreement."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ниже можно указать другой кошелёк. Если казна уже создана, выход из неё потребует согласия остальных подписантов."
           }
         }
       }

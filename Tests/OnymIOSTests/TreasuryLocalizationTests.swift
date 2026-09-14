@@ -193,11 +193,20 @@ final class TreasuryLocalizationTests: XCTestCase {
                         // `circle` sibling both qualify, and no copy on
                         // these screens does — UI sentences here begin
                         // with a capital.
+                        // Identifiers, not sentences: SF Symbol names
+                        // and storage keys. Placeholders are stripped
+                        // first, because a key built by interpolation —
+                        // "treasury.address-disclosure.\(group)" —
+                        // becomes "…%@" and stops looking like the
+                        // identifier it is.
                         let symbolAlphabet = CharacterSet(
-                            charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789."
+                            charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789.-"
                         )
-                        if !literal.isEmpty,
-                           literal.unicodeScalars.allSatisfy(symbolAlphabet.contains) {
+                        let withoutPlaceholders = Self.catalogKey(literal)
+                            .replacingOccurrences(of: "%@", with: "")
+                            .replacingOccurrences(of: "%lld", with: "")
+                        if !withoutPlaceholders.isEmpty,
+                           withoutPlaceholders.unicodeScalars.allSatisfy(symbolAlphabet.contains) {
                             continue
                         }
                         let key = Self.catalogKey(literal)

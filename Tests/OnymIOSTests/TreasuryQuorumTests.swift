@@ -82,11 +82,17 @@ final class TreasuryQuorumTests: XCTestCase {
     func test_aVeto_isVisibleAsNotBeingExcludable() {
         let balanced = quorum(weights: [2, 2, 1, 1], medium: 4)
         let mira = balanced.coSigners[2]
-        XCTAssertTrue(balanced.canBeExcluded(mira), "Mira at 1 is not load-bearing")
+        XCTAssertEqual(balanced.canBeExcluded(mira), true, "Mira at 1 is not load-bearing")
 
         // One person's 3 is in every winning set.
         let dominant = quorum(weights: [3, 1, 1], medium: 4)
-        XCTAssertFalse(dominant.canBeExcluded(dominant.coSigners[0]))
+        XCTAssertEqual(dominant.canBeExcluded(dominant.coSigners[0]), false)
+
+        // Nil, not false, where nothing was computed: "no payment can
+        // happen without you" is the strong claim and must not be
+        // asserted about a set this never enumerated.
+        let many = quorum(weights: Array(repeating: 1, count: 12), medium: 6)
+        XCTAssertNil(many.canBeExcluded(many.coSigners[0]))
     }
 
     /// Unanimity is arithmetic, not equality.

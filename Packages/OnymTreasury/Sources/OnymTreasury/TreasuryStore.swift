@@ -39,10 +39,13 @@ public protocol TreasuryStore: Sendable {
 
     /// A creation handed to a wallet and not yet confirmed. At most one
     /// per group.
+    /// Throws when a row exists and cannot be read — which is a
+    /// different fact from "there is none", and the difference is an
+    /// account that may already hold the founder's money.
     func pendingCreation(
         groupID: String,
         ownerIDString: String
-    ) async -> PendingTreasuryCreation?
+    ) async throws -> PendingTreasuryCreation?
     func upsert(_ pending: PendingTreasuryCreation) async
     func removePendingCreation(groupID: String, ownerIDString: String) async
 
@@ -185,7 +188,7 @@ public actor InMemoryTreasuryStore: TreasuryStore {
     public func pendingCreation(
         groupID: String,
         ownerIDString: String
-    ) -> PendingTreasuryCreation? {
+    ) throws -> PendingTreasuryCreation? {
         pending[Key(groupID: groupID, owner: ownerIDString)]
     }
 

@@ -361,9 +361,27 @@ public actor TreasuryRepository {
 
     /// The creation handed to a wallet and awaiting confirmation, if
     /// any — see `PendingTreasuryCreation`.
-    public func pendingCreation(groupID: String) async -> PendingTreasuryCreation? {
+    /// Nil when there is no handoff. Throws when there is one this
+    /// build cannot read, so a caller cannot mistake the second for the
+    /// first and quietly forget a funded account.
+    public func pendingCreation(groupID: String) async throws -> PendingTreasuryCreation? {
         guard let owner = currentIdentity?.rawValue.uuidString else { return nil }
-        return await store.pendingCreation(groupID: groupID, ownerIDString: owner)
+        return try await store.pendingCreation(groupID: groupID, ownerIDString: owner)
+    }
+
+    /// Whether a handoff exists on disk that this build cannot read.
+    ///
+    /// Separate from `pendingCreation` because the callers that must
+    /// not mistake the two are the ones that delete things: "no row"
+    /// permits a discard, "a row I cannot parse" does not.
+    public func hasUnreadablePendingCreation(groupID: String) async -> Bool {
+        guard let owner = currentIdentity?.rawValue.uuidString else { return false }
+        do {
+            _ = try await store.pendingCreation(groupID: groupID, ownerIDString: owner)
+            return false
+        } catch {
+            return true
+        }
     }
 
     public func recordPendingCreation(_ pending: PendingTreasuryCreation) async {

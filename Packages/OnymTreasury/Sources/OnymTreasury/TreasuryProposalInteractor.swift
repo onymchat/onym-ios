@@ -111,9 +111,14 @@ public struct TreasuryProposalInteractor: Sendable {
         // "nobody holding it, permanently" failure as creation, and it
         // is worth catching here rather than trusting the caller.
         if let newThresholds,
-           let count = await liveSignerCount(groupID: groupID),
-           !TreasurySignerSelection.isUsable(newThresholds, signerCount: count + 1) {
-            return .failed("Those thresholds can't be met once that signer is added.")
+           let existing = await liveCoSigners(groupID: groupID) {
+            // The set this proposal would produce, weights included —
+            // the new signer at weight 1 unless the caller says
+            // otherwise, which is the only weight `addSigner` builds.
+            let resulting = existing + [TreasuryCoSigner(account: newSigner)]
+            guard TreasuryQuorum(coSigners: resulting, thresholds: newThresholds).isReachable else {
+                return .failed("Those thresholds can't be met once that signer is added.")
+            }
         }
         return await propose(groupID: groupID, kind: .addSigner, now: now) { context in
             try TreasuryTransactionFactory.addSigner(
@@ -135,12 +140,12 @@ public struct TreasuryProposalInteractor: Sendable {
     ) async -> TreasuryProposalOutcome {
         // Removal lowers the count, so an unchanged threshold can
         // become unreachable even without new numbers being asked for.
-        if let count = await liveSignerCount(groupID: groupID) {
-            let resulting = max(count - 1, 0)
-            let existing = await currentThresholds(groupID: groupID)
-            let effective = newThresholds ?? existing
+        if let existing = await liveCoSigners(groupID: groupID) {
+            let resulting = existing.filter { $0.account != signer }
+            let current = await currentThresholds(groupID: groupID)
+            let effective = newThresholds ?? current
             if let effective,
-               !TreasurySignerSelection.isUsable(effective, signerCount: resulting) {
+               !TreasuryQuorum(coSigners: resulting, thresholds: effective).isReachable {
                 return .failed("Removing that signer would leave a treasury nobody can use.")
             }
         }
@@ -159,9 +164,21 @@ public struct TreasuryProposalInteractor: Sendable {
     // MARK: - Shared path
 
     /// Signers with weight on the live account.
-    private func liveSignerCount(groupID: String) async -> Int? {
-        await treasury.refresh(groupID: groupID)
-            .map { $0.signers.filter { $0.weight > 0 }.count }
+    /// The live signer set, with the weights the ledger gives them.
+    ///
+    /// Counting heads was the same headcount-versus-weight bug this
+    /// PR fixed in `misconfiguration` and in the creation clamp, left
+    /// in the propose paths: with weights 3/1/1 and `high` 4, removing
+    /// a signer of weight 1 leaves weight 4, which clears the bar —
+    /// while "2 signers remain, the bar is 4" refuses it. Never unsafe,
+    /// always wrong in the same direction, and it blocks removals on
+    /// exactly the treasuries weights make possible.
+    private func liveCoSigners(groupID: String) async -> [TreasuryCoSigner]? {
+        await treasury.refresh(groupID: groupID).map { account in
+            account.signers
+                .filter { $0.weight > 0 && $0.key != account.accountID }
+                .compactMap { TreasuryCoSigner(account: $0.key, weight: $0.weight) }
+        }
     }
 
     private func currentThresholds(groupID: String) async -> TreasuryThresholds? {

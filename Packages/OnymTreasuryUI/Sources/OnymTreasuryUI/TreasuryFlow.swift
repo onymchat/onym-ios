@@ -257,9 +257,21 @@ public final class TreasuryFlow {
         // then puts "waiting for your wallet" on a group that already
         // has one, on every launch. `snapshot.treasury` is the cheaper
         // and more direct guard than anything the row could carry.
+        // An unreadable row is reported, not treated as no row: it may
+        // hold a key for an account a wallet already funded, and
+        // quietly showing the idle form over the top of it is how a
+        // handoff gets forgotten.
+        let pendingRow = try? await repository.pendingCreation(groupID: groupID)
+        if pendingRow == nil,
+           snapshot.treasury == nil,
+           await repository.hasUnreadablePendingCreation(groupID: groupID) {
+            creationError = String(
+                localized: "A treasury handoff is saved on this phone and this version cannot read it. Nothing has been changed."
+            )
+        }
         if case .idle = creationStage,
            snapshot.treasury == nil,
-           let pending = await repository.pendingCreation(groupID: groupID) {
+           let pending = pendingRow {
             creationStage = .awaitingWallet(
                 treasuryAccountID: pending.treasuryAccount.accountID,
                 creationTxHash: pending.creationTxHash,
@@ -290,6 +302,7 @@ public final class TreasuryFlow {
         // group this identity does not own — one that fails the check
         // above — still had an address broadcast into it.
         await publishOnymAccountIfUndeclared(snapshot, me: me)
+        loadAddressDisclosure()
 
         groupName = group.name
         isAdmin = group.isAdmin(blsPublicKey: me.blsPublicKey)
@@ -527,6 +540,27 @@ public final class TreasuryFlow {
                 high: highThreshold
             )
         )
+    }
+
+    /// Whether this device has shown the person what was published
+    /// about them.
+    ///
+    /// Per group and per identity, because the address is published per
+    /// group: being told once about Flat 4 says nothing about the next
+    /// chat someone is quietly added to.
+    public private(set) var hasSeenAddressDisclosure = false
+
+    private var addressDisclosureKey: String {
+        "treasury.address-disclosure.\(groupID).\(myBlsPubkeyHex ?? "unknown")"
+    }
+
+    public func acknowledgeAddressDisclosure() {
+        hasSeenAddressDisclosure = true
+        UserDefaults.standard.set(true, forKey: addressDisclosureKey)
+    }
+
+    private func loadAddressDisclosure() {
+        hasSeenAddressDisclosure = UserDefaults.standard.bool(forKey: addressDisclosureKey)
     }
 
     /// Roster keys to names, so a quorum sentence can say "Aino"
@@ -772,7 +806,7 @@ public final class TreasuryFlow {
     private func reconcileStrandedFunding(_ snapshot: TreasurySnapshot) async {
         guard !hasReconciledStrandedFunding,
               let anchored = snapshot.treasury,
-              let pending = await repository.pendingCreation(groupID: groupID),
+              let pending = try? await repository.pendingCreation(groupID: groupID),
               pending.treasurySeed != nil,
               pending.treasuryAccount != anchored.account
         else { return }
