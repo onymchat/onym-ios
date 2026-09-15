@@ -183,8 +183,20 @@ public struct CreateTreasuryView: View {
                         let selected = flow.selectedCoSigners.contains(member.blsPubkeyHex)
                         Row(
                             titleText: member.isSelf ? "\(member.alias) (you)" : member.alias,
-                            subtitle: member.account?.abbreviated,
-                            subtitleMono: true,
+                            // The address when they are not on it, the
+                            // gloss when they are.
+                            //
+                            // The gloss sat in the row's trailing slot
+                            // beside the stepper, which has no width to
+                            // spare: "one signature" wrapped to one
+                            // character per line. It belongs here
+                            // anyway — a subtitle is where the design
+                            // teaches `weight`, with the plain meaning
+                            // reading as part of the person's row
+                            // rather than as a label on a control.
+                            subtitle: selected ? nil : member.account?.abbreviated,
+                            subtitleKey: selected ? Self.gloss(flow.weight(of: member)) : nil,
+                            subtitleMono: !selected,
                             hasChevron: false,
                             last: index == flow.nominatable.count - 1,
                             onTap: { flow.toggle(member) }
@@ -211,6 +223,10 @@ public struct CreateTreasuryView: View {
                                         selected ? OnymAccent.blue.color : OnymTokens.text3
                                     )
                             }
+                            // The trailing slot takes what is left of
+                            // the row, so anything in it that can wrap,
+                            // will.
+                            .fixedSize()
                         }
                         .accessibilityIdentifier("treasury.create.cosigner.\(member.blsPubkeyHex)")
                     }
@@ -230,11 +246,7 @@ public struct CreateTreasuryView: View {
     /// `weight` is taught; the number is beside it, never instead of
     /// it.
     private func weightStepper(for member: TreasuryMemberRow) -> some View {
-        let weight = flow.weight(of: member)
-        return HStack(spacing: 8) {
-            Text(weight == 1 ? "one signature" : "counts \(Int(weight))")
-                .font(OnymType.font(size: 12))
-                .foregroundStyle(OnymTokens.text3)
+        HStack(spacing: 8) {
             Stepper(
                 value: Binding(
                     get: { flow.weight(of: member) },
@@ -248,6 +260,11 @@ public struct CreateTreasuryView: View {
                 .labelsHidden()
                 .accessibilityIdentifier("treasury.create.weight.\(member.blsPubkeyHex)")
         }
+    }
+
+    /// What a weight means, in the words the design teaches it with.
+    static func gloss(_ weight: UInt32) -> LocalizedStringKey {
+        weight == 1 ? "one signature" : "counts \(Int(weight))"
     }
 
     private var thresholds: some View {
