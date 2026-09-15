@@ -230,6 +230,12 @@ public final class TreasuryProposalsFlow {
 
     public func refresh() async {
         await repository.refresh(groupID: groupID)
+        // Before anything renders a standing. A proposal somebody else
+        // submitted has moved the account's sequence, and the sequence
+        // on its own says only "something used the slot" — which turns
+        // the transaction that succeeded into a "didn't go through"
+        // card with a Submit button on it.
+        await repository.reconcileSubmittedProposals(groupID: groupID)
     }
 
     public func loadHistory() async {
@@ -237,6 +243,7 @@ public final class TreasuryProposalsFlow {
         isLoadingHistory = true
         defer { isLoadingHistory = false }
         history = await repository.history(groupID: groupID)
+        await repository.reconcileSubmittedProposals(groupID: groupID)
         rebuildEvents()
     }
 
