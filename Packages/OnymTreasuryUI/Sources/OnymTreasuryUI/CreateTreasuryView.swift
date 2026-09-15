@@ -508,7 +508,7 @@ public struct CreateTreasuryView: View {
                 ) {
                     EmptyView()
                 } right: {
-                    TextField("0", text: $flow.spendableField)
+                    TextField(TreasuryFlow.defaultSpendableXLM, text: $flow.spendableField)
                         .font(OnymType.mono(size: 15))
                         .keyboardType(.decimalPad)
                         .multilineTextAlignment(.trailing)

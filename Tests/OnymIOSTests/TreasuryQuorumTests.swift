@@ -1,6 +1,7 @@
 import XCTest
 @testable import OnymStellar
 @testable import OnymTreasury
+@testable import OnymTreasuryUI
 
 /// The arithmetic behind "what does it now take to spend?".
 ///
@@ -152,5 +153,27 @@ final class TreasuryQuorumTests: XCTestCase {
         let many = quorum(weights: Array(repeating: 1, count: 15), medium: 8)
         XCTAssertTrue(many.isReachable)
         XCTAssertTrue(many.minimalCombinations(reaching: 8).isEmpty)
+    }
+}
+
+/// What a new treasury is funded with by default.
+final class TreasuryFundingDefaultTests: XCTestCase {
+
+    /// Ten, not nothing. A treasury funded to exactly its reserve
+    /// exists and cannot pay for anything, including the first payment
+    /// the group made it for.
+    func test_theDefaultStartingBalance_isSpendable() throws {
+        let amount = try XCTUnwrap(
+            TreasurySignerSelection.spendableAmount(TreasuryFlow.defaultSpendableXLM)
+        )
+        XCTAssertEqual(amount.decimalString, "10")
+        XCTAssertGreaterThan(amount.stroops, 0)
+    }
+
+    /// A starting figure, not a floor: clearing the field still means
+    /// "nothing spendable", which is an ordinary thing to want.
+    func test_clearingTheField_stillMeansNothingSpendable() {
+        XCTAssertEqual(TreasurySignerSelection.spendableAmount("")?.stroops, 0)
+        XCTAssertEqual(TreasurySignerSelection.spendableAmount("25")?.decimalString, "25")
     }
 }

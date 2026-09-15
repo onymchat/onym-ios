@@ -94,7 +94,22 @@ public final class TreasuryFlow {
     /// field failed `create()` with "That isn't an amount" rather than
     /// meaning "no spendable balance", which is a perfectly ordinary
     /// thing to want.
-    public var spendableField = "0"
+    public var spendableField = TreasuryFlow.defaultSpendableXLM
+
+    /// What a new treasury starts with, before the reserve Stellar
+    /// locks and the fee.
+    ///
+    /// Ten rather than nothing, because a treasury funded to exactly
+    /// its reserve is an account that exists and cannot pay for
+    /// anything — including the first payment the group makes it for.
+    /// The old default was zero, which meant the ordinary path ended in
+    /// a treasury that had to be topped up before it could be used, and
+    /// the screen said "Spendable balance 0" while asking for 1.5 XLM.
+    ///
+    /// A starting figure, not a floor: the field is editable, and
+    /// clearing it still means "nothing spendable", which is a
+    /// perfectly reasonable thing to want.
+    public static let defaultSpendableXLM = "10"
 
     /// What `spendableField` means, with the half-typed states a text
     /// field legitimately passes through treated as zero.
