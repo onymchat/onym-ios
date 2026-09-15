@@ -52,7 +52,13 @@ public struct TreasurySetupView: View {
     /// thing that had to exist before the publishing did.
     @ViewBuilder
     private var addressDisclosure: some View {
-        if let mine = flow.mine, mine.source == .onym, !flow.hasSeenAddressDisclosure {
+        // Only when this device published it unasked. `source == .onym`
+        // is also what a deliberate "use my Onym account" writes, and
+        // telling that person their address was published for them is
+        // the one falsehood this screen cannot afford.
+        if let mine = flow.mine,
+           flow.addressWasPublishedUnasked,
+           !flow.hasSeenAddressDisclosure {
             VStack(alignment: .leading, spacing: 0) {
                 SectionLabel("YOUR ADDRESS IS NOW PUBLIC")
                 Card {

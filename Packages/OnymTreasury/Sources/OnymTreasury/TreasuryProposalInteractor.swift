@@ -112,10 +112,17 @@ public struct TreasuryProposalInteractor: Sendable {
         // is worth catching here rather than trusting the caller.
         if let newThresholds,
            let existing = await liveCoSigners(groupID: groupID) {
-            // The set this proposal would produce, weights included —
-            // the new signer at weight 1 unless the caller says
-            // otherwise, which is the only weight `addSigner` builds.
-            let resulting = existing + [TreasuryCoSigner(account: newSigner)]
+            // The set this proposal would produce, weights included.
+            //
+            // The existing entry for that account is dropped first,
+            // because `setOptions` *replaces* a signer's weight rather
+            // than adding one: re-proposing somebody already on the
+            // treasury at a lower weight makes the total go down, while
+            // appending made this guard believe it went up — and an
+            // unreachable `high` passed the check that exists to stop
+            // exactly that.
+            let resulting = existing.filter { $0.account != newSigner }
+                + [TreasuryCoSigner(account: newSigner)]
             guard TreasuryQuorum(coSigners: resulting, thresholds: newThresholds).isReachable else {
                 return .failed("Those thresholds can't be met once that signer is added.")
             }

@@ -317,7 +317,7 @@ public final class TreasuryFlow {
         // group this identity does not own — one that fails the check
         // above — still had an address broadcast into it.
         await publishOnymAccountIfUndeclared(snapshot, me: me)
-        loadAddressDisclosure()
+        loadAddressDisclosure(myHex: me.blsPublicKey.hexString)
 
         groupName = group.name
         isAdmin = group.isAdmin(blsPublicKey: me.blsPublicKey)
@@ -359,6 +359,9 @@ public final class TreasuryFlow {
             mediumThreshold = defaults.medium
             highThreshold = defaults.high
         }
+        // The snapshot decides who is resolvable at all, so the stored
+        // quorum follows it as well as the taps.
+        rebuildQuorum()
     }
 
     // MARK: - Declaration intents
@@ -402,6 +405,13 @@ public final class TreasuryFlow {
         // it. The declarations in the snapshot are the answer to "has
         // this member already chosen", and they are in hand here.
         let myKey = me.blsPublicKey.hexString
+        // A declaration does not appear in a snapshot until it has
+        // round-tripped, and `apply` runs per snapshot — so anything
+        // arriving in that window (another member declaring, an account
+        // refresh) used to broadcast a second identical one. The
+        // snapshot check is still the one that matters across launches;
+        // this is the one that matters within a second.
+        guard !isPublishingOnymAccount else { return }
         guard snapshot.declarations.first(where: {
             $0.memberBlsPubkeyHex.lowercased() == myKey.lowercased()
         }) == nil else { return }
@@ -409,12 +419,22 @@ public final class TreasuryFlow {
         // is fixed on the ledger, so a new declaration adds nobody and
         // publishes an address for nothing.
         guard snapshot.treasury == nil, let account = onymDerivedAccount else { return }
-        _ = await broadcaster.declareSigner(
+        isPublishingOnymAccount = true
+        defer { isPublishingOnymAccount = false }
+        guard await broadcaster.declareSigner(
             groupIDHex: groupID,
             account: account,
             source: .onym
-        )
+        ) else { return }
+        // Recorded here, because this is the only place that knows the
+        // address went out without anyone asking. The source alone
+        // cannot tell: it is `.onym` whether this published it or the
+        // person chose it.
+        addressWasPublishedUnasked = true
+        UserDefaults.standard.set(true, forKey: autoPublishedKey(myKey))
     }
+
+    private var isPublishingOnymAccount = false
 
     public func declareOnymDerived() async {
         guard let account = onymDerivedAccount else {
@@ -543,11 +563,24 @@ public final class TreasuryFlow {
     /// What it takes to spend, live, as a sentence about people.
     ///
     /// The old screen showed "1/1" twice and left the reader to work
-    /// out what either number governed. This recomputes on every tap
-    /// and is the thing the creation steps and the roster both lead
-    /// with.
-    public var quorum: TreasuryQuorum {
-        TreasuryQuorum(
+    /// out what either number governed. This is what the creation steps
+    /// and the roster both lead with.
+    ///
+    /// Stored, not computed on access. As a computed property it
+    /// rebuilt the resolved signer set every time SwiftUI read it, and
+    /// the sentence behind it enumerates subsets — at the eight-signer
+    /// ceiling with a bar of 1 that is 255 reaching sets and tens of
+    /// thousands of subset comparisons, per body evaluation, on a
+    /// screen whose steppers move under the reader's thumb.
+    public private(set) var quorum = TreasuryQuorum(
+        coSigners: [],
+        thresholds: TreasuryThresholds(low: 1, medium: 1, high: 1)
+    )
+
+    /// Recomputed where the inputs change: the ticks, the weights, the
+    /// bars, and the snapshot that decides who is resolvable at all.
+    private func rebuildQuorum() {
+        quorum = TreasuryQuorum(
             coSigners: resolvedCoSignerSet,
             thresholds: TreasuryThresholds(
                 low: 1,
@@ -565,17 +598,47 @@ public final class TreasuryFlow {
     /// chat someone is quietly added to.
     public private(set) var hasSeenAddressDisclosure = false
 
-    private var addressDisclosureKey: String {
-        "treasury.address-disclosure.\(groupID).\(myBlsPubkeyHex ?? "unknown")"
+    /// Whether this device published the address without being asked —
+    /// which is the only case the disclosure is true about.
+    ///
+    /// The card used to be gated on `source == .onym`, which is also
+    /// what `declareOnymDerived()` writes when somebody deliberately
+    /// taps "use my Onym account". They were then told Onym had
+    /// published it for them so a treasury could be made without
+    /// waiting — false, in the second person, on the one screen whose
+    /// entire justification is telling the truth about something
+    /// irreversible. Anyone who declared `.onym` before this existed
+    /// got the same sentence.
+    public private(set) var addressWasPublishedUnasked = false
+
+    /// Keyed on the identity, which `apply` has in hand.
+    ///
+    /// `myBlsPubkeyHex` reads `members`, and the first `apply` of a
+    /// process ran this before `members` was assigned — so the read hit
+    /// `…unknown` while the acknowledgement wrote the real key, and
+    /// "Got it" did not survive a relaunch. The flow is cached for the
+    /// process lifetime, so the first read is the one that decides
+    /// whether the card draws.
+    private func disclosureKey(_ myHex: String) -> String {
+        "treasury.address-disclosure.\(groupID).\(myHex)"
     }
+
+    private func autoPublishedKey(_ myHex: String) -> String {
+        "treasury.auto-published.\(groupID).\(myHex)"
+    }
+
+    private var myHexForDisclosure: String?
 
     public func acknowledgeAddressDisclosure() {
         hasSeenAddressDisclosure = true
-        UserDefaults.standard.set(true, forKey: addressDisclosureKey)
+        guard let myHexForDisclosure else { return }
+        UserDefaults.standard.set(true, forKey: disclosureKey(myHexForDisclosure))
     }
 
-    private func loadAddressDisclosure() {
-        hasSeenAddressDisclosure = UserDefaults.standard.bool(forKey: addressDisclosureKey)
+    private func loadAddressDisclosure(myHex: String) {
+        myHexForDisclosure = myHex
+        hasSeenAddressDisclosure = UserDefaults.standard.bool(forKey: disclosureKey(myHex))
+        addressWasPublishedUnasked = UserDefaults.standard.bool(forKey: autoPublishedKey(myHex))
     }
 
     /// Roster keys to names, so a quorum sentence can say "Aino"
@@ -611,10 +674,12 @@ public final class TreasuryFlow {
     /// quorum can ever act on, including to repair itself. Stellar
     /// accepts that; nobody can undo it.
     private func clampThresholdsToWeight() {
+        rebuildQuorum()
         let total = quorum.totalWeight
         guard total > 0 else { return }
         mediumThreshold = min(max(mediumThreshold, 1), total)
         highThreshold = min(max(highThreshold, mediumThreshold), total)
+        rebuildQuorum()
     }
 
     /// Never used — `nominatable` is false whenever the account is nil,

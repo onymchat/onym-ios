@@ -331,6 +331,12 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
         /// decoder falls back to. A schema that cannot read its own
         /// older rows is a migration nobody planned.
         var weights: [String: UInt32]?
+        /// Roster key per co-signer account, so a handoff restored
+        /// after a relaunch can still say "Aino" rather than an
+        /// address. `misconfiguration` compares account-and-weight
+        /// pairs and never misses it, which is why its absence was
+        /// invisible — until a screen tries to draw the people.
+        var members: [String: String]?
         let low: UInt32
         let medium: UInt32
         let high: UInt32
@@ -389,7 +395,11 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
                         return TreasuryCoSigner(account: account)
                     }
                     guard let weight = weights[accountID],
-                          let coSigner = TreasuryCoSigner(account: account, weight: weight)
+                          let coSigner = TreasuryCoSigner(
+                              account: account,
+                              weight: weight,
+                              memberBlsPubkeyHex: configuration.members?[accountID]
+                          )
                     else {
                         throw TreasuryStoreError.unreadableWeight(accountID)
                     }
@@ -421,6 +431,14 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
                     coSigners: record.coSigners.map(\.account.accountID),
                     weights: Dictionary(
                         record.coSigners.map { ($0.account.accountID, $0.weight) },
+                        uniquingKeysWith: { first, _ in first }
+                    ),
+                    members: Dictionary(
+                        record.coSigners.compactMap { coSigner in
+                            coSigner.memberBlsPubkeyHex.map {
+                                (coSigner.account.accountID, $0)
+                            }
+                        },
                         uniquingKeysWith: { first, _ in first }
                     ),
                     low: record.thresholds.low,
@@ -650,10 +668,10 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
         return IdentityID(uuid)
     }
 
+
     /// Every store call funnels through here so writes serialise on one
     /// queue and a throw becomes `nil` rather than a crash — the same
     /// bargain the other SwiftData stores make.
-    @discardableResult
     /// Like `perform`, but the caller decides what a failure means.
     ///
     /// `perform` turns every throw into nil, which is right for a read
@@ -675,6 +693,13 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
         }
     }
 
+    /// Every store call funnels through here: the SwiftData context is
+    /// not thread-safe, and a throw becomes `nil` because the caller of
+    /// a read has the same screen to draw either way.
+    ///
+    /// The exception is `performThrowing` above, for the one read where
+    /// absence and failure are different facts.
+    @discardableResult
     private func perform<T>(_ body: @escaping () throws -> T) async -> T? {
         await withCheckedContinuation { continuation in
             queue.async {

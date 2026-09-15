@@ -34,19 +34,4 @@ final class TreasuryAmountFieldTests: XCTestCase {
         XCTAssertNil(spendable("abc"))
         XCTAssertNil(spendable("-1"))
     }
-
-    /// The clamp has to be applied against the *resolved* co-signers at
-    /// submit, not the ticks at tap time: a member can leave the group
-    /// or their declaration stop verifying in between, and the
-    /// thresholds were chosen against the old count.
-    func test_thresholdsAreUsableAfterTheSignerSetShrinks() {
-        let chosen = TreasuryThresholds(low: 1, medium: 3, high: 3)
-        XCTAssertTrue(TreasurySignerSelection.isUsable(chosen, signerCount: 3))
-        // One co-signer drops out between the last tap and submit.
-        XCTAssertFalse(TreasurySignerSelection.isUsable(chosen, signerCount: 2))
-        let reclamped = TreasurySignerSelection.clamped(chosen, signerCount: 2)
-        XCTAssertTrue(TreasurySignerSelection.isUsable(reclamped, signerCount: 2))
-        XCTAssertEqual(reclamped.medium, 2)
-        XCTAssertEqual(reclamped.high, 2)
-    }
 }

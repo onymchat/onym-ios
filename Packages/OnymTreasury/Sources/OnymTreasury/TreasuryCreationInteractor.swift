@@ -883,11 +883,11 @@ public struct TreasuryCreationInteractor: Sendable {
         // themselves 3 still fails, while a treasury the group
         // deliberately weighted 2/2/1/1 passes.
         let live = onChain.signers.filter { $0.weight > 0 }
-        let onLedger = Set(live.map { Pair(account: $0.key, weight: $0.weight) })
-        let chosen = Set(expectedCoSigners.map { Pair(account: $0.account, weight: $0.weight) })
         guard Set(live.map(\.key)) == Set(expectedCoSigners.map(\.account)) else {
             return "that account's signers are not the ones this group chose"
         }
+        let onLedger = Set(live.map { Pair(account: $0.key, weight: $0.weight) })
+        let chosen = Set(expectedCoSigners.map { Pair(account: $0.account, weight: $0.weight) })
         guard onLedger == chosen else {
             return "that account weights its signers differently from what this group chose"
         }
