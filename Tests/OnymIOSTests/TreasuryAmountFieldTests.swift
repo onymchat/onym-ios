@@ -3,8 +3,7 @@ import XCTest
 import OnymStellar
 import OnymTreasury
 
-/// The amount field's half-typed states, and the threshold clamp at
-/// submit.
+/// The amount field's half-typed states.
 ///
 /// `TreasuryFlow` itself needs an `IdentityRepository`, a
 /// `GroupRepository` and a broadcaster to construct, so what is tested

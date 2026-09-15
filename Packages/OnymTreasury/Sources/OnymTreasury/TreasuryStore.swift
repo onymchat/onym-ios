@@ -49,16 +49,14 @@ public protocol TreasuryStore: Sendable {
     func upsert(_ pending: PendingTreasuryCreation) async
     func removePendingCreation(groupID: String, ownerIDString: String) async
 
-    /// Every proposal this identity holds that has not been submitted,
-    /// across all groups.
+    /// Proposals still in front of this identity: not submitted, not
+    /// refused, and not set aside. Across all groups.
     ///
     /// Exists for one caller: a signed transaction coming back from a
     /// wallet carries no group id, so the only way to attribute it is
     /// to offer it to each open proposal and let the signature decide.
     /// Exactly one transaction hash can accept it, and a signature that
     /// matches none is simply not adopted.
-    /// Proposals still in front of this identity: not submitted, not
-    /// refused, and not set aside.
     ///
     /// Dismissal belongs in this filter for the same reason the expiry
     /// guard exists in `TreasurySigningInteractor` — the paths that act

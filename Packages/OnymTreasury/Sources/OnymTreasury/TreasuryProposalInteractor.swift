@@ -170,7 +170,6 @@ public struct TreasuryProposalInteractor: Sendable {
 
     // MARK: - Shared path
 
-    /// Signers with weight on the live account.
     /// The live signer set, with the weights the ledger gives them.
     ///
     /// Counting heads was the same headcount-versus-weight bug this

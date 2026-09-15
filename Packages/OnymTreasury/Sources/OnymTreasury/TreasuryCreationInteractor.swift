@@ -425,16 +425,6 @@ public struct TreasuryCreationInteractor: Sendable {
         case external
     }
 
-    /// Record a treasury whose creation transaction was submitted
-    /// elsewhere — by the founder's own wallet, after a
-    /// `needsExternalWallet` handoff.
-    ///
-    /// The claim is checked against the chain before it is believed:
-    /// the account must exist, its master weight must actually be zero,
-    /// and its signer set must be the one that was asked for. Taking
-    /// the founder's word for it would mean anchoring the group to an
-    /// account that might still be under one person's control — which
-    /// is the single thing this design exists to rule out.
     /// How far back `adopt` looks for the creating transaction. A
     /// treasury being adopted has just been created, so its history is
     /// short; the depth is here to bound the read rather than to cover
@@ -835,6 +825,13 @@ public struct TreasuryCreationInteractor: Sendable {
         return .fundedAnotherAccount(pending.treasuryAccount)
     }
 
+    /// An account and the weight it carries, for comparing a ledger's
+    /// signer set against the one a group chose.
+    private struct Pair: Hashable {
+        let account: StellarAccountID
+        let weight: UInt32
+    }
+
     /// Why an account on the ledger is not the treasury this group
     /// asked for, or nil when it is.
     ///
@@ -852,13 +849,6 @@ public struct TreasuryCreationInteractor: Sendable {
     /// thresholds above the signers' total weight make an account that
     /// can never change its own signers again — spendable until a key
     /// is lost, and then never.
-    /// An account and the weight it carries, for comparing a ledger's
-    /// signer set against the one a group chose.
-    private struct Pair: Hashable {
-        let account: StellarAccountID
-        let weight: UInt32
-    }
-
     public static func misconfiguration(
         _ onChain: HorizonAccount,
         account: StellarAccountID,
@@ -907,6 +897,16 @@ public struct TreasuryCreationInteractor: Sendable {
         return nil
     }
 
+    /// Record a treasury whose creation transaction was submitted
+    /// elsewhere — by the founder's own wallet, after a
+    /// `needsExternalWallet` handoff.
+    ///
+    /// The claim is checked against the chain before it is believed:
+    /// the account must exist, its master weight must actually be zero,
+    /// and its signer set must be the one that was asked for. Taking
+    /// the founder's word for it would mean anchoring the group to an
+    /// account that might still be under one person's control — which
+    /// is the single thing this design exists to rule out.
     public func adopt(
         groupIDHex: String,
         treasuryAccountID: String,

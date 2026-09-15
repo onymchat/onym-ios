@@ -698,12 +698,7 @@ public final class TreasuryFlow {
         clampThresholdsToWeight()
     }
 
-    /// Keeps the thresholds inside what the resolved signer set can
-    /// reach, and `high` at or above `medium`. Both are reachable in a
-    /// couple of taps on screen and both are permanent — an account
-    /// whose threshold exceeds its total weight can never act again,
-    /// and one whose `high` is below its `medium` can be seized by any
-     /// One clamp, and it counts weight.
+    /// One clamp, and it counts weight.
     ///
     /// There were two: this one, against the headcount, and a
     /// weight-aware twin. `create()` used the twin; the steppers and
@@ -717,7 +712,6 @@ public final class TreasuryFlow {
     /// one. Two functions with one job is how the first version got
     /// converted and the second did not.
     public func thresholdsChanged() { clampThresholdsToWeight() }
-
 
     public func create() async {
         // The founder funds from the account they declared. Not from

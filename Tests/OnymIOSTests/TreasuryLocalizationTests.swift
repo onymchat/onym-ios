@@ -24,9 +24,6 @@ final class TreasuryLocalizationTests: XCTestCase {
         ]
     }
 
-    /// Call sites whose first string literal is a `LocalizedStringKey`.
-    /// `titleText:` / `verbatim:` initialisers are deliberately absent —
-    /// those exist precisely so runtime data is never looked up as a key.
     /// One Swift string literal.
     ///
     /// Written once because the shapes that slip past a scanner like

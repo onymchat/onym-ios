@@ -70,8 +70,4 @@ final class TreasurySignerSelectionTests: XCTestCase {
         )
         XCTAssertEqual(resolved, [ada])
     }
-
-    // MARK: - Thresholds
-
-    // MARK: - Usability
 }

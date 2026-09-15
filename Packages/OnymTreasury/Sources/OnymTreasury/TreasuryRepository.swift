@@ -408,9 +408,6 @@ public actor TreasuryRepository {
         try? await horizon(network).account(account)
     }
 
-    /// Applied transactions for the group's treasury, newest first.
-    /// Not cached — history is a screen the user opened, and a stale
-    /// list is worse than a spinner.
     /// Find out from the ledger which open proposals already went
     /// through, whoever submitted them.
     ///
@@ -466,6 +463,9 @@ public actor TreasuryRepository {
         return applied
     }
 
+    /// Applied transactions for the group's treasury, newest first.
+    /// Not cached — history is a screen the user opened, and a stale
+    /// list is worse than a spinner.
     public func history(groupID: String, limit: Int = 50) async -> [HorizonTransaction] {
         guard let owner = currentIdentity?.rawValue.uuidString,
               let treasury = await store.treasury(groupID: groupID, ownerIDString: owner)

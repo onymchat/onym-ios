@@ -379,6 +379,7 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
                 // turning a 0 into a signer of weight 1, which is how a
                 // stale or tampered row becomes authority nobody
                 // granted.
+                //
                 // Three cases, and they are not the same thing.
                 //
                 // No map at all is a row written before weights
@@ -668,10 +669,6 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
         return IdentityID(uuid)
     }
 
-
-    /// Every store call funnels through here so writes serialise on one
-    /// queue and a throw becomes `nil` rather than a crash — the same
-    /// bargain the other SwiftData stores make.
     /// Like `perform`, but the caller decides what a failure means.
     ///
     /// `perform` turns every throw into nil, which is right for a read

@@ -347,10 +347,6 @@ public struct CreateTreasuryView: View {
         names: [String: String],
         me: String?
     ) -> String {
-        // Unreachable and not-enumerated are different facts, and the
-        // first version reported both as "nobody can reach this bar" —
-        // a false statement about a perfectly good nine-signer
-        // treasury.
         // Two different failures, and only one of them has those
         // remedies. A bar above the total weight is fixed by lowering
         // it or adding weight; `high` below `medium` is fixed by
@@ -363,6 +359,10 @@ public struct CreateTreasuryView: View {
                 localized: "Changing who can spend is set lower than spending itself, which would let one person take the account over."
             )
         }
+        // Unreachable and not-enumerated are different facts, and the
+        // first version reported both as "nobody can reach this bar" —
+        // a false statement about a perfectly good nine-signer
+        // treasury.
         guard quorum.isReachable else {
             return String(
                 localized: "Nobody can reach this bar \u{2014} lower it or give someone more weight."
@@ -415,6 +415,7 @@ public struct CreateTreasuryView: View {
         // declaration stopped verifying is not a signer, and a
         // threshold counted from headcount would exceed the weight that
         // actually exists.
+        //
         // Against the total weight, not the headcount. With everyone
         // at 1 those were the same number; with anyone at 2 they are
         // not, and the bar the ledger enforces is the weight one. The
