@@ -59,45 +59,13 @@ public enum TreasurySignerSelection {
         return resolved
     }
 
-    /// Thresholds that the given signer set can satisfy, and that do not
-    /// let a minority seize the majority's account.
-    ///
-    /// Two clamps, both load-bearing:
-    ///
-    /// - **Neither may exceed the total weight.** A threshold above what
-    ///   the signers add up to is an account no quorum can ever act on,
-    ///   permanently — including to fix the threshold.
-    /// - **`high` may not be below `medium`.** The steppers are
-    ///   independent on screen, so "3 of 3 to spend, 1 of 3 to change
-    ///   who can spend" is two taps away — and it means any single
-    ///   co-signer can `setOptions` themselves to sole control and then
-    ///   spend everything alone. Raising `high` to meet `medium` is the
-    ///   safe direction: it is the setting that governs who is allowed
-    ///   to change the other.
-    public static func clamped(
-        _ thresholds: TreasuryThresholds,
-        signerCount: Int
-    ) -> TreasuryThresholds {
-        let total = UInt32(max(signerCount, 1))
-        let medium = min(max(thresholds.medium, 1), total)
-        let high = min(max(thresholds.high, medium), total)
-        return TreasuryThresholds(
-            low: min(max(thresholds.low, 1), total),
-            medium: medium,
-            high: high
-        )
-    }
-
-    /// Whether a set of thresholds would leave the treasury able to act
-    /// at all. `accounts(ticked:from:)` can return fewer signers than
-    /// were ticked, so this is asked of the resolved list.
-    public static func isUsable(
-        _ thresholds: TreasuryThresholds,
-        signerCount: Int
-    ) -> Bool {
-        signerCount > 0
-            && thresholds.medium <= UInt32(signerCount)
-            && thresholds.high <= UInt32(signerCount)
-            && thresholds.high >= thresholds.medium
-    }
+    // `clamped(_:signerCount:)` and `isUsable(_:signerCount:)` lived
+    // here and counted people. `TreasuryQuorum.isReachable` counts
+    // weight, which is what the ledger enforces, and the two disagreed
+    // the moment anybody was worth more than one signature.
+    //
+    // They are gone rather than deprecated. Leaving a headcount twin in
+    // the file is exactly how the creation path got converted and the
+    // steppers did not — a second shape of the same job is something
+    // the next caller can pick by accident.
 }

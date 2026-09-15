@@ -298,14 +298,25 @@ public struct TreasurySigningInteractor: Sendable {
             await treasury.markSubmitted(proposalID: proposalID, txHash: hash)
             return .submitted(txHash: hash)
         } catch let error as HorizonError {
-            // `tx_bad_seq` means somebody else's transaction won the
-            // race between the refresh above and this submit. Reported
-            // as superseded rather than as a generic failure, because
-            // the two need different things from the user: one is "try
-            // again", the other is "this can never work, propose
-            // again".
+            // `tx_bad_seq` means the account's sequence moved between
+            // the refresh above and this submit — and the likeliest
+            // reason is that this very proposal was already sent, by
+            // whichever co-signer's finger got there first. Two people
+            // tapping Submit on a ready proposal is the ordinary case,
+            // not an edge one.
+            //
+            // So ask the ledger before calling it lost. If the
+            // proposal's own hash is in the account's history, the
+            // right answer is "it went through" — telling the second
+            // tapper their payment can never be used, about the
+            // payment that just succeeded, is the bug this reports.
             if case .submissionFailed(let codes, _) = error,
                codes.contains("tx_bad_seq") {
+                await treasury.reconcileSubmittedProposals(groupID: proposal.groupID)
+                if let settled = await treasury.proposal(id: proposalID)?
+                    .proposal.submittedTxHash {
+                    return .submitted(txHash: settled)
+                }
                 return .superseded
             }
             return .failed(describe(error))

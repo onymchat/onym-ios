@@ -324,6 +324,19 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
 
     private struct PendingConfiguration: Codable {
         let coSigners: [String]
+        /// Weight per co-signer account, keyed the same way.
+        ///
+        /// Optional, and absent on rows written before weights existed
+        /// — those were all-1 by construction, which is what the
+        /// decoder falls back to. A schema that cannot read its own
+        /// older rows is a migration nobody planned.
+        var weights: [String: UInt32]?
+        /// Roster key per co-signer account, so a handoff restored
+        /// after a relaunch can still say "Aino" rather than an
+        /// address. `misconfiguration` compares account-and-weight
+        /// pairs and never misses it, which is why its absence was
+        /// invisible — until a screen tries to draw the people.
+        var members: [String: String]?
         let low: UInt32
         let medium: UInt32
         let high: UInt32
@@ -341,8 +354,8 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
     public func pendingCreation(
         groupID: String,
         ownerIDString: String
-    ) async -> PendingTreasuryCreation? {
-        await perform { () -> PendingTreasuryCreation? in
+    ) async throws -> PendingTreasuryCreation? {
+        try await performThrowing { () -> PendingTreasuryCreation? in
             let descriptor = FetchDescriptor<PersistedPendingCreation>(
                 predicate: #Predicate {
                     $0.groupID == groupID && $0.ownerIdentityIDString == ownerIDString
@@ -361,8 +374,37 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
                 ),
                 network: try self.network(row.encryptedNetwork),
                 creationTxHash: try self.string(row.encryptedCreationTxHash),
-                coSigners: try configuration.coSigners.map {
-                    try StellarAccountID(accountID: $0)
+                // A weight this type refuses is a row that cannot be
+                // read back honestly — the alternative is quietly
+                // turning a 0 into a signer of weight 1, which is how a
+                // stale or tampered row becomes authority nobody
+                // granted.
+                //
+                // Three cases, and they are not the same thing.
+                //
+                // No map at all is a row written before weights
+                // existed: those were one apiece by construction, and
+                // one is the honest reading. A map that exists and
+                // omits this account is not — falling back to one there
+                // is the silent-authority case the refusal above exists
+                // to prevent, arrived at from the other side. And a
+                // weight outside 1...255 is a row this store will not
+                // pretend to understand.
+                coSigners: try configuration.coSigners.map { accountID in
+                    let account = try StellarAccountID(accountID: accountID)
+                    guard let weights = configuration.weights else {
+                        return TreasuryCoSigner(account: account)
+                    }
+                    guard let weight = weights[accountID],
+                          let coSigner = TreasuryCoSigner(
+                              account: account,
+                              weight: weight,
+                              memberBlsPubkeyHex: configuration.members?[accountID]
+                          )
+                    else {
+                        throw TreasuryStoreError.unreadableWeight(accountID)
+                    }
+                    return coSigner
                 },
                 thresholds: TreasuryThresholds(
                     low: configuration.low,
@@ -373,7 +415,7 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
                 treasurySeed: configuration.treasurySeed,
                 configurationTxHash: configuration.configurationTxHash
             )
-        } ?? nil
+        }
     }
 
     public func upsert(_ record: PendingTreasuryCreation) async {
@@ -387,7 +429,19 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
             )
             let configuration = try StorageEncryption.encrypt(
                 try JSONEncoder().encode(PendingConfiguration(
-                    coSigners: record.coSigners.map(\.accountID),
+                    coSigners: record.coSigners.map(\.account.accountID),
+                    weights: Dictionary(
+                        record.coSigners.map { ($0.account.accountID, $0.weight) },
+                        uniquingKeysWith: { first, _ in first }
+                    ),
+                    members: Dictionary(
+                        record.coSigners.compactMap { coSigner in
+                            coSigner.memberBlsPubkeyHex.map {
+                                (coSigner.account.accountID, $0)
+                            }
+                        },
+                        uniquingKeysWith: { first, _ in first }
+                    ),
                     low: record.thresholds.low,
                     medium: record.thresholds.medium,
                     high: record.thresholds.high,
@@ -615,9 +669,33 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
         return IdentityID(uuid)
     }
 
-    /// Every store call funnels through here so writes serialise on one
-    /// queue and a throw becomes `nil` rather than a crash — the same
-    /// bargain the other SwiftData stores make.
+    /// Like `perform`, but the caller decides what a failure means.
+    ///
+    /// `perform` turns every throw into nil, which is right for a read
+    /// whose absence and whose failure lead to the same screen. It is
+    /// wrong for the pending creation: "there is no handoff" and "the
+    /// handoff is on disk and this build cannot read it" differ by an
+    /// account that may already hold the founder's money, and
+    /// collapsing them drops the awaiting-wallet stage for a funded
+    /// treasury. That is worse than the clamp the throw replaced.
+    private func performThrowing<T>(_ body: @escaping () throws -> T) async throws -> T {
+        try await withCheckedThrowingContinuation { continuation in
+            queue.async {
+                do {
+                    continuation.resume(returning: try body())
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    /// Every store call funnels through here: the SwiftData context is
+    /// not thread-safe, and a throw becomes `nil` because the caller of
+    /// a read has the same screen to draw either way.
+    ///
+    /// The exception is `performThrowing` above, for the one read where
+    /// absence and failure are different facts.
     @discardableResult
     private func perform<T>(_ body: @escaping () throws -> T) async -> T? {
         await withCheckedContinuation { continuation in
@@ -635,4 +713,8 @@ public final class SwiftDataTreasuryStore: TreasuryStore, @unchecked Sendable {
 
 enum TreasuryStoreError: Error, Equatable {
     case undecodable(String)
+    /// A stored signer weight outside 1...255. Refused rather than
+    /// clamped: a zero silently becoming one is authority nobody
+    /// granted.
+    case unreadableWeight(String)
 }

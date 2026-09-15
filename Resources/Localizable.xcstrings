@@ -1,6 +1,23 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    " and ": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": " and "
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": " и "
+          }
+        }
+      }
+    },
     " · published on Stellar so anyone can verify it’s real.": {
       "extractionState": "stale",
       "localizations": {
@@ -14,6 +31,23 @@
           "stringUnit": {
             "state": "translated",
             "value": " · опубликован в Stellar — любой может убедиться, что он настоящий."
+          }
+        }
+      }
+    },
+    " — and other combinations": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": " — and other combinations"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": " — и другие сочетания"
           }
         }
       }
@@ -433,6 +467,23 @@
         }
       }
     },
+    "%lld of %lld weight": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld of %lld weight"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld из %lld веса"
+          }
+        }
+      }
+    },
     "%lld people want to join": {
       "extractionState": "manual",
       "localizations": {
@@ -657,6 +708,23 @@
         }
       }
     },
+    ", or ": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": ", or "
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": ", либо "
+          }
+        }
+      }
+    },
     ", or share a QR code from there.": {
       "localizations": {
         "en": {
@@ -868,6 +936,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Казна для этого чата"
+          }
+        }
+      }
+    },
+    "A treasury handoff is saved on this phone and this version cannot read it. Nothing has been changed.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A treasury handoff is saved on this phone and this version cannot read it. Nothing has been changed."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "На этом телефоне сохранена передача казны, которую эта версия не может прочитать. Ничего не изменено."
           }
         }
       }
@@ -1588,6 +1673,23 @@
         }
       }
     },
+    "Any signatures adding up to %lld of %lld.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Any signatures adding up to %lld of %lld."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Любые подписи, дающие в сумме %lld из %lld."
+          }
+        }
+      }
+    },
     "Anyone can issue a token called anything. The issuer account is what tells a real one from a copy — get it from the issuer themselves, not from whoever asked you to add it.": {
       "extractionState": "manual",
       "localizations": {
@@ -2265,6 +2367,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Изменить, кто управляет казной"
+          }
+        }
+      }
+    },
+    "Changing who can spend is set lower than spending itself, which would let one person take the account over.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Changing who can spend is set lower than spending itself, which would let one person take the account over."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Планка для смены тех, кто может тратить, ниже планки для трат — так один человек сможет забрать счёт себе."
           }
         }
       }
@@ -3922,6 +4041,23 @@
         }
       }
     },
+    "Got it": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Got it"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Понятно"
+          }
+        }
+      }
+    },
     "Group integrity": {
       "extractionState": "manual",
       "localizations": {
@@ -4307,6 +4443,23 @@
         }
       }
     },
+    "If any one of these phones is lost, this account freezes forever — a key cannot be removed without its own signature, so the weight left behind can never clear the bar for changing who can spend.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "If any one of these phones is lost, this account freezes forever — a key cannot be removed without its own signature, so the weight left behind can never clear the bar for changing who can spend."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Если потерять любой из этих телефонов, счёт замрёт навсегда: ключ нельзя убрать без его же подписи, и оставшегося веса уже не хватит, чтобы изменить круг тех, кто может тратить."
+          }
+        }
+      }
+    },
     "If enough co-signers lose their keys to reach the numbers above, the balance is locked away for good. Nobody can undo that.": {
       "extractionState": "manual",
       "localizations": {
@@ -4469,6 +4622,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Эмитент"
+          }
+        }
+      }
+    },
+    "It is on Stellar's public ledger beside this chat's treasury, and it stays there. Leaving a treasury later does not remove that record — nothing can.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "It is on Stellar's public ledger beside this chat's treasury, and it stays there. Leaving a treasury later does not remove that record — nothing can."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Он в публичном реестре Stellar рядом с казной этого чата и останется там. Выход из казны позже не удалит эту запись — ничто не удалит."
           }
         }
       }
@@ -5591,6 +5761,23 @@
         }
       }
     },
+    "Nobody can reach this bar — lower it or give someone more weight.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nobody can reach this bar — lower it or give someone more weight."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Эту планку никто не достигнет — опустите её или дайте кому-то больший вес."
+          }
+        }
+      }
+    },
     "Nobody has chosen a Stellar account yet.": {
       "extractionState": "manual",
       "localizations": {
@@ -6126,6 +6313,23 @@
         }
       }
     },
+    "Onym published the Stellar account it keeps for you to this chat, so a treasury can be set up without waiting for everyone.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Onym published the Stellar account it keeps for you to this chat, so a treasury can be set up without waiting for everyone."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Onym опубликовал в этом чате счёт Stellar, который хранит для вас, чтобы казну можно было создать, не дожидаясь всех."
+          }
+        }
+      }
+    },
     "Onym runs on independent services for delivery, files and timestamps. Start with a set that works, or pick your own.": {
       "extractionState": "manual",
       "localizations": {
@@ -6190,6 +6394,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Из %lld соподписантов. Требовать подписи всех — значит заморозить казну навсегда из-за одного потерянного телефона: удалить ключ без его же подписи нельзя."
+          }
+        }
+      }
+    },
+    "Out of %lld total weight. The second bar is deliberately higher than the first — changing who holds the keys should be harder than spending.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Out of %lld total weight. The second bar is deliberately higher than the first — changing who holds the keys should be harder than spending."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Из %lld общего веса. Вторая планка намеренно выше первой: менять тех, у кого ключи, должно быть труднее, чем тратить."
           }
         }
       }
@@ -6657,6 +6878,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Вынести на общее решение"
+          }
+        }
+      }
+    },
+    "RIGHT NOW, SPENDING TAKES": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "RIGHT NOW, SPENDING TAKES"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "СЕЙЧАС ДЛЯ ТРАТЫ НУЖНО"
           }
         }
       }
@@ -7807,6 +8045,23 @@
         }
       }
     },
+    "Sent %@ %@ to %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sent %@ %@ to %@"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Отправлено %@ %@ на %@"
+          }
+        }
+      }
+    },
     "Sent when you created the group. Each one can still be used to request to join.": {
       "localizations": {
         "en": {
@@ -8304,6 +8559,23 @@
         }
       }
     },
+    "Someone added %@ %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Someone added %@ %@"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Кто-то пополнил на %@ %@"
+          }
+        }
+      }
+    },
     "Someone wants to join": {
       "extractionState": "manual",
       "localizations": {
@@ -8317,6 +8589,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Кто-то хочет присоединиться"
+          }
+        }
+      }
+    },
+    "Something this app cannot read": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Something this app cannot read"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Что-то, что приложение не может прочитать"
           }
         }
       }
@@ -8465,6 +8754,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Начать заново"
+          }
+        }
+      }
+    },
+    "Started holding %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Started holding %@"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Начали держать %@"
           }
         }
       }
@@ -8633,6 +8939,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Перестать держать %@"
+          }
+        }
+      }
+    },
+    "Stopped holding %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stopped holding %@"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Перестали держать %@"
           }
         }
       }
@@ -9250,6 +9573,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Казна создана. Теперь её видят все в чате."
+          }
+        }
+      }
+    },
+    "The treasury was created": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The treasury was created"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Казна создана"
           }
         }
       }
@@ -10625,6 +10965,23 @@
         }
       }
     },
+    "Who can spend changed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Who can spend changed"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Изменился круг тех, кто может тратить"
+          }
+        }
+      }
+    },
     "Who carries your sealed messages": {
       "extractionState": "manual",
       "localizations": {
@@ -10794,6 +11151,23 @@
         }
       }
     },
+    "YOUR ADDRESS IS NOW PUBLIC": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "YOUR ADDRESS IS NOW PUBLIC"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ВАШ АДРЕС ТЕПЕРЬ ПУБЛИЧЕН"
+          }
+        }
+      }
+    },
     "YOUR CHOICE": {
       "extractionState": "manual",
       "localizations": {
@@ -10856,6 +11230,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Можно не закрывать этот экран — если заявку одобрят, чат появится сам."
+          }
+        }
+      }
+    },
+    "You can name a different wallet below. If a treasury already exists, coming off it takes the other co-signers' agreement.": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You can name a different wallet below. If a treasury already exists, coming off it takes the other co-signers' agreement."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ниже можно указать другой кошелёк. Если казна уже создана, выход из неё потребует согласия остальных подписантов."
           }
         }
       }
@@ -11559,6 +11950,23 @@
         }
       }
     },
+    "counts %lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "counts %lld"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "считается за %lld"
+          }
+        }
+      }
+    },
     "group": {
       "extractionState": "manual",
       "localizations": {
@@ -11670,6 +12078,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "npub"
+          }
+        }
+      }
+    },
+    "one signature": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "one signature"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "одна подпись"
           }
         }
       }
@@ -11800,6 +12225,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "вес %lld"
+          }
+        }
+      }
+    },
+    "you": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "you"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "вы"
           }
         }
       }

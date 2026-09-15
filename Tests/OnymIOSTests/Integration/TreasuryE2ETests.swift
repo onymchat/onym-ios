@@ -140,7 +140,7 @@ final class TreasuryE2ETests: XCTestCase {
         let created = await adaSide.creation.create(
             groupIDHex: groupIDHex,
             funder: adaSigner,
-            coSigners: [adaSigner, boSigner],
+            coSigners: [adaSigner, boSigner].map { TreasuryCoSigner(account: $0) },
             thresholds: TreasuryThresholds(low: 1, medium: 2, high: 2),
             spendable: try StellarAmount(decimalString: "100"),
             network: .testnet
@@ -445,7 +445,7 @@ final class TreasuryE2ETests: XCTestCase {
         let world = try await makeExternalWorld()
 
         let request = try await handOff(world)
-        let loadedPending = await world.side.repository.pendingCreation(groupID: groupIDHex)
+        let loadedPending = try await world.side.repository.pendingCreation(groupID: groupIDHex)
         let accountID = try XCTUnwrap(loadedPending).treasuryAccount.accountID
 
         // What a wallet is given: one operation, one source, unsigned.
@@ -473,11 +473,11 @@ final class TreasuryE2ETests: XCTestCase {
         XCTAssertNil(TreasuryCreationInteractor.misconfiguration(
             onChain,
             account: treasury.account,
-            expectedCoSigners: world.coSigners,
+            expectedCoSigners: world.coSigners.map { TreasuryCoSigner(account: $0) },
             expectedThresholds: world.thresholds
         ))
         // The seed dies with the row.
-        let pending = await world.side.repository.pendingCreation(groupID: groupIDHex)
+        let pending = try await world.side.repository.pendingCreation(groupID: groupIDHex)
         XCTAssertNil(pending)
     }
 
@@ -507,7 +507,7 @@ final class TreasuryE2ETests: XCTestCase {
 
         // Configure by hand, exactly as the interactor would, then wipe
         // nothing — the pending row still says the job is unfinished.
-        let loaded = await world.side.repository.pendingCreation(groupID: groupIDHex)
+        let loaded = try await world.side.repository.pendingCreation(groupID: groupIDHex)
         let pending = try XCTUnwrap(loaded)
         let seed = try XCTUnwrap(pending.treasurySeed)
         let key = try EphemeralTreasuryKey(seed: seed)
@@ -528,7 +528,7 @@ final class TreasuryE2ETests: XCTestCase {
             await world.side.creation.completeExternalCreation(groupIDHex: groupIDHex)
         else { return XCTFail("the resume branch must anchor what is already configured") }
         XCTAssertEqual(treasury.account, pending.treasuryAccount)
-        let cleared = await world.side.repository.pendingCreation(groupID: groupIDHex)
+        let cleared = try await world.side.repository.pendingCreation(groupID: groupIDHex)
         XCTAssertNil(cleared)
     }
 
@@ -543,7 +543,7 @@ final class TreasuryE2ETests: XCTestCase {
         guard case .accountAlreadyFunded = outcome else {
             return XCTFail("abandoning a funded treasury must be refused, got \(outcome)")
         }
-        let pending = await world.side.repository.pendingCreation(groupID: groupIDHex)
+        let pending = try await world.side.repository.pendingCreation(groupID: groupIDHex)
         XCTAssertNotNil(pending?.treasurySeed, "the key must survive a refused abandon")
 
         // And the way out of that state still works.
@@ -559,7 +559,7 @@ final class TreasuryE2ETests: XCTestCase {
         try await handOff(world)
         let outcome = await world.side.creation.abandonExternalCreation(groupIDHex: groupIDHex)
         XCTAssertEqual(outcome, .discarded)
-        let pending = await world.side.repository.pendingCreation(groupID: groupIDHex)
+        let pending = try await world.side.repository.pendingCreation(groupID: groupIDHex)
         XCTAssertNil(pending)
     }
 
@@ -568,7 +568,7 @@ final class TreasuryE2ETests: XCTestCase {
     func test_aPendingRowWithNoSeed_fallsBackToAdopt() async throws {
         let world = try await makeExternalWorld()
         try await handOff(world)
-        let loaded = await world.side.repository.pendingCreation(groupID: groupIDHex)
+        let loaded = try await world.side.repository.pendingCreation(groupID: groupIDHex)
         let pending = try XCTUnwrap(loaded)
         await world.side.repository.recordPendingCreation(PendingTreasuryCreation(
             groupID: pending.groupID,
@@ -595,7 +595,7 @@ final class TreasuryE2ETests: XCTestCase {
     func test_abandoning_refusesWhenTheLedgerCannotBeReached() async throws {
         let world = try await makeExternalWorld()
         try await fundExternally(world)
-        let loaded = await world.side.repository.pendingCreation(groupID: groupIDHex)
+        let loaded = try await world.side.repository.pendingCreation(groupID: groupIDHex)
         let pending = try XCTUnwrap(loaded)
 
         // A side whose Horizon answers nothing but errors.
@@ -618,7 +618,7 @@ final class TreasuryE2ETests: XCTestCase {
 
         let outcome = await offline.creation.abandonExternalCreation(groupIDHex: groupIDHex)
         XCTAssertEqual(outcome, .couldNotTell)
-        let survived = await offline.repository.pendingCreation(groupID: groupIDHex)
+        let survived = try await offline.repository.pendingCreation(groupID: groupIDHex)
         XCTAssertNotNil(survived?.treasurySeed, "an unreachable ledger must not cost the key")
     }
 
@@ -629,7 +629,7 @@ final class TreasuryE2ETests: XCTestCase {
     func test_fundingStrandedByAnotherAnchor_isStillConfigured() async throws {
         let world = try await makeExternalWorld()
         try await fundExternally(world)
-        let loaded = await world.side.repository.pendingCreation(groupID: groupIDHex)
+        let loaded = try await world.side.repository.pendingCreation(groupID: groupIDHex)
         let pending = try XCTUnwrap(loaded)
 
         // Someone else's treasury, anchored first.
@@ -657,7 +657,7 @@ final class TreasuryE2ETests: XCTestCase {
             expectedCoSigners: pending.coSigners,
             expectedThresholds: pending.thresholds
         ))
-        let cleared = await world.side.repository.pendingCreation(groupID: groupIDHex)
+        let cleared = try await world.side.repository.pendingCreation(groupID: groupIDHex)
         XCTAssertNil(cleared)
     }
 
@@ -674,7 +674,7 @@ final class TreasuryE2ETests: XCTestCase {
         }
         XCTAssertTrue(reason.contains("does not cover its reserve"), reason)
         // And the row survives, because sending it more is a real fix.
-        let pending = await world.side.repository.pendingCreation(groupID: groupIDHex)
+        let pending = try await world.side.repository.pendingCreation(groupID: groupIDHex)
         XCTAssertNotNil(pending?.treasurySeed)
     }
 
@@ -703,7 +703,7 @@ final class TreasuryE2ETests: XCTestCase {
     func test_strandedFunding_thatCannotBeFinished_isNotReportedAsCreated() async throws {
         let world = try await makeExternalWorld()
         try await fundExternally(world)
-        let loaded = await world.side.repository.pendingCreation(groupID: groupIDHex)
+        let loaded = try await world.side.repository.pendingCreation(groupID: groupIDHex)
         let pending = try XCTUnwrap(loaded)
 
         // Another admin's anchor, and a ledger that refuses the
@@ -726,7 +726,7 @@ final class TreasuryE2ETests: XCTestCase {
         }
         XCTAssertTrue(reason.contains(pending.treasuryAccount.abbreviated), reason)
         // And the key survives, because the account still needs it.
-        let survived = await world.side.repository.pendingCreation(groupID: groupIDHex)
+        let survived = try await world.side.repository.pendingCreation(groupID: groupIDHex)
         XCTAssertNotNil(survived?.treasurySeed)
     }
 
@@ -736,13 +736,13 @@ final class TreasuryE2ETests: XCTestCase {
     func test_creatingTwice_doesNotOverwriteALiveHandoff() async throws {
         let world = try await makeExternalWorld()
         try await handOff(world)
-        let loaded = await world.side.repository.pendingCreation(groupID: groupIDHex)
+        let loaded = try await world.side.repository.pendingCreation(groupID: groupIDHex)
         let first = try XCTUnwrap(loaded)
 
         let outcome = await world.side.creation.create(
             groupIDHex: groupIDHex,
             funder: world.funder,
-            coSigners: world.coSigners,
+            coSigners: world.coSigners.map { TreasuryCoSigner(account: $0) },
             thresholds: world.thresholds,
             spendable: StellarAmount(stroops: 0),
             network: .testnet
@@ -751,7 +751,7 @@ final class TreasuryE2ETests: XCTestCase {
             return XCTFail("expected a refusal, got \(outcome)")
         }
         XCTAssertTrue(reason.contains("already waiting"), reason)
-        let after = await world.side.repository.pendingCreation(groupID: groupIDHex)
+        let after = try await world.side.repository.pendingCreation(groupID: groupIDHex)
         XCTAssertEqual(after?.treasuryAccount, first.treasuryAccount)
         XCTAssertEqual(after?.treasurySeed, first.treasurySeed)
     }
@@ -852,7 +852,7 @@ final class TreasuryE2ETests: XCTestCase {
         let outcome = await world.side.creation.create(
             groupIDHex: groupIDHex,
             funder: world.funder,
-            coSigners: world.coSigners,
+            coSigners: world.coSigners.map { TreasuryCoSigner(account: $0) },
             thresholds: world.thresholds,
             spendable: StellarAmount(stroops: 0),
             network: .testnet
@@ -869,10 +869,10 @@ final class TreasuryE2ETests: XCTestCase {
         _ world: ExternalWorld,
         stroops: Int64 = 40_000_000
     ) async throws {
-        if await world.side.repository.pendingCreation(groupID: groupIDHex) == nil {
+        if try await world.side.repository.pendingCreation(groupID: groupIDHex) == nil {
             try await handOff(world)
         }
-        let loaded = await world.side.repository.pendingCreation(groupID: groupIDHex)
+        let loaded = try await world.side.repository.pendingCreation(groupID: groupIDHex)
         let pending = try XCTUnwrap(loaded)
         let account = try await world.ledger.account(world.funder)
         let funding = try TreasuryTransactionFactory.creationFunding(

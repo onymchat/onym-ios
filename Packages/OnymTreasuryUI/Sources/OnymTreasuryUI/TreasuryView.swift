@@ -337,6 +337,53 @@ public struct TreasuryView: View {
         }
     }
 
+    /// What happened, as a sentence.
+    ///
+    /// The list this replaces was five transaction hashes and a tick —
+    /// the ledger's record rendered the way the ledger stores it. The
+    /// hash is still reachable, on the screen about the thing rather
+    /// than in place of it.
+    static func title(of event: TreasuryHistoryEvent) -> LocalizedStringKey {
+        switch event.kind {
+        case .received(let amount, let asset, _):
+            "Someone added \(amount.decimalString) \(asset.code)"
+        case .sent(let amount, let asset, let destination):
+            "Sent \(amount.decimalString) \(asset.code) to \(destination.abbreviated)"
+        case .startedHolding(let asset):
+            "Started holding \(asset.code)"
+        case .stoppedHolding(let asset):
+            "Stopped holding \(asset.code)"
+        case .created:
+            "The treasury was created"
+        case .changedControl:
+            "Who can spend changed"
+        case .other:
+            "Something this app cannot read"
+        }
+    }
+
+    static func symbol(of event: TreasuryHistoryEvent) -> String {
+        switch event.kind {
+        case .received: "arrow.down.circle.fill"
+        case .sent: "paperplane.fill"
+        case .startedHolding, .stoppedHolding: "link"
+        case .created: "building.columns.fill"
+        case .changedControl: "person.2.fill"
+        case .other: "questionmark.circle.fill"
+        }
+    }
+
+    static func tile(of event: TreasuryHistoryEvent) -> Color {
+        switch event.kind {
+        case .received: OnymTile.green
+        case .sent: OnymTile.blue
+        case .startedHolding, .stoppedHolding: OnymTile.indigo
+        case .created: OnymTile.green
+        case .changedControl: OnymTile.amber
+        case .other: OnymTile.gray
+        }
+    }
+
     @ViewBuilder
     private var history: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -355,22 +402,16 @@ public struct TreasuryView: View {
                         IconTile(symbol: "clock", bg: OnymTile.gray)
                     } right: { EmptyView() }
                 } else {
-                    ForEach(Array(flow.history.enumerated()), id: \.element.hash) { index, entry in
+                    ForEach(Array(flow.events.enumerated()), id: \.element.id) { index, event in
                         Row(
-                            titleText: entry.hash,
-                            titleMono: true,
-                            subtitle: entry.ledgerCloseTime.formatted(
-                                date: .abbreviated,
-                                time: .shortened
-                            ),
+                            title: Self.title(of: event),
+                            subtitle: event.at.formatted(date: .abbreviated, time: .shortened),
                             hasChevron: false,
-                            last: index == flow.history.count - 1
+                            last: index == flow.events.count - 1
                         ) {
                             IconTile(
-                                symbol: entry.successful
-                                    ? "checkmark.circle.fill"
-                                    : "xmark.circle.fill",
-                                bg: entry.successful ? OnymTile.green : OnymTile.red
+                                symbol: Self.symbol(of: event),
+                                bg: event.successful ? Self.tile(of: event) : OnymTile.red
                             )
                         } right: { EmptyView() }
                     }

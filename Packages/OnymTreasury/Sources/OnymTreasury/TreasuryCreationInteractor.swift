@@ -177,7 +177,7 @@ public struct TreasuryCreationInteractor: Sendable {
     public func create(
         groupIDHex: String,
         funder: StellarAccountID,
-        coSigners: [StellarAccountID],
+        coSigners: [TreasuryCoSigner],
         thresholds: TreasuryThresholds,
         spendable: StellarAmount,
         network: StellarNetwork,
@@ -204,17 +204,17 @@ public struct TreasuryCreationInteractor: Sendable {
         // be produced *after* real money moved in. A screen is not the
         // place this invariant can live, because a screen is not the
         // only caller.
-        let deduplicated = Array(
-            NSOrderedSet(array: coSigners.map(\.accountID)).compactMap { $0 as? String }
-        )
+        let deduplicated = Set(coSigners.map(\.account.accountID))
         guard deduplicated.count == coSigners.count else {
             return .failed("Two co-signers named the same account.")
         }
-        guard TreasurySignerSelection.isUsable(
-            thresholds,
-            signerCount: coSigners.count
-        ) else {
-            return .failed("Those thresholds can't be met by that many co-signers.")
+        // Against the weights, not the headcount. With everyone at 1
+        // those were the same number; they stop being the same the
+        // moment one person counts double, and the threshold that
+        // matters is the one the ledger will enforce.
+        let quorum = TreasuryQuorum(coSigners: coSigners, thresholds: thresholds)
+        guard quorum.isReachable else {
+            return .failed("Those numbers can't be met by the co-signers you chose.")
         }
         guard await treasury.snapshot(groupID: groupIDHex).treasury == nil else {
             return .alreadyExists
@@ -299,8 +299,18 @@ public struct TreasuryCreationInteractor: Sendable {
             // account a wallet may already have funded — the same loss
             // `abandonExternalCreation` refuses, reached by a different
             // button. Only UI stage ordering stood between them.
-            if let existing = await treasury.pendingCreation(groupID: groupIDHex),
-               existing.treasurySeed != nil {
+            // A row that will not read counts as one that exists: the
+            // question here is "is a handoff already out there", and an
+            // unreadable row is not an answer of no.
+            let existingRow = try? await treasury.pendingCreation(groupID: groupIDHex)
+            if existingRow == nil,
+               await treasury.hasUnreadablePendingCreation(groupID: groupIDHex) {
+                return .failed(
+                    "a treasury handoff for this chat is on this device and cannot be read. "
+                    + "Nothing has been changed."
+                )
+            }
+            if let existing = existingRow, existing.treasurySeed != nil {
                 return .failed(
                     "a treasury handoff for this chat is already waiting. Finish it, or "
                     + "start over from that screen, before creating another."
@@ -415,16 +425,6 @@ public struct TreasuryCreationInteractor: Sendable {
         case external
     }
 
-    /// Record a treasury whose creation transaction was submitted
-    /// elsewhere — by the founder's own wallet, after a
-    /// `needsExternalWallet` handoff.
-    ///
-    /// The claim is checked against the chain before it is believed:
-    /// the account must exist, its master weight must actually be zero,
-    /// and its signer set must be the one that was asked for. Taking
-    /// the founder's word for it would mean anchoring the group to an
-    /// account that might still be under one person's control — which
-    /// is the single thing this design exists to rule out.
     /// How far back `adopt` looks for the creating transaction. A
     /// treasury being adopted has just been created, so its history is
     /// short; the depth is here to bound the read rather than to cover
@@ -459,8 +459,14 @@ public struct TreasuryCreationInteractor: Sendable {
     /// exists. The way out of that state is `completeExternalCreation`,
     /// which finishes the job the wallet started.
     public func abandonExternalCreation(groupIDHex: String) async -> AbandonOutcome {
-        guard let pending = await treasury.pendingCreation(groupID: groupIDHex) else {
-            return .discarded
+        // Unreadable is not "nothing to keep". Discarding a row this
+        // build cannot parse would delete a key for an account that may
+        // already be funded, which is the whole reason this method asks
+        // a ledger at all.
+        guard let pending = try? await treasury.pendingCreation(groupID: groupIDHex) else {
+            return await treasury.hasUnreadablePendingCreation(groupID: groupIDHex)
+                ? .couldNotTell
+                : .discarded
         }
         guard pending.treasurySeed != nil else {
             // No key to strand: an older row, or one for the in-app
@@ -506,7 +512,7 @@ public struct TreasuryCreationInteractor: Sendable {
         guard let owner = await identity.currentSelectedID() else {
             return .failed("no identity")
         }
-        let pendingRow = await treasury.pendingCreation(groupID: groupIDHex)
+        let pendingRow = try? await treasury.pendingCreation(groupID: groupIDHex)
         // The anchored treasury is checked before the pending row, not
         // after. A founder who taps twice has no row left by the second
         // tap — this already worked — and "nothing is waiting for a
@@ -819,6 +825,13 @@ public struct TreasuryCreationInteractor: Sendable {
         return .fundedAnotherAccount(pending.treasuryAccount)
     }
 
+    /// An account and the weight it carries, for comparing a ledger's
+    /// signer set against the one a group chose.
+    private struct Pair: Hashable {
+        let account: StellarAccountID
+        let weight: UInt32
+    }
+
     /// Why an account on the ledger is not the treasury this group
     /// asked for, or nil when it is.
     ///
@@ -839,7 +852,7 @@ public struct TreasuryCreationInteractor: Sendable {
     public static func misconfiguration(
         _ onChain: HorizonAccount,
         account: StellarAccountID,
-        expectedCoSigners: [StellarAccountID],
+        expectedCoSigners: [TreasuryCoSigner],
         expectedThresholds: TreasuryThresholds
     ) -> String? {
         // Master weight zero shows up as the account's own key being
@@ -850,12 +863,23 @@ public struct TreasuryCreationInteractor: Sendable {
         guard masterWeight == 0 else {
             return "that account can still be controlled by its own key"
         }
+        // Keys *and* weights, as a set of pairs.
+        //
+        // The weight check used to be "everybody is 1", which was true
+        // of every treasury this app could build and stopped being true
+        // the moment weights became a thing a founder sets. What has to
+        // hold is that the ledger shows the configuration this group
+        // chose — so an account where the founder quietly gave
+        // themselves 3 still fails, while a treasury the group
+        // deliberately weighted 2/2/1/1 passes.
         let live = onChain.signers.filter { $0.weight > 0 }
-        guard Set(live.map(\.key)) == Set(expectedCoSigners) else {
+        guard Set(live.map(\.key)) == Set(expectedCoSigners.map(\.account)) else {
             return "that account's signers are not the ones this group chose"
         }
-        guard live.allSatisfy({ $0.weight == 1 }) else {
-            return "that account gives some signers more weight than others"
+        let onLedger = Set(live.map { Pair(account: $0.key, weight: $0.weight) })
+        let chosen = Set(expectedCoSigners.map { Pair(account: $0.account, weight: $0.weight) })
+        guard onLedger == chosen else {
+            return "that account weights its signers differently from what this group chose"
         }
         guard onChain.thresholds.low == expectedThresholds.low,
               onChain.thresholds.medium == expectedThresholds.medium,
@@ -873,12 +897,22 @@ public struct TreasuryCreationInteractor: Sendable {
         return nil
     }
 
+    /// Record a treasury whose creation transaction was submitted
+    /// elsewhere — by the founder's own wallet, after a
+    /// `needsExternalWallet` handoff.
+    ///
+    /// The claim is checked against the chain before it is believed:
+    /// the account must exist, its master weight must actually be zero,
+    /// and its signer set must be the one that was asked for. Taking
+    /// the founder's word for it would mean anchoring the group to an
+    /// account that might still be under one person's control — which
+    /// is the single thing this design exists to rule out.
     public func adopt(
         groupIDHex: String,
         treasuryAccountID: String,
         creationTxHash: String,
         network: StellarNetwork,
-        expectedCoSigners: [StellarAccountID],
+        expectedCoSigners: [TreasuryCoSigner],
         expectedThresholds: TreasuryThresholds,
         now: Date = Date()
     ) async -> TreasuryCreationOutcome {

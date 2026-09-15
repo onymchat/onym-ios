@@ -183,8 +183,20 @@ public struct CreateTreasuryView: View {
                         let selected = flow.selectedCoSigners.contains(member.blsPubkeyHex)
                         Row(
                             titleText: member.isSelf ? "\(member.alias) (you)" : member.alias,
-                            subtitle: member.account?.abbreviated,
-                            subtitleMono: true,
+                            // The address when they are not on it, the
+                            // gloss when they are.
+                            //
+                            // The gloss sat in the row's trailing slot
+                            // beside the stepper, which has no width to
+                            // spare: "one signature" wrapped to one
+                            // character per line. It belongs here
+                            // anyway — a subtitle is where the design
+                            // teaches `weight`, with the plain meaning
+                            // reading as part of the person's row
+                            // rather than as a label on a control.
+                            subtitle: selected ? nil : member.account?.abbreviated,
+                            subtitleKey: selected ? Self.gloss(flow.weight(of: member)) : nil,
+                            subtitleMono: !selected,
                             hasChevron: false,
                             last: index == flow.nominatable.count - 1,
                             onTap: { flow.toggle(member) }
@@ -198,10 +210,23 @@ public struct CreateTreasuryView: View {
                                     : OnymTile.indigo
                             )
                         } right: {
-                            Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(
-                                    selected ? OnymAccent.blue.color : OnymTokens.text3
-                                )
+                            HStack(spacing: 10) {
+                                // The weight, and only while they are on
+                                // it. A stepper beside somebody who is
+                                // not a co-signer sets a number that
+                                // governs nothing.
+                                if selected {
+                                    weightStepper(for: member)
+                                }
+                                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(
+                                        selected ? OnymAccent.blue.color : OnymTokens.text3
+                                    )
+                            }
+                            // The trailing slot takes what is left of
+                            // the row, so anything in it that can wrap,
+                            // will.
+                            .fixedSize()
                         }
                         .accessibilityIdentifier("treasury.create.cosigner.\(member.blsPubkeyHex)")
                     }
@@ -211,6 +236,35 @@ public struct CreateTreasuryView: View {
                 Footnote("Some of these accounts are held outside Onym and haven't signed anything yet, so nobody has confirmed they can. If one of them can't, the treasury may end up short of signatures.")
             }
         }
+    }
+
+    /// How far one person's signature carries.
+    ///
+    /// Everyone is one by default, which is what the old design could
+    /// express and the only thing it could express. The gloss under the
+    /// name — "counts double", "one signature" — is where the word
+    /// `weight` is taught; the number is beside it, never instead of
+    /// it.
+    private func weightStepper(for member: TreasuryMemberRow) -> some View {
+        HStack(spacing: 8) {
+            Stepper(
+                value: Binding(
+                    get: { flow.weight(of: member) },
+                    set: { flow.setWeight($0, for: member) }
+                ),
+                // The protocol's ceiling, not the enumeration cap —
+                // those are unrelated numbers that happened to be
+                // usable in the same place.
+                in: 1...TreasuryCoSigner.maximumWeight
+            ) { EmptyView() }
+                .labelsHidden()
+                .accessibilityIdentifier("treasury.create.weight.\(member.blsPubkeyHex)")
+        }
+    }
+
+    /// What a weight means, in the words the design teaches it with.
+    static func gloss(_ weight: UInt32) -> LocalizedStringKey {
+        weight == 1 ? "one signature" : "counts \(Int(weight))"
     }
 
     private var thresholds: some View {
@@ -231,9 +285,123 @@ public struct CreateTreasuryView: View {
                     last: true
                 )
             }
-            Footnote("Out of \(flow.resolvedCoSigners.count) co-signers. Requiring everyone means one lost phone freezes the treasury for good \u{2014} there is no way to remove a key without its own signature.")
+            quorumReadout
+            Footnote("Out of \(Int(flow.quorum.totalWeight)) total weight. The second bar is deliberately higher than the first \u{2014} changing who holds the keys should be harder than spending.")
         }
         .padding(.top, 8)
+    }
+
+    /// What it takes to spend, as a sentence naming people.
+    ///
+    /// The screen this replaces showed "1/1" twice, with nothing to say
+    /// what either number governed or who could satisfy it. This
+    /// recomputes on every tap, and the arithmetic sits under the
+    /// sentence rather than in place of it.
+    @ViewBuilder
+    private var quorumReadout: some View {
+        let quorum = flow.quorum
+        if !quorum.coSigners.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                SectionLabel("RIGHT NOW, SPENDING TAKES")
+                Card {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(Self.spendingSentence(
+                            quorum,
+                            names: flow.memberNames,
+                            me: flow.myBlsPubkeyHex
+                        ))
+                            .font(OnymType.font(size: 16.5, weight: .medium))
+                            .foregroundStyle(OnymTokens.text)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("\(Int(quorum.thresholds.medium)) of \(Int(quorum.totalWeight)) weight")
+                            .font(OnymType.font(size: 13))
+                            .foregroundStyle(OnymTokens.text3)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                }
+                // Governed by the bar for *changing* the signer set,
+                // which is what removing a lost key costs — not by the
+                // spending bar, which is what the first version
+                // checked and which says nothing about three signers
+                // at 1 with high 3.
+                if !quorum.signersWhoseLossWouldFreezeIt.isEmpty {
+                    Footnote("If any one of these phones is lost, this account freezes forever \u{2014} a key cannot be removed without its own signature, so the weight left behind can never clear the bar for changing who can spend.")
+                }
+            }
+            .padding(.top, 8)
+        }
+    }
+
+    /// "You and Aino together — or either of you plus both Mira and
+    /// Sam." Built from the minimal combinations, because a list of
+    /// every set that clears the bar is true and unreadable.
+    ///
+    /// `names` is why `TreasuryCoSigner` carries a roster key at all.
+    /// The first version of this rendered `account.abbreviated` and
+    /// produced "GBOIQE… and GCXRT…", which is the sentence the
+    /// redesign exists to replace, written in a nicer font.
+    static func spendingSentence(
+        _ quorum: TreasuryQuorum,
+        names: [String: String],
+        me: String?
+    ) -> String {
+        // Two different failures, and only one of them has those
+        // remedies. A bar above the total weight is fixed by lowering
+        // it or adding weight; `high` below `medium` is fixed by
+        // raising `high`, and telling someone to lower the spending bar
+        // would send them the wrong way. `clampThresholdsToWeight`
+        // keeps them ordered today, so the second is latent — which is
+        // exactly when copy quietly starts lying.
+        guard quorum.thresholds.high >= quorum.thresholds.medium else {
+            return String(
+                localized: "Changing who can spend is set lower than spending itself, which would let one person take the account over."
+            )
+        }
+        // Unreachable and not-enumerated are different facts, and the
+        // first version reported both as "nobody can reach this bar" —
+        // a false statement about a perfectly good nine-signer
+        // treasury.
+        guard quorum.isReachable else {
+            return String(
+                localized: "Nobody can reach this bar \u{2014} lower it or give someone more weight."
+            )
+        }
+        let combinations = quorum.minimalCombinations(reaching: quorum.thresholds.medium)
+        guard !combinations.isEmpty else {
+            return String(
+                localized: "Any signatures adding up to \(Int(quorum.thresholds.medium)) of \(Int(quorum.totalWeight))."
+            )
+        }
+        let spelled = combinations.prefix(3).map { combination in
+            Self.names(combination, names: names, me: me)
+        }
+        // Localised, like the other two joiners. A plain Swift literal
+        // here produced "вы и Aino, or либо…" — half a sentence in each
+        // language, which `LocalizationCatalogTests` cannot see because
+        // it only checks keys that are already in the catalog.
+        let separator = String(localized: ", or ")
+        if combinations.count > spelled.count {
+            return spelled.joined(separator: separator)
+                + String(localized: " \u{2014} and other combinations")
+        }
+        return spelled.joined(separator: separator)
+    }
+
+    private static func names(
+        _ group: [TreasuryCoSigner],
+        names: [String: String],
+        me: String?
+    ) -> String {
+        let labels = group.map { coSigner -> String in
+            guard let key = coSigner.memberBlsPubkeyHex else { return coSigner.account.abbreviated }
+            if key == me { return String(localized: "you") }
+            return names[key] ?? coSigner.account.abbreviated
+        }
+        if labels.count == 1 { return labels[0] }
+        return labels.dropLast().joined(separator: ", ")
+            + String(localized: " and ") + (labels.last ?? "")
     }
 
     private func stepper(
@@ -247,7 +415,13 @@ public struct CreateTreasuryView: View {
         // declaration stopped verifying is not a signer, and a
         // threshold counted from headcount would exceed the weight that
         // actually exists.
-        let maximum = UInt32(max(flow.resolvedCoSigners.count, 1))
+        //
+        // Against the total weight, not the headcount. With everyone
+        // at 1 those were the same number; with anyone at 2 they are
+        // not, and the bar the ledger enforces is the weight one. The
+        // ceiling is what makes an unreachable threshold unreachable
+        // rather than merely discouraged.
+        let maximum = max(flow.quorum.totalWeight, 1)
         return Row(
             title: title,
             subtitleKey: subtitle,
@@ -335,7 +509,7 @@ public struct CreateTreasuryView: View {
                 ) {
                     EmptyView()
                 } right: {
-                    TextField("0", text: $flow.spendableField)
+                    TextField(TreasuryFlow.defaultSpendableXLM, text: $flow.spendableField)
                         .font(OnymType.mono(size: 15))
                         .keyboardType(.decimalPad)
                         .multilineTextAlignment(.trailing)

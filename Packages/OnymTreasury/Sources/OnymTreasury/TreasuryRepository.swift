@@ -361,9 +361,27 @@ public actor TreasuryRepository {
 
     /// The creation handed to a wallet and awaiting confirmation, if
     /// any — see `PendingTreasuryCreation`.
-    public func pendingCreation(groupID: String) async -> PendingTreasuryCreation? {
+    /// Nil when there is no handoff. Throws when there is one this
+    /// build cannot read, so a caller cannot mistake the second for the
+    /// first and quietly forget a funded account.
+    public func pendingCreation(groupID: String) async throws -> PendingTreasuryCreation? {
         guard let owner = currentIdentity?.rawValue.uuidString else { return nil }
-        return await store.pendingCreation(groupID: groupID, ownerIDString: owner)
+        return try await store.pendingCreation(groupID: groupID, ownerIDString: owner)
+    }
+
+    /// Whether a handoff exists on disk that this build cannot read.
+    ///
+    /// Separate from `pendingCreation` because the callers that must
+    /// not mistake the two are the ones that delete things: "no row"
+    /// permits a discard, "a row I cannot parse" does not.
+    public func hasUnreadablePendingCreation(groupID: String) async -> Bool {
+        guard let owner = currentIdentity?.rawValue.uuidString else { return false }
+        do {
+            _ = try await store.pendingCreation(groupID: groupID, ownerIDString: owner)
+            return false
+        } catch {
+            return true
+        }
     }
 
     public func recordPendingCreation(_ pending: PendingTreasuryCreation) async {
@@ -388,6 +406,61 @@ public actor TreasuryRepository {
         network: StellarNetwork
     ) async -> HorizonAccount? {
         try? await horizon(network).account(account)
+    }
+
+    /// Find out from the ledger which open proposals already went
+    /// through, whoever submitted them.
+    ///
+    /// `submittedTxHash` is written by the device that presses submit,
+    /// so only that device knows. Everyone else watched the account's
+    /// sequence move past the proposal and concluded the only thing the
+    /// sequence alone can say: something else used the slot. Alice
+    /// proposed it, Bob signed and sent it, and Alice's copy filed the
+    /// transaction that succeeded under "didn't go through" — while
+    /// still offering her a Submit button that could only ever fail.
+    ///
+    /// The answer is on the ledger and needs nobody's word for it. A
+    /// transaction's hash is fixed before it is signed, so this device
+    /// can compute the hash of a proposal it holds and look for it in
+    /// the account's history. Present and successful: it went through,
+    /// and the hash is the one anyone can check. Absent: the sequence
+    /// really was taken by something else, and superseded is the truth.
+    ///
+    /// Deliberately not a broadcast. Bob announcing "I sent it" would
+    /// be faster and would mean trusting Bob about whether the group's
+    /// money moved.
+    @discardableResult
+    public func reconcileSubmittedProposals(
+        groupID: String,
+        limit: Int = 50
+    ) async -> Int {
+        guard let owner = currentIdentity?.rawValue.uuidString,
+              let treasury = await store.treasury(groupID: groupID, ownerIDString: owner)
+        else { return 0 }
+        let open = await store.proposals(groupID: groupID, ownerIDString: owner).filter {
+            $0.rejection == nil && $0.proposal.submittedTxHash == nil
+        }
+        guard !open.isEmpty else { return 0 }
+        guard let history = try? await horizon(treasury.network)
+            .transactions(for: treasury.account, limit: limit)
+        else { return 0 }
+
+        var applied = 0
+        for stored in open {
+            let hash = stored.proposal.envelope.transaction
+                .hash(network: stored.proposal.network)
+                .hexString
+            guard history.contains(where: { $0.hash == hash && $0.successful }) else { continue }
+            var updated = stored
+            updated.proposal.submittedTxHash = hash
+            await store.upsert(updated)
+            applied += 1
+        }
+        if applied > 0 {
+            accounts.removeValue(forKey: treasury.account.accountID)
+            await refresh(groupID: groupID)
+        }
+        return applied
     }
 
     /// Applied transactions for the group's treasury, newest first.

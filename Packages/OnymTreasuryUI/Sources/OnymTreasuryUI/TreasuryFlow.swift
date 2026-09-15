@@ -51,6 +51,8 @@ public final class TreasuryFlow {
     public private(set) var members: [TreasuryMemberRow] = []
     /// This identity's own declaration, if it has made one.
     public private(set) var mine: TreasurySignerDeclarationRecord?
+    /// Weight per member, by roster key. Absent means one.
+    public private(set) var weights: [String: UInt32] = [:]
     public private(set) var isAdmin = false
     public private(set) var groupName = ""
 
@@ -92,7 +94,22 @@ public final class TreasuryFlow {
     /// field failed `create()` with "That isn't an amount" rather than
     /// meaning "no spendable balance", which is a perfectly ordinary
     /// thing to want.
-    public var spendableField = "0"
+    public var spendableField = TreasuryFlow.defaultSpendableXLM
+
+    /// What a new treasury starts with, before the reserve Stellar
+    /// locks and the fee.
+    ///
+    /// Ten rather than nothing, because a treasury funded to exactly
+    /// its reserve is an account that exists and cannot pay for
+    /// anything — including the first payment the group makes it for.
+    /// The old default was zero, which meant the ordinary path ended in
+    /// a treasury that had to be topped up before it could be used, and
+    /// the screen said "Spendable balance 0" while asking for 1.5 XLM.
+    ///
+    /// A starting figure, not a floor: the field is editable, and
+    /// clearing it still means "nothing spendable", which is a
+    /// perfectly reasonable thing to want.
+    public static let defaultSpendableXLM = "10"
 
     /// What `spendableField` means, with the half-typed states a text
     /// field legitimately passes through treated as zero.
@@ -157,7 +174,7 @@ public final class TreasuryFlow {
         case awaitingWallet(
             treasuryAccountID: String,
             creationTxHash: String,
-            coSigners: [StellarAccountID],
+            coSigners: [TreasuryCoSigner],
             thresholds: TreasuryThresholds,
             network: StellarNetwork,
             request: SEP0007Request?
@@ -255,9 +272,21 @@ public final class TreasuryFlow {
         // then puts "waiting for your wallet" on a group that already
         // has one, on every launch. `snapshot.treasury` is the cheaper
         // and more direct guard than anything the row could carry.
+        // An unreadable row is reported, not treated as no row: it may
+        // hold a key for an account a wallet already funded, and
+        // quietly showing the idle form over the top of it is how a
+        // handoff gets forgotten.
+        let pendingRow = try? await repository.pendingCreation(groupID: groupID)
+        if pendingRow == nil,
+           snapshot.treasury == nil,
+           await repository.hasUnreadablePendingCreation(groupID: groupID) {
+            creationError = String(
+                localized: "A treasury handoff is saved on this phone and this version cannot read it. Nothing has been changed."
+            )
+        }
         if case .idle = creationStage,
            snapshot.treasury == nil,
-           let pending = await repository.pendingCreation(groupID: groupID) {
+           let pending = pendingRow {
             creationStage = .awaitingWallet(
                 treasuryAccountID: pending.treasuryAccount.accountID,
                 creationTxHash: pending.creationTxHash,
@@ -283,6 +312,12 @@ public final class TreasuryFlow {
                   $0.id == groupID && $0.ownerIdentityID == owner
               })
         else { return }
+
+        // After the guard, deliberately. Publishing ran before it, so a
+        // group this identity does not own — one that fails the check
+        // above — still had an address broadcast into it.
+        await publishOnymAccountIfUndeclared(snapshot, me: me)
+        loadAddressDisclosure(myHex: me.blsPublicKey.hexString)
 
         groupName = group.name
         isAdmin = group.isAdmin(blsPublicKey: me.blsPublicKey)
@@ -324,9 +359,82 @@ public final class TreasuryFlow {
             mediumThreshold = defaults.medium
             highThreshold = defaults.high
         }
+        // The snapshot decides who is resolvable at all, so the stored
+        // quorum follows it as well as the taps.
+        rebuildQuorum()
     }
 
     // MARK: - Declaration intents
+
+    /// Publish this member's Onym-derived account without being asked,
+    /// so a founder does not meet a gate before they know what a
+    /// treasury is.
+    ///
+    /// The old first screen said "Waiting for people to choose their
+    /// accounts" and "Out of 0 co-signers": creation was blocked until
+    /// every member separately completed a flow none of them had a
+    /// reason to understand yet. The redesign's answer is that Onym
+    /// already holds a Stellar account for everyone, so everyone can be
+    /// on the list from the start.
+    ///
+    /// It has to happen here, on each member's own device, and that is
+    /// not an implementation detail: the Onym account is HKDF-derived
+    /// from that member's Nostr secret, so no other device — founder's
+    /// included — can compute it. "Default to their Onym account" is
+    /// only possible as "their device published it already", which is
+    /// also what keeps the address signed by the person it belongs to
+    /// rather than asserted by someone else.
+    ///
+    /// What it costs is stated where the person can act on it: their
+    /// address becomes public, permanently, without them choosing. A
+    /// member who wants a different wallet replaces it from the roster;
+    /// one who wants off a treasury that already exists needs the
+    /// group's agreement, because by then Stellar is holding the
+    /// answer, not this app.
+    private func publishOnymAccountIfUndeclared(
+        _ snapshot: TreasurySnapshot,
+        me: Identity
+    ) async {
+        // Against the snapshot, not against `mine`.
+        //
+        // `mine` is assigned further down this same function, so a
+        // guard on it was reading the *previous* snapshot: every
+        // snapshot arriving before a declaration round-tripped
+        // re-broadcast it, and a member who had just chosen an external
+        // wallet could have the Onym account published over the top of
+        // it. The declarations in the snapshot are the answer to "has
+        // this member already chosen", and they are in hand here.
+        let myKey = me.blsPublicKey.hexString
+        // A declaration does not appear in a snapshot until it has
+        // round-tripped, and `apply` runs per snapshot — so anything
+        // arriving in that window (another member declaring, an account
+        // refresh) used to broadcast a second identical one. The
+        // snapshot check is still the one that matters across launches;
+        // this is the one that matters within a second.
+        guard !isPublishingOnymAccount else { return }
+        guard snapshot.declarations.first(where: {
+            $0.memberBlsPubkeyHex.lowercased() == myKey.lowercased()
+        }) == nil else { return }
+        // And not into a treasury that already exists: its signer set
+        // is fixed on the ledger, so a new declaration adds nobody and
+        // publishes an address for nothing.
+        guard snapshot.treasury == nil, let account = onymDerivedAccount else { return }
+        isPublishingOnymAccount = true
+        defer { isPublishingOnymAccount = false }
+        guard await broadcaster.declareSigner(
+            groupIDHex: groupID,
+            account: account,
+            source: .onym
+        ) else { return }
+        // Recorded here, because this is the only place that knows the
+        // address went out without anyone asking. The source alone
+        // cannot tell: it is `.onym` whether this published it or the
+        // person chose it.
+        addressWasPublishedUnasked = true
+        UserDefaults.standard.set(true, forKey: autoPublishedKey(myKey))
+    }
+
+    private var isPublishingOnymAccount = false
 
     public func declareOnymDerived() async {
         guard let account = onymDerivedAccount else {
@@ -415,13 +523,163 @@ public final class TreasuryFlow {
     /// verify. Not the same length as `selectedCoSigners`, which is why
     /// every threshold decision is taken from this.
     public var resolvedCoSigners: [StellarAccountID] {
-        TreasurySignerSelection.accounts(
+        resolvedCoSignerSet.map(\.account)
+    }
+
+    /// The co-signers with their weights, which is what the transaction
+    /// is built from and what every readout counts.
+    public var resolvedCoSignerSet: [TreasuryCoSigner] {
+        let accounts = TreasurySignerSelection.accounts(
             ticked: selectedCoSigners,
             from: members.map {
                 ($0.blsPubkeyHex, $0.account ?? Self.placeholder, $0.standing.canBeNominated
                     && $0.account != nil)
             }
         )
+        return accounts.map { account in
+            let member = members.first { $0.account == account }
+            let chosen = member.flatMap { weights[$0.blsPubkeyHex] }
+            // A weight the domain refuses falls back to one rather than
+            // dropping the person: the co-signer set is what the
+            // founder ticked, and a signer vanishing because a stepper
+            // produced an out-of-range number would be a worse lie than
+            // a signer counted once.
+            guard let chosen,
+                  let weighted = TreasuryCoSigner(
+                      account: account,
+                      weight: chosen,
+                      memberBlsPubkeyHex: member?.blsPubkeyHex
+                  )
+            else {
+                return TreasuryCoSigner(
+                    account: account,
+                    memberBlsPubkeyHex: member?.blsPubkeyHex
+                )
+            }
+            return weighted
+        }
+    }
+
+    /// What it takes to spend, live, as a sentence about people.
+    ///
+    /// The old screen showed "1/1" twice and left the reader to work
+    /// out what either number governed. This is what the creation steps
+    /// and the roster both lead with.
+    ///
+    /// Stored, not computed on access. As a computed property it
+    /// rebuilt the resolved signer set every time SwiftUI read it, and
+    /// the sentence behind it enumerates subsets — at the eight-signer
+    /// ceiling with a bar of 1 that is 255 reaching sets and tens of
+    /// thousands of subset comparisons, per body evaluation, on a
+    /// screen whose steppers move under the reader's thumb.
+    public private(set) var quorum = TreasuryQuorum(
+        coSigners: [],
+        thresholds: TreasuryThresholds(low: 1, medium: 1, high: 1)
+    )
+
+    /// Recomputed where the inputs change: the ticks, the weights, the
+    /// bars, and the snapshot that decides who is resolvable at all.
+    private func rebuildQuorum() {
+        quorum = TreasuryQuorum(
+            coSigners: resolvedCoSignerSet,
+            thresholds: TreasuryThresholds(
+                low: 1,
+                medium: mediumThreshold,
+                high: highThreshold
+            )
+        )
+    }
+
+    /// Whether this device has shown the person what was published
+    /// about them.
+    ///
+    /// Per group and per identity, because the address is published per
+    /// group: being told once about Flat 4 says nothing about the next
+    /// chat someone is quietly added to.
+    public private(set) var hasSeenAddressDisclosure = false
+
+    /// Whether this device published the address without being asked —
+    /// which is the only case the disclosure is true about.
+    ///
+    /// The card used to be gated on `source == .onym`, which is also
+    /// what `declareOnymDerived()` writes when somebody deliberately
+    /// taps "use my Onym account". They were then told Onym had
+    /// published it for them so a treasury could be made without
+    /// waiting — false, in the second person, on the one screen whose
+    /// entire justification is telling the truth about something
+    /// irreversible. Anyone who declared `.onym` before this existed
+    /// got the same sentence.
+    public private(set) var addressWasPublishedUnasked = false
+
+    /// Keyed on the identity, which `apply` has in hand.
+    ///
+    /// `myBlsPubkeyHex` reads `members`, and the first `apply` of a
+    /// process ran this before `members` was assigned — so the read hit
+    /// `…unknown` while the acknowledgement wrote the real key, and
+    /// "Got it" did not survive a relaunch. The flow is cached for the
+    /// process lifetime, so the first read is the one that decides
+    /// whether the card draws.
+    private func disclosureKey(_ myHex: String) -> String {
+        "treasury.address-disclosure.\(groupID).\(myHex)"
+    }
+
+    private func autoPublishedKey(_ myHex: String) -> String {
+        "treasury.auto-published.\(groupID).\(myHex)"
+    }
+
+    private var myHexForDisclosure: String?
+
+    public func acknowledgeAddressDisclosure() {
+        hasSeenAddressDisclosure = true
+        guard let myHexForDisclosure else { return }
+        UserDefaults.standard.set(true, forKey: disclosureKey(myHexForDisclosure))
+    }
+
+    private func loadAddressDisclosure(myHex: String) {
+        myHexForDisclosure = myHex
+        hasSeenAddressDisclosure = UserDefaults.standard.bool(forKey: disclosureKey(myHex))
+        addressWasPublishedUnasked = UserDefaults.standard.bool(forKey: autoPublishedKey(myHex))
+    }
+
+    /// Roster keys to names, so a quorum sentence can say "Aino"
+    /// rather than "GBOIQE…". This is what `TreasuryCoSigner`'s roster
+    /// key is carried for.
+    public var memberNames: [String: String] {
+        Dictionary(
+            members.map { ($0.blsPubkeyHex, $0.alias) },
+            uniquingKeysWith: { first, _ in first }
+        )
+    }
+
+    /// This device's own roster key, so the sentence can say "you".
+    public var myBlsPubkeyHex: String? {
+        members.first { $0.isSelf }?.blsPubkeyHex
+    }
+
+    /// What one person's signature counts for. One is the default and
+    /// the only value the old design could express.
+    public func weight(of member: TreasuryMemberRow) -> UInt32 {
+        weights[member.blsPubkeyHex] ?? 1
+    }
+
+    public func setWeight(_ weight: UInt32, for member: TreasuryMemberRow) {
+        weights[member.blsPubkeyHex] = min(max(weight, 1), TreasuryCoSigner.maximumWeight)
+        clampThresholdsToWeight()
+    }
+
+    /// Thresholds follow the weights down.
+    ///
+    /// The steppers are independent, so lowering someone's weight can
+    /// leave a bar above what the group adds up to — an account no
+    /// quorum can ever act on, including to repair itself. Stellar
+    /// accepts that; nobody can undo it.
+    private func clampThresholdsToWeight() {
+        rebuildQuorum()
+        let total = quorum.totalWeight
+        guard total > 0 else { return }
+        mediumThreshold = min(max(mediumThreshold, 1), total)
+        highThreshold = min(max(highThreshold, mediumThreshold), total)
+        rebuildQuorum()
     }
 
     /// Never used — `nominatable` is false whenever the account is nil,
@@ -437,27 +695,23 @@ public final class TreasuryFlow {
         } else {
             selectedCoSigners.insert(member.blsPubkeyHex)
         }
-        clampThresholds()
+        clampThresholdsToWeight()
     }
 
-    /// Keeps the thresholds inside what the resolved signer set can
-    /// reach, and `high` at or above `medium`. Both are reachable in a
-    /// couple of taps on screen and both are permanent — an account
-    /// whose threshold exceeds its total weight can never act again,
-    /// and one whose `high` is below its `medium` can be seized by any
-    /// single co-signer. See `TreasurySignerSelection.clamped`.
-    private func clampThresholds() {
-        let clamped = TreasurySignerSelection.clamped(
-            TreasuryThresholds(low: 1, medium: mediumThreshold, high: highThreshold),
-            signerCount: resolvedCoSigners.count
-        )
-        mediumThreshold = clamped.medium
-        highThreshold = clamped.high
-    }
-
-    /// Called by the steppers, which move one value at a time and can
-    /// therefore push `high` below `medium` on their own.
-    public func thresholdsChanged() { clampThresholds() }
+    /// One clamp, and it counts weight.
+    ///
+    /// There were two: this one, against the headcount, and a
+    /// weight-aware twin. `create()` used the twin; the steppers and
+    /// the co-signer toggles — every control a founder actually touches
+    /// — called this one, so each tap snapped the bar back to the
+    /// number of people. Weights above 1 were settable and then
+    /// immediately undone: "you and Aino together", two signers at 2
+    /// with the bar at 4, could not be expressed at all.
+    ///
+    /// The twin is `clampThresholdsToWeight`, and it is now the only
+    /// one. Two functions with one job is how the first version got
+    /// converted and the second did not.
+    public func thresholdsChanged() { clampThresholdsToWeight() }
 
     public func create() async {
         // The founder funds from the account they declared. Not from
@@ -480,23 +734,26 @@ public final class TreasuryFlow {
         // the steppers: a member can leave the group or their
         // declaration can stop verifying between the last tap and this
         // moment, and the thresholds were chosen against the old count.
-        let coSigners = resolvedCoSigners
+        let coSigners = resolvedCoSignerSet
         guard !coSigners.isEmpty else {
             creationError = String(localized: "Choose at least one co-signer.")
             return
         }
-        let thresholds = TreasurySignerSelection.clamped(
-            TreasuryThresholds(low: 1, medium: mediumThreshold, high: highThreshold),
-            signerCount: coSigners.count
+        // Clamped against the weights, not the headcount: with someone
+        // at 2 the two numbers differ, and the ledger enforces the one
+        // the signers add up to.
+        clampThresholdsToWeight()
+        let thresholds = TreasuryThresholds(
+            low: 1,
+            medium: mediumThreshold,
+            high: highThreshold
         )
-        guard TreasurySignerSelection.isUsable(thresholds, signerCount: coSigners.count) else {
+        guard TreasuryQuorum(coSigners: coSigners, thresholds: thresholds).isReachable else {
             creationError = String(
                 localized: "Those numbers can't be met by the co-signers you chose."
             )
             return
         }
-        mediumThreshold = thresholds.medium
-        highThreshold = thresholds.high
 
         isCreating = true
         creationError = nil
@@ -623,7 +880,7 @@ public final class TreasuryFlow {
     private func reconcileStrandedFunding(_ snapshot: TreasurySnapshot) async {
         guard !hasReconciledStrandedFunding,
               let anchored = snapshot.treasury,
-              let pending = await repository.pendingCreation(groupID: groupID),
+              let pending = try? await repository.pendingCreation(groupID: groupID),
               pending.treasurySeed != nil,
               pending.treasuryAccount != anchored.account
         else { return }

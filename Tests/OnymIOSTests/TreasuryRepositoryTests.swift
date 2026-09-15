@@ -265,6 +265,135 @@ final class TreasuryRepositoryTests: XCTestCase {
         ))
     }
 
+    // MARK: - Somebody else pressed submit
+
+    /// Alice proposes, Bob signs, Bob submits. Alice's copy must say it
+    /// went through — not "didn't go through", and not with a Submit
+    /// button still on it.
+    ///
+    /// Only the device that submits writes `submittedTxHash`. Every
+    /// other device sees the account's sequence move past the proposal,
+    /// and the sequence alone cannot tell "somebody else's transaction
+    /// took the slot" from "this transaction took the slot". The
+    /// proposal's own hash is fixed before it is signed, so the ledger
+    /// can be asked which of the two happened.
+    func test_aProposalSubmittedByAnotherDevice_readsAsSubmitted() async throws {
+        let store = InMemoryTreasuryStore()
+        let horizon = FakeHorizonClient()
+        let repository = TreasuryRepository(store: store, horizon: { _ in horizon })
+        await repository.setCurrentIdentity(owner)
+        let proposal = try await seedProposal(store: store)
+        let hash = proposal.envelope.transaction.hash(network: .testnet).hexString
+
+        // The ledger after Bob's submission: the sequence has moved
+        // past the proposal, and the proposal's own transaction is in
+        // the history.
+        await horizon.setAccount(HorizonAccount(
+            accountID: treasuryAccount,
+            sequenceNumber: proposal.sequenceNumber,
+            balances: [],
+            signers: [StellarSigner(key: signer, weight: 1)],
+            thresholds: HorizonThresholds(low: 1, medium: 1, high: 1)
+        ))
+        await horizon.setTransactions([
+            HorizonTransaction(
+                hash: hash,
+                ledgerCloseTime: Date(),
+                sourceAccount: treasuryAccount,
+                successful: true,
+                feeCharged: StellarAmount(stroops: 100),
+                envelopeXDR: proposal.envelope.base64XDR
+            ),
+        ])
+
+        // Before: the only thing the sequence can say.
+        var snapshot = await repository.snapshot(groupID: groupID)
+        var stored = try XCTUnwrap(snapshot.proposals.first)
+        await repository.refresh(groupID: groupID)
+        snapshot = await repository.snapshot(groupID: groupID)
+        stored = try XCTUnwrap(snapshot.proposals.first)
+        XCTAssertEqual(snapshot.standing(of: stored, now: Date()), .superseded)
+
+        // After asking the ledger which transaction it was.
+        let reconciled = await repository.reconcileSubmittedProposals(groupID: groupID)
+        XCTAssertEqual(reconciled, 1)
+        snapshot = await repository.snapshot(groupID: groupID)
+        stored = try XCTUnwrap(snapshot.proposals.first)
+        XCTAssertEqual(snapshot.standing(of: stored, now: Date()), .submitted(txHash: hash))
+        XCTAssertFalse(
+            snapshot.standing(of: stored, now: Date())?.isActionable ?? true,
+            "a transaction that already applied must not still offer Submit"
+        )
+    }
+
+    /// And the case the old behaviour was right about: the slot really
+    /// was taken by something else. The proposal's hash is not in the
+    /// history, so superseded stands.
+    func test_aProposalOvertakenBySomethingElse_staysSuperseded() async throws {
+        let store = InMemoryTreasuryStore()
+        let horizon = FakeHorizonClient()
+        let repository = TreasuryRepository(store: store, horizon: { _ in horizon })
+        await repository.setCurrentIdentity(owner)
+        let proposal = try await seedProposal(store: store)
+
+        await horizon.setAccount(HorizonAccount(
+            accountID: treasuryAccount,
+            sequenceNumber: proposal.sequenceNumber,
+            balances: [],
+            signers: [StellarSigner(key: signer, weight: 1)],
+            thresholds: HorizonThresholds(low: 1, medium: 1, high: 1)
+        ))
+        await horizon.setTransactions([
+            HorizonTransaction(
+                hash: "somebody else's transaction",
+                ledgerCloseTime: Date(),
+                sourceAccount: treasuryAccount,
+                successful: true,
+                feeCharged: StellarAmount(stroops: 100),
+                envelopeXDR: proposal.envelope.base64XDR
+            ),
+        ])
+
+        let reconciled = await repository.reconcileSubmittedProposals(groupID: groupID)
+        XCTAssertEqual(reconciled, 0)
+        await repository.refresh(groupID: groupID)
+        let snapshot = await repository.snapshot(groupID: groupID)
+        let stored = try XCTUnwrap(snapshot.proposals.first)
+        XCTAssertEqual(snapshot.standing(of: stored, now: Date()), .superseded)
+    }
+
+    /// A transaction the network refused does not count as sent, even
+    /// though its hash is in the account's history.
+    func test_aFailedTransactionInTheHistory_doesNotCountAsSubmitted() async throws {
+        let store = InMemoryTreasuryStore()
+        let horizon = FakeHorizonClient()
+        let repository = TreasuryRepository(store: store, horizon: { _ in horizon })
+        await repository.setCurrentIdentity(owner)
+        let proposal = try await seedProposal(store: store)
+        let hash = proposal.envelope.transaction.hash(network: .testnet).hexString
+
+        await horizon.setAccount(HorizonAccount(
+            accountID: treasuryAccount,
+            sequenceNumber: proposal.sequenceNumber,
+            balances: [],
+            signers: [StellarSigner(key: signer, weight: 1)],
+            thresholds: HorizonThresholds(low: 1, medium: 1, high: 1)
+        ))
+        await horizon.setTransactions([
+            HorizonTransaction(
+                hash: hash,
+                ledgerCloseTime: Date(),
+                sourceAccount: treasuryAccount,
+                successful: false,
+                feeCharged: StellarAmount(stroops: 100),
+                envelopeXDR: proposal.envelope.base64XDR
+            ),
+        ])
+
+        let reconciled = await repository.reconcileSubmittedProposals(groupID: groupID)
+        XCTAssertEqual(reconciled, 0)
+    }
+
     private func makeRepository(
         seedHorizon: Bool = true
     ) async -> (TreasuryRepository, InMemoryTreasuryStore) {

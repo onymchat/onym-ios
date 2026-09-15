@@ -75,7 +75,7 @@ public enum TreasuryTransactionFactory {
         funder: StellarAccountID,
         funderSequence: Int64,
         treasury: StellarAccountID,
-        coSigners: [StellarAccountID],
+        coSigners: [TreasuryCoSigner],
         thresholds: TreasuryThresholds,
         startingBalance: StellarAmount,
         baseFee: StellarAmount,
@@ -91,7 +91,7 @@ public enum TreasuryTransactionFactory {
             operations.append(StellarOperation(
                 sourceAccount: treasury,
                 body: .setOptions(SetOptionsFields(
-                    signer: StellarSigner(key: coSigner, weight: 1)
+                    signer: StellarSigner(key: coSigner.account, weight: coSigner.weight)
                 ))
             ))
         }
@@ -287,14 +287,14 @@ public enum TreasuryTransactionFactory {
     public static func creationConfiguration(
         treasury: StellarAccountID,
         treasurySequence: Int64,
-        coSigners: [StellarAccountID],
+        coSigners: [TreasuryCoSigner],
         thresholds: TreasuryThresholds,
         baseFee: StellarAmount,
         timeBounds: StellarTimeBounds
     ) throws -> StellarTransaction {
         var operations: [StellarOperation] = coSigners.map { coSigner in
             StellarOperation(body: .setOptions(SetOptionsFields(
-                signer: StellarSigner(key: coSigner, weight: 1)
+                signer: StellarSigner(key: coSigner.account, weight: coSigner.weight)
             )))
         }
         // Last, for the same reason as in `creation`: until it applies,

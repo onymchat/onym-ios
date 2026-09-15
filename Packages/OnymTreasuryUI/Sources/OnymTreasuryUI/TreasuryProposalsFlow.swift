@@ -81,6 +81,24 @@ public final class TreasuryProposalsFlow {
     public private(set) var signers: [StellarSigner] = []
     public private(set) var thresholds: HorizonThresholds?
     public private(set) var history: [HorizonTransaction] = []
+
+    /// History as events rather than hashes.
+    ///
+    /// Decoded from each transaction's own envelope — the only
+    /// description of a transaction nobody could have written for us —
+    /// and stored rather than computed on access. As a computed
+    /// property every read re-decoded the whole history, and a
+    /// `ForEach` that also reads `events.count` per row made one render
+    /// n+1 full base64-plus-XDR passes over it.
+    public private(set) var events: [TreasuryHistoryEvent] = []
+
+    private func rebuildEvents() {
+        guard let account = treasury?.account else {
+            events = []
+            return
+        }
+        events = history.map { TreasuryHistoryEvent($0, treasury: account) }
+    }
     public private(set) var isLoadingHistory = false
     private var hasLoadedHistory = false
     /// Nil until a live account read has succeeded. The screen draws
@@ -212,6 +230,12 @@ public final class TreasuryProposalsFlow {
 
     public func refresh() async {
         await repository.refresh(groupID: groupID)
+        // Before anything renders a standing. A proposal somebody else
+        // submitted has moved the account's sequence, and the sequence
+        // on its own says only "something used the slot" — which turns
+        // the transaction that succeeded into a "didn't go through"
+        // card with a Submit button on it.
+        await repository.reconcileSubmittedProposals(groupID: groupID)
     }
 
     public func loadHistory() async {
@@ -219,6 +243,8 @@ public final class TreasuryProposalsFlow {
         isLoadingHistory = true
         defer { isLoadingHistory = false }
         history = await repository.history(groupID: groupID)
+        await repository.reconcileSubmittedProposals(groupID: groupID)
+        rebuildEvents()
     }
 
     private func apply(_ snapshot: TreasurySnapshot) async {
@@ -229,6 +255,10 @@ public final class TreasuryProposalsFlow {
         myBlsHex = await identity.currentIdentity()?.blsPublicKey.hexString
 
         treasury = snapshot.treasury
+        // The account decides direction for every payment in the list,
+        // so the events are rebuilt when it arrives — not only when the
+        // history does.
+        rebuildEvents()
         declarations = snapshot.declarations
         hasLiveAccount = snapshot.account != nil
         balances = snapshot.account?.balances ?? []

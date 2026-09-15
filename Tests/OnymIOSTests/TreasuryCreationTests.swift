@@ -313,7 +313,7 @@ final class TreasuryCreationTests: XCTestCase {
         try TreasuryTransactionFactory.creationConfiguration(
             treasury: treasury,
             treasurySequence: 4,
-            coSigners: coSigners,
+            coSigners: coSigners.map { TreasuryCoSigner(account: $0) },
             thresholds: TreasuryThresholds.majority(of: coSigners.count),
             baseFee: baseFee,
             timeBounds: bounds
@@ -335,7 +335,7 @@ final class TreasuryCreationTests: XCTestCase {
             funder: funder,
             funderSequence: 10,
             treasury: override ?? treasury,
-            coSigners: coSigners,
+            coSigners: coSigners.map { TreasuryCoSigner(account: $0) },
             thresholds: TreasuryThresholds.majority(of: coSigners.count),
             startingBalance: StellarAmount(stroops: 20_000_000),
             baseFee: baseFee,

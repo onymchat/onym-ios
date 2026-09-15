@@ -39,23 +39,24 @@ public protocol TreasuryStore: Sendable {
 
     /// A creation handed to a wallet and not yet confirmed. At most one
     /// per group.
+    /// Throws when a row exists and cannot be read — which is a
+    /// different fact from "there is none", and the difference is an
+    /// account that may already hold the founder's money.
     func pendingCreation(
         groupID: String,
         ownerIDString: String
-    ) async -> PendingTreasuryCreation?
+    ) async throws -> PendingTreasuryCreation?
     func upsert(_ pending: PendingTreasuryCreation) async
     func removePendingCreation(groupID: String, ownerIDString: String) async
 
-    /// Every proposal this identity holds that has not been submitted,
-    /// across all groups.
+    /// Proposals still in front of this identity: not submitted, not
+    /// refused, and not set aside. Across all groups.
     ///
     /// Exists for one caller: a signed transaction coming back from a
     /// wallet carries no group id, so the only way to attribute it is
     /// to offer it to each open proposal and let the signature decide.
     /// Exactly one transaction hash can accept it, and a signature that
     /// matches none is simply not adopted.
-    /// Proposals still in front of this identity: not submitted, not
-    /// refused, and not set aside.
     ///
     /// Dismissal belongs in this filter for the same reason the expiry
     /// guard exists in `TreasurySigningInteractor` — the paths that act
@@ -185,7 +186,7 @@ public actor InMemoryTreasuryStore: TreasuryStore {
     public func pendingCreation(
         groupID: String,
         ownerIDString: String
-    ) -> PendingTreasuryCreation? {
+    ) throws -> PendingTreasuryCreation? {
         pending[Key(groupID: groupID, owner: ownerIDString)]
     }
 
