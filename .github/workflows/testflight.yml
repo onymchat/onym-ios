@@ -1,0 +1,160 @@
+name: TestFlight
+
+# App Store build of `main` (or the dispatched ref), uploaded to
+# TestFlight, then watched until App Store Connect has processed it.
+# Runs on GitHub-hosted macOS: no self-hosted runner needed. Distinct
+# from `release.yml`, which builds the ad-hoc IPA for the GitHub
+# Release and onym.app/qa/ and gates on the full test suite.
+#
+# To dispatch:
+#   gh workflow run TestFlight --ref main
+#   gh workflow run TestFlight --ref main -f version=v0.0.87
+#   # first run, or after the profile expires:
+#   gh workflow run TestFlight --ref main -f allow_signing_updates=true
+#
+# Secrets:
+#   org-wide:   ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_CONTENT
+#               (App Store Connect API key, App Manager role)
+#   repo-local: MATCH_GIT_URL, MATCH_DEPLOY_KEY, MATCH_TEAM_ID,
+#               MATCH_PASSWORD, RELAYER_AUTH_TOKEN (as release.yml)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g. v0.0.87). Blank = the latest v* tag.'
+        required: false
+        type: string
+        default: ''
+      allow_signing_updates:
+        description: 'Let match create or renew the App Store profile in the vault.'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: testflight-ios
+  cancel-in-progress: false
+
+jobs:
+  lint:
+    name: Lint (secret-handling discipline)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: No off-repo secret reads
+        run: python3 scripts/lint-secrets.py
+      - name: No secrets reach transport
+        run: python3 scripts/lint-no-secret-transport.py
+
+  build:
+    name: Build + upload to TestFlight
+    needs: lint
+    runs-on: macos-26
+    timeout-minutes: 60
+    outputs:
+      version: ${{ steps.version.outputs.MARKETING_VERSION }}
+      build_number: ${{ steps.upload.outputs.build_number }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # AppIcon + LaunchLogo PNGs are LFS-tracked; without them the
+          # upload fails icon validation.
+          lfs: true
+          # Tags, for the latest-tag default below.
+          fetch-depth: 0
+
+      - name: Select Xcode
+        # The newest Xcode on the image — project.yml needs 26 or later.
+        run: |
+          xcode="$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+          echo "DEVELOPER_DIR=$xcode/Contents/Developer" >> "$GITHUB_ENV"
+          DEVELOPER_DIR="$xcode/Contents/Developer" xcodebuild -version
+
+      - name: Resolve version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        # A bare `git describe` between tags yields `0.0.86-2-gb2ccc76`,
+        # which App Store Connect rejects as a version — always resolve
+        # from a tag. The build number comes from TestFlight in the lane.
+        run: |
+          tag="${INPUT_VERSION:-$(git describe --tags --abbrev=0 --match 'v*')}"
+          echo "RELEASE_VERSION=$tag" >> "$GITHUB_ENV"
+          RELEASE_VERSION="$tag" scripts/resolve-release-version.sh | tee -a "$GITHUB_OUTPUT" >> "$GITHUB_ENV"
+
+      - name: Install xcodegen
+        run: command -v xcodegen >/dev/null 2>&1 || brew install xcodegen
+
+      - name: Bundle relayer auth token
+        env:
+          RELAYER_AUTH_TOKEN: ${{ secrets.RELAYER_AUTH_TOKEN }}
+        run: |
+          cat > Resources/RelayerSecrets.json <<EOF
+          { "authToken": "${RELAYER_AUTH_TOKEN}" }
+          EOF
+
+      - name: Generate Xcode project
+        run: ./generate-xcodeproj.sh
+
+      - name: Configure SSH for Match
+        env:
+          MATCH_DEPLOY_KEY: ${{ secrets.MATCH_DEPLOY_KEY }}
+        run: |
+          umask 077
+          echo "$MATCH_DEPLOY_KEY" > "$RUNNER_TEMP/match_key"
+          ssh-keyscan github.com > "$RUNNER_TEMP/match_known_hosts"
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+
+      - name: Build + upload
+        id: upload
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
+          MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
+          MATCH_TEAM_ID: ${{ secrets.MATCH_TEAM_ID }}
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          MATCH_READONLY: ${{ inputs.allow_signing_updates && 'false' || 'true' }}
+          GIT_SSH_COMMAND: ssh -i ${{ runner.temp }}/match_key -o IdentitiesOnly=yes -F /dev/null -o UserKnownHostsFile=${{ runner.temp }}/match_known_hosts -o StrictHostKeyChecking=accept-new
+        run: bundle exec fastlane ios testflight_release
+
+      - name: Clean up match key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/match_key" "$RUNNER_TEMP/match_known_hosts"
+
+  processing:
+    name: Wait for App Store Connect processing
+    needs: build
+    # Polling is just API calls — no reason to hold a macOS runner.
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+      - name: Wait for processing
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
+          MARKETING_VERSION: ${{ needs.build.outputs.version }}
+          BUILD_NUMBER: ${{ needs.build.outputs.build_number }}
+        run: bundle exec fastlane ios testflight_status
+      - name: Summary
+        if: success()
+        env:
+          MARKETING_VERSION: ${{ needs.build.outputs.version }}
+          BUILD_NUMBER: ${{ needs.build.outputs.build_number }}
+        run: |
+          echo "### ✅ ${MARKETING_VERSION} (${BUILD_NUMBER}) is in TestFlight" >> "$GITHUB_STEP_SUMMARY"
+          echo "App Store Connect → Apps → Onym → TestFlight" >> "$GITHUB_STEP_SUMMARY"

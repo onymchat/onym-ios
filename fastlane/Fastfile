@@ -40,6 +40,105 @@ platform :ios do
     )
   end
 
+  desc "App Store build, uploaded to TestFlight (CI: .github/workflows/testflight.yml)"
+  desc ""
+  desc "Env: ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_CONTENT [+ ASC_KEY_CONTENT_BASE64],"
+  desc "MATCH_* as for `release`, MARKETING_VERSION (from the release tag)."
+  desc "MATCH_READONLY=false lets match create or renew the App Store profile;"
+  desc "anything else reads the vault only."
+  lane :testflight_release do
+    setup_ci(force: true)
+    api_key = asc_api_key
+
+    match(
+      type: "appstore",
+      app_identifier: ["app.onym.ios"],
+      readonly: ENV["MATCH_READONLY"] != "false",
+      api_key: api_key
+    )
+
+    update_code_signing_settings(
+      use_automatic_signing: false,
+      path: "OnymIOS.xcodeproj",
+      team_id: ENV['MATCH_TEAM_ID'],
+      code_sign_identity: "Apple Distribution",
+      targets: ["OnymIOS"],
+      profile_name: "match AppStore app.onym.ios"
+    )
+
+    # The tag fixes the marketing version; the build number only has to
+    # climb within it, so take the next one TestFlight hasn't seen.
+    # Passed as an xcarg, it overrides the tag-derived
+    # CURRENT_PROJECT_VERSION baked in by xcodegen.
+    version = ENV.fetch("MARKETING_VERSION")
+    build_number = latest_testflight_build_number(
+      api_key: api_key,
+      app_identifier: "app.onym.ios",
+      version: version,
+      initial_build_number: 0
+    ).to_i + 1
+    UI.message("TestFlight build: #{version} (#{build_number})")
+
+    gym(
+      project: "OnymIOS.xcodeproj",
+      scheme: "OnymIOS",
+      configuration: "Release",
+      destination: "generic/platform=iOS",
+      export_method: "app-store",
+      archive_path: "build/ios/appstore/OnymIOS.xcarchive",
+      export_options: {
+        signingStyle: "manual",
+        teamID: ENV['MATCH_TEAM_ID'],
+        provisioningProfiles: {
+          "app.onym.ios" => "match AppStore app.onym.ios"
+        }
+      },
+      xcargs: "COMPILER_INDEX_STORE_ENABLE=NO DEVELOPMENT_TEAM='#{ENV['MATCH_TEAM_ID']}' CURRENT_PROJECT_VERSION=#{build_number}",
+      output_directory: "build/ios/appstore",
+      output_name: "OnymIOS.ipa"
+    )
+
+    # Upload only; processing is waited on by `testflight_status` on a
+    # cheaper runner.
+    upload_to_testflight(
+      api_key: api_key,
+      ipa: "build/ios/appstore/OnymIOS.ipa",
+      skip_waiting_for_build_processing: true
+    )
+
+    if ENV["GITHUB_OUTPUT"]
+      File.open(ENV["GITHUB_OUTPUT"], "a") { |f| f.puts("build_number=#{build_number}") }
+    end
+  end
+
+  desc "Wait until an uploaded build finishes processing in App Store Connect."
+  desc "Env: ASC_* as for testflight_release, MARKETING_VERSION, BUILD_NUMBER."
+  lane :testflight_status do
+    asc_api_key
+    version = ENV.fetch("MARKETING_VERSION")
+    number = ENV.fetch("BUILD_NUMBER")
+    app = Spaceship::ConnectAPI::App.find("app.onym.ios")
+    UI.user_error!("No App Store Connect app for app.onym.ios") unless app
+
+    deadline = Time.now + 45 * 60
+    loop do
+      build = Spaceship::ConnectAPI::Build.all(
+        app_id: app.id, version: version, build_number: number
+      ).first
+      state = build&.processing_state
+      UI.message("#{version} (#{number}): #{state || 'not listed yet'}")
+      case state
+      when "VALID"
+        UI.success("#{version} (#{number}) is processed and in TestFlight")
+        break
+      when "FAILED", "INVALID"
+        UI.user_error!("App Store Connect rejected #{version} (#{number}): #{state}")
+      end
+      UI.user_error!("Still not processed after 45 minutes") if Time.now > deadline
+      sleep 60
+    end
+  end
+
   desc "Generate localized App Store screenshots via the UI-test harness"
   desc ""
   desc "Drives the app through fastlane snapshot (see fastlane/Snapfile):"
@@ -128,6 +227,18 @@ platform :ios do
       run_precheck_before_submit: false,
       precheck_include_in_app_purchases: false,
       submit_for_review: false
+    )
+  end
+
+  # App Store Connect API key from the environment (CI: org secrets).
+  # Also hands the token to Spaceship for `testflight_status`.
+  private_lane :asc_api_key do
+    app_store_connect_api_key(
+      key_id: ENV.fetch("ASC_KEY_ID"),
+      issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+      key_content: ENV.fetch("ASC_KEY_CONTENT"),
+      is_key_content_base64: ENV["ASC_KEY_CONTENT_BASE64"] == "true",
+      in_house: false
     )
   end
 end
