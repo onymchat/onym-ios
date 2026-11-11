@@ -56,18 +56,35 @@ public struct InboundMessage: Sendable {
     }
 }
 
+/// How an inbound payload reached this device.
+public enum InboundDelivery: Sendable, Equatable {
+    /// A relay or server — the default for every network transport.
+    case network
+    /// Heard on the Bluetooth mesh. Nobody learns this device heard it,
+    /// and the app must keep it that way: no receipt goes back for it.
+    case bluetooth
+}
+
 /// Inbox variant of `InboundMessage`.
 public struct InboundInbox: Sendable {
     public let inbox: TransportInboxID
     public let payload: Data
     public let receivedAt: Date
     public let messageID: String
+    public let delivery: InboundDelivery
 
-    public init(inbox: TransportInboxID, payload: Data, receivedAt: Date, messageID: String) {
+    public init(
+        inbox: TransportInboxID,
+        payload: Data,
+        receivedAt: Date,
+        messageID: String,
+        delivery: InboundDelivery = .network
+    ) {
         self.inbox = inbox
         self.payload = payload
         self.receivedAt = receivedAt
         self.messageID = messageID
+        self.delivery = delivery
     }
 }
 

@@ -44,6 +44,7 @@ packages:
   # builds the package standalone to prove it compiles without any app
   # scaffolding — see release.yml's "xcodebuild build (OnymPush)" step.
   OnymPush: {path: Packages/OnymPush}
+  OnymMesh: {path: Packages/OnymMesh}
 
 targets:
   OnymIOS:
@@ -58,6 +59,7 @@ targets:
       - package: OnymDesignTokens
       - package: OnymFoundation
       - package: OnymTransport
+      - package: OnymMesh
       - package: OnymChain
       - package: OnymTransportNostr
       - package: OnymTransportBlossom
@@ -178,6 +180,18 @@ targets:
         # (`ChatVoiceRecorder`). Audio is AES-GCM-encrypted on-device
         # before it's uploaded; the plaintext never leaves the process.
         NSMicrophoneUsageDescription: Onym uses the microphone to record voice messages you send in a chat.
+        # Bluetooth is used only once the user turns on Settings →
+        # Privacy → "Listen over Bluetooth" (`MeshListeningPreference`);
+        # the scanner isn't created, and the prompt never shown, before
+        # that. Listening is receive-only: it never connects or
+        # advertises (`BLEMeshScanner`, docs/mesh-ble-v1.md).
+        NSBluetoothAlwaysUsageDescription: Onym listens for nearby encrypted messages over Bluetooth when you turn on Bluetooth listening. It never connects to devices or shows anyone that you're nearby.
+        # Keeps the receive-only mesh scan running while backgrounded so a
+        # message heard nearby can raise a local notification. iOS limits
+        # background scans to the mesh service UUID and coalesces repeat
+        # sightings (see BLEMeshScanner).
+        UIBackgroundModes:
+          - bluetooth-central
     entitlements:
       path: OnymIOS.entitlements
       properties:
@@ -196,7 +210,8 @@ targets:
         # Automatic, below), so the caveat about manually signed
         # archives shipping the sandbox entitlement is inert here; it
         # would matter only if signing ever moved to Manual.
-        # Pushes are content-free alerts, so no UIBackgroundModes.
+        # Pushes are content-free alerts, so they need no background
+        # mode (the only one is the Bluetooth listener's, in Info.plist).
         aps-environment: development
     settings:
       base:
@@ -242,6 +257,7 @@ targets:
       - package: OnymDesignTokens
       - package: OnymFoundation
       - package: OnymTransport
+      - package: OnymMesh
       - package: OnymChain
       - package: OnymTransportNostr
       - package: OnymTransportBlossom

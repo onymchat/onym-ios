@@ -16,6 +16,7 @@ import OnymModeration
 import OnymModerationUI
 import OnymDiscovery
 import OnymFoundation
+import OnymMesh
 import OnymOnboarding
 import OnymBackup
 import OnymBackupUI
@@ -1969,7 +1970,8 @@ struct OnymIOSApp: App {
                             identity: identityRepository,
                             inboxTransport: inboxTransport
                         ),
-                        readReceiptsEnabled: { ReadReceiptsPreference.isEnabled }
+                        readReceiptsEnabled: { ReadReceiptsPreference.isEnabled },
+                        bluetoothMessageArrived: { _, _ in await MeshListening.notifyArrival() }
                     )
                     // Close the loop for the Retry on a snapshot parked
                     // because *this* device couldn't read the chain. The
@@ -2002,7 +2004,36 @@ struct OnymIOSApp: App {
                         identityRepository: identityRepository,
                         dispatcher: dispatcher
                     )
-                    await fanout.run()
+                    // Bluetooth mesh, when the user has turned listening
+                    // on: a second fan-out over a receive-only transport,
+                    // into the same dispatcher. It stays off every send
+                    // path — the mesh transport can't send — and what it
+                    // delivers is marked `.bluetooth`, so no receipt goes
+                    // back for it.
+                    var meshFanout: InboxFanoutInteractor?
+                    if MeshListeningPreference.isEnabled {
+                        let meshTransport = MeshInboxTransport(
+                            source: BLEMeshScanner(),
+                            contacts: { [identityRepository, groupRepository] in
+                                await MeshListening.contacts(
+                                    identities: identityRepository,
+                                    groups: groupRepository
+                                )
+                            }
+                        )
+                        await meshTransport.connect(to: [])
+                        meshFanout = InboxFanoutInteractor(
+                            inboxTransport: meshTransport,
+                            identityRepository: identityRepository,
+                            dispatcher: dispatcher
+                        )
+                    }
+                    await withTaskGroup(of: Void.self) { group in
+                        group.addTask { await fanout.run() }
+                        if let meshFanout {
+                            group.addTask { await meshFanout.run() }
+                        }
+                    }
                 }
                 .task {
                     // Push registration reconciler: consumes the APNs

@@ -35,6 +35,8 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.social-networking</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Onym listens for nearby encrypted messages over Bluetooth when you turn on Bluetooth listening. It never connects to devices or shows anyone that you're nearby.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Onym uses the camera to scan invite-key QR codes when you add someone to a group.</string>
 	<key>NSMicrophoneUsageDescription</key>
@@ -48,6 +50,10 @@
 	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>bluetooth-central</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>

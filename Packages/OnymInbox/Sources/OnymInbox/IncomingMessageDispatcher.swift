@@ -1,4 +1,5 @@
 import Foundation
+import OnymTransport
 import OnymChain
 import OnymChatsCore
 import OnymIdentity
@@ -86,6 +87,10 @@ public struct IncomingMessageDispatcher: Sendable {
     /// Defaulted so existing constructions get the behaviour without
     /// a new parameter.
     let parkedMessages: ChatMessageParkingLot
+    /// Told when a chat message heard on the Bluetooth mesh is stored —
+    /// the app's cue for a local notification, since no push will come
+    /// for a message that never touched a relay.
+    let bluetoothMessageArrived: @Sendable (_ owner: IdentityID, _ groupIDHex: String) async -> Void
 
     /// Mints the membership notices this device is entitled to render:
     /// "X joined" off a verified announcement, "You joined X" off a
@@ -108,7 +113,8 @@ public struct IncomingMessageDispatcher: Sendable {
         groupStateRefresher: any GroupStateRefreshing = NoopGroupStateRefresher(),
         receiptSender: any ChatReceiptSending = NoopChatReceiptSender(),
         readReceiptsEnabled: @escaping @Sendable () -> Bool = { true },
-        parkedMessages: ChatMessageParkingLot = ChatMessageParkingLot()
+        parkedMessages: ChatMessageParkingLot = ChatMessageParkingLot(),
+        bluetoothMessageArrived: @escaping @Sendable (IdentityID, String) async -> Void = { _, _ in }
     ) {
         self.envelopeDecrypter = envelopeDecrypter
         self.identities = identities
@@ -121,14 +127,20 @@ public struct IncomingMessageDispatcher: Sendable {
         self.receiptSender = receiptSender
         self.readReceiptsEnabled = readReceiptsEnabled
         self.parkedMessages = parkedMessages
+        self.bluetoothMessageArrived = bluetoothMessageArrived
     }
 
     public func dispatch(
         messageID: String,
         ownerIdentityID: IdentityID,
         payload: Data,
-        receivedAt: Date
+        receivedAt: Date,
+        delivery: InboundDelivery = .network
     ) async {
+        if delivery == .bluetooth {
+            await dispatchFromMesh(ownerIdentityID: ownerIdentityID, payload: payload)
+            return
+        }
         // Decrypt once at receive time and grab the sender's Ed25519
         // pubkey at the same hop — both fast paths use it for
         // provenance (announcement: verify against stored admin;
@@ -272,6 +284,28 @@ public struct IncomingMessageDispatcher: Sendable {
             ownerIdentityID: ownerIdentityID,
             payload: payload,
             receivedAt: receivedAt
+        )
+    }
+
+    /// What the Bluetooth mesh may deliver: chat messages, and nothing
+    /// else. Anything that doesn't decrypt is dropped rather than queued
+    /// as an invitation (`fallThrough`) — over a radio, an envelope that
+    /// doesn't open is almost always a tag collision, and radio bytes
+    /// must never land in a store. Group state, invitations and offers
+    /// need the chain or the relays anyway, and arrive that way.
+    private func dispatchFromMesh(ownerIdentityID: IdentityID, payload: Data) async {
+        guard let envelope = try? await envelopeDecrypter.decryptInvitationWithSender(
+            envelopeBytes: payload,
+            asIdentity: ownerIdentityID
+        ), let chatMessage = try? JSONDecoder().decode(
+            ChatMessagePayload.self,
+            from: envelope.plaintext
+        ) else { return }
+        await persistChatMessage(
+            chatMessage,
+            ownerIdentityID: ownerIdentityID,
+            senderEd25519PublicKey: envelope.senderEd25519PublicKey,
+            delivery: .bluetooth
         )
     }
 
@@ -1187,7 +1221,8 @@ public struct IncomingMessageDispatcher: Sendable {
     private func persistChatMessage(
         _ payload: ChatMessagePayload,
         ownerIdentityID: IdentityID,
-        senderEd25519PublicKey: Data?
+        senderEd25519PublicKey: Data?,
+        delivery: InboundDelivery = .network
     ) async {
         // Envelope must have been signed — anonymous chat messages
         // are not part of the v1 trust model.
@@ -1206,6 +1241,9 @@ public struct IncomingMessageDispatcher: Sendable {
         guard let group = groups.first(where: {
             $0.id == groupIDHex && $0.ownerIdentityID == ownerIdentityID
         }) else {
+            // Mesh copies aren't parked: the lot is drained into the
+            // receipt-sending path, and the relay copy catches up anyway.
+            guard delivery == .network else { return }
             await parkedMessages.park(.init(
                 groupIDHex: groupIDHex,
                 payload: payload,
@@ -1222,6 +1260,7 @@ public struct IncomingMessageDispatcher: Sendable {
         // yet; `applyAnnouncement` drains the lot when it lands.
         let senderKey = payload.senderBlsPubkeyHex.lowercased()
         guard let senderProfile = group.memberProfiles[senderKey] else {
+            guard delivery == .network else { return }
             await parkedMessages.park(.init(
                 groupIDHex: groupIDHex,
                 payload: payload,
@@ -1286,6 +1325,17 @@ public struct IncomingMessageDispatcher: Sendable {
             voiceAttachment: payload.voiceAttachment
         )
         let outcome = await messageRepository.insert(message)
+
+        // Heard on the mesh: store it, tell the app, and say nothing to
+        // anyone. A receipt — even one sent later over a relay — would
+        // tell the sender this device was in range of a broadcast. If a
+        // relay copy arrives afterwards, that delivery acks on its own.
+        guard delivery == .network else {
+            if case .inserted = outcome {
+                await bluetoothMessageArrived(ownerIdentityID, groupIDHex)
+            }
+            return
+        }
 
         // Ack the sender: delivered now (it only reveals a device
         // received the ciphertext). Read receipts are sent later, when

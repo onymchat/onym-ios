@@ -1,6 +1,7 @@
 import SwiftUI
 import OnymDesign
 import OnymIdentity
+import OnymMesh
 
 /// Settings → Privacy & Encryption. Scaffold screen — encryption hero,
 /// "How it works" explainers, your-keys summary, and toggles for app
@@ -13,6 +14,7 @@ struct PrivacyEncryptionView: View {
     @AppStorage("settings.privacy.readReceipts") private var readReceipts = false
     @AppStorage("settings.privacy.appLock")      private var appLock = true
     @AppStorage("settings.privacy.autoLockMin")  private var autoLockMin = 1
+    @AppStorage(MeshListeningPreference.storageKey) private var meshListening = false
 
     private let autoLockOptions: [Int] = [0, 1, 5, 15, -1]
 
@@ -146,6 +148,24 @@ struct PrivacyEncryptionView: View {
                     }
                 }
                 Footnote("Read receipts are end-to-end encrypted, but they reveal you’re online. Turn off for stricter privacy.")
+
+                SectionLabel("NEARBY")
+                Card {
+                    Row(
+                        title: "Listen over Bluetooth",
+                        subtitle: "Receive messages broadcast nearby, without internet",
+                        hasChevron: false,
+                        last: true
+                    ) {
+                        IconTile(symbol: "antenna.radiowaves.left.and.right", bg: OnymTile.indigo)
+                    } right: {
+                        Toggle("", isOn: $meshListening)
+                            .labelsHidden()
+                            .tint(OnymTokens.green)
+                            .accessibilityIdentifier("privacy.mesh_listening")
+                    }
+                }
+                Footnote("Your iPhone only listens — it never transmits, so nobody nearby can tell you received anything. Messages heard this way send no receipts. Takes effect the next time Onym starts.")
                 // The DATA section (Clear local message cache) moved to the
                 // Settings home, above About, where it does real work.
             }
