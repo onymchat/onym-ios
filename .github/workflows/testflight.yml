@@ -111,7 +111,13 @@ jobs:
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.3'
-          bundler-cache: true
+      - name: Install Fastlane
+        # Not `bundler-cache`: that installs frozen, and Gemfile.lock
+        # carries an empty CHECKSUMS entry Bundler 4 won't accept frozen.
+        # Same install release.yml does.
+        run: |
+          bundle config set --local path 'vendor/bundle'
+          bundle install
 
       - name: Build + upload
         id: upload
@@ -141,7 +147,13 @@ jobs:
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.3'
-          bundler-cache: true
+      - name: Install Fastlane
+        # Not `bundler-cache`: that installs frozen, and Gemfile.lock
+        # carries an empty CHECKSUMS entry Bundler 4 won't accept frozen.
+        # Same install release.yml does.
+        run: |
+          bundle config set --local path 'vendor/bundle'
+          bundle install
       - name: Wait for processing
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
