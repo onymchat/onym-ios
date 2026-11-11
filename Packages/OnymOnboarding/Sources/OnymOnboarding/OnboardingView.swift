@@ -70,28 +70,19 @@ public struct OnboardingView: View {
     /// by step, and (app-supplied) restore from a recovery phrase.
     /// Every button carries an accessibility label in place of a title.
     private var welcomeScreen: some View {
-        VStack(spacing: 0) {
-            Spacer(minLength: 24)
-
-            content(for: .welcome)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(Text(verbatim: Self.title(for: .welcome)))
-                .accessibilityIdentifier("onboarding.welcome.title")
-
-            Spacer(minLength: 24)
-
-            Button { flow.skipAll() } label: {
-                Image(systemName: "door.left.hand.open")
-                    .font(OnymType.fixed(size: 34, weight: .semibold))
-                    .frame(width: 104, height: 104)
-            }
-            .buttonStyle(.borderedProminent)
-            .buttonBorderShape(.circle)
-            .accessibilityLabel(Text(verbatim: Self.primaryTitle(for: .welcome)))
-            .accessibilityIdentifier("onboarding.welcome.primary")
-
-            Spacer(minLength: 24)
-
+        // The door sits dead centre of the screen; the bottom row is an
+        // overlay so its height can't push it off.
+        Button { flow.skipAll() } label: {
+            Image(systemName: "door.left.hand.open")
+                .font(OnymType.fixed(size: 34, weight: .semibold))
+                .frame(width: 104, height: 104)
+        }
+        .buttonStyle(.borderedProminent)
+        .buttonBorderShape(.circle)
+        .accessibilityLabel(Text(verbatim: Self.primaryTitle(for: .welcome)))
+        .accessibilityIdentifier("onboarding.welcome.primary")
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay(alignment: .bottom) {
             HStack(spacing: 24) {
                 Button { flow.advance() } label: {
                     Image(systemName: "slider.horizontal.3")
@@ -109,8 +100,12 @@ public struct OnboardingView: View {
             }
             .padding(.bottom, 24)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.horizontal, 20)
+        // No title on screen any more; the container carries the
+        // anchor the UI tests wait on.
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text(verbatim: Self.title(for: .welcome)))
+        .accessibilityIdentifier("onboarding.welcome.title")
     }
 
     // MARK: - Steps
@@ -120,16 +115,26 @@ public struct OnboardingView: View {
         OnboardingStepScaffold(
             step: step,
             title: Self.title(for: step, restoring: flow.identityOrigin == .restored),
-            subtitle: Self.subtitle(for: step, restoring: flow.identityOrigin == .restored),
+            symbol: Self.symbol(for: step),
+            hint: Self.subtitle(for: step, restoring: flow.identityOrigin == .restored),
             primaryTitle: Self.primaryTitle(for: step),
+            // A mandatory moderation step finishes by signing, so its
+            // primary is the signature rather than an arrow.
+            primarySymbol: step == .moderation && flow.isMandatory(step)
+                ? "signature"
+                : Self.primarySymbol(for: step),
             // Outcome-gated steps render their primary disabled until
             // the step content records one (moderation's consent, the
             // recovery reveal); `flow.advance()` carries the same
             // guard as the second layer.
-            primaryDisabled: flow.requiresOutcomeToAdvance(step) && !flow.outcomeSatisfiesGate(step),
+            primaryDisabled: flow.requiresOutcomeToAdvance(step)
+                && !flow.outcomeSatisfiesGate(step)
+                && flow.primaryOverride == nil,
             primaryAction: { primaryTapped() },
             secondaryAction: stepSecondaryAction(step),
             skipTitle: Self.skipTitle(for: step),
+            // An alarm clock: "remind me later", not "skip for good".
+            skipSymbol: step == .recoveryPhrase ? "alarm" : "forward",
             skipAction: flow.isSkippable(step) ? { flow.skip() } : nil,
             // While the directory probe is unresolved, moderation's
             // mandatory state is unknown (failed closed) — show
@@ -142,6 +147,13 @@ public struct OnboardingView: View {
             // Unnumbered steps opt out entirely so the scaffold never
             // reserves a blank indicator band.
             showsIndicator: flow.indicatorPosition(for: step) != nil,
+            // Short steps sit centred. Identity's content is its key,
+            // badged with the bootstrap's state, in place of the symbol.
+            centersContent: step == .identity || step == .services
+                || step == .moderation || step == .recoveryPhrase || step == .done,
+            // Identity's key and recovery's life preserver are the
+            // content itself, each badged with its state.
+            showsSymbol: step != .identity && step != .recoveryPhrase,
             content: { content(for: step) },
             indicator: {
                 if let position = flow.indicatorPosition(for: step) {
@@ -152,7 +164,9 @@ public struct OnboardingView: View {
     }
 
     private func primaryTapped() {
-        if flow.step == .done {
+        if let override = flow.primaryOverride, !flow.outcomeSatisfiesGate(flow.step) {
+            override()
+        } else if flow.step == .done {
             flow.complete()
         } else {
             flow.advance()
@@ -167,8 +181,6 @@ public struct OnboardingView: View {
             injected
         } else {
             switch step {
-            case .welcome:
-                WelcomeStepContent()
             case .done:
                 DoneStepContent(
                     outcomes: flow.outcomes,
@@ -196,6 +208,27 @@ public struct OnboardingView: View {
         }
     }
 
+    /// What stands on screen in place of each step's title.
+    static func symbol(for step: OnboardingStep) -> String {
+        switch step {
+        case .welcome: return "key.horizontal"
+        case .identity: return "key.horizontal.fill"
+        case .services: return "server.rack"
+        case .moderation: return "shield.lefthalf.filled"
+        case .recoveryPhrase: return "lifepreserver.fill"
+        case .done: return "checkmark.seal.fill"
+        }
+    }
+
+    static func primarySymbol(for step: OnboardingStep) -> String {
+        switch step {
+        case .recoveryPhrase: return "checkmark"
+        case .done: return "door.left.hand.open"
+        default: return "arrow.right"
+        }
+    }
+
+    /// Spoken by VoiceOver as each step's header hint — never shown.
     static func subtitle(for step: OnboardingStep, restoring: Bool = false) -> String? {
         switch step {
         case .welcome:
@@ -239,17 +272,6 @@ public struct OnboardingView: View {
 }
 
 // MARK: - Built-in step content
-
-/// Welcome step body: a mark, no text. The app layer replaces this
-/// via `stepContent` with the OnymMark; the built-in keeps the
-/// package standalone.
-struct WelcomeStepContent: View {
-    var body: some View {
-        Image(systemName: "key.horizontal")
-            .font(OnymType.font(size: 64))
-            .foregroundStyle(.tint)
-    }
-}
 
 /// Done step body: summary of what was decided, plus a reminder that
 /// everything stays editable in Settings.

@@ -62,7 +62,8 @@ struct OnboardingStepContentBuilder {
     func content(for step: OnboardingStep, flow: OnboardingFlow) -> AnyView? {
         switch step {
         case .welcome:
-            return AnyView(OnboardingWelcomeContent())
+            // The welcome screen is the door alone — no body.
+            return nil
         case .identity:
             return AnyView(OnboardingIdentityContent(
                 onboarding: flow,
@@ -78,14 +79,15 @@ struct OnboardingStepContentBuilder {
                 onboarding: flow,
                 makeConsentFlow: makeModerationConsentFlow
             ))
-        case .recoveryPhrase:
+        case .recoveryPhrase: // onym:allow-secret-read — step name, not the phrase
             return AnyView(OnboardingRecoveryContent(
                 onboarding: flow,
                 makeBackupFlow: makeBackupFlow
             ))
         case .done:
             return AnyView(OnboardingDoneContent(
-                recoveryBackupState: flow.recoveryBackupState,
+                onboarding: flow,
+                makeBackupFlow: makeBackupFlow,
                 loadSummary: loadSummary
             ))
         }
@@ -244,17 +246,6 @@ private struct OnboardingSectionLabel: View {
 
 // MARK: - Welcome
 
-/// Brand framing over the scaffold's "your keys, your services"
-/// subtitle. The identity bootstrap stays silent — it already runs in
-/// the WindowGroup task; nothing here mentions or blocks on it.
-struct OnboardingWelcomeContent: View {
-
-    /// The mark alone — the welcome screen carries no text.
-    var body: some View {
-        OnymMark(size: 120, color: OnymAccent.blue.color, strokeRatio: 0.14)
-    }
-}
-
 /// The welcome step's "I have a recovery phrase" affordance — an
 /// icon in the screen's bottom row, beside step-by-step setup. Owns
 /// the sheet it presents, and advances the flow only once the restore
@@ -382,9 +373,9 @@ private struct OnboardingRestoreSheet: View {
 
 /// "Making your keys" — the identity bootstrap already runs in the
 /// WindowGroup task; this step BINDS to it instead of asserting
-/// success it can't know about. The checklist shows progress while the
-/// bootstrap resolves, checks once a snapshot exists, and an explicit
-/// failure state (with retry) if it doesn't. The step is
+/// success it can't know about. A spinner while the bootstrap
+/// resolves, nothing once a snapshot exists, and a retry if it
+/// doesn't. The step is
 /// outcome-gated (`requiresOutcomeToAdvance`): Continue stays
 /// disabled until a snapshot exists, because a failed bootstrap must
 /// not walk the user on to services and a recovery step whose reveal
@@ -402,62 +393,61 @@ struct OnboardingIdentityContent: View {
     @State private var phase: Phase = .checking
     @State private var attempt = 0
 
+    /// One key, centred by the scaffold, its state badged on its
+    /// corner: a spinner while the bootstrap resolves, a green check
+    /// once the key exists. A failure badges a red cross and puts a
+    /// retry under the key — as an overlay, so the key stays centred.
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            VStack(spacing: 0) {
-                row(title: onboarding.identityOrigin == .restored
-                        ? "Identity key restored"
-                        : "Identity key created",
-                    subtitle: "Held in this device's secure enclave — nowhere else, ever")
-                Divider()
-                    .background(OnymTokens.hairline)
-                    .padding(.leading, 46)
-                row(title: onboarding.identityOrigin == .restored
-                        ? "Recovery phrase confirmed"
-                        : "Recovery phrase generated",
-                    subtitle: onboarding.identityOrigin == .restored
-                        ? "The words you entered are now this device's identity"
-                        : "12 words — you'll back these up in a moment")
-            }
-            .background(OnymTokens.surface2,
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("onboarding.identity.checklist")
-
-            if case .failed = phase {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(OnymTokens.red)
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Your keys couldn't be created. Nothing was sent anywhere — try again.")
-                            .font(.system(size: 13))
-                            .foregroundStyle(OnymTokens.text2)
-                            .lineSpacing(2)
-                        Button {
-                            attempt += 1
-                        } label: {
-                            Text("Try again")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(OnymAccent.blue.color)
-                        }
-                        .accessibilityIdentifier("onboarding.identity.retry")
+        Image(systemName: "key.horizontal.fill")
+            .font(.system(size: 72, weight: .semibold))
+            .foregroundStyle(.tint)
+            .frame(width: 120, height: 120)
+            .overlay(alignment: .bottomTrailing) {
+                Group {
+                    switch phase {
+                    case .checking:
+                        ProgressView()
+                            .controlSize(.large)
+                            .accessibilityLabel(Text(onboarding.identityOrigin == .restored
+                                ? "Restoring your identity"
+                                : "Making your keys"))
+                    case .ready:
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 40))
+                            .foregroundStyle(OnymTokens.green)
+                            .transition(.scale.combined(with: .opacity))
+                            .accessibilityLabel(Text(onboarding.identityOrigin == .restored
+                                ? "Identity key restored"
+                                : "Identity key created"))
+                            .accessibilityIdentifier("onboarding.identity.ready")
+                    case .failed:
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 40))
+                            .foregroundStyle(OnymTokens.red)
+                            .accessibilityLabel(Text("Your keys couldn't be created. Nothing was sent anywhere — try again."))
                     }
                 }
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(OnymTokens.red.opacity(0.10),
-                            in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .padding(.top, 12)
-                .accessibilityIdentifier("onboarding.identity.failed")
+                .background(OnymTokens.surface, in: Circle())
+                .offset(x: 10, y: 10)
             }
-
-            Text("This key is the only proof of who you are. No server holds a copy of it — not even ours.")
-                .font(.system(size: 12.5))
-                .foregroundStyle(OnymTokens.text2)
-                .lineSpacing(2)
-                .padding(.top, 12)
-        }
+            .overlay(alignment: .bottom) {
+                if case .failed = phase {
+                    Button {
+                        attempt += 1
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 18, weight: .semibold))
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.circle)
+                    .tint(OnymTokens.red)
+                    .accessibilityLabel(Text("Try again"))
+                    .accessibilityIdentifier("onboarding.identity.retry")
+                    .offset(y: 84)
+                }
+            }
+            .animation(.spring(duration: 0.35), value: phase)
         .task(id: attempt) {
             phase = .checking
             let ready = await identityReady()
@@ -478,41 +468,6 @@ struct OnboardingIdentityContent: View {
                 phase = .failed
             }
         }
-    }
-
-    private func row(
-        title: LocalizedStringKey,
-        subtitle: LocalizedStringKey
-    ) -> some View {
-        HStack(spacing: 12) {
-            switch phase {
-            case .checking:
-                ProgressView()
-                    .controlSize(.small)
-                    .frame(width: 24)
-            case .ready:
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 20))
-                    .foregroundStyle(OnymTokens.green)
-                    .frame(width: 24)
-            case .failed:
-                Image(systemName: "xmark.circle")
-                    .font(.system(size: 20))
-                    .foregroundStyle(OnymTokens.red)
-                    .frame(width: 24)
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(OnymTokens.text)
-                Text(subtitle)
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(OnymTokens.text2)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
     }
 }
 
@@ -539,11 +494,6 @@ struct OnboardingServicesContent: View {
         VStack(alignment: .leading, spacing: 12) {
             recommendedCard
             customCard
-            Text("Swap any of this later in Settings → Services. None of them can lock you out — you hold the key, not them.")
-                .font(.system(size: 12.5))
-                .foregroundStyle(OnymTokens.text2)
-                .lineSpacing(2)
-                .padding(.top, 4)
         }
         // The screen shows "Selected" on the recommended card from the
         // first frame, so the outcome must say the same thing:
@@ -598,43 +548,30 @@ struct OnboardingServicesContent: View {
             onboarding.servicesChoice = .recommended
             onboarding.recordOutcome(.consented(componentId: nil))
         } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 10) {
-                    Text("Recommended setup")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(OnymTokens.text)
-                    if !usingCustom {
-                        Chip(
-                            text: String(localized: "Selected"),
-                            fg: OnymTokens.onAccent,
-                            bg: OnymAccent.blue.color
-                        )
-                    }
-                    Spacer(minLength: 0)
+            // The recommended set as its four seats' icons — delivery,
+            // media, group integrity, directory: the fixed promise the
+            // Done step's summary then shows live.
+            HStack(spacing: 0) {
+                ForEach(Self.recommendedSeats, id: \.self) { symbol in
+                    Image(systemName: symbol)
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundStyle(OnymAccent.blue.color)
+                        .frame(maxWidth: .infinity)
                 }
-                Text("Published by Onym, verified on this device. None of it is a login — swap any piece later.")
-                    .font(.system(size: 13.5))
-                    .foregroundStyle(OnymTokens.text2)
-                    .lineSpacing(2)
-                    .padding(.bottom, 10)
-                // These lines name the FIXED recommended set (the
-                // seeded defaults plus the published lists installed
-                // on completion) — they are a promise, not live state;
-                // the Done step's summary is the live, checkable view.
-                summaryLine(label: "Delivery", value: "Onym Official relay")
-                summaryLine(label: "Media delivery", value: "Onym Official")
-                summaryLine(label: "Group integrity", value: "Published defaults")
-                summaryLine(label: "Directory", value: "Onym Discovery")
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(16)
+            .padding(.vertical, 22)
+            .frame(maxWidth: .infinity)
             .background(OnymTokens.surface2,
                         in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .strokeBorder(usingCustom ? Color.clear : OnymAccent.blue.color, lineWidth: 2)
             )
+            .overlay(alignment: .topTrailing) { selectedBadge(!usingCustom) }
         }
+        .accessibilityLabel(Text("Recommended setup"))
+        .accessibilityHint(Text("Published by Onym, verified on this device. None of it is a login — swap any piece later."))
+        .accessibilityAddTraits(usingCustom ? [] : .isSelected)
         .buttonStyle(.plain)
         .accessibilityIdentifier("onboarding.services.recommended")
     }
@@ -643,54 +580,43 @@ struct OnboardingServicesContent: View {
         Button {
             showHub = true
         } label: {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 10) {
-                        Text("Choose services myself")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(OnymTokens.text)
-                        if usingCustom {
-                            Chip(
-                                text: String(localized: "Selected"),
-                                fg: OnymTokens.onAccent,
-                                bg: OnymAccent.blue.color
-                            )
-                        }
-                    }
-                    Text("Pick your own directories, relays, storage and notaries. About two minutes.")
-                        .font(.system(size: 13.5))
-                        .foregroundStyle(OnymTokens.text2)
-                        .lineSpacing(2)
-                }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(OnymTokens.text3)
-            }
-            .padding(16)
-            .background(OnymTokens.surface2,
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(usingCustom ? OnymAccent.blue.color : Color.clear, lineWidth: 2)
-            )
+            Image(systemName: "slider.horizontal.3")
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(OnymTokens.text)
+                .padding(.vertical, 22)
+                .frame(maxWidth: .infinity)
+                .background(OnymTokens.surface2,
+                            in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(usingCustom ? OnymAccent.blue.color : Color.clear, lineWidth: 2)
+                )
+                .overlay(alignment: .topTrailing) { selectedBadge(usingCustom) }
         }
+        .accessibilityLabel(Text("Choose services myself"))
+        .accessibilityHint(Text("Pick your own directories, relays, storage and notaries. About two minutes."))
+        .accessibilityAddTraits(usingCustom ? .isSelected : [])
         .buttonStyle(.plain)
         .accessibilityIdentifier("onboarding.services.custom")
     }
 
-    private func summaryLine(label: LocalizedStringKey, value: LocalizedStringKey) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Text(label)
-                .font(.system(size: 13.5))
-                .foregroundStyle(OnymTokens.text2)
-                .frame(width: 108, alignment: .leading)
-            Text(value)
-                .font(.system(size: 13.5, weight: .medium))
-                .foregroundStyle(OnymTokens.text)
-            Spacer(minLength: 0)
+    private static let recommendedSeats = [
+        "antenna.radiowaves.left.and.right",
+        "photo.on.rectangle.angled",
+        "checkmark.seal",
+        "magnifyingglass",
+    ]
+
+    /// Stands in for the old "Selected" chip.
+    @ViewBuilder
+    private func selectedBadge(_ selected: Bool) -> some View {
+        if selected {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 20))
+                .foregroundStyle(OnymAccent.blue.color)
+                .padding(10)
+                .accessibilityHidden(true)
         }
-        .padding(.vertical, 2)
     }
 }
 
@@ -1657,47 +1583,41 @@ struct OnboardingModerationContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Only true while an authority is still being chosen — once
-            // terms are on screen the referee is already picked.
-            if case .pickingAuthority = flow.state.step {
-                Text("You choose the referee — not a homeserver admin, not us.")
-                    .font(.system(size: 13.5, weight: .semibold))
-                    .foregroundStyle(OnymTokens.text)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12)
-                    .background(OnymAccent.blue.color.opacity(0.14),
-                                in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .padding(.bottom, 8)
-            }
-
             // Header suppressed: the scaffold above already reads
             // "Reports & safety" and explains what an authority does.
-            ModerationConsentContent(flow: flow, showsPickerHeader: false)
+            // The step's primary is the signature — the review drops its
+            // own sign button.
+            ModerationConsentContent(flow: flow, showsPickerHeader: false, hostOwnsSigning: true)
                 // The content carries the Settings pages' own
                 // horizontal insets; pull them back to the scaffold's.
                 .padding(.horizontal, -16)
-
-            // "…the terms you're about to read" is only true up to the
-            // review; once signing/signed the terms are behind the
-            // user and the reassurance would read stale.
-            switch flow.state.step {
-            case .loadingDirectory, .pickingAuthority, .reviewingManifest:
-                Text("An authority never sees your messages. It only ever sees what a person chooses to report, and it can only act inside the terms you're about to read.")
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(OnymTokens.text2)
-                    .lineSpacing(2)
-                    .padding(.top, 12)
-            case .signing, .done:
-                EmptyView()
-            }
         }
             .task { flow.start() }
-            .onDisappear { flow.stop() }
-            .onChange(of: flow.state.step) { _, step in
+            .onDisappear {
+                flow.stop()
+                onboarding.primaryOverride = nil
+            }
+            .onChange(of: flow.state.step, initial: true) { _, step in
+                // The scaffold's primary signs while terms are on screen;
+                // anywhere else (picking, signing, signed) it is its
+                // usual gated self.
+                if step == .reviewingManifest, onboarding.step == .moderation {
+                    onboarding.primaryOverride = { [flow] in flow.tappedAgree() }
+                } else {
+                    onboarding.primaryOverride = nil
+                }
                 if step == .done {
                     onboarding.recordOutcome(.consented(
                         componentId: flow.state.selectedListing?.componentId
                     ))
+                    // Signing was the step's last act: let the seal
+                    // land, then move on without a second tap.
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(800))
+                        if onboarding.step == .moderation {
+                            onboarding.advance()
+                        }
+                    }
                 }
             }
             // A restarted walk (Settings → Restart Onboarding) arrives
@@ -1755,39 +1675,36 @@ struct OnboardingRecoveryContent: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: backedUp ? "checkmark.seal.fill" : "key.viewfinder")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(backedUp ? OnymTokens.green : OnymTile.amber)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(backedUp ? "Backed up" : (sawPhrase ? "Revealed — write it down" : "Not backed up yet"))
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(OnymTokens.text)
-                    Text(statusSubtitle)
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(OnymTokens.text2)
-                        .lineSpacing(2)
-                }
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background((backedUp ? OnymTokens.green : OnymTile.amber).opacity(0.10),
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .accessibilityIdentifier("onboarding.recoveryPhrase.status")
-
-            PrimaryButton(sawPhrase || backedUp ? "View it again" : "Reveal my recovery phrase") {
-                flow = makeBackupFlow()
-                showBackup = true
-            }
-            .padding(.top, 12)
-            .accessibilityIdentifier("onboarding.recoveryPhrase.reveal")
-
-            Text("Anyone with these words can read your future messages. Keep them off screenshots and out of chats.")
-                .font(.system(size: 12.5))
-                .foregroundStyle(OnymTokens.text2)
-                .lineSpacing(2)
-                .padding(.top, 12)
+        // The recovery step's mirror of the identity step: one symbol,
+        // centred by the scaffold, its state badged on the same corner
+        // at the same size. A life preserver — the way back if this
+        // iPhone is lost — and tapping it opens the words.
+        Button {
+            flow = makeBackupFlow()
+            showBackup = true
+        } label: {
+            Image(systemName: "lifepreserver.fill")
+                .font(.system(size: 64, weight: .semibold))
+                .frame(width: 140, height: 140)
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.circle)
+        .tint(backedUp ? OnymTokens.green : OnymAccent.blue.color)
+        .accessibilityLabel(Text(sawPhrase || backedUp ? "View it again" : "Reveal my recovery phrase"))
+        .accessibilityHint(Text(statusSubtitle))
+        .accessibilityIdentifier("onboarding.recoveryPhrase.reveal") // onym:allow-secret-read — step name, not the phrase
+        // Outside the button's label so it stays its own element:
+        // what to do next, then that it's done.
+        .overlay(alignment: .bottomTrailing) {
+            Image(systemName: badgeSymbol)
+                .font(.system(size: 40))
+                .foregroundStyle(OnymTokens.onAccent, badgeColor)
+                .background(OnymTokens.surface, in: Circle())
+                .offset(x: 6, y: 6)
+                .animation(.spring(duration: 0.35), value: onboarding.recoveryBackupState)
+                .allowsHitTesting(false)
+                .accessibilityLabel(Text(backedUp ? "Backed up" : (sawPhrase ? "Revealed — write it down" : "Not backed up yet")))
+                .accessibilityIdentifier("onboarding.recoveryPhrase.status") // onym:allow-secret-read — step name, not the phrase
         }
         .sheet(isPresented: $showBackup, onDismiss: {
             // stop() breaks the snapshot task's self-retain (dropping
@@ -1806,7 +1723,7 @@ struct OnboardingRecoveryContent: View {
             // recordOutcome writes to the flow's CURRENT step — same
             // async-callback hazard OnboardingIdentityContent guards
             // against; refuse to record from anywhere else.
-            guard onboarding.step == .recoveryPhrase else { return }
+            guard onboarding.step == .recoveryPhrase else { return } // onym:allow-secret-read — step name, not the phrase
             // The reveal is what makes "I've written it down" honest —
             // record the outcome (unlocking the step's primary) the
             // moment the words are actually on screen. The backup
@@ -1831,6 +1748,20 @@ struct OnboardingRecoveryContent: View {
         }
     }
 
+    /// Before: an eye — look at your words. Seen: a pencil — write
+    /// them down. Verified: the identity step's green check.
+    private var badgeSymbol: String {
+        if backedUp { return "checkmark.circle.fill" }
+        if sawPhrase { return "pencil.circle.fill" }
+        return "eye.circle.fill"
+    }
+
+    private var badgeColor: Color {
+        if backedUp { return OnymTokens.green }
+        if sawPhrase { return OnymTile.amber }
+        return OnymAccent.blue.color
+    }
+
     private var statusSubtitle: LocalizedStringKey {
         if backedUp {
             return "You revealed and verified your phrase. Keep it somewhere safe — off screenshots and out of chats."
@@ -1839,6 +1770,58 @@ struct OnboardingRecoveryContent: View {
             return "You've seen the 12 words. Verifying a few of them makes sure your copy is right."
         }
         return "Reveal the 12 words, write them down, then verify a few of them. Takes about a minute."
+    }
+}
+
+/// "Back up again" from the Done step's recovery sheet: the SAME
+/// `RecoveryPhraseBackupFlow` the recovery step runs (biometric gate,
+/// reveal, verify quiz), with the same lifecycle — a fresh flow per
+/// presentation, stopped and released on dismiss so the plaintext
+/// phrase never outlives the sheet. Progress lands on the onboarding
+/// flow's `recoveryBackupState`, which never downgrades, so the
+/// review's tile turns ✓ the moment the quiz passes.
+struct OnboardingRecoveryBackupButton: View {
+    let onboarding: OnboardingFlow
+    let makeBackupFlow: @MainActor () -> RecoveryPhraseBackupFlow
+    @State private var flow: RecoveryPhraseBackupFlow?
+    @State private var showBackup = false
+
+    var body: some View {
+        Button {
+            flow = makeBackupFlow()
+            showBackup = true
+        } label: {
+            Image(systemName: onboarding.recoveryBackupState == .none ? "eye.fill" : "arrow.clockwise")
+                .font(.system(size: 22, weight: .semibold))
+                .frame(width: 120, height: 40)
+        }
+        .buttonStyle(.borderedProminent)
+        .buttonBorderShape(.capsule)
+        .accessibilityLabel(Text(onboarding.recoveryBackupState == .none
+            ? "Reveal my recovery phrase"
+            : "Back up again"))
+        .accessibilityIdentifier("onboarding.done.backup_again")
+        .sheet(isPresented: $showBackup, onDismiss: {
+            flow?.stop()
+            flow = nil
+        }) {
+            if let flow {
+                RecoveryPhraseBackupView(flow: flow)
+            }
+        }
+        .onChange(of: flow?.step) { old, step in
+            if case .reveal(_, true)? = step, onboarding.recoveryBackupState == .none {
+                onboarding.recoveryBackupState = .revealed
+            }
+            if case .done? = step {
+                onboarding.recoveryBackupState = .verified
+            }
+            // The flow's DoneScreen "Done" loops back to .intro — here
+            // that means the walk is over: close the sheet.
+            if case .done? = old, case .intro? = step {
+                showBackup = false
+            }
+        }
     }
 }
 
@@ -1856,125 +1839,210 @@ struct OnboardingSummaryRow: Identifiable, Sendable {
     let detail: String?
     var symbol: String = "circle"
     var trailing: String?
+    /// Whether the seat has something in it — badges the Done grid's
+    /// icon, now that the value text isn't on screen to say so.
+    var isSet: Bool = true
 }
 
-/// Summary of the chosen components + the backup-phrase nudge. The
-/// recovery-phrase flow itself stays in Settings (it takes biometrics
-/// and its own confirmation walk — not something to inline at the end
-/// of onboarding).
+/// The review: everything the walk set up or agreed to, as tiles in
+/// balanced rows — up to three a row, each row centred, so any count
+/// reads as one symmetric block under the scaffold's seal. Every tile
+/// is one size, badged ✓ (agreed / configured), ✎ (started, not done)
+/// or – (left empty). Tapping a tile opens what it stands for, in
+/// words: the chosen name and the checkable detail behind it (URL, key
+/// fingerprint, manifest hash).
 struct OnboardingDoneContent: View {
-    /// How far the recovery backup got — drives the nudge below the
-    /// summary. This is the app-layer reader of the flow's
-    /// `recoveryBackupState`: a user who just revealed and verified
-    /// must not be told to go back their phrase up in Settings.
-    let recoveryBackupState: RecoveryBackupState
+    /// Read for the recovery tile's badge — a user who revealed and
+    /// verified must not be told to back it up — and written by the
+    /// backup the tile's sheet can run again.
+    let onboarding: OnboardingFlow
+    let makeBackupFlow: @MainActor () -> RecoveryPhraseBackupFlow
     let loadSummary: @MainActor () async -> [OnboardingSummaryRow]
     @State private var rows: [OnboardingSummaryRow] = []
+    @State private var reading: Tile?
+
+    /// One reviewable thing — a seat from the summary, or the phrase.
+    struct Tile: Identifiable {
+        enum Status { case done, pending, empty }
+
+        let id: String
+        let symbol: String
+        let status: Status
+        let title: String
+        let value: String
+        let detail: String?
+        let trailing: String?
+    }
+
+    private static let perRow = 3
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Spacer()
-                Circle()
-                    .fill(OnymTokens.green)
-                    .frame(width: 62, height: 62)
-                    .overlay(Image(systemName: "checkmark")
-                        .font(.system(size: 28, weight: .bold))
-                        .foregroundStyle(OnymTokens.onAccent))
-                Spacer()
-            }
-            .padding(.bottom, 20)
-            .accessibilityHidden(true)
-
-            OnboardingSectionLabel(text: "YOUR SETUP")
-            VStack(spacing: 0) {
-                ForEach(Array(rows.enumerated()), id: \.element.id) { idx, row in
-                    VStack(spacing: 0) {
-                        HStack(spacing: 12) {
-                            Image(systemName: row.symbol)
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(OnymAccent.blue.color)
-                                .frame(width: 24)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(verbatim: row.title)
-                                    .font(.system(size: 14.5, weight: .semibold))
-                                    .foregroundStyle(OnymTokens.text)
-                                Text(verbatim: row.value)
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(OnymTokens.text2)
-                                    .onymLineLimit(1)
-                                    .truncationMode(.tail)
-                                // The checkable claim: URL / key
-                                // fingerprint / manifest hash on its
-                                // own monospaced line, not folded into
-                                // the proportional value text.
-                                if let detail = row.detail {
-                                    Text(verbatim: detail)
-                                        .font(.system(size: 11, design: .monospaced))
-                                        .foregroundStyle(OnymTokens.text3)
-                                        .lineLimit(1)
-                                        .truncationMode(.middle)
-                                }
-                            }
-                            Spacer(minLength: 4)
-                            if let trailing = row.trailing {
-                                Text(verbatim: trailing)
-                                    .font(.system(size: 12.5))
-                                    .foregroundStyle(OnymTokens.text2)
-                            }
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        if idx != rows.count - 1 {
-                            Divider()
-                                .background(OnymTokens.hairline)
-                                .padding(.leading, 50)
-                        }
+        VStack(spacing: 16) {
+            ForEach(Array(tileRows.enumerated()), id: \.offset) { _, row in
+                HStack(spacing: 16) {
+                    ForEach(row) { tile in
+                        tileButton(tile)
                     }
                 }
             }
-            .background(OnymTokens.surface2,
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("onboarding.done.summary")
-
-            // Gated on how far the recovery step actually got:
-            // hidden once revealed AND verified, softened to "finish
-            // verifying" after a reveal alone, the full nudge only
-            // when the step was deferred.
-            if recoveryBackupState != .verified {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: "key.viewfinder")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(OnymTile.amber)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(recoveryBackupState == .revealed
-                             ? "Finish verifying your recovery phrase"
-                             : "Back up your recovery phrase")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(OnymTokens.text)
-                        Text(recoveryBackupState == .revealed
-                             ? "You've seen the 12 words. Verify a few of them from Settings → Back Up Recovery Phrase to make sure your copy is right."
-                             : "Your identity key was created on this device and exists nowhere else. Back it up from Settings → Back Up Recovery Phrase so you can recover your account.")
-                            .font(.system(size: 12.5))
-                            .foregroundStyle(OnymTokens.text2)
-                            .lineSpacing(2)
-                    }
-                }
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(OnymTile.amber.opacity(0.10),
-                            in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .padding(.top, 12)
-                .accessibilityIdentifier("onboarding.done.backup_nudge")
-            }
-
-            Text("Tap any line to change it. Nothing here is permanent except your recovery phrase.")
-                .font(.system(size: 12.5))
-                .foregroundStyle(OnymTokens.text2)
-                .lineSpacing(2)
-                .padding(.top, 12)
         }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("onboarding.done.summary")
         .task { rows = await loadSummary() }
+        .sheet(item: $reading) { tile in
+            // Looked up live, not the tapped snapshot: a backup run from
+            // this sheet must flip it to ✓ while it is still open.
+            detailSheet(tiles.first { $0.id == tile.id } ?? tile)
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+        }
+    }
+
+    private var tiles: [Tile] {
+        rows.map { row in
+            Tile(
+                id: row.id,
+                symbol: row.symbol,
+                status: row.isSet ? .done : .empty,
+                title: row.title,
+                value: row.value,
+                detail: row.detail,
+                trailing: row.trailing
+            )
+        } + [recoveryTile]
+    }
+
+    private var recoveryTile: Tile {
+        switch onboarding.recoveryBackupState {
+        case .verified:
+            return Tile(id: "recoveryPhrase", symbol: "lifepreserver.fill", status: .done,
+                        title: String(localized: "Recovery phrase"),
+                        value: String(localized: "Backed up"),
+                        detail: nil, trailing: nil)
+        case .revealed:
+            return Tile(id: "recoveryPhrase", symbol: "lifepreserver.fill", status: .pending,
+                        title: String(localized: "Finish verifying your recovery phrase"),
+                        value: String(localized: "You've seen the 12 words. Verify a few of them from Settings → Back Up Recovery Phrase to make sure your copy is right."),
+                        detail: nil, trailing: nil)
+        case .none:
+            return Tile(id: "recoveryPhrase", symbol: "lifepreserver.fill", status: .empty,
+                        title: String(localized: "Back up your recovery phrase"),
+                        value: String(localized: "Your identity key was created on this device and exists nowhere else. Back it up from Settings → Back Up Recovery Phrase so you can recover your account."),
+                        detail: nil, trailing: nil)
+        }
+    }
+
+    /// Balanced rows: 5 tiles are 3 + 2, 4 are 2 + 2 — never a full
+    /// row over a lone straggler when an even split exists.
+    private var tileRows: [[Tile]] {
+        let all = tiles
+        guard !all.isEmpty else { return [] }
+        let rowCount = (all.count + Self.perRow - 1) / Self.perRow
+        let base = all.count / rowCount
+        var extra = all.count % rowCount
+        var out: [[Tile]] = []
+        var index = 0
+        for _ in 0..<rowCount {
+            let size = base + (extra > 0 ? 1 : 0)
+            if extra > 0 { extra -= 1 }
+            out.append(Array(all[index..<index + size]))
+            index += size
+        }
+        return out
+    }
+
+    private func tileButton(_ tile: Tile) -> some View {
+        Button {
+            reading = tile
+        } label: {
+            Image(systemName: tile.symbol)
+                .font(.system(size: 28, weight: .semibold))
+                .foregroundStyle(tile.status == .empty ? OnymTokens.text3 : OnymAccent.blue.color)
+                .frame(width: 80, height: 80)
+                .background(OnymTokens.surface2,
+                            in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(alignment: .bottomTrailing) {
+                    Image(systemName: badgeSymbol(tile.status))
+                        .font(.system(size: 22))
+                        .foregroundStyle(OnymTokens.onAccent, badgeColor(tile.status))
+                        .background(OnymTokens.surface, in: Circle())
+                        .offset(x: 6, y: 6)
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(verbatim: tile.title))
+        .accessibilityValue(Text(verbatim: [tile.value, tile.trailing].compactMap { $0 }.joined(separator: ", ")))
+        .accessibilityHint(Text("Shows what was agreed"))
+        .accessibilityIdentifier(tile.id == "recoveryPhrase"
+            ? "onboarding.done.backup_nudge"
+            : "onboarding.done.tile.\(tile.id)")
+    }
+
+    /// What the tile stands for, in words — the one place this step
+    /// spells anything out, and only when asked.
+    private func detailSheet(_ tile: Tile) -> some View {
+        VStack(spacing: 14) {
+            Image(systemName: tile.symbol)
+                .font(.system(size: 40, weight: .semibold))
+                .foregroundStyle(tile.status == .empty ? OnymTokens.text3 : OnymAccent.blue.color)
+                .overlay(alignment: .bottomTrailing) {
+                    Image(systemName: badgeSymbol(tile.status))
+                        .font(.system(size: 20))
+                        .foregroundStyle(OnymTokens.onAccent, badgeColor(tile.status))
+                        .offset(x: 8, y: 8)
+                }
+                .padding(.top, 28)
+                .accessibilityHidden(true)
+            Text(verbatim: tile.title)
+                .font(.system(size: 19, weight: .semibold))
+                .foregroundStyle(OnymTokens.text)
+                .multilineTextAlignment(.center)
+            Text(verbatim: tile.value)
+                .font(.system(size: 15))
+                .foregroundStyle(OnymTokens.text2)
+                .multilineTextAlignment(.center)
+            if let trailing = tile.trailing {
+                Text(verbatim: trailing)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(OnymTokens.green)
+            }
+            if let detail = tile.detail {
+                Text(verbatim: detail)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(OnymTokens.text3)
+                    .multilineTextAlignment(.center)
+                    .textSelection(.enabled)
+            }
+            // The phrase isn't only reported on: back it up from here,
+            // first time or again — the same walk the recovery step runs.
+            if tile.id == "recoveryPhrase" {
+                OnboardingRecoveryBackupButton(
+                    onboarding: onboarding,
+                    makeBackupFlow: makeBackupFlow
+                )
+                .padding(.top, 8)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 24)
+        .frame(maxWidth: .infinity)
+        .accessibilityIdentifier("onboarding.done.detail")
+    }
+
+    private func badgeSymbol(_ status: Tile.Status) -> String {
+        switch status {
+        case .done: return "checkmark.circle.fill"
+        case .pending: return "pencil.circle.fill"
+        case .empty: return "minus.circle.fill"
+        }
+    }
+
+    private func badgeColor(_ status: Tile.Status) -> Color {
+        switch status {
+        case .done: return OnymTokens.green
+        case .pending: return OnymTile.amber
+        case .empty: return OnymTokens.text3
+        }
     }
 }
