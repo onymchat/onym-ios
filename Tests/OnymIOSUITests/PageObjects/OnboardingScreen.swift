@@ -19,12 +19,22 @@ struct OnboardingScreen {
 
     // MARK: - Scaffold chrome
 
+    /// A step's appearance anchor: the title text, or on the textless
+    /// welcome screen the mark that stands in for it.
     func title(_ step: String) -> XCUIElement {
-        app.staticTexts["onboarding.\(step).title"]
+        app.descendants(matching: .any)
+            .matching(identifier: "onboarding.\(step).title")
+            .firstMatch
     }
 
     func primary(_ step: String) -> XCUIElement {
         app.buttons["onboarding.\(step).primary"]
+    }
+
+    /// Welcome's "Set up step by step" — the opt-in walk under the
+    /// primary, which skips onboarding entirely.
+    func setup(_ step: String) -> XCUIElement {
+        app.buttons["onboarding.\(step).setup"]
     }
 
     func skip(_ step: String) -> XCUIElement {

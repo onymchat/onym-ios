@@ -9,8 +9,9 @@ import OnymDesignTokens
 /// at the presentation site — a full-screen cover has no interactive
 /// dismissal of its own, but the modifier documents intent and guards
 /// against a future switch to `.sheet`. The only exits are
-/// `flow.complete()` on the Done step and the recovery step's
-/// "Remind me later"; onboarding is never swiped away half-done.
+/// `flow.complete()` on the Done step and `flow.skipAll()` — the
+/// welcome screen's main button, or the skip-setup icon on the steps
+/// after it; onboarding is never swiped away half-done.
 ///
 /// Dependency posture: this package renders the *frame* of each step.
 /// The middle steps' real content — the services hub, the moderation
@@ -52,8 +53,64 @@ public struct OnboardingView: View {
     }
 
     public var body: some View {
-        scaffold(for: flow.step)
-            .task { flow.start() }
+        Group {
+            if flow.step == .welcome {
+                welcomeScreen
+            } else {
+                scaffold(for: flow.step)
+            }
+        }
+        .task { flow.start() }
+    }
+
+    // MARK: - Welcome
+
+    /// No text: the mark, one dominant button that skips straight to
+    /// Chats, and a bottom row of icon-only alternatives — set up step
+    /// by step, and (app-supplied) restore from a recovery phrase.
+    /// Every button carries an accessibility label in place of a title.
+    private var welcomeScreen: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 24)
+
+            content(for: .welcome)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text(verbatim: Self.title(for: .welcome)))
+                .accessibilityIdentifier("onboarding.welcome.title")
+
+            Spacer(minLength: 24)
+
+            Button { flow.skipAll() } label: {
+                Image(systemName: "door.left.hand.open")
+                    .font(OnymType.fixed(size: 34, weight: .semibold))
+                    .frame(width: 104, height: 104)
+            }
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.circle)
+            .accessibilityLabel(Text(verbatim: Self.primaryTitle(for: .welcome)))
+            .accessibilityIdentifier("onboarding.welcome.primary")
+
+            Spacer(minLength: 24)
+
+            HStack(spacing: 24) {
+                Button { flow.advance() } label: {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(OnymType.fixed(size: 20, weight: .semibold))
+                        .frame(width: 52, height: 52)
+                }
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.circle)
+                .accessibilityLabel(Text("Set up step by step"))
+                .accessibilityIdentifier("onboarding.welcome.setup")
+
+                if let restore = stepSecondaryAction(.welcome) {
+                    restore
+                }
+            }
+            .padding(.bottom, 24)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 20)
     }
 
     // MARK: - Steps
@@ -79,6 +136,9 @@ public struct OnboardingView: View {
             // progress where Skip would be instead of nothing.
             showsSkipProgress: step == .moderation && !flow.moderationProbeResolved,
             backAction: step == .welcome ? nil : { flow.back() },
+            // Mid-walk way out for whoever opted in to the steps.
+            // Done's primary already finishes.
+            skipAllAction: step == .done ? nil : { flow.skipAll() },
             // Unnumbered steps opt out entirely so the scaffold never
             // reserves a blank indicator band.
             showsIndicator: flow.indicatorPosition(for: step) != nil,
@@ -161,7 +221,7 @@ public struct OnboardingView: View {
 
     static func primaryTitle(for step: OnboardingStep) -> String {
         switch step {
-        case .welcome: return String(localized: "Create my identity")
+        case .welcome: return String(localized: "Start messaging")
         case .recoveryPhrase: return String(localized: "I've written it down")
         case .done: return String(localized: "Start messaging")
         default: return String(localized: "Continue")
@@ -180,36 +240,14 @@ public struct OnboardingView: View {
 
 // MARK: - Built-in step content
 
-/// Welcome step body: brand framing. The app layer replaces this via
-/// `stepContent` with the OnymMark-branded version; the built-in
-/// keeps the package standalone.
+/// Welcome step body: a mark, no text. The app layer replaces this
+/// via `stepContent` with the OnymMark; the built-in keeps the
+/// package standalone.
 struct WelcomeStepContent: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Image(systemName: "key.horizontal")
-                .font(OnymType.font(size: 44))
-                .foregroundStyle(.tint)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 24)
-            bullet(symbol: "lock.fill",
-                   text: "Your identity key is made on this device and stays here.")
-            bullet(symbol: "antenna.radiowaves.left.and.right",
-                   text: "You pick who carries your messages — and can swap them any time.")
-            bullet(symbol: "shield.fill",
-                   text: "You pick who handles reports, and see exactly what they can do.")
-        }
-    }
-
-    private func bullet(symbol: String, text: LocalizedStringKey) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: symbol)
-                .font(OnymType.fixed(size: 15, weight: .semibold))
-                .foregroundStyle(.tint)
-                .frame(width: 24)
-            Text(text)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-        }
+        Image(systemName: "key.horizontal")
+            .font(OnymType.font(size: 64))
+            .foregroundStyle(.tint)
     }
 }
 

@@ -41,6 +41,10 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
     private let showsSkipProgress: Bool
     /// nil hides the Back affordance (the first step).
     private let backAction: (() -> Void)?
+    /// Leave onboarding entirely — an icon button pinned top-trailing,
+    /// apart from the footer's per-step actions. nil hides it (Done,
+    /// whose primary already finishes).
+    private let skipAllAction: (() -> Void)?
     /// False drops the indicator slot entirely — the unnumbered steps
     /// (welcome, recovery, done) must not carry a blank 24pt band
     /// where the indicator would sit.
@@ -61,6 +65,7 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
         skipAction: (() -> Void)? = nil,
         showsSkipProgress: Bool = false,
         backAction: (() -> Void)? = nil,
+        skipAllAction: (() -> Void)? = nil,
         showsIndicator: Bool = true,
         @ViewBuilder content: () -> Content,
         @ViewBuilder indicator: () -> Indicator
@@ -76,6 +81,7 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
         self.skipAction = skipAction
         self.showsSkipProgress = showsSkipProgress
         self.backAction = backAction
+        self.skipAllAction = skipAllAction
         self.showsIndicator = showsIndicator
         self.content = content()
         self.indicator = indicator()
@@ -95,6 +101,9 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
                         .font(.largeTitle.bold())
                         .accessibilityIdentifier("onboarding.\(step.rawValue).title")
                         .padding(.top, showsIndicator ? 8 : 24)
+                        // Clear of the skip-all button pinned over
+                        // this corner, or a wrapping title runs under it.
+                        .padding(.trailing, skipAllAction == nil ? 0 : 48)
 
                     if let subtitle {
                         Text(verbatim: subtitle)
@@ -108,6 +117,21 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 20)
                 .padding(.bottom, 24)
+            }
+            .overlay(alignment: .topTrailing) {
+                if let skipAllAction {
+                    Button(action: skipAllAction) {
+                        Image(systemName: "door.left.hand.open")
+                            .font(.body.weight(.semibold))
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.circle)
+                    .padding(.top, 8)
+                    .padding(.trailing, 16)
+                    .accessibilityLabel(Text("Skip setup"))
+                    .accessibilityIdentifier("onboarding.\(step.rawValue).skip_all")
+                }
             }
 
             VStack(spacing: 12) {

@@ -50,13 +50,15 @@ final class OnboardingUITests: XCTestCase {
 
         let onboarding = OnboardingScreen(app: app)
 
-        // Step 1 — Welcome. Unskippable: no Skip affordance; the
-        // primary reads "Create my identity".
+        // Step 1 — Welcome. The primary ("Start messaging") skips the
+        // whole walk; this test opts in to the steps instead.
         XCTAssertTrue(onboarding.title("welcome").waitForExistence(timeout: 10),
                       "onboarding cover never presented. Hierarchy:\n\(app.debugDescription)")
         XCTAssertFalse(onboarding.skip("welcome").exists,
-                       "welcome must not offer Skip")
-        onboarding.continueFrom("welcome")
+                       "welcome must not offer a per-step Skip")
+        XCTAssertTrue(onboarding.setup("welcome").waitForExistence(timeout: 5),
+                      "welcome never offered Set up step by step")
+        onboarding.setup("welcome").tap()
 
         // Step 2 — Identity ("Making your keys", 1 of 3). The
         // checklist binds to the key bootstrap, and Continue is
@@ -267,11 +269,12 @@ final class OnboardingUITests: XCTestCase {
 
         let onboarding = OnboardingScreen(app: app)
 
-        // Welcome → identity. Identity's Continue is outcome-gated on
-        // the key bootstrap; wait for it to unlock.
+        // Welcome → identity, through the step-by-step icon (the main
+        // button would skip the walk). Identity's Continue is
+        // outcome-gated on the key bootstrap; wait for it to unlock.
         XCTAssertTrue(onboarding.title("welcome").waitForExistence(timeout: 10),
                       "onboarding cover never presented. Hierarchy:\n\(app.debugDescription)")
-        onboarding.continueFrom("welcome")
+        onboarding.setup("welcome").tap()
         XCTAssertTrue(onboarding.title("identity").waitForExistence(timeout: 5))
         XCTAssertTrue(waitUntilEnabled(onboarding.primary("identity"), timeout: 10),
                       "identity Continue never unlocked (bootstrap readiness)")
@@ -336,6 +339,37 @@ final class OnboardingUITests: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         }
         return element.exists && element.isEnabled
+    }
+
+    /// The welcome screen's main button is the whole of onboarding for
+    /// most people: one tap, straight to Chats, and the cover stays
+    /// gone. Mandate store left as seeded (no
+    /// `--moderation-needs-consent`) so no consent cover follows.
+    func test_welcomeMainButton_skipsStraightToChats() throws {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--ui-testing",
+            "--reset-keychain",
+            "--mock-biometric",
+            "--ui-discovery",
+            "--ui-onboarding",
+            "-AppleLanguages", "(en)",
+            "-AppleLocale", "en_US",
+        ]
+        app.launch()
+
+        let onboarding = OnboardingScreen(app: app)
+        XCTAssertTrue(onboarding.primary("welcome").waitForExistence(timeout: 10),
+                      "onboarding cover never presented. Hierarchy:\n\(app.debugDescription)")
+        XCTAssertTrue(onboarding.setup("welcome").exists,
+                      "welcome must offer the step-by-step icon")
+        onboarding.primary("welcome").tap()
+
+        let chats = ChatsScreen(app: app)
+        XCTAssertTrue(chats.chatsTab.waitForExistence(timeout: 10),
+                      "skip never reached the tab bar")
+        XCTAssertFalse(onboarding.title("welcome").exists,
+                       "onboarding cover must be gone after skipping")
     }
 
     /// `--skip-onboarding` outranks `--ui-onboarding`: launch a fresh

@@ -91,12 +91,9 @@ struct OnboardingStepContentBuilder {
         }
     }
 
-    /// A step's alternative action, rendered by the scaffold under the
-    /// primary button. Only Welcome has one: restoring from a phrase
-    /// is the genuine second answer to "Create my identity", and it
-    /// belongs beside that button rather than at the end of the
-    /// scrolling body — on an iPad the body ends well above the fold,
-    /// leaving the link clumped against the last card.
+    /// A step's alternative action. Only Welcome has one: restoring
+    /// from a phrase, the genuine alternative to starting fresh,
+    /// rendered as an icon in the welcome screen's bottom row.
     func secondaryAction(for step: OnboardingStep, flow: OnboardingFlow) -> AnyView? {
         // Hidden on a Settings → Restart Onboarding walk: that path
         // keeps identity/chats/messages by design, and
@@ -252,50 +249,16 @@ private struct OnboardingSectionLabel: View {
 /// the WindowGroup task; nothing here mentions or blocks on it.
 struct OnboardingWelcomeContent: View {
 
+    /// The mark alone — the welcome screen carries no text.
     var body: some View {
-        VStack(spacing: 0) {
-            OnymMark(size: 88, color: OnymAccent.blue.color, strokeRatio: 0.14)
-                .frame(maxWidth: .infinity)
-                .padding(.top, 28)
-                .padding(.bottom, 8)
-                .accessibilityHidden(true)
-            Text("No account to take away.")
-                .font(.system(size: 19, weight: .semibold))
-                .foregroundStyle(OnymTokens.text)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.bottom, 20)
-            VStack(alignment: .leading, spacing: 14) {
-                row(symbol: "lock.fill",
-                    text: "Your identity is a key made on this device — not an account on ours.")
-                row(symbol: "antenna.radiowaves.left.and.right",
-                    text: "You pick who carries your messages, and can swap them any time — nobody's locked in.")
-                row(symbol: "shield.fill",
-                    text: "You pick who handles reports, and see exactly what they're allowed to do — before you agree.")
-            }
-            .padding(16)
-            .background(OnymTokens.surface2,
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        }
-    }
-
-    private func row(symbol: String, text: LocalizedStringKey) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: symbol)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(OnymAccent.blue.color)
-                .frame(width: 24)
-            Text(text)
-                .font(.system(size: 14))
-                .foregroundStyle(OnymTokens.text2)
-                .lineSpacing(2)
-        }
+        OnymMark(size: 120, color: OnymAccent.blue.color, strokeRatio: 0.14)
     }
 }
 
-/// The welcome step's "I have a recovery phrase" affordance, handed
-/// to the scaffold's secondary slot so it sits under "Create my
-/// identity" instead of trailing the scrolling body. Owns the sheet
-/// it presents, and advances the flow only once the restore lands.
+/// The welcome step's "I have a recovery phrase" affordance — an
+/// icon in the screen's bottom row, beside step-by-step setup. Owns
+/// the sheet it presents, and advances the flow only once the restore
+/// lands.
 private struct OnboardingRestoreButton: View {
     let onboarding: OnboardingFlow
     let identityRestore: @MainActor (String) async throws -> Void
@@ -305,11 +268,14 @@ private struct OnboardingRestoreButton: View {
         Button {
             showRestore = true
         } label: {
-            // The scaffold's own secondary look, so this button and
-            // the Skip/Back it stacks with are one family.
-            Text("I have a recovery phrase").onboardingSecondaryLabel()
+            // Same metrics as the step-by-step icon it sits beside.
+            Image(systemName: "key.fill")
+                .font(.system(size: 20, weight: .semibold))
+                .frame(width: 52, height: 52)
         }
         .buttonStyle(.bordered)
+        .buttonBorderShape(.circle)
+        .accessibilityLabel(Text("I have a recovery phrase"))
         .accessibilityIdentifier("onboarding.welcome.restore")
         .sheet(isPresented: $showRestore) {
             OnboardingRestoreSheet(identityRestore: identityRestore) {

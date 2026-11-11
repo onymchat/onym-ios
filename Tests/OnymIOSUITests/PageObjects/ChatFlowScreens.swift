@@ -9,18 +9,13 @@ import XCTest
 struct CreateGroupScreen {
     let app: XCUIApplication
 
-    /// Enter the flow from the Chats tab — empty state (first group) or
-    /// the toolbar "+" (subsequent).
+    /// Enter the flow from the Chats tab's toolbar button — the only
+    /// entry point, empty state or not.
     func open() {
-        let emptyCTA = app.buttons["chats.create_group_empty_cta"]
         let toolbar = app.buttons["chats.create_group_toolbar"]
-        if emptyCTA.waitForExistence(timeout: 4) {
-            emptyCTA.tap()
-        } else if toolbar.exists {
-            toolbar.tap()
-        } else {
-            XCTFail("no create-group entry point on the Chats tab")
-        }
+        XCTAssertTrue(toolbar.waitForExistence(timeout: 4),
+                      "no create-group entry point on the Chats tab")
+        toolbar.tap()
     }
 
     var nameField: XCUIElement { app.textFields["create_group.step1.name_field"] }

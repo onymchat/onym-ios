@@ -314,9 +314,16 @@ struct RootView: View {
         }
     }
 
+    /// A tab's label: the icon alone on screen, the name kept for
+    /// VoiceOver (and the UI tests, which find tabs by it).
+    private static func tabIcon(_ name: LocalizedStringKey, systemImage: String) -> some View {
+        Image(systemName: systemImage)
+            .accessibilityLabel(Text(name))
+    }
+
     private var tabs: some View {
         TabView(selection: $selectedTab) {
-            Tab("Chats", systemImage: "bubble.left.and.bubble.right.fill", value: .chats) {
+            Tab(value: RootTab.chats) {
                 // Path hoisted into `dependencies` so a tapped invite
                 // link — handled above the tab bar — can push the chat
                 // it just created.
@@ -343,9 +350,11 @@ struct RootView: View {
                         moderationCaseBanner
                     }
                 }
+            } label: {
+                Self.tabIcon("Chats", systemImage: "bubble.left.and.bubble.right.fill")
             }
 
-            Tab("Settings", systemImage: "gearshape", value: .settings) {
+            Tab(value: RootTab.settings) {
                 NavigationStack {
                     SettingsView(
                         makeBackupFlow: dependencies.makeRecoveryPhraseBackupFlow,
@@ -370,9 +379,11 @@ struct RootView: View {
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     moderationCaseBanner
                 }
+            } label: {
+                Self.tabIcon("Settings", systemImage: "gearshape")
             }
 
-            Tab("Search", systemImage: "magnifyingglass", value: .search, role: .search) {
+            Tab(value: RootTab.search, role: .search) {
                 let chatsFlow = dependencies.chatsFlow
                 NavigationStack {
                     SearchView(
@@ -407,6 +418,8 @@ struct RootView: View {
                         moderationCaseBanner
                     }
                 }
+            } label: {
+                Self.tabIcon("Search", systemImage: "magnifyingglass")
             }
         }
     }
