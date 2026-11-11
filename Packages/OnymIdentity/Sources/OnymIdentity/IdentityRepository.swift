@@ -3,6 +3,7 @@ import Foundation
 import OnymSDK
 import UIKit
 import OnymFoundation
+import OnymMesh
 
 /// Owns every on-device identity. All Keychain I/O and OnymSDK calls
 /// happen here; views observe `identitiesStream` + `currentIdentityID`
@@ -455,6 +456,22 @@ public actor IdentityRepository: InvitationEnvelopeDecrypting, InvitationEnvelop
             envelopeBytes: envelopeBytes,
             recipientX25519PrivateKey: privateKey
         )
+    }
+
+    /// The Bluetooth mesh key this identity shares with one peer — what
+    /// the mesh's rotating recipient tags derive from (`MeshTag`).
+    ///
+    /// Computed here so the inbox private key never leaves the
+    /// repository: callers get the pair key, not the material behind it.
+    /// The peer derives the same key from its side.
+    public func meshPairKey(asIdentity identityID: IdentityID, peerInboxPublicKey: Data) throws -> Data {
+        guard let snapshot = try keychain.read(identityID) else {
+            throw InvitationDecryptError.identityNotLoaded
+        }
+        let privateKey = try Self.inboxKeyAgreementPrivateKey(
+            fromNostrSecret: snapshot.nostrSecretKey
+        )
+        return try MeshPairKey.derive(privateKey: privateKey, peerPublicKey: peerInboxPublicKey)
     }
 
     /// Single-pass decrypt that surfaces the sender's Ed25519 pubkey

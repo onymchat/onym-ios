@@ -132,7 +132,8 @@ private actor ActiveSubscriptions {
                         messageID: message.messageID,
                         ownerIdentityID: id,
                         payload: message.payload,
-                        receivedAt: message.receivedAt
+                        receivedAt: message.receivedAt,
+                        delivery: message.delivery
                     )
                 }
             }

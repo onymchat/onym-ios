@@ -549,6 +549,87 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
         )
     }
 
+    // MARK: - Bluetooth mesh
+
+    /// Heard on the mesh: stored, the app told, and no receipt — even a
+    /// later one over a relay would tell the sender this device was in
+    /// range of the broadcast.
+    func test_bluetoothChatMessage_isStoredWithoutReceipt() async throws {
+        let payload = makePayload(body: "over the air")
+        let spy = SpyChatReceiptSender()
+        let arrivals = ArrivalRecorder()
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: FakeInvitationEnvelopeDecrypter(
+                mode: .fixed(try JSONEncoder().encode(payload)),
+                senderEd25519PublicKey: senderEd25519
+            ),
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState,
+            messageRepository: messages,
+            receiptSender: spy,
+            bluetoothMessageArrived: { owner, group in await arrivals.record(owner, group) }
+        )
+        await dispatcher.dispatch(
+            messageID: "ble:0000000000000001",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date(),
+            delivery: .bluetooth
+        )
+        let stored = await messages.currentMessages(groupID: groupIDHex, owner: owner)
+        XCTAssertEqual(stored.map(\.id), [payload.messageID])
+        let sends = await spy.sends
+        XCTAssertTrue(sends.isEmpty, "a mesh delivery must never be acknowledged")
+        let recorded = await arrivals.entries
+        XCTAssertEqual(recorded.count, 1)
+        XCTAssertEqual(recorded.first?.group, groupIDHex)
+    }
+
+    /// The parking lot drains into the receipt-sending path, so a mesh
+    /// copy for a group this device doesn't know yet is dropped — the
+    /// relay copy catches up — instead of acking when the group lands.
+    func test_bluetoothChatMessage_forUnknownGroup_isDroppedNotParked() async throws {
+        let lot = ChatMessageParkingLot()
+        let newGroupBytes = Data(repeating: 0x99, count: 32)
+        let newGroupHex = newGroupBytes.map { String(format: "%02x", $0) }.joined()
+        let payload = makePayload(body: "early", groupIDBytes: newGroupBytes)
+        let spy = SpyChatReceiptSender()
+        await makeDispatcher(
+            plaintext: try JSONEncoder().encode(payload),
+            envelopeSigner: senderEd25519,
+            receiptSender: spy,
+            parkedMessages: lot
+        ).dispatch(
+            messageID: "ble:0000000000000002",
+            ownerIdentityID: owner,
+            payload: Data("envelope".utf8),
+            receivedAt: Date(),
+            delivery: .bluetooth
+        )
+
+        // Materialize the group the way the parked-message test does; a
+        // parked mesh copy would drain into the store (and ack) here.
+        let invitation = makeTyrannyInvitation(
+            groupID: newGroupBytes,
+            memberProfiles: [
+                senderBlsHex: MemberProfile(alias: "Alice", inboxPublicKey: senderInbox, sendingPubkey: senderEd25519)
+            ]
+        )
+        await makeDispatcher(
+            plaintext: try JSONEncoder().encode(invitation),
+            envelopeSigner: senderEd25519,
+            receiptSender: spy,
+            parkedMessages: lot
+        ).dispatch(messageID: "inv-1", ownerIdentityID: owner, payload: Data("envelope".utf8), receivedAt: Date())
+
+        let stored = await messages.currentMessages(groupID: newGroupHex, owner: owner)
+        XCTAssertFalse(stored.contains { $0.id == payload.messageID }, "mesh copies are not parked")
+        let sends = await spy.sends
+        XCTAssertTrue(sends.filter { $0.messageIDs.contains(payload.messageID) }.isEmpty)
+    }
+
     // MARK: - Receipts
 
     func test_incomingChatMessage_shipsDeliveredReceiptToSender() async throws {
@@ -731,4 +812,10 @@ private actor StubIdentities: IdentitiesProviding {
     }
 
     func currentIdentities() -> [IdentitySummary] { summaries }
+}
+
+/// Records the dispatcher's "stored a mesh message" callbacks.
+private actor ArrivalRecorder {
+    private(set) var entries: [(owner: IdentityID, group: String)] = []
+    func record(_ owner: IdentityID, _ group: String) { entries.append((owner, group)) }
 }

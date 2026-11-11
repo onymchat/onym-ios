@@ -10,6 +10,7 @@ let package = Package(
     dependencies: [
         .package(path: "../OnymFoundation"),
         .package(path: "../OnymTransport"),
+        .package(path: "../OnymMesh"),
         .package(url: "https://github.com/onymchat/onym-sdk-swift.git", from: "0.0.2"),
     ],
     targets: [
@@ -18,6 +19,7 @@ let package = Package(
             dependencies: [
                 "OnymFoundation",
                 "OnymTransport",
+                "OnymMesh",
                 .product(name: "OnymSDK", package: "onym-sdk-swift"),
             ]
         )
