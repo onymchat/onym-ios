@@ -1,9 +1,10 @@
 import SwiftUI
 
-/// One onboarding step screen, per the established consent-view
-/// skeleton: ScrollView + large title + content slot + primary button
-/// + text Back/Skip, with the step indicator injected as a view
-/// builder slot.
+/// One onboarding step screen, textless: a large step symbol in place
+/// of the title, the content slot, and a footer of icon-only buttons
+/// (Back, Skip, primary). Every string the scaffold is given is an
+/// accessibility label — VoiceOver reads it, the screen never shows
+/// it. The step indicator is injected as a view builder slot.
 ///
 /// Deliberately styled with plain SwiftUI — this package does not
 /// depend on OnymDesign. PR 3 supplies `StepIndicator` (made
@@ -16,9 +17,14 @@ import SwiftUI
 /// `onboarding.<step>.back`, `onboarding.<step>.title`.
 public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
     private let step: OnboardingStep
+    /// Accessibility label for `symbol`; carries the
+    /// `onboarding.<step>.title` identifier the UI tests anchor on.
     private let title: String
-    private let subtitle: String?
+    private let symbol: String
+    /// VoiceOver hint on the symbol — what the step's subtitle said.
+    private let hint: String?
     private let primaryTitle: String
+    private let primarySymbol: String
     /// Disables the primary button — mandatory steps with no recorded
     /// outcome render Continue disabled (the flow's `advance()` guard
     /// is the second layer of the same rule).
@@ -33,6 +39,7 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
     /// Label for the Skip affordance — the recovery step reads
     /// "Remind me later"; the default is "Skip".
     private let skipTitle: String
+    private let skipSymbol: String
     /// nil hides the Skip affordance (unskippable steps).
     private let skipAction: (() -> Void)?
     /// Renders a small progress indicator in the Skip slot — used
@@ -49,6 +56,12 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
     /// (welcome, recovery, done) must not carry a blank 24pt band
     /// where the indicator would sit.
     private let showsIndicator: Bool
+    /// Centre the symbol and content, as one group, in the space above
+    /// the footer — for steps short enough to have nothing to scroll.
+    private let centersContent: Bool
+    /// False when the content IS the symbol (identity: the key, badged
+    /// with its status) — the scaffold then draws none of its own.
+    private let showsSymbol: Bool
     private let content: Content
     private let indicator: Indicator
     @Environment(\.colorScheme) private var colorScheme
@@ -56,126 +69,108 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
     public init(
         step: OnboardingStep,
         title: String,
-        subtitle: String? = nil,
+        symbol: String,
+        hint: String? = nil,
         primaryTitle: String,
+        primarySymbol: String = "arrow.right",
         primaryDisabled: Bool = false,
         primaryAction: @escaping () -> Void,
         secondaryAction: AnyView? = nil,
         skipTitle: String = String(localized: "Skip"),
+        skipSymbol: String = "forward",
         skipAction: (() -> Void)? = nil,
         showsSkipProgress: Bool = false,
         backAction: (() -> Void)? = nil,
         skipAllAction: (() -> Void)? = nil,
         showsIndicator: Bool = true,
+        centersContent: Bool = false,
+        showsSymbol: Bool = true,
         @ViewBuilder content: () -> Content,
         @ViewBuilder indicator: () -> Indicator
     ) {
         self.step = step
         self.title = title
-        self.subtitle = subtitle
+        self.symbol = symbol
+        self.hint = hint
         self.primaryTitle = primaryTitle
+        self.primarySymbol = primarySymbol
         self.primaryDisabled = primaryDisabled
         self.primaryAction = primaryAction
         self.secondaryAction = secondaryAction
         self.skipTitle = skipTitle
+        self.skipSymbol = skipSymbol
         self.skipAction = skipAction
         self.showsSkipProgress = showsSkipProgress
         self.backAction = backAction
         self.skipAllAction = skipAllAction
         self.showsIndicator = showsIndicator
+        self.centersContent = centersContent
+        self.showsSymbol = showsSymbol
         self.content = content()
         self.indicator = indicator()
     }
 
     public var body: some View {
         VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    if showsIndicator {
-                        indicator
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 24)
-                    }
-
-                    Text(verbatim: title)
-                        .font(.largeTitle.bold())
-                        .accessibilityIdentifier("onboarding.\(step.rawValue).title")
-                        .padding(.top, showsIndicator ? 8 : 24)
-                        // Clear of the skip-all button pinned over
-                        // this corner, or a wrapping title runs under it.
-                        .padding(.trailing, skipAllAction == nil ? 0 : 48)
-
-                    if let subtitle {
-                        Text(verbatim: subtitle)
-                            .font(.body)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    content
-                        .padding(.top, 8)
+            Group {
+                if centersContent {
+                    centeredBody
+                } else {
+                    scrollingBody
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 20)
-                .padding(.bottom, 24)
+            }
+            // Top bar, mirrored: Back on the left, leave-setup on the
+            // right — the same two round icons at the same height.
+            .overlay(alignment: .topLeading) {
+                if let backAction {
+                    cornerIcon("arrow.left", label: String(localized: "Back"), action: backAction)
+                        .accessibilityIdentifier("onboarding.\(step.rawValue).back")
+                }
             }
             .overlay(alignment: .topTrailing) {
                 if let skipAllAction {
-                    Button(action: skipAllAction) {
-                        Image(systemName: "door.left.hand.open")
-                            .font(.body.weight(.semibold))
-                            .frame(width: 44, height: 44)
-                    }
-                    .buttonStyle(.bordered)
-                    .buttonBorderShape(.circle)
-                    .padding(.top, 8)
-                    .padding(.trailing, 16)
-                    .accessibilityLabel(Text("Skip setup"))
-                    .accessibilityIdentifier("onboarding.\(step.rawValue).skip_all")
+                    cornerIcon("door.left.hand.open", label: String(localized: "Skip setup"), action: skipAllAction)
+                        .accessibilityIdentifier("onboarding.\(step.rawValue).skip_all")
                 }
             }
 
+            // Footer: the step's answers, side by side at equal width —
+            // a deferral (Skip) is a full button beside the primary,
+            // never a small icon a user has to hunt for. Without one,
+            // the primary takes the whole row.
             VStack(spacing: 12) {
-                Button(action: primaryAction) {
-                    Text(verbatim: primaryTitle)
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 6)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(primaryDisabled)
-                .accessibilityIdentifier("onboarding.\(step.rawValue).primary")
-
-                // A real alternative to the primary sits with it, in
-                // the button stack — not in the scrolling body, where
-                // on a wide iPad it lands under a short page of
-                // content and reads as part of the last card.
                 if let secondaryAction {
                     secondaryAction
                 }
 
-                // The remaining actions stack under the primary, in
-                // the same secondary look — a corner-pinned Back read
-                // as page chrome, not as this screen's alternative
-                // action, and a plain text Skip beneath two real
-                // buttons read as a footnote to them.
-                if let skipAction {
-                    Button(action: skipAction) {
-                        Text(verbatim: skipTitle).onboardingSecondaryLabel()
+                HStack(spacing: 12) {
+                    if let skipAction {
+                        Button(action: skipAction) {
+                            Image(systemName: skipSymbol)
+                                .font(.system(size: 22, weight: .semibold))
+                                .frame(maxWidth: .infinity, minHeight: 40)
+                        }
+                        .buttonStyle(.bordered)
+                        .buttonBorderShape(.capsule)
+                        .accessibilityLabel(Text(verbatim: skipTitle))
+                        .accessibilityIdentifier("onboarding.\(step.rawValue).skip")
+                    } else if showsSkipProgress {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(maxWidth: .infinity, minHeight: 40)
+                            .accessibilityIdentifier("onboarding.\(step.rawValue).skip_pending")
                     }
-                    .buttonStyle(.bordered)
-                    .accessibilityIdentifier("onboarding.\(step.rawValue).skip")
-                } else if showsSkipProgress {
-                    ProgressView()
-                        .controlSize(.small)
-                        .frame(maxWidth: .infinity)
-                        .accessibilityIdentifier("onboarding.\(step.rawValue).skip_pending")
-                }
-                if let backAction {
-                    Button(action: backAction) {
-                        Text("Back").onboardingSecondaryLabel()
+
+                    Button(action: primaryAction) {
+                        Image(systemName: primarySymbol)
+                            .font(.system(size: 22, weight: .semibold))
+                            .frame(maxWidth: .infinity, minHeight: 40)
                     }
-                    .buttonStyle(.bordered)
-                    .accessibilityIdentifier("onboarding.\(step.rawValue).back")
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.capsule)
+                    .disabled(primaryDisabled)
+                    .accessibilityLabel(Text(verbatim: primaryTitle))
+                    .accessibilityIdentifier("onboarding.\(step.rawValue).primary")
                 }
             }
             .padding(.horizontal, 20)
@@ -199,6 +194,83 @@ public struct OnboardingStepScaffold<Content: View, Indicator: View>: View {
                     .ignoresSafeArea(edges: .bottom)
             }
         }
+    }
+
+    private var scrollingBody: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                if showsIndicator {
+                    indicator
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 24)
+                }
+
+                stepSymbol
+                    .padding(.top, showsIndicator ? 8 : 24)
+
+                content
+                    .padding(.top, 8)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 24)
+        }
+    }
+
+    /// Content centred in the whole area above the footer — the
+    /// indicator rides on top as an overlay so it can't push the
+    /// content off centre. Still scrolls if the screen is too short.
+    private var centeredBody: some View {
+        GeometryReader { proxy in
+            ScrollView {
+                VStack(spacing: 24) {
+                    if showsSymbol {
+                        stepSymbol
+                        content
+                    } else {
+                        content
+                            .accessibilityElement(children: .contain)
+                            .accessibilityLabel(Text(verbatim: title))
+                            .accessibilityHint(Text(verbatim: hint ?? ""))
+                            .accessibilityAddTraits(.isHeader)
+                            .accessibilityIdentifier("onboarding.\(step.rawValue).title")
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: proxy.size.height)
+                .padding(.horizontal, 20)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+        }
+        .overlay(alignment: .top) {
+            if showsIndicator {
+                indicator.padding(.top, 24)
+            }
+        }
+    }
+
+    private var stepSymbol: some View {
+        Image(systemName: symbol)
+            .font(.system(size: 56, weight: .semibold))
+            .foregroundStyle(.tint)
+            .frame(maxWidth: .infinity)
+            .accessibilityElement()
+            .accessibilityLabel(Text(verbatim: title))
+            .accessibilityHint(Text(verbatim: hint ?? ""))
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityIdentifier("onboarding.\(step.rawValue).title")
+    }
+
+    private func cornerIcon(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.body.weight(.semibold))
+                .frame(width: 44, height: 44)
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.circle)
+        .padding(.top, 8)
+        .padding(.horizontal, 16)
+        .accessibilityLabel(Text(verbatim: label))
     }
 
     /// The footer's separating shadow. A dark shadow does nothing on a

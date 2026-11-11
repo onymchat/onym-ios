@@ -144,6 +144,11 @@ public final class OnboardingFlow {
     /// carry the dismissal: it is bound at the composition root, which
     /// has no handle on the presenting view's state.
     public private(set) var isCompleted = false
+    /// Set by a step's content when the step's primary should do that
+    /// step's work rather than advance — moderation's terms review,
+    /// where the primary IS the signature. Consulted only while the
+    /// step's gate is unmet; the content clears it when it leaves.
+    public var primaryOverride: (@MainActor () -> Void)?
 
     /// Whether the directory probe has answered — the view shows a
     /// progress state on the skip affordance while this is false.

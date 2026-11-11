@@ -87,12 +87,12 @@ struct OnboardingScreen {
 
     var recoveryStatus: XCUIElement {
         app.descendants(matching: .any)
-            .matching(identifier: "onboarding.recoveryPhrase.status")
+            .matching(identifier: "onboarding.recoveryPhrase.status") // onym:allow-secret-read — step name, not the phrase
             .firstMatch
     }
 
     var recoveryReveal: XCUIElement {
-        app.buttons["onboarding.recoveryPhrase.reveal"]
+        app.buttons["onboarding.recoveryPhrase.reveal"] // onym:allow-secret-read — step name, not the phrase
     }
 
     // MARK: - Discovery confirm step
@@ -162,12 +162,23 @@ struct OnboardingScreen {
 
     // MARK: - Moderation step (shared consent surface)
 
+    /// The configure icon the authority list sits behind.
+    var moderationChoose: XCUIElement {
+        app.buttons["moderation.consent.choose"]
+    }
+
     func moderationAuthorityRow(componentId: String) -> XCUIElement {
         app.buttons["moderation.consent.authority.\(componentId)"]
     }
 
+    /// Signing, in onboarding, is the moderation step's primary (✍︎).
     var moderationAgree: XCUIElement {
-        app.buttons["moderation.consent.agree"]
+        app.buttons["onboarding.moderation.primary"]
+    }
+
+    /// The review's terms-in-words icon — present once terms are up.
+    var moderationTermsText: XCUIElement {
+        app.buttons["moderation.consent.terms_text"]
     }
 
     /// "Mandate signed" — the consent surface's done state.

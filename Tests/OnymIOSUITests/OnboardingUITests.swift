@@ -156,11 +156,12 @@ final class OnboardingUITests: XCTestCase {
         // Authority, so the step is MANDATORY: Continue stays disabled
         // and Skip never appears until a mandate is signed.
         XCTAssertTrue(onboarding.title("moderation").waitForExistence(timeout: 5))
+        // The authorities sit behind the configure icon.
+        XCTAssertTrue(onboarding.moderationChoose.waitForExistence(timeout: 10),
+                      "authority configure icon never appeared. Hierarchy:\n\(app.debugDescription)")
         let authorityRow = onboarding.moderationAuthorityRow(
             componentId: "onym:component:uitest-authority"
         )
-        XCTAssertTrue(authorityRow.waitForExistence(timeout: 10),
-                      "authority row never appeared. Hierarchy:\n\(app.debugDescription)")
         let moderationContinue = onboarding.primary("moderation")
         XCTAssertTrue(moderationContinue.waitForExistence(timeout: 5),
                       "moderation Continue button never appeared")
@@ -168,13 +169,25 @@ final class OnboardingUITests: XCTestCase {
                        "Continue must stay disabled before the mandate is signed")
         XCTAssertFalse(onboarding.skip("moderation").exists,
                        "moderation must not be skippable while the directory has entries")
+        onboarding.moderationChoose.tap()
+        XCTAssertTrue(authorityRow.waitForExistence(timeout: 10),
+                      "authority row never appeared. Hierarchy:\n\(app.debugDescription)")
         authorityRow.tap()
-        XCTAssertTrue(onboarding.moderationAgree.waitForExistence(timeout: 5),
-                      "manifest review (I agree and sign) never appeared")
+        XCTAssertTrue(onboarding.moderationTermsText.waitForExistence(timeout: 5),
+                      "manifest review never appeared")
+        // The terms in words, one tap from the symbols.
+        onboarding.moderationTermsText.tap()
+        let closeTerms = app.buttons["moderation.consent.terms_text.close"]
+        XCTAssertTrue(closeTerms.waitForExistence(timeout: 5),
+                      "terms text sheet never appeared")
+        closeTerms.tap()
+        let sheetGone = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: closeTerms)
+        wait(for: [sheetGone], timeout: 5)
+        // The step's primary is the signature; signing moves on by
+        // itself once the seal has shown.
+        XCTAssertTrue(waitUntilEnabled(onboarding.moderationAgree, timeout: 5),
+                      "signature primary never enabled on the terms review")
         onboarding.moderationAgree.tap()
-        XCTAssertTrue(onboarding.moderationDone.waitForExistence(timeout: 10),
-                      "mandate-signed state never appeared")
-        onboarding.continueFrom("moderation")
 
         // Step 5 — Recovery phrase. Unnumbered; the deferral reads
         // "Remind me later" (the only skippable step). The primary
@@ -216,6 +229,18 @@ final class OnboardingUITests: XCTestCase {
         XCTAssertTrue(onboarding.title("done").waitForExistence(timeout: 5))
         XCTAssertTrue(onboarding.doneSummary.waitForExistence(timeout: 5),
                       "done summary card never appeared")
+        // Any tile reads back what was agreed — the signed mandate here.
+        let moderationTile = app.buttons["onboarding.done.tile.moderation"]
+        XCTAssertTrue(moderationTile.waitForExistence(timeout: 5),
+                      "moderation tile never appeared on the review")
+        moderationTile.tap()
+        let detail = app.descendants(matching: .any)
+            .matching(identifier: "onboarding.done.detail").firstMatch
+        XCTAssertTrue(detail.waitForExistence(timeout: 5),
+                      "tapping a review tile never showed what was agreed")
+        detail.swipeDown()
+        let detailGone = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: detail)
+        wait(for: [detailGone], timeout: 5)
         onboarding.continueFrom("done")
 
         let chats = ChatsScreen(app: app)
@@ -286,17 +311,19 @@ final class OnboardingUITests: XCTestCase {
         // Reports & safety: mandatory — sign the fixture authority's
         // mandate to unlock Continue.
         XCTAssertTrue(onboarding.title("moderation").waitForExistence(timeout: 5))
+        // The authorities sit behind the configure icon.
+        XCTAssertTrue(onboarding.moderationChoose.waitForExistence(timeout: 10),
+                      "authority configure icon never appeared. Hierarchy:\n\(app.debugDescription)")
         let authorityRow = onboarding.moderationAuthorityRow(
             componentId: "onym:component:uitest-authority"
         )
+        onboarding.moderationChoose.tap()
         XCTAssertTrue(authorityRow.waitForExistence(timeout: 10),
                       "authority row never appeared. Hierarchy:\n\(app.debugDescription)")
         authorityRow.tap()
-        XCTAssertTrue(onboarding.moderationAgree.waitForExistence(timeout: 5))
+        XCTAssertTrue(onboarding.moderationTermsText.waitForExistence(timeout: 5))
+        XCTAssertTrue(waitUntilEnabled(onboarding.moderationAgree, timeout: 5))
         onboarding.moderationAgree.tap()
-        XCTAssertTrue(onboarding.moderationDone.waitForExistence(timeout: 10),
-                      "mandate-signed state never appeared")
-        onboarding.continueFrom("moderation")
 
         // Recovery: primary is gated on the reveal — defer instead.
         XCTAssertTrue(onboarding.title("recoveryPhrase").waitForExistence(timeout: 5))

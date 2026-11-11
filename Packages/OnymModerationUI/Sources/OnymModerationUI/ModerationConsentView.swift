@@ -22,7 +22,6 @@ public struct ModerationConsentView: View {
                     .padding(.bottom, 32)
             }
             .background(OnymTokens.surface.ignoresSafeArea())
-            .navigationTitle(navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 // Switching is a normal, abandonable settings task, and
@@ -32,8 +31,11 @@ public struct ModerationConsentView: View {
                 // consent is the gate.
                 if flow.isDismissable {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button(dismissLabel) { dismiss() }
-                            .accessibilityIdentifier("moderation.consent.dismiss")
+                        Button { dismiss() } label: {
+                            Image(systemName: dismissSymbol)
+                        }
+                        .accessibilityLabel(Text(dismissLabel))
+                        .accessibilityIdentifier("moderation.consent.dismiss")
                     }
                 }
             }
@@ -43,21 +45,19 @@ public struct ModerationConsentView: View {
         .interactiveDismissDisabled(!flow.isDismissable)
     }
 
-    private var navigationTitle: LocalizedStringKey {
-        switch flow.mode {
-        case .onboarding: return "Moderation"
-        case .switching: return "Switch Authority"
-        case .reconsent(.termsChanged): return "Terms Updated"
-        case .reconsent(.authorityDelisted): return "Authority Unavailable"
-        }
-    }
-
     /// "Cancel" while the task can still be abandoned; "Done" once the
     /// mandate exists, whichever terms it ended up binding.
     private var dismissLabel: LocalizedStringKey {
         switch flow.state.step {
         case .done: return "Done"
         default: return "Cancel"
+        }
+    }
+
+    private var dismissSymbol: String {
+        switch flow.state.step {
+        case .done: return "checkmark"
+        default: return "xmark"
         }
     }
 
@@ -83,14 +83,30 @@ public struct ModerationConsentContent: View {
     /// paragraphs above the fold, leaving the authorities themselves
     /// entirely below it.
     private let showsPickerHeader: Bool
+    /// The embedder signs with its own button (the onboarding step's
+    /// primary calls `flow.tappedAgree()`), so the review drops its
+    /// sign button and offers re-choosing the authority instead of Back.
+    private let hostOwnsSigning: Bool
+    @State private var showsAuthorities = false
+    @State private var showsTermsText = false
 
-    public init(flow: ModerationConsentFlow, showsPickerHeader: Bool = true) {
+    /// Embedded (no header), the onboarding scaffold centres this
+    /// content itself; standalone it sits under the header, pushed
+    /// down so it doesn't crowd the top.
+    private var topInset: CGFloat { showsPickerHeader ? 120 : 0 }
+
+    public init(
+        flow: ModerationConsentFlow,
+        showsPickerHeader: Bool = true,
+        hostOwnsSigning: Bool = false
+    ) {
         self.flow = flow
         self.showsPickerHeader = showsPickerHeader
+        self.hostOwnsSigning = hostOwnsSigning
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(spacing: 0) {
             switch flow.state.step {
             case .loadingDirectory:
                 loading
@@ -107,82 +123,134 @@ public struct ModerationConsentContent: View {
     // MARK: - Steps
 
     private var loading: some View {
-        VStack(spacing: 12) {
-            ProgressView()
-            Text("Loading moderation authorities…")
-                .font(OnymType.font(size: 14))
-                .foregroundStyle(OnymTokens.text2)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 120)
+        ProgressView()
+            .controlSize(.large)
+            .frame(maxWidth: .infinity)
+            .padding(.top, topInset)
+            .accessibilityLabel(Text("Loading moderation authorities…"))
     }
 
+    /// The authorities sit behind one configure icon — the same
+    /// sliders the welcome screen uses for "set up myself" — opening
+    /// the list as a sheet.
     @ViewBuilder
     private var picker: some View {
         if showsPickerHeader {
-            LargeTitle(pickerTitle)
-            Text(pickerBlurb)
-                .font(OnymType.font(size: 14))
-                .foregroundStyle(OnymTokens.text2)
-                .lineSpacing(3)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 16)
+            Image(systemName: pickerSymbol)
+                .font(OnymType.fixed(size: 56, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 24)
+                .accessibilityElement()
+                .accessibilityLabel(Text(pickerTitle))
+                .accessibilityHint(Text(pickerBlurb))
         }
 
         supersededHashes
 
-        switch flow.state.fetchStatus {
-        case .failed(let message):
-            Card {
-                VStack(spacing: 10) {
-                    Text(message)
-                        .font(OnymType.font(size: 14))
-                        .foregroundStyle(OnymTokens.text2)
-                    Button("Retry") { flow.tappedRetry() }
-                        .accessibilityIdentifier("moderation.consent.retry")
-                }
-                .frame(maxWidth: .infinity)
-                .padding(16)
-            }
-        case .fetching, .idle:
-            Card {
+        VStack(spacing: 16) {
+            switch flow.state.fetchStatus {
+            case .failed(let message):
+                Image(systemName: "wifi.exclamationmark")
+                    .font(OnymType.fixed(size: 28, weight: .semibold))
+                    .foregroundStyle(OnymTokens.red)
+                    .accessibilityLabel(Text(verbatim: message))
+                roundButton("arrow.clockwise", label: "Retry") { flow.tappedRetry() }
+                    .accessibilityIdentifier("moderation.consent.retry")
+            case .fetching, .idle:
                 ProgressView()
-                    .frame(maxWidth: .infinity)
-                    .padding(16)
-            }
-        case .success where flow.state.authorities.isEmpty:
-            Card {
-                Text("No authorities are published yet.")
-                    .font(OnymType.font(size: 14))
+                    .controlSize(.large)
+            case .success where flow.state.authorities.isEmpty:
+                Image(systemName: "tray")
+                    .font(OnymType.fixed(size: 28, weight: .semibold))
                     .foregroundStyle(OnymTokens.text3)
-                    .frame(maxWidth: .infinity)
-                    .padding(16)
+                    .accessibilityLabel(Text("No authorities are published yet."))
+            case .success:
+                roundButton("slider.horizontal.3", label: pickerTitle, size: 64) {
+                    showsAuthorities = true
+                }
+                .accessibilityHint(Text(pickerBlurb))
+                .accessibilityIdentifier("moderation.consent.choose")
             }
-        case .success:
-            Card {
-                ForEach(Array(flow.state.authorities.enumerated()), id: \.element.componentId) { idx, listing in
-                    Button { flow.selectedAuthority(listing) } label: {
-                        Row(
-                            titleText: listing.name,
-                            subtitle: rowSubtitle(for: listing),
-                            // The re-consent marker is prepended to the
-                            // component id, which already fills the
-                            // single default line on its own.
-                            subtitleLineLimit: 2,
-                            last: idx == flow.state.authorities.count - 1
-                        ) {
-                            IconTile(symbol: "checkmark.shield", bg: OnymTile.indigo)
+
+            errorSymbol
+        }
+        .frame(maxWidth: .infinity)
+        .sheet(isPresented: $showsAuthorities) {
+            authorityList
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+    }
+
+    private var authorityList: some View {
+        NavigationStack {
+            ScrollView {
+                Card {
+                    ForEach(Array(flow.state.authorities.enumerated()), id: \.element.componentId) { idx, listing in
+                        Button {
+                            showsAuthorities = false
+                            flow.selectedAuthority(listing)
+                        } label: {
+                            // The name is data — the one word the pick
+                            // needs. Your current authority is marked by
+                            // its tile.
+                            Row(
+                                titleText: listing.name,
+                                last: idx == flow.state.authorities.count - 1
+                            ) {
+                                IconTile(
+                                    symbol: isCurrent(listing) ? "checkmark.shield.fill" : "checkmark.shield",
+                                    bg: isCurrent(listing) ? OnymTile.green : OnymTile.indigo
+                                )
+                            }
+                            .accessibilityValue(Text(verbatim: rowSubtitle(for: listing)))
                         }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("moderation.consent.authority.\(listing.componentId)")
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("moderation.consent.authority.\(listing.componentId)")
+                }
+                .padding(.top, 8)
+            }
+            .background(OnymTokens.surface.ignoresSafeArea())
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showsAuthorities = false } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .accessibilityLabel(Text("Cancel"))
                 }
             }
         }
+    }
 
+    /// A failure the flow reports (terms that wouldn't load, a signing
+    /// that failed): a warning glyph, the message on its VoiceOver label.
+    @ViewBuilder
+    private var errorSymbol: some View {
         if let error = flow.state.errorMessage {
-            Footnote(verbatim: error)
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(OnymType.fixed(size: 22, weight: .semibold))
+                .foregroundStyle(OnymTokens.red)
+                .accessibilityLabel(Text(verbatim: error))
+                .accessibilityIdentifier("moderation.consent.error")
         }
+    }
+
+    private func roundButton(
+        _ symbol: String,
+        label: LocalizedStringKey,
+        size: CGFloat = 44,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(OnymType.fixed(size: size * 0.4, weight: .semibold))
+                .frame(width: size, height: size)
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.circle)
+        .accessibilityLabel(Text(label))
     }
 
     /// The two documents the "terms have changed" claim is about. Only
@@ -193,11 +261,10 @@ public struct ModerationConsentContent: View {
         if case .reconsent(.termsChanged) = flow.mode,
            let pinned = flow.state.pinnedManifestHash,
            let published = flow.state.publishedManifestHash {
-            SectionLabel("WHAT CHANGED")
             Card {
                 VStack(alignment: .leading, spacing: 10) {
-                    hashRow("Terms you signed", pinned)
-                    hashRow("Published now", published)
+                    hashRow("signature", "Terms you signed", pinned)
+                    hashRow("globe", "Published now", published)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(16)
@@ -205,16 +272,29 @@ public struct ModerationConsentContent: View {
         }
     }
 
-    private func hashRow(_ label: LocalizedStringKey, _ hash: String) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(label)
-                .font(OnymType.font(size: 13, weight: .semibold))
-                .foregroundStyle(OnymTokens.text)
+    private func hashRow(_ symbol: String, _ label: LocalizedStringKey, _ hash: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            SymbolHint(symbol, label: label)
             Text(hash)
                 .font(OnymType.mono(size: 11))
                 .foregroundStyle(OnymTokens.text2)
                 .textSelection(.enabled)
         }
+    }
+
+    private var pickerSymbol: String {
+        switch flow.mode {
+        case .onboarding, .switching: return "shield.lefthalf.filled"
+        case .reconsent(.termsChanged): return "doc.badge.clock"
+        case .reconsent(.authorityDelisted): return "shield.slash"
+        }
+    }
+
+    private func isCurrent(_ listing: AuthorityListing) -> Bool {
+        if case .reconsent = flow.mode {
+            return listing.componentId == flow.state.currentAuthorityId
+        }
+        return false
     }
 
     private var pickerTitle: LocalizedStringKey {
@@ -253,86 +333,140 @@ public struct ModerationConsentContent: View {
         return String(localized: "Your current authority") + " · " + listing.componentId
     }
 
+    /// The terms on one screen: the classes as symbols (tap one for
+    /// its name), the full terms in words one tap away, then Back and
+    /// sign. What is signed is exactly the manifest the text sheet
+    /// shows — both read `reviewingManifest`.
     @ViewBuilder
     private var review: some View {
         if let reviewing = flow.state.reviewingManifest?.signedManifest {
-            LargeTitle(verbatim: flow.state.selectedListing?.name ?? String(localized: "Terms"))
-
-            Text("These are the exact terms you're consenting to. A case can only ever reach you under a violation class listed here, with these windows and this appeal path.")
-                .font(OnymType.font(size: 14))
-                .foregroundStyle(OnymTokens.text2)
-                .lineSpacing(3)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 12)
-
-            ForEach(reviewing.manifest.violationClasses, id: \.classId) { violationClass in
-                classCard(violationClass)
-            }
-
-            proceduralCard(reviewing)
-
-            SectionLabel("WHAT YOU'RE SIGNING")
-            Card {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Manifest hash")
-                        .font(OnymType.font(size: 13, weight: .semibold))
-                        .foregroundStyle(OnymTokens.text)
-                    Text(reviewing.manifestHash)
-                        .font(OnymType.mono(size: 11))
-                        .foregroundStyle(OnymTokens.text2)
-                        .textSelection(.enabled)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(16)
-            }
-            Footnote("Your consent binds to this hash of these exact terms. The authority cannot edit them under your mandate — changed terms bind only new consents.")
-
-            if let error = flow.state.errorMessage {
-                Footnote(verbatim: error)
-            }
-
-            VStack(spacing: 10) {
-                PrimaryButton(action: { flow.tappedAgree() }) {
-                    if flow.state.step == .signing {
-                        ProgressView().tint(OnymTokens.onAccent)
-                    } else {
-                        Text("I agree and sign")
+            VStack(spacing: 24) {
+                HStack(spacing: 24) {
+                    ForEach(reviewing.manifest.violationClasses, id: \.classId) { violationClass in
+                        ViolationClassSymbol(classId: violationClass.classId)
                     }
                 }
-                .disabled(flow.state.step == .signing)
-                .accessibilityIdentifier("moderation.consent.agree")
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(Text(verbatim: flow.state.selectedListing?.name ?? ""))
 
-                Button("Back") { flow.tappedBack() }
-                    .font(OnymType.font(size: 14))
-                    .foregroundStyle(OnymTokens.text2)
-                    .disabled(flow.state.step == .signing)
-                    .accessibilityIdentifier("moderation.consent.back")
+                roundButton("doc.plaintext", label: "Read the terms", size: 64) {
+                    showsTermsText = true
+                }
+                .accessibilityIdentifier("moderation.consent.terms_text")
+
+                errorSymbol
+
+                if hostOwnsSigning {
+                    if flow.state.step == .signing {
+                        ProgressView()
+                            .controlSize(.large)
+                            .accessibilityLabel(Text("I agree and sign"))
+                    } else {
+                        // Back to the list, with it already open — the
+                        // same configure icon the picker shows.
+                        roundButton("slider.horizontal.3", label: "Choose a moderation authority", size: 50) {
+                            flow.tappedBack()
+                            showsAuthorities = true
+                        }
+                        .accessibilityIdentifier("moderation.consent.rechoose")
+                    }
+                } else {
+                    HStack(spacing: 12) {
+                        roundButton("arrow.left", label: "Back", size: 50) { flow.tappedBack() }
+                            .disabled(flow.state.step == .signing)
+                            .accessibilityIdentifier("moderation.consent.back")
+
+                        PrimaryButton(action: { flow.tappedAgree() }) {
+                            if flow.state.step == .signing {
+                                ProgressView().tint(OnymTokens.onAccent)
+                            } else {
+                                Image(systemName: "signature")
+                                    .font(OnymType.fixed(size: 22, weight: .semibold))
+                            }
+                        }
+                        .disabled(flow.state.step == .signing)
+                        .accessibilityLabel(Text("I agree and sign"))
+                        .accessibilityIdentifier("moderation.consent.agree")
+                    }
+                    .padding(.horizontal, 16)
+                }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 16)
+            .frame(maxWidth: .infinity)
+            .padding(.top, showsPickerHeader ? 48 : 0)
+            .sheet(isPresented: $showsTermsText) {
+                ModerationTermsText(
+                    authorityName: flow.state.selectedListing?.name,
+                    reviewing: reviewing
+                )
+            }
         }
     }
 
     private var done: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(OnymType.font(size: 44))
-                .foregroundStyle(OnymTokens.green)
-            Text("Mandate signed")
-                .font(OnymType.font(size: 17, weight: .semibold))
-                .foregroundStyle(OnymTokens.text)
+        Image(systemName: "checkmark.seal.fill")
+            .font(OnymType.fixed(size: 64))
+            .foregroundStyle(OnymTokens.green)
+            .frame(maxWidth: .infinity)
+            .accessibilityLabel(Text("Mandate signed"))
+            .padding(.top, topInset)
+            .accessibilityIdentifier("moderation.consent.done")
+    }
+}
+
+/// The terms in words — what the consent screen's text icon opens.
+/// Every violation class with all five terms, the procedure, and the
+/// hash being pinned, labelled in full and nothing collapsed: the
+/// written form of what the symbols on the consent screen stand for.
+struct ModerationTermsText: View {
+    let authorityName: String?
+    let reviewing: SignedManifest
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    LargeTitle(verbatim: authorityName ?? String(localized: "Terms"))
+
+                    Text("These are the exact terms you're consenting to. A case can only ever reach you under a violation class listed here, with these windows and this appeal path.")
+                        .font(OnymType.font(size: 14))
+                        .foregroundStyle(OnymTokens.text2)
+                        .lineSpacing(3)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 12)
+
+                    ForEach(reviewing.manifest.violationClasses, id: \.classId) { violationClass in
+                        classCard(violationClass)
+                    }
+
+                    proceduralCard
+
+                    SectionLabel("WHAT YOU'RE SIGNING")
+                    Card {
+                        termRow("Manifest hash", reviewing.manifestHash, mono: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(16)
+                    }
+                    Footnote("Your consent binds to this hash of these exact terms. The authority cannot edit them under your mandate — changed terms bind only new consents.")
+                }
+                .padding(.bottom, 32)
+            }
+            .background(OnymTokens.surface.ignoresSafeArea())
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .accessibilityLabel(Text("Done"))
+                    .accessibilityIdentifier("moderation.consent.terms_text.close")
+                }
+            }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 120)
-        .accessibilityIdentifier("moderation.consent.done")
     }
 
-    // MARK: - Cards
-
-    /// One violation class with all five mandatory terms visible.
     private func classCard(_ violationClass: ViolationClass) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            SectionLabel(verbatim: violationClass.classId.replacingOccurrences(of: "-", with: " ").uppercased())
+            SectionLabel(verbatim: ViolationClassSymbol.name(for: violationClass.classId).uppercased())
             Card {
                 VStack(alignment: .leading, spacing: 8) {
                     termRow("Response window", violationClass.responseWindow.display)
@@ -360,7 +494,7 @@ public struct ModerationConsentContent: View {
 
     /// Appellate, new-holder path, and validity — the manifest-level
     /// terms shared by all classes.
-    private func proceduralCard(_ reviewing: SignedManifest) -> some View {
+    private var proceduralCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             SectionLabel("PROCEDURE")
             Card {
@@ -372,7 +506,7 @@ public struct ModerationConsentContent: View {
                         termRow("New device owner", newHolder)
                     }
                     termRow("Terms valid until", reviewing.manifest.validUntil.formatted(date: .abbreviated, time: .omitted))
-                    termRow("Operated by", reviewing.manifest.operatorKey)
+                    termRow("Operated by", reviewing.manifest.operatorKey, mono: true)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(16)
@@ -380,14 +514,15 @@ public struct ModerationConsentContent: View {
         }
     }
 
-    private func termRow(_ label: LocalizedStringKey, _ value: String) -> some View {
+    private func termRow(_ label: LocalizedStringKey, _ value: String, mono: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label)
                 .font(OnymType.font(size: 13, weight: .semibold))
                 .foregroundStyle(OnymTokens.text)
-            Text(value)
-                .font(OnymType.font(size: 13))
+            Text(verbatim: value)
+                .font(mono ? OnymType.mono(size: 11) : OnymType.font(size: 13))
                 .foregroundStyle(OnymTokens.text2)
+                .textSelection(.enabled)
         }
     }
 
@@ -412,6 +547,35 @@ public struct ModerationConsentContent: View {
             return String(localized: "Permanent (appealable at the external appellate for as long as it is in force)")
         case .duration(let duration):
             return duration.display
+        }
+    }
+}
+
+/// A violation class as a symbol — child safety for CSAM, and so on.
+/// Unknown classes fall back to a generic shield, labelled with the
+/// class id so the popover still says exactly which class it is.
+struct ViolationClassSymbol: View {
+    let classId: String
+
+    var body: some View {
+        SymbolHint(symbol, verbatimLabel: Self.name(for: classId), size: 34, color: OnymTokens.red)
+    }
+
+    private var symbol: String {
+        switch classId {
+        case "csam": return "figure.and.child.holdinghands"
+        case "unsolicited-pornography": return "eye.slash.fill"
+        case "spam": return "envelope.badge.fill"
+        default: return "exclamationmark.shield.fill"
+        }
+    }
+
+    static func name(for classId: String) -> String {
+        switch classId {
+        case "csam": return String(localized: "Child sexual abuse material")
+        case "unsolicited-pornography": return String(localized: "Unsolicited pornography")
+        case "spam": return String(localized: "Spam")
+        default: return classId.replacingOccurrences(of: "-", with: " ")
         }
     }
 }

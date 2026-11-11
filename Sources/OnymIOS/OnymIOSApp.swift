@@ -1364,7 +1364,8 @@ struct OnymIOSApp: App {
                         value: nostrEndpoints.first?.name ?? String(localized: "None configured"),
                         detail: nostrEndpoints.first?.url.absoluteString,
                         symbol: "antenna.radiowaves.left.and.right",
-                        trailing: nostrEndpoints.isEmpty ? nil : serviceCount(nostrEndpoints.count)
+                        trailing: nostrEndpoints.isEmpty ? nil : serviceCount(nostrEndpoints.count),
+                        isSet: !nostrEndpoints.isEmpty
                     ))
                     let blossomEndpoints = await blossomServersRepository.currentEndpoints()
                     rows.append(OnboardingSummaryRow(
@@ -1373,7 +1374,8 @@ struct OnymIOSApp: App {
                         value: blossomEndpoints.first?.name ?? String(localized: "None configured"),
                         detail: blossomEndpoints.first?.url.absoluteString,
                         symbol: "photo.on.rectangle.angled",
-                        trailing: blossomEndpoints.isEmpty ? nil : serviceCount(blossomEndpoints.count)
+                        trailing: blossomEndpoints.isEmpty ? nil : serviceCount(blossomEndpoints.count),
+                        isSet: !blossomEndpoints.isEmpty
                     ))
                     let relayerEndpoints = await relayerRepository.currentState().configuration.endpoints
                     rows.append(OnboardingSummaryRow(
@@ -1409,7 +1411,8 @@ struct OnymIOSApp: App {
                         value: mandate?.authorityName ?? String(localized: "None"),
                         detail: mandate?.mandate.manifestHash,
                         symbol: "shield",
-                        trailing: mandate == nil ? nil : String(localized: "Agreed")
+                        trailing: mandate == nil ? nil : String(localized: "Agreed"),
+                        isSet: mandate != nil
                     ))
                     return rows
                 }
