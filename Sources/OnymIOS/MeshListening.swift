@@ -41,6 +41,23 @@ enum MeshListening {
         return contacts
     }
 
+    /// Narrow the scan when the app backgrounds and widen it again on
+    /// return: compact frames need the unfiltered scan iOS allows only in
+    /// the foreground. Keep the returned observers alive.
+    @MainActor
+    static func followAppState(_ scanner: BLEMeshScanner) -> [NSObjectProtocol] {
+        scanner.setBackgrounded(UIApplication.shared.applicationState == .background)
+        let center = NotificationCenter.default
+        return [
+            center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { _ in
+                scanner.setBackgrounded(true)
+            },
+            center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { _ in
+                scanner.setBackgrounded(false)
+            },
+        ]
+    }
+
     /// A message heard over Bluetooth gets no push — it never touched a
     /// relay — so a backgrounded app raises its own notification. Content
     /// free, like the pushes: what arrived stays inside the app.

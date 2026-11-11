@@ -21,6 +21,9 @@ final class MeshVectorsTests: XCTestCase {
         let envelopeID: String
         let maxFrameSize: Int
         let frames: [String]
+        let compactEnvelopeID: String
+        let compactMaxChunk: Int
+        let compactFrames: [String]
     }
 
     private var v: Vectors!
@@ -63,6 +66,28 @@ final class MeshVectorsTests: XCTestCase {
         let decoded = try v.frames.reversed().map { try XCTUnwrap(MeshFrame(bytes: hex($0))) }
         let results = decoded.map { reassembler.add($0, at: Date()) }
         XCTAssertEqual(results.compactMap { $0 }, [hex(v.envelopeHex)])
+    }
+
+    func testCompactFramesEncodeAndResolve() throws {
+        let tag = MeshTag.derive(pairKey: hex(v.pairKey), epoch: v.epoch)
+        let id = UInt16(v.compactEnvelopeID, radix: 16)!
+        let frames = try XCTUnwrap(MeshCompactFrame.fragment(
+            envelope: hex(v.envelopeHex), tag: tag, epoch: v.epoch,
+            envelopeID: id, maxChunk: v.compactMaxChunk
+        ))
+        XCTAssertEqual(frames.map { $0.bytes }, v.compactFrames.map(hex))
+
+        // A receiver recovers the full epoch from the low byte, then
+        // reassembles through the shared v1 path.
+        var reassembler = MeshReassembler()
+        var out: [Data] = []
+        for bytes in v.compactFrames.map(hex) {
+            let compact = try XCTUnwrap(MeshCompactFrame(bytes: bytes))
+            let epoch = try XCTUnwrap(MeshCompactFrame.resolveEpoch(low: compact.epochLow, oldest: v.epoch - 96, current: v.epoch))
+            XCTAssertEqual(epoch, v.epoch)
+            if let e = reassembler.add(compact.meshFrame(epoch: epoch), at: Date()) { out.append(e) }
+        }
+        XCTAssertEqual(out, [hex(v.envelopeHex)])
     }
 }
 

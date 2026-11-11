@@ -102,10 +102,24 @@ public actor MeshInboxTransport: InboxTransport {
     /// One frame's bytes: decode, check the epoch is plausible, match the
     /// tag, reassemble, deliver. Internal so tests can drive it directly.
     func receive(_ bytes: Data) async {
-        guard let frame = MeshFrame(bytes: bytes) else { return }
         let date = now()
         let current = MeshEpoch.number(at: date)
         let oldest = MeshEpoch.number(at: date.addingTimeInterval(-Self.retention))
+        // Two shapes on the air, told apart by their first byte: v1
+        // frames from extended advertising, compact ones from legacy.
+        let decoded: MeshFrame?
+        switch bytes.first {
+        case MeshFrame.version:
+            decoded = MeshFrame(bytes: bytes)
+        case MeshCompactFrame.kind:
+            decoded = MeshCompactFrame(bytes: bytes).flatMap { compact in
+                MeshCompactFrame.resolveEpoch(low: compact.epochLow, oldest: oldest, current: current)
+                    .map { compact.meshFrame(epoch: $0) }
+            }
+        default:
+            decoded = nil
+        }
+        guard let frame = decoded else { return }
         guard frame.epoch >= oldest, frame.epoch <= current &+ 1 else { return }
 
         await refreshContactsIfStale(at: date)
