@@ -313,6 +313,49 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertTrue(flow.isCompleted)
     }
 
+    // MARK: - Skip setup
+
+    /// One tap from Welcome finishes onboarding: flag written, the
+    /// presenter's dismissal signal raised, the gate handed control.
+    func testSkipAllFromWelcomeCompletes() {
+        var completedCalls = 0
+        let flow = makeFlow(onCompleted: { completedCalls += 1 })
+        flow.skipAll()
+        XCTAssertTrue(store.hasCompletedOnboarding())
+        XCTAssertTrue(flow.isCompleted)
+        XCTAssertEqual(completedCalls, 1)
+    }
+
+    /// Skipping records no decisions — in particular no moderation
+    /// outcome, so nothing downstream can read it as a consent. The
+    /// moderation gate decides on its own after `onCompleted`.
+    func testSkipAllRecordsNoOutcomes() async {
+        let flow = await makeResolvedFlow(directoryNonEmpty: true)
+        flow.skipAll()
+        XCTAssertNil(flow.outcomes[.moderation])
+        XCTAssertTrue(flow.outcomes.isEmpty)
+    }
+
+    func testSkipAllMidWalkAndTwiceFiresOnce() async {
+        var completedCalls = 0
+        let flow = await makeResolvedFlow(onCompleted: { completedCalls += 1 })
+        walk(flow, to: .services)
+        flow.skipAll()
+        flow.skipAll()
+        XCTAssertTrue(flow.isCompleted)
+        XCTAssertEqual(completedCalls, 1)
+    }
+
+    /// A skipped Settings → Restart walk is finished too: the persisted
+    /// restart marker must not bring the walk back next launch.
+    func testSkipAllClearsRestartMarker() {
+        store.requestRestart()
+        let flow = makeFlow()
+        flow.skipAll()
+        XCTAssertFalse(store.isRestartRequested())
+        XCTAssertTrue(store.hasCompletedOnboarding())
+    }
+
     func testCompleteBeforeDoneIsANoOp() {
         var completedCalls = 0
         let flow = makeFlow(onCompleted: { completedCalls += 1 })

@@ -157,18 +157,17 @@ public struct ChatsView: View {
                 .accessibilityLabel("Scan invite QR")
                 .accessibilityIdentifier("chats.scan_join_toolbar")
             }
-            // Plus button mirrors iOS Mail / Messages — useful once
-            // the user already has at least one chat. Hidden in the
-            // empty state because the central CTA already covers it.
-            if hasAnyChats {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showCreateGroup = true
-                    } label: {
-                        Image(systemName: "square.and.pencil")
-                    }
-                    .accessibilityIdentifier("chats.create_group_toolbar")
+            // Plus button mirrors iOS Mail / Messages. Always shown:
+            // the empty state is a single "?" now, so this is the only
+            // way to start a first group.
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showCreateGroup = true
+                } label: {
+                    Image(systemName: "square.and.pencil")
                 }
+                .accessibilityLabel("Create a group")
+                .accessibilityIdentifier("chats.create_group_toolbar")
             }
         }
         .task { flow.start() }
@@ -245,23 +244,30 @@ public struct ChatsView: View {
     private func handleScannerDismiss() {
         if let cap = scannedCapability {
             scannedCapability = nil
-            let flow = pendingChatsFlow
-            let navigation = navigation
-            Task { @MainActor in
-                switch await flow.prepareJoin(capability: cap) {
-                case .alreadyJoined(let groupIDHex):
-                    navigation.openChat(groupID: groupIDHex)
-                case .waiting(let rowID):
-                    navigation.openPending(rowID: rowID)
-                case .confirm(let confirmation):
-                    scanConfirmation = confirmation
-                case .failed(let reason):
-                    scanJoinError = reason
-                }
-            }
+            startJoin(cap)
         } else if scannedInvalid {
             scannedInvalid = false
             scanRejected = true
+        }
+    }
+
+    /// The join a scanned QR starts, shared with the empty state's "?":
+    /// already a member opens the chat, already asked opens the
+    /// pending row, otherwise the usual confirm sheet.
+    private func startJoin(_ cap: IntroCapability) {
+        let flow = pendingChatsFlow
+        let navigation = navigation
+        Task { @MainActor in
+            switch await flow.prepareJoin(capability: cap) {
+            case .alreadyJoined(let groupIDHex):
+                navigation.openChat(groupID: groupIDHex)
+            case .waiting(let rowID):
+                navigation.openPending(rowID: rowID)
+            case .confirm(let confirmation):
+                scanConfirmation = confirmation
+            case .failed(let reason):
+                scanJoinError = reason
+            }
         }
     }
 
@@ -278,13 +284,10 @@ public struct ChatsView: View {
     // MARK: - Empty state
 
     private var emptyState: some View {
-        // Centred when it fits, scrollable when it doesn't. Laid out
-        // flat, this pitch is taller than a short screen: the subtitle
-        // truncated mid-sentence and "Scan a QR to join" ended up
-        // underneath the tab bar, unreadable and unreachable, with no
-        // way to scroll to it. The min-height keeps the centring on a
-        // roomy screen — the content only starts scrolling once it has
-        // more to say than the screen can hold.
+        // Centred when it fits, scrollable when it doesn't — a landscape
+        // phone is shorter than the "?" plus the tab bar, and a button
+        // left underneath the bar's glass is visible but untappable.
+        // The min-height keeps the centring on a roomy screen.
         GeometryReader { proxy in
             ScrollView {
                 emptyStateContent
@@ -310,96 +313,38 @@ public struct ChatsView: View {
     /// of the gap above the bar is fair game.
     private static let tabBarAllowance: CGFloat = 96
 
+    /// Invite to the Onym AMA group — where the empty state's "?"
+    /// leads, so a question goes to people who can answer it. A plain
+    /// invite link: joining still goes through the usual confirm sheet
+    /// and the host's approval.
+    static let helpGroupInviteLink =
+        "https://onym.app/join?c=eyJncm91cF9pZCI6Ik5oNkVUZEN3MW9xUW1NaFY1dk9kUVNvUGxNdk5YN1E3dnh6QldsTHZlY1E9IiwiZ3JvdXBfbmFtZSI6Ik9ueW0gQU1BIiwiaW50cm9fcHViIjoieWM2TmVsUXFSNjMyUFdsdXZaWjllaUNpOUFjUnFOcHhiUStUZjlTakNGMD0iLCJydWxlcyI6ItCe0YLQstC10YLRgdGC0LLQtdC90L3QvtGB0YLRjDog0LXRgdC70Lgg0JLQsNC8INC30LDQtNCw0LvQuCDQstC-0L_RgNC-0YEsINCS0Ysg0L7QsdGP0LfRg9C10YLQtdGB0Ywg0L7RgtCy0LXRgtC40YLRjC4g0J7RgtCy0LXRgiDCq9C90LUg0LfQvdCw0Y7CuyDQtNC-0L_Rg9GB0YLQuNC8LiJ9"
+
+    /// No text: one huge "?" that opens the AMA group's join. Creating
+    /// and scanning live in the toolbar.
     private var emptyStateContent: some View {
         VStack(spacing: 0) {
             Spacer(minLength: 0)
 
-            ZStack {
-                Circle()
-                    .fill(Color.accentColor.opacity(0.10))
-                    .frame(width: 96, height: 96)
-                Image(systemName: "lock.shield.fill")
-                    .font(OnymType.fixed(size: 42))
-                    .foregroundStyle(Color.accentColor)
-            }
-            .padding(.bottom, 10)
-
-            // Lead with the value, not "you have nothing" — turn the empty
-            // state into a pitch for starting the first chat.
-            Text("Start a private chat")
-                .font(.title2.weight(.bold))
-            Text("Spin up an encrypted group and share one link — that's it.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-                .padding(.top, 6)
-
-            VStack(alignment: .leading, spacing: 16) {
-                benefitRow(
-                    icon: "lock.fill",
-                    title: "End-to-end encrypted",
-                    detail: "Only your group can read what's sent."
-                )
-                benefitRow(
-                    icon: "person.badge.key.fill",
-                    title: "No phone number, no email",
-                    detail: "Your identity is a key you own — not your contact info."
-                )
-                benefitRow(
-                    icon: "point.3.connected.trianglepath.dotted",
-                    title: "No central server",
-                    detail: "Group membership is anchored on Stellar, not owned by us."
-                )
-            }
-            .padding(.horizontal, 32)
-            .padding(.top, 16)
-
             Button {
-                showCreateGroup = true
+                guard let cap = IntroCapability.fromLink(Self.helpGroupInviteLink) else {
+                    scanJoinError = String(localized: "The help group's invite link is broken.")
+                    return
+                }
+                startJoin(cap)
             } label: {
-                Text("Create a group & share a link")
-                    .font(.headline)
-                    .frame(maxWidth: 300)
+                Image(systemName: "questionmark")
+                    .font(OnymType.fixed(size: 96, weight: .bold))
+                    .frame(width: 200, height: 200)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .padding(.top, 18)
-            .accessibilityIdentifier("chats.create_group_empty_cta")
-
-            Button {
-                showScanner = true
-            } label: {
-                Label("Scan a QR to join", systemImage: "qrcode.viewfinder")
-                    .font(.subheadline.weight(.medium))
-            }
-            .buttonStyle(.borderless)
-            .padding(.top, 14)
-            .accessibilityIdentifier("chats.scan_join_empty_cta")
+            .buttonStyle(.bordered)
+            .buttonBorderShape(.circle)
+            .accessibilityLabel("Ask in Onym AMA")
+            .accessibilityIdentifier("chats.empty_help")
 
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity)
-    }
-
-    /// One privacy-benefit line in the empty state: accent icon + a bold
-    /// title over a muted one-line detail.
-    private func benefitRow(icon: String, title: LocalizedStringKey, detail: LocalizedStringKey) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: icon)
-                .font(OnymType.fixed(size: 16, weight: .semibold))
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 24, height: 22)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
-        }
     }
 
     // MARK: - Populated list

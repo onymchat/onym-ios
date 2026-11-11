@@ -99,8 +99,8 @@ public enum IdentityOrigin: Equatable, Sendable {
 ///
 /// Presentation contract: RootView presents `OnboardingView` as a
 /// `fullScreenCover` with `.interactiveDismissDisabled(true)` — the
-/// only exits are `complete()` on the Done step and the recovery
-/// step's "Remind me later"; there is no swipe-to-dismiss.
+/// only exits are `complete()` on the Done step and `skipAll()` from
+/// any step's "Skip setup"; there is no swipe-to-dismiss.
 ///
 /// Partial progress is deliberately NOT persisted: the flow lives in
 /// memory, and an app killed mid-onboarding starts over at `welcome`
@@ -317,6 +317,24 @@ public final class OnboardingFlow {
         if outcomes[step] == nil {
             outcomes[step] = .notApplicable
         }
+        store.markOnboardingCompleted()
+        isCompleted = true
+        onCompleted()
+    }
+
+    /// "Skip setup": leave the walk from any step and land on Chats
+    /// with whatever is already in place — the recommended services
+    /// are the seeded defaults, and the identity was bootstrapped at
+    /// app start. Persists the completion flag exactly like
+    /// `complete()`, so the walk does not come back on next launch.
+    ///
+    /// Not a way around moderation: no outcome is recorded here, and
+    /// `onCompleted` hands control to the moderation gate, which
+    /// presents its own consent cover if a mandate is still owed. The
+    /// recovery phrase stays un-backed-up, which Settings keeps
+    /// nudging about.
+    public func skipAll() {
+        guard !isCompleted else { return }
         store.markOnboardingCompleted()
         isCompleted = true
         onCompleted()
