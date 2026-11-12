@@ -9,6 +9,7 @@ import OnymModeration
 import OnymBackupUI
 import OnymModerationUI
 import OnymDiscovery
+import OnymMesh
 
 /// Settings tab — Onym design home. Identity hero (active identity
 /// avatar + truncated BLS fingerprint) and a per-identity invite QR
@@ -126,6 +127,10 @@ public struct SettingsView: View {
     /// read receipts and seeing others'. Same key as
     /// `ReadReceiptsPreference`.
     @AppStorage(ReadReceiptsPreference.storageKey) private var sendReadReceipts = true
+
+    /// Receive-only Bluetooth mesh (off by default). Read at launch, so a
+    /// change applies the next time Onym starts.
+    @AppStorage(MeshListeningPreference.storageKey) private var meshListening = false
 
     public var body: some View {
         ScrollView {
@@ -372,6 +377,28 @@ public struct SettingsView: View {
                     }
                     Footnote("Runs the first-launch setup again: message transport, file storage, notary, and moderation. Your identity, chats, and messages are kept, and your current choices stay until you change them.")
                 }
+
+                SectionLabel("NEARBY")
+                Card {
+                    Row(
+                        title: "Listen over Bluetooth",
+                        subtitle: "Receive messages from people nearby without internet",
+                        subtitleLineLimit: nil,
+                        hasChevron: false,
+                        last: true
+                    ) {
+                        IconTile(
+                            symbol: "antenna.radiowaves.left.and.right",
+                            bg: meshListening ? OnymTile.indigo : OnymTile.gray
+                        )
+                    } right: {
+                        Toggle("", isOn: $meshListening)
+                            .labelsHidden()
+                            .tint(OnymTokens.green)
+                            .accessibilityIdentifier("settings.mesh_listening_toggle")
+                    }
+                }
+                Footnote("Your iPhone only listens — it never transmits, so nobody nearby can tell you received anything, and messages heard this way send no receipts. Keep Onym open to hear phones nearby. Takes effect the next time Onym starts.")
 
                 SectionLabel("DATA")
                 Card {
