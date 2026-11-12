@@ -2004,40 +2004,21 @@ struct OnymIOSApp: App {
                         identityRepository: identityRepository,
                         dispatcher: dispatcher
                     )
-                    // Bluetooth mesh, when the user has turned listening
-                    // on: a second fan-out over a receive-only transport,
-                    // into the same dispatcher. It stays off every send
-                    // path — the mesh transport can't send — and what it
-                    // delivers is marked `.bluetooth`, so no receipt goes
-                    // back for it.
-                    var meshFanout: InboxFanoutInteractor?
-                    var meshAppStateObservers: [NSObjectProtocol] = []
-                    if MeshListeningPreference.isEnabled {
-                        let scanner = BLEMeshScanner()
-                        meshAppStateObservers = await MeshListening.followAppState(scanner)
-                        let meshTransport = MeshInboxTransport(
-                            source: scanner,
-                            contacts: { [identityRepository, groupRepository] in
-                                await MeshListening.contacts(
-                                    identities: identityRepository,
-                                    groups: groupRepository
-                                )
-                            }
-                        )
-                        await meshTransport.connect(to: [])
-                        meshFanout = InboxFanoutInteractor(
-                            inboxTransport: meshTransport,
-                            identityRepository: identityRepository,
-                            dispatcher: dispatcher
-                        )
-                    }
+                    // Bluetooth mesh, following the Settings switch live:
+                    // a second fan-out over a receive-only transport, into
+                    // the same dispatcher. It stays off every send path —
+                    // the mesh transport can't send — and what it delivers
+                    // is marked `.bluetooth`, so no receipt goes back.
                     await withTaskGroup(of: Void.self) { group in
                         group.addTask { await fanout.run() }
-                        if let meshFanout {
-                            group.addTask { await meshFanout.run() }
+                        group.addTask { [identityRepository, groupRepository] in
+                            await MeshListening.follow(
+                                identities: identityRepository,
+                                groups: groupRepository,
+                                dispatcher: dispatcher
+                            )
                         }
                     }
-                    meshAppStateObservers.forEach(NotificationCenter.default.removeObserver)
                 }
                 .task {
                     // Push registration reconciler: consumes the APNs

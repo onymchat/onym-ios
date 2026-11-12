@@ -126,6 +126,7 @@ public actor MeshInboxTransport: InboxTransport {
         guard let inboxes = tags(for: frame.epoch)[frame.tag], !inboxes.isEmpty else { return }
         guard let envelope = reassembler.add(frame, at: date) else { return }
 
+        MeshListenerStatus.report { $0.envelopesDelivered += 1 }
         let messageID = "ble:" + String(format: "%016llx", frame.envelopeID)
         for inbox in inboxes {
             let message = InboundInbox(

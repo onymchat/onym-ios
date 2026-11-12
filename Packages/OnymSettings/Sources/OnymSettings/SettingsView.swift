@@ -128,9 +128,45 @@ public struct SettingsView: View {
     /// `ReadReceiptsPreference`.
     @AppStorage(ReadReceiptsPreference.storageKey) private var sendReadReceipts = true
 
-    /// Receive-only Bluetooth mesh (off by default). Read at launch, so a
-    /// change applies the next time Onym starts.
+    /// Receive-only Bluetooth mesh (off by default). Applied live: the app
+    /// starts or stops the listener the moment this changes.
     @AppStorage(MeshListeningPreference.storageKey) private var meshListening = false
+    private var meshStatus: MeshListenerStatus { MeshListenerStatus.shared }
+
+    /// What the listener is doing right now — where a nearby message
+    /// would stop if it doesn't arrive.
+    private var meshStatusLine: some View {
+        let (symbol, color, text): (String, Color, String) = {
+            switch meshStatus.radio {
+            case .idle, .starting:
+                return ("hourglass", OnymTokens.text2, String(localized: "Starting Bluetooth…"))
+            case .unauthorized:
+                return ("exclamationmark.triangle.fill", OnymTokens.red,
+                        String(localized: "Bluetooth access is off for Onym. Allow it in iOS Settings → Onym."))
+            case .off:
+                return ("exclamationmark.triangle.fill", OnymTile.amber,
+                        String(localized: "Bluetooth is turned off."))
+            case .unsupported:
+                return ("xmark.octagon.fill", OnymTokens.red,
+                        String(localized: "This device can't listen over Bluetooth."))
+            case .on:
+                return ("dot.radiowaves.left.and.right", OnymTokens.green,
+                        String(localized: "Listening · \(meshStatus.framesHeard) nearby frames heard · \(meshStatus.envelopesDelivered) messages received"))
+            }
+        }()
+        return HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: symbol)
+                .foregroundStyle(color)
+            Text(verbatim: text)
+                .font(OnymType.font(size: 13))
+                .foregroundStyle(OnymTokens.text2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 32)
+        .padding(.top, 8)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("settings.mesh_status")
+    }
 
     public var body: some View {
         ScrollView {
@@ -398,7 +434,10 @@ public struct SettingsView: View {
                             .accessibilityIdentifier("settings.mesh_listening_toggle")
                     }
                 }
-                Footnote("Your iPhone only listens — it never transmits, so nobody nearby can tell you received anything, and messages heard this way send no receipts. Keep Onym open to hear phones nearby. Takes effect the next time Onym starts.")
+                if meshListening {
+                    meshStatusLine
+                }
+                Footnote("Your iPhone only listens — it never transmits, so nobody nearby can tell you received anything, and messages heard this way send no receipts. Keep Onym open to hear phones nearby.")
 
                 SectionLabel("DATA")
                 Card {

@@ -4,7 +4,8 @@ import XCTest
 /// on a screen nothing navigated to, which left the whole Bluetooth
 /// listener impossible to turn on — this pins it to the Settings tab, and
 /// pins that it survives the relaunch it needs (the scanner starts at
-/// launch).
+/// launch) — and that it applies live: turning it on starts the listener
+/// at once, with no relaunch.
 final class MeshListeningSettingsUITests: XCTestCase {
     private func launch(resetKeychain: Bool) -> XCUIApplication {
         let app = XCUIApplication()
@@ -55,6 +56,14 @@ final class MeshListeningSettingsUITests: XCTestCase {
 
         flip(toggle)
         XCTAssertTrue(isOn(toggle), "the switch turns listening on")
+
+        // Applied live: no relaunch — the listener starts now and the
+        // status line under the switch says what the radio is doing.
+        let status = app.descendants(matching: .any)["settings.mesh_status"]
+        XCTAssertTrue(status.waitForExistence(timeout: 5), "no listener status after turning the switch on")
+        let started = NSPredicate(format: "NOT (label CONTAINS 'Starting')")
+        let reported = expectation(for: started, evaluatedWith: status)
+        wait(for: [reported], timeout: 10)
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = "settings-nearby"
         shot.lifetime = .keepAlways

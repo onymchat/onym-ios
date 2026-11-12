@@ -2,6 +2,7 @@ import Foundation
 import OnymFoundation
 import OnymGroup
 import OnymIdentity
+import OnymInbox
 import OnymMesh
 import OnymTransport
 import UIKit
@@ -10,6 +11,51 @@ import UserNotifications
 /// App-side glue for the receive-only Bluetooth mesh (docs/mesh-ble-v1.md):
 /// who this device can hear from, and what to do when it hears something.
 enum MeshListening {
+    /// Follow the Settings switch for the life of the app: on starts a
+    /// listener (the Bluetooth permission prompt appears right then, the
+    /// first time), off stops it. Never returns until cancelled.
+    static func follow(
+        identities: IdentityRepository,
+        groups: GroupRepository,
+        dispatcher: IncomingMessageDispatcher
+    ) async {
+        var listening: Task<Void, Never>?
+        for await enabled in MeshListeningPreference.values() {
+            listening?.cancel()
+            listening = nil
+            await MainActor.run { MeshListenerStatus.shared.reset() }
+            if enabled {
+                listening = Task {
+                    await listen(identities: identities, groups: groups, dispatcher: dispatcher)
+                }
+            }
+        }
+        listening?.cancel()
+    }
+
+    /// One listening session: scanner → receive-only transport → fan-out
+    /// into the dispatcher, until cancelled.
+    private static func listen(
+        identities: IdentityRepository,
+        groups: GroupRepository,
+        dispatcher: IncomingMessageDispatcher
+    ) async {
+        let scanner = BLEMeshScanner()
+        let observers = await followAppState(scanner)
+        let transport = MeshInboxTransport(
+            source: scanner,
+            contacts: { await contacts(identities: identities, groups: groups) }
+        )
+        await transport.connect(to: [])
+        await InboxFanoutInteractor(
+            inboxTransport: transport,
+            identityRepository: identities,
+            dispatcher: dispatcher
+        ).run()
+        await transport.disconnect()
+        await MainActor.run { observers.forEach(NotificationCenter.default.removeObserver) }
+    }
+
     /// Every (local identity, group member) pair, keyed for the mesh.
     ///
     /// The mesh delivers only from people this identity already shares a

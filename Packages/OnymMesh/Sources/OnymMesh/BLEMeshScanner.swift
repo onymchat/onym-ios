@@ -47,6 +47,7 @@ public final class BLEMeshScanner: NSObject, MeshFrameSource, @unchecked Sendabl
     public func frames() -> AsyncStream<Data> {
         let (stream, continuation) = AsyncStream<Data>.makeStream(bufferingPolicy: .bufferingNewest(256))
         let id = UUID()
+        MeshListenerStatus.report { if $0.radio == .idle { $0.radio = .starting } }
         queue.async {
             self.continuations[id] = continuation
             if self.central == nil {
@@ -110,6 +111,16 @@ public final class BLEMeshScanner: NSObject, MeshFrameSource, @unchecked Sendabl
 
 extension BLEMeshScanner: CBCentralManagerDelegate {
     public func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        let radio: MeshListenerStatus.Radio
+        switch central.state {
+        case .poweredOn: radio = .on
+        case .poweredOff: radio = .off
+        case .unauthorized: radio = .unauthorized
+        case .unsupported: radio = .unsupported
+        case .resetting, .unknown: radio = .starting
+        @unknown default: radio = .starting
+        }
+        MeshListenerStatus.report { $0.radio = radio }
         startScanning()
     }
 
@@ -125,6 +136,7 @@ extension BLEMeshScanner: CBCentralManagerDelegate {
         rssi RSSI: NSNumber
     ) {
         guard let frame = Self.frame(in: advertisementData) else { return }
+        MeshListenerStatus.report { $0.framesHeard += 1 }
         for continuation in continuations.values {
             continuation.yield(frame)
         }
