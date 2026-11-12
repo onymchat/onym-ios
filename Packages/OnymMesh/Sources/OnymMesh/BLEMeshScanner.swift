@@ -17,12 +17,14 @@ public enum MeshService {
 /// broadcasters are required to be non-connectable and non-scannable
 /// (spec §3), so on the air this device stays silent however iOS scans.
 ///
-/// Background caveat, the main thing a device test has to measure: a
-/// backgrounded app's scan is filtered to the service UUID and iOS
-/// coalesces repeat sightings of the same advertiser, so a broadcaster
-/// cycling fragments under one address may only get its first fragment
-/// through. In the foreground duplicates are allowed and every frame is
-/// seen.
+/// It reads two shapes: v1 frames in the mesh service's Service Data
+/// (extended advertising), and compact frames in Manufacturer Specific
+/// Data under company `0xFFFF` (legacy advertising — what iPhones are
+/// known to deliver; spec §4b). Seeing the second needs an unfiltered
+/// scan, and iOS runs unfiltered scans only in the foreground, so in
+/// the background the scan narrows to the service UUID and only v1
+/// frames can arrive — and iOS coalesces repeat sightings there, so a
+/// broadcaster cycling fragments may only get one through.
 public final class BLEMeshScanner: NSObject, MeshFrameSource, @unchecked Sendable {
     /// Lets iOS relaunch the app into the background for mesh frames
     /// after it was terminated for memory (not after a force-quit).
@@ -31,6 +33,9 @@ public final class BLEMeshScanner: NSObject, MeshFrameSource, @unchecked Sendabl
     private let queue = DispatchQueue(label: "app.onym.mesh.scanner")
     private var central: CBCentralManager?
     private var continuations: [UUID: AsyncStream<Data>.Continuation] = [:]
+    /// Whether the scan is narrowed to the service UUID — the only scan
+    /// iOS allows a backgrounded app.
+    private var backgrounded = false
 
     public override init() {
         super.init()
@@ -66,12 +71,40 @@ public final class BLEMeshScanner: NSObject, MeshFrameSource, @unchecked Sendabl
         return stream
     }
 
+    /// Call on entering and leaving the background: the unfiltered scan
+    /// compact frames need only runs in the foreground.
+    public func setBackgrounded(_ backgrounded: Bool) {
+        queue.async {
+            guard self.backgrounded != backgrounded else { return }
+            self.backgrounded = backgrounded
+            self.central?.stopScan()
+            self.startScanning()
+        }
+    }
+
     private func startScanning() {
         guard let central, central.state == .poweredOn, !continuations.isEmpty else { return }
         central.scanForPeripherals(
-            withServices: [MeshService.uuid],
+            withServices: backgrounded ? [MeshService.uuid] : nil,
             options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
         )
+    }
+
+    /// The frame an advertisement carries, if it carries one.
+    static func frame(in advertisementData: [String: Any]) -> Data? {
+        if let serviceData = advertisementData[CBAdvertisementDataServiceDataKey] as? [CBUUID: Data],
+           let frame = serviceData[MeshService.uuid] {
+            return frame
+        }
+        // Manufacturer data starts with the company ID, little-endian.
+        if let manufacturer = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data,
+           manufacturer.count > 2,
+           manufacturer[manufacturer.startIndex] == 0xFF,
+           manufacturer[manufacturer.startIndex + 1] == 0xFF,
+           manufacturer[manufacturer.startIndex + 2] == MeshCompactFrame.kind {
+            return Data(manufacturer.dropFirst(2))
+        }
+        return nil
     }
 }
 
@@ -91,9 +124,7 @@ extension BLEMeshScanner: CBCentralManagerDelegate {
         advertisementData: [String: Any],
         rssi RSSI: NSNumber
     ) {
-        guard let serviceData = advertisementData[CBAdvertisementDataServiceDataKey] as? [CBUUID: Data],
-              let frame = serviceData[MeshService.uuid]
-        else { return }
+        guard let frame = Self.frame(in: advertisementData) else { return }
         for continuation in continuations.values {
             continuation.yield(frame)
         }

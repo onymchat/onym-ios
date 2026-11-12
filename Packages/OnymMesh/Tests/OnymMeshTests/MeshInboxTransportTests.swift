@@ -68,6 +68,25 @@ final class MeshInboxTransportTests: XCTestCase {
         XCTAssertTrue(out.isEmpty)
     }
 
+    /// The legacy-advertising shape iPhones receive: same tag, same
+    /// delivery, a 9-byte header and the epoch's low byte only.
+    func testDeliversCompactFrames() async {
+        let envelope = Data(repeating: 9, count: 70)
+        let epoch = MeshEpoch.number(at: now)
+        let tag = MeshTag.derive(pairKey: pairKey, epoch: epoch)
+        let input = MeshCompactFrame.fragment(envelope: envelope, tag: tag, epoch: epoch, envelopeID: 0x0102)!.map(\.bytes)
+        let out = await received(makeTransport(), feeding: input.reversed())
+        XCTAssertEqual(out.map(\.payload), [envelope])
+        XCTAssertEqual(out.first?.delivery, .bluetooth)
+    }
+
+    func testCompactEpochOutsideTheWindowDoesNotResolve() {
+        // 98 epochs of window; a low byte matching none of them is noise.
+        XCTAssertNil(MeshCompactFrame.resolveEpoch(low: 0x10, oldest: 0x1_0020, current: 0x1_0070))
+        XCTAssertEqual(MeshCompactFrame.resolveEpoch(low: 0x71, oldest: 0x1_0020, current: 0x1_0070), 0x1_0071, "one ahead")
+        XCTAssertEqual(MeshCompactFrame.resolveEpoch(low: 0x20, oldest: 0x1_0020, current: 0x1_0070), 0x1_0020, "oldest")
+    }
+
     func testNeverSends() async {
         do {
             _ = try await makeTransport().send(Data([1]), to: inbox)

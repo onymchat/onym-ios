@@ -4,6 +4,13 @@
   "bobPrivateKey" : "2122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f40",
   "bobPublicKey" : "5869aff450549732cbaaed5e5df9b30a6da31cb0e5742bad5ad4a1a768f1a67b",
   "comment" : "Onym BLE mesh v1 test vectors (docs/mesh-ble-v1.md). Generated independently of the OnymMesh package; both implementations must agree.",
+  "compactEnvelopeID" : "0a0b",
+  "compactFrames" : [
+    "c13049bbb20a0b000368656c6c6f",
+    "c13049bbb20a0b01032c206d6573",
+    "c13049bbb20a0b02036821"
+  ],
+  "compactMaxChunk" : 5,
   "date" : "2026-11-11T12:00:00Z",
   "envelopeHex" : "68656c6c6f2c206d65736821",
   "envelopeID" : "0102030405060708",

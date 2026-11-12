@@ -2011,9 +2011,12 @@ struct OnymIOSApp: App {
                     // delivers is marked `.bluetooth`, so no receipt goes
                     // back for it.
                     var meshFanout: InboxFanoutInteractor?
+                    var meshAppStateObservers: [NSObjectProtocol] = []
                     if MeshListeningPreference.isEnabled {
+                        let scanner = BLEMeshScanner()
+                        meshAppStateObservers = await MeshListening.followAppState(scanner)
                         let meshTransport = MeshInboxTransport(
-                            source: BLEMeshScanner(),
+                            source: scanner,
                             contacts: { [identityRepository, groupRepository] in
                                 await MeshListening.contacts(
                                     identities: identityRepository,
@@ -2034,6 +2037,7 @@ struct OnymIOSApp: App {
                             group.addTask { await meshFanout.run() }
                         }
                     }
+                    meshAppStateObservers.forEach(NotificationCenter.default.removeObserver)
                 }
                 .task {
                     // Push registration reconciler: consumes the APNs
