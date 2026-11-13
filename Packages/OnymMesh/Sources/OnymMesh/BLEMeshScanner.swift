@@ -102,7 +102,7 @@ public final class BLEMeshScanner: NSObject, MeshFrameSource, @unchecked Sendabl
            manufacturer.count > 2,
            manufacturer[manufacturer.startIndex] == 0xFF,
            manufacturer[manufacturer.startIndex + 1] == 0xFF,
-           manufacturer[manufacturer.startIndex + 2] == MeshCompactFrame.kind {
+           [MeshCompactFrame.kind, MeshCodedFrame.kind].contains(manufacturer[manufacturer.startIndex + 2]) {
             return Data(manufacturer.dropFirst(2))
         }
         return nil

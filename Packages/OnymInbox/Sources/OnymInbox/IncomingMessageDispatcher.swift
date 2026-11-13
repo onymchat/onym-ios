@@ -1,5 +1,6 @@
 import Foundation
 import OnymTransport
+import OnymMesh
 import OnymChain
 import OnymChatsCore
 import OnymIdentity
@@ -297,10 +298,12 @@ public struct IncomingMessageDispatcher: Sendable {
         guard let envelope = try? await envelopeDecrypter.decryptInvitationWithSender(
             envelopeBytes: payload,
             asIdentity: ownerIdentityID
-        ), let chatMessage = try? JSONDecoder().decode(
-            ChatMessagePayload.self,
-            from: envelope.plaintext
-        ) else { return }
+        ),
+            // Mesh senders seal a compressed payload (spec §4c); older
+            // frames carry the JSON as is, which expand passes through.
+            let payload = MeshPayload.expand(envelope.plaintext),
+            let chatMessage = try? JSONDecoder().decode(ChatMessagePayload.self, from: payload)
+        else { return }
         await persistChatMessage(
             chatMessage,
             ownerIdentityID: ownerIdentityID,
