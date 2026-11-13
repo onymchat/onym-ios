@@ -98,7 +98,11 @@ public struct MeshFrame: Equatable, Sendable {
 /// time are bounded however hostile the airwaves are, and an envelope
 /// that can't be completed is simply forgotten.
 public struct MeshReassembler: Sendable {
-    public var timeout: TimeInterval = 10 * 60
+    /// How long a partial envelope's progress is kept. Generous: a
+    /// broadcaster loops for a day, and a listener that only catches some
+    /// advertisements per lap needs many laps — dropping progress after a
+    /// few minutes could keep a long message from ever completing.
+    public var timeout: TimeInterval = 30 * 60
     public var maxPending = 64
     /// Envelopes already delivered, kept so a looping broadcaster doesn't
     /// hand the same message to the dispatcher every lap.
@@ -119,6 +123,11 @@ public struct MeshReassembler: Sendable {
     /// The whole envelope once its last missing fragment arrives;
     /// nil until then, and nil for fragments of anything already
     /// delivered or inconsistent with what came before.
+    /// Fragments held so far for an envelope still being assembled.
+    public func progress(of envelopeID: UInt64) -> (have: Int, count: Int)? {
+        pending[envelopeID].map { ($0.chunks.count, Int($0.count)) }
+    }
+
     public mutating func add(_ frame: MeshFrame, at now: Date) -> Data? {
         expire(now: now)
         if delivered[frame.envelopeID] != nil { return nil }

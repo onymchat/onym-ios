@@ -65,6 +65,9 @@ public struct MeshTag: Hashable, Sendable {
         self.bytes = Data(bytes)
     }
 
+    /// Lowercase hex, for logs.
+    public var hex: String { bytes.map { String(format: "%02x", $0) }.joined() }
+
     public static func derive(pairKey: Data, epoch: UInt32) -> MeshTag {
         var message = domain
         message.append(contentsOf: withUnsafeBytes(of: epoch.bigEndian) { Array($0) })
