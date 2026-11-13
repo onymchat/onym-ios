@@ -150,8 +150,15 @@ public struct SettingsView: View {
                 return ("xmark.octagon.fill", OnymTokens.red,
                         String(localized: "This device can't listen over Bluetooth."))
             case .on:
-                return ("dot.radiowaves.left.and.right", OnymTokens.green,
-                        String(localized: "Listening · \(meshStatus.framesHeard) nearby frames heard · \(meshStatus.envelopesDelivered) messages received"))
+                var parts = [
+                    String(localized: "Listening · \(meshStatus.framesHeard) nearby frames heard"),
+                    String(localized: "\(meshStatus.framesForThisDevice) for this device"),
+                ]
+                if let progress = meshStatus.assembling {
+                    parts.append(String(localized: "assembling \(progress.have) of \(progress.count)"))
+                }
+                parts.append(String(localized: "\(meshStatus.envelopesDelivered) messages received"))
+                return ("dot.radiowaves.left.and.right", OnymTokens.green, parts.joined(separator: " · "))
             }
         }()
         return HStack(alignment: .firstTextBaseline, spacing: 8) {

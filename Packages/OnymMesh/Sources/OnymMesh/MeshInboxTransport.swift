@@ -1,5 +1,11 @@
 import Foundation
 import OnymTransport
+import os
+
+/// Diagnostics for field tests (Xcode console / Console.app). Tags are
+/// public: they rotate every 15 minutes and say nothing without the pair
+/// key, which is never logged.
+private let log = Logger(subsystem: "app.onym.mesh", category: "listener")
 
 /// One (local inbox, peer) pair the mesh can deliver for: frames whose
 /// tag derives from `pairKey` belong to `inbox`.
@@ -47,6 +53,8 @@ public actor MeshInboxTransport: InboxTransport {
     /// Tags per epoch, computed on first use and dropped when contacts
     /// change. A day of epochs × a few hundred contacts is small.
     private var tagCache: [UInt32: [MeshTag: Set<TransportInboxID>]] = [:]
+    private var unmatchedLogged: Set<String> = []
+    private var lastProgress: [UInt64: Int] = [:]
 
     public init(
         source: any MeshFrameSource,
@@ -123,8 +131,23 @@ public actor MeshInboxTransport: InboxTransport {
         guard frame.epoch >= oldest, frame.epoch <= current &+ 1 else { return }
 
         await refreshContactsIfStale(at: date)
-        guard let inboxes = tags(for: frame.epoch)[frame.tag], !inboxes.isEmpty else { return }
-        guard let envelope = reassembler.add(frame, at: date) else { return }
+        guard let inboxes = tags(for: frame.epoch)[frame.tag], !inboxes.isEmpty else {
+            let key = "\(frame.epoch):\(frame.tag.hex)"
+            if unmatchedLogged.insert(key).inserted {
+                log.info("frame for someone else: epoch \(frame.epoch, privacy: .public) tag \(frame.tag.hex, privacy: .public) (\(self.knownContacts.count, privacy: .public) contacts)")
+            }
+            return
+        }
+        MeshListenerStatus.report { $0.framesForThisDevice += 1 }
+        let envelope = reassembler.add(frame, at: date)
+        if envelope == nil, let progress = reassembler.progress(of: frame.envelopeID), progress.have != lastProgress[frame.envelopeID] {
+            lastProgress[frame.envelopeID] = progress.have
+            log.info("assembling \(String(format: "%016llx", frame.envelopeID), privacy: .public): \(progress.have, privacy: .public)/\(progress.count, privacy: .public)")
+            MeshListenerStatus.report { $0.assembling = progress }
+        }
+        guard let envelope else { return }
+        log.info("delivered \(String(format: "%016llx", frame.envelopeID), privacy: .public): \(envelope.count, privacy: .public) bytes")
+        MeshListenerStatus.report { $0.assembling = nil }
 
         MeshListenerStatus.report { $0.envelopesDelivered += 1 }
         let messageID = "ble:" + String(format: "%016llx", frame.envelopeID)
@@ -144,6 +167,9 @@ public actor MeshInboxTransport: InboxTransport {
         if fresh != knownContacts {
             knownContacts = fresh
             tagCache = [:]
+            let epoch = MeshEpoch.number(at: date)
+            let expected = fresh.map { MeshTag.derive(pairKey: $0.pairKey, epoch: epoch).hex }.joined(separator: " ")
+            log.info("contacts: \(fresh.count, privacy: .public); epoch \(epoch, privacy: .public) tags \(expected, privacy: .public)")
         }
     }
 

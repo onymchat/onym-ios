@@ -60,6 +60,10 @@ public final class MeshListenerStatus {
     public internal(set) var radio: Radio = .idle
     /// Onym frames heard on the air — anyone's, matched or not.
     public internal(set) var framesHeard = 0
+    /// Frames whose tag matched one of this device's contacts.
+    public internal(set) var framesForThisDevice = 0
+    /// Progress on the message most recently being assembled.
+    public internal(set) var assembling: (have: Int, count: Int)?
     /// Envelopes reassembled and handed to the app for this device.
     public internal(set) var envelopesDelivered = 0
 
@@ -67,6 +71,8 @@ public final class MeshListenerStatus {
     public func reset() {
         radio = .idle
         framesHeard = 0
+        framesForThisDevice = 0
+        assembling = nil
         envelopesDelivered = 0
     }
 
