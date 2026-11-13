@@ -352,23 +352,12 @@ public struct ChatThreadView: View {
                 .accessibilityIdentifier("chat.report.preparing")
             }
         }
-        .confirmationDialog(
-            blockCandidate.map { "Block \(senderAlias(of: $0))?" } ?? "",
-            isPresented: Binding(get: { blockCandidate != nil }, set: { if !$0 { blockCandidate = nil } }),
-            titleVisibility: .visible,
-            presenting: blockCandidate
-        ) { message in
-            Button("Block and Report", role: .destructive) { block(message) }
-                .accessibilityIdentifier("chat.block.confirm")
-            Button("Cancel", role: .cancel) {}
-        } message: { _ in
-            Text("Their messages are removed from your chats now and new ones won't reach you. Then tell the moderators what they sent.")
-        }
-        .alert("Blocked", isPresented: $blockedWithoutReport) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("Their messages are gone from your chats. This message couldn't be sent to the moderators as evidence, because Onym couldn't confirm the sender signed it.")
-        }
+        .modifier(BlockDialogs(
+            candidate: $blockCandidate,
+            blockedWithoutReport: $blockedWithoutReport,
+            alias: { senderAlias(of: $0) },
+            block: { block($0) }
+        ))
         .alert("This message can't be reported", isPresented: $reportUnavailable) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -1084,5 +1073,35 @@ private struct FullScreenImageView: View {
         .task {
             image = try? await imageLoader.image(for: attachment)
         }
+    }
+}
+
+/// Block's confirmation and its "couldn't report" notice — a modifier of
+/// their own so the thread's long body stays type-checkable.
+private struct BlockDialogs: ViewModifier {
+    @Binding var candidate: ChatMessage?
+    @Binding var blockedWithoutReport: Bool
+    let alias: (ChatMessage) -> String
+    let block: (ChatMessage) -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .confirmationDialog(
+                candidate.map { "Block \(alias($0))?" } ?? "",
+                isPresented: Binding(get: { candidate != nil }, set: { if !$0 { candidate = nil } }),
+                titleVisibility: .visible,
+                presenting: candidate
+            ) { message in
+                Button("Block and Report", role: .destructive) { block(message) }
+                    .accessibilityIdentifier("chat.block.confirm")
+                Button("Cancel", role: .cancel) {}
+            } message: { _ in
+                Text("Their messages are removed from your chats now and new ones won't reach you. Then tell the moderators what they sent.")
+            }
+            .alert("Blocked", isPresented: $blockedWithoutReport) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Their messages are gone from your chats. This message couldn't be sent to the moderators as evidence, because Onym couldn't confirm the sender signed it.")
+            }
     }
 }
