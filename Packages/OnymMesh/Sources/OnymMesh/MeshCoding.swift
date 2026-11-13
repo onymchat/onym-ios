@@ -42,18 +42,14 @@ public enum MeshFountain {
     /// 255 symbols, less the 2-byte length prefix.
     public static let maxEnvelopeSize = 255 * symbolSize - 2
 
-    /// A repair frame's coefficients: xorshift32 seeded from the envelope ID
-    /// and frame index, one byte per symbol, zero mapped to one.
-    public static func coefficients(envelopeID: UInt16, index: UInt16, k: Int) -> [UInt8] {
-        var x = (UInt32(envelopeID) << 16 | UInt32(index)) &* 0x9E37_79B1 ^ 0x6D2B_79F5
-        if x == 0 { x = 1 }
-        return (0..<k).map { _ in
-            x ^= x << 13
-            x ^= x >> 17
-            x ^= x << 5
-            let c = UInt8(truncatingIfNeeded: x)
-            return c == 0 ? 1 : c
-        }
+    /// A repair frame's coefficients: a Cauchy row, `1 / (x ⊕ m)` for
+    /// symbol `m`, with `x = k + (index − k) mod (256 − k)`. Source symbols
+    /// sit at `0…k−1` and repair rows at `k…255`, disjoint, so any k
+    /// distinct frames — sources and repairs mixed — are independent:
+    /// none is ever wasted. Indices past 255 repeat earlier rows.
+    public static func coefficients(index: UInt16, k: Int) -> [UInt8] {
+        let x = UInt8(k + (Int(index) - k) % (256 - k))
+        return (0..<k).map { GF256.inv(x ^ UInt8($0)) }
     }
 
     /// Produces any frame's symbol for one envelope.
@@ -75,7 +71,7 @@ public enum MeshFountain {
 
         public func symbol(index: UInt16) -> Data {
             if Int(index) < k { return Data(symbols[Int(index)]) }
-            let coefficients = MeshFountain.coefficients(envelopeID: envelopeID, index: index, k: k)
+            let coefficients = MeshFountain.coefficients(index: index, k: k)
             var out = [UInt8](repeating: 0, count: symbolSize)
             for (m, c) in coefficients.enumerated() {
                 for j in 0..<symbolSize { out[j] ^= GF256.mul(c, symbols[m][j]) }
@@ -108,7 +104,7 @@ public enum MeshFountain {
                 v = [UInt8](repeating: 0, count: k)
                 v[Int(index)] = 1
             } else {
-                v = MeshFountain.coefficients(envelopeID: envelopeID, index: index, k: k)
+                v = MeshFountain.coefficients(index: index, k: k)
             }
             var d = [UInt8](symbol)
             for (pivot, row) in rows where v[pivot] != 0 {

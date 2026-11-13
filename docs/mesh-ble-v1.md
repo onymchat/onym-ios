@@ -131,11 +131,15 @@ cutting how long a message takes to cross:
 3. **Erasure coding.** The envelope, prefixed with its 2-byte length and
    zero-padded, is split into K symbols of 13 bytes. Frame indices
    `0…K−1` carry the symbols; every index `≥ K` carries a GF(2⁸)
-   combination of all K (polynomial `0x11D`) with coefficients from
-   xorshift32 seeded by `(envelopeID << 16 | index) × 0x9E3779B1 ⊕
-   0x6D2B79F5` (zero seed → 1; each step `x ^= x<<13; x ^= x>>17; x ^=
-   x<<5`; low byte, zero → 1). Any K independent frames rebuild the
-   envelope — no waiting for one particular missing fragment.
+   combination of all K (polynomial `0x11D`) — a Cauchy row: the
+   coefficient for symbol `m` is `1 / (x ⊕ m)` with `x = K + (index − K)
+   mod (256 − K)`. Sources occupy field elements `0…K−1` and repairs
+   `K…255`, disjoint, so **any K distinct frames** rebuild the envelope
+   — never one wasted, and no waiting for one particular fragment. Index
+   values past 255 repeat earlier rows. (A pseudo-random generator was
+   tried first; xorshift is linear over GF(2), so its rows span at most
+   33 dimensions and envelopes over 33 symbols could never decode from
+   repairs.)
 
 ```
 offset  size  field
@@ -176,8 +180,8 @@ arrive.
 
 Listeners still read v1 and compact frames.
 
-Broadcasters should send the source frames, then an unending run of
-fresh repair indices, and give the newest envelope most of the airtime
+Broadcasters should send the source frames, then repair indices
+`K…255` in turn, round and round, and give the newest envelope most of the airtime
 while it is new.
 
 ## 5. Listener behaviour (what iOS does)

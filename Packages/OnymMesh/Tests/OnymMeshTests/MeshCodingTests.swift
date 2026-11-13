@@ -20,7 +20,6 @@ final class MeshCodingTests: XCTestCase {
     func testCoefficientsMatchTheVectors() throws {
         let c = try XCTUnwrap(coded["coefficients"] as? [String: Any])
         let values = MeshFountain.coefficients(
-            envelopeID: UInt16(c["envelopeID"] as! String, radix: 16)!,
             index: UInt16(c["index"] as! Int),
             k: c["k"] as! Int
         )
@@ -56,24 +55,22 @@ final class MeshCodingTests: XCTestCase {
         XCTAssertEqual(out, hex(string("envelopeHex")))
     }
 
-    /// Any k of a stream of frames, in any order — the property the speed
-    /// comes from. Every k-subset of the first 2k frames of a real-sized
-    /// envelope, shuffled, should decode (GF(256) makes a dependent set
-    /// rare; allow it, but not often).
+    /// Any k distinct frames, in any order, decode — the property the
+    /// speed comes from. Exactly k, never k+1: the Cauchy rows make every
+    /// k-subset independent. Includes a k above 33, where the previous
+    /// GF(2)-linear coefficients could never reach full rank.
     func testAnyKFramesInAnyOrderDecode() throws {
-        let envelope = Data((0..<500).map { UInt8(truncatingIfNeeded: $0 &* 37) })
-        let encoder = try XCTUnwrap(MeshFountain.Encoder(envelope: envelope, envelopeID: 0x1234))
-        var failures = 0
-        for trial in 0..<50 {
-            var indices = Array(0..<UInt16(encoder.k * 2)).shuffled()
-            indices = Array(indices.prefix(encoder.k + 1))
-            var decoder = MeshFountain.Decoder(k: encoder.k, envelopeID: 0x1234)
-            var out: Data?
-            for i in indices { out = decoder.add(index: i, symbol: encoder.symbol(index: i)) ?? out }
-            if out != envelope { failures += 1 }
-            _ = trial
+        for size in [40, 500, 900] {
+            let envelope = Data((0..<size).map { UInt8(truncatingIfNeeded: $0 &* 37) })
+            let encoder = try XCTUnwrap(MeshFountain.Encoder(envelope: envelope, envelopeID: 0x1234))
+            for _ in 0..<30 {
+                let indices = Array(Array(0..<UInt16(256)).shuffled().prefix(encoder.k))
+                var decoder = MeshFountain.Decoder(k: encoder.k, envelopeID: 0x1234)
+                var out: Data?
+                for i in indices { out = decoder.add(index: i, symbol: encoder.symbol(index: i)) ?? out }
+                XCTAssertEqual(out, envelope, "k = \(encoder.k), indices \(indices)")
+            }
         }
-        XCTAssertLessThanOrEqual(failures, 1, "k+1 random frames should almost always decode")
     }
 
     func testRedundantFramesAreIgnored() throws {
