@@ -8,6 +8,11 @@ import Foundation
 /// with it.
 public enum MeshService {
     public static let uuid = CBUUID(string: "76797324-4B57-4664-8E4D-53F4C3D38BC4")
+    /// The 16-bit UUID coded frames travel under (spec §4c). Broadcasters
+    /// list it as well as keying the frame's Service Data with it: the
+    /// list is what a backgrounded iPhone's scan filter matches, and a
+    /// 16-bit one leaves room in a legacy advertisement for the frame.
+    public static let codedUUID = CBUUID(string: "4F4E")
 }
 
 /// Listens for mesh frames. Never connects, never advertises.
@@ -17,14 +22,18 @@ public enum MeshService {
 /// broadcasters are required to be non-connectable and non-scannable
 /// (spec §3), so on the air this device stays silent however iOS scans.
 ///
-/// It reads two shapes: v1 frames in the mesh service's Service Data
-/// (extended advertising), and compact frames in Manufacturer Specific
-/// Data under company `0xFFFF` (legacy advertising — what iPhones are
-/// known to deliver; spec §4b). Seeing the second needs an unfiltered
-/// scan, and iOS runs unfiltered scans only in the foreground, so in
-/// the background the scan narrows to the service UUID and only v1
-/// frames can arrive — and iOS coalesces repeat sightings there, so a
-/// broadcaster cycling fragments may only get one through.
+/// It reads three shapes: coded frames in Service Data under the 16-bit
+/// `MeshService.codedUUID` (legacy advertising, the current format;
+/// spec §4c), v1 frames in the 128-bit service's Service Data (extended
+/// advertising), and compact frames in Manufacturer Specific Data under
+/// company `0xFFFF` (spec §4b).
+///
+/// In the foreground the scan is unfiltered. In the background — the
+/// locked phone in a pocket — iOS allows only a scan filtered to service
+/// UUIDs, which coded frames carry, and coalesces repeat sightings of
+/// one advertiser into a single discovery. Broadcasters rotate their
+/// address often, and the scanner restarts its scan after each frame it
+/// hears while backgrounded, so the frames keep coming.
 public final class BLEMeshScanner: NSObject, MeshFrameSource, @unchecked Sendable {
     /// Lets iOS relaunch the app into the background for mesh frames
     /// after it was terminated for memory (not after a force-quit).
@@ -36,6 +45,8 @@ public final class BLEMeshScanner: NSObject, MeshFrameSource, @unchecked Sendabl
     /// Whether the scan is narrowed to the service UUID — the only scan
     /// iOS allows a backgrounded app.
     private var backgrounded = false
+    /// A background scan restart is queued (see `restartSoon`).
+    private var restartQueued = false
 
     public override init() {
         super.init()
@@ -86,23 +97,41 @@ public final class BLEMeshScanner: NSObject, MeshFrameSource, @unchecked Sendabl
     private func startScanning() {
         guard let central, central.state == .poweredOn, !continuations.isEmpty else { return }
         central.scanForPeripherals(
-            withServices: backgrounded ? [MeshService.uuid] : nil,
+            withServices: backgrounded ? [MeshService.codedUUID, MeshService.uuid] : nil,
             options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
         )
     }
 
+    /// A backgrounded scan reports each advertiser once; restarting it
+    /// lets the next frame through. Batched, so a burst of frames costs
+    /// one restart.
+    private func restartSoon() {
+        guard backgrounded, !restartQueued else { return }
+        restartQueued = true
+        queue.asyncAfter(deadline: .now() + 0.25) {
+            self.restartQueued = false
+            guard self.backgrounded else { return }
+            self.central?.stopScan()
+            self.startScanning()
+        }
+    }
+
     /// The frame an advertisement carries, if it carries one.
     static func frame(in advertisementData: [String: Any]) -> Data? {
-        if let serviceData = advertisementData[CBAdvertisementDataServiceDataKey] as? [CBUUID: Data],
-           let frame = serviceData[MeshService.uuid] {
-            return frame
+        if let serviceData = advertisementData[CBAdvertisementDataServiceDataKey] as? [CBUUID: Data] {
+            if let frame = serviceData[MeshService.codedUUID], frame.first == MeshCodedFrame.kind {
+                return frame
+            }
+            if let frame = serviceData[MeshService.uuid] {
+                return frame
+            }
         }
         // Manufacturer data starts with the company ID, little-endian.
         if let manufacturer = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data,
            manufacturer.count > 2,
            manufacturer[manufacturer.startIndex] == 0xFF,
            manufacturer[manufacturer.startIndex + 1] == 0xFF,
-           [MeshCompactFrame.kind, MeshCodedFrame.kind].contains(manufacturer[manufacturer.startIndex + 2]) {
+           manufacturer[manufacturer.startIndex + 2] == MeshCompactFrame.kind {
             return Data(manufacturer.dropFirst(2))
         }
         return nil
@@ -136,6 +165,7 @@ extension BLEMeshScanner: CBCentralManagerDelegate {
         rssi RSSI: NSNumber
     ) {
         guard let frame = Self.frame(in: advertisementData) else { return }
+        restartSoon()
         MeshListenerStatus.report { $0.framesHeard += 1 }
         for continuation in continuations.values {
             continuation.yield(frame)

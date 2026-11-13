@@ -587,6 +587,52 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
         XCTAssertEqual(recorded.first?.group, groupIDHex)
     }
 
+    /// Heard while the phone is locked: the store (Complete file
+    /// protection) refuses the write, but the notification goes out at
+    /// once and the message is stored on unlock — notified only once.
+    func test_bluetoothChatMessage_whileLocked_notifiesNowAndStoresOnUnlock() async throws {
+        let payload = makePayload(body: "in a pocket")
+        let store = LockableMessageStore()
+        let lockedMessages = MessageRepository(store: store)
+        let arrivals = ArrivalRecorder()
+        let dispatcher = IncomingMessageDispatcher(
+            envelopeDecrypter: FakeInvitationEnvelopeDecrypter(
+                mode: .fixed(try JSONEncoder().encode(payload)),
+                senderEd25519PublicKey: senderEd25519
+            ),
+            identities: StubIdentities(summaries: []),
+            groupRepository: groups,
+            invitationsRepository: invitations,
+            chainState: chainState,
+            messageRepository: lockedMessages,
+            bluetoothMessageArrived: { owner, group in await arrivals.record(owner, group) }
+        )
+        for _ in 0..<2 {
+            await dispatcher.dispatch(
+                messageID: "ble:0000000000000003",
+                ownerIdentityID: owner,
+                payload: Data("envelope".utf8),
+                receivedAt: Date(),
+                delivery: .bluetooth
+            )
+        }
+        var recorded = await arrivals.entries
+        XCTAssertEqual(recorded.count, 1, "notified once, while locked")
+        var stored = await lockedMessages.currentMessages(groupID: groupIDHex, owner: owner)
+        XCTAssertTrue(stored.isEmpty)
+
+        await dispatcher.storeHeldMeshMessages()
+        stored = await lockedMessages.currentMessages(groupID: groupIDHex, owner: owner)
+        XCTAssertTrue(stored.isEmpty, "still locked: kept for the next try")
+
+        await store.unlock()
+        await dispatcher.storeHeldMeshMessages()
+        stored = await lockedMessages.currentMessages(groupID: groupIDHex, owner: owner)
+        XCTAssertEqual(stored.map(\.id), [payload.messageID])
+        recorded = await arrivals.entries
+        XCTAssertEqual(recorded.count, 1, "storing it later raises no second notification")
+    }
+
     /// The parking lot drains into the receipt-sending path, so a mesh
     /// copy for a group this device doesn't know yet is dropped — the
     /// relay copy catches up — instead of acking when the group lands.
@@ -818,4 +864,44 @@ private actor StubIdentities: IdentitiesProviding {
 private actor ArrivalRecorder {
     private(set) var entries: [(owner: IdentityID, group: String)] = []
     func record(_ owner: IdentityID, _ group: String) { entries.append((owner, group)) }
+}
+
+/// A message store that refuses every write until `unlock()` — a locked
+/// phone's Complete-protected store.
+private actor LockableMessageStore: MessageStore {
+    private let inner = SwiftDataMessageStore.inMemory()
+    private var locked = true
+
+    func unlock() { locked = false }
+
+    func list(groupID: String, ownerIDString: String) async -> [ChatMessage] {
+        locked ? [] : await inner.list(groupID: groupID, ownerIDString: ownerIDString)
+    }
+    func latestMessage(groupID: String, ownerIDString: String) async -> ChatMessage? {
+        locked ? nil : await inner.latestMessage(groupID: groupID, ownerIDString: ownerIDString)
+    }
+    func unreadCount(groupID: String, ownerIDString: String, since: Date) async -> Int {
+        locked ? 0 : await inner.unreadCount(groupID: groupID, ownerIDString: ownerIDString, since: since)
+    }
+    func search(ownerIDString: String, query: String, limit: Int) async -> [ChatMessage] {
+        locked ? [] : await inner.search(ownerIDString: ownerIDString, query: query, limit: limit)
+    }
+    func insertOrUpdate(_ message: ChatMessage) async -> MessageInsertOutcome {
+        locked ? .failed : await inner.insertOrUpdate(message)
+    }
+    func needsDeliveredAck(id: UUID, ownerIDString: String) async -> Bool {
+        await inner.needsDeliveredAck(id: id, ownerIDString: ownerIDString)
+    }
+    func markDeliveredAckSent(id: UUID, ownerIDString: String) async {
+        await inner.markDeliveredAckSent(id: id, ownerIDString: ownerIDString)
+    }
+    func updateStatus(id: UUID, ownerIDString: String, status: MessageStatus, failureReason: SendFailureReason?) async {
+        await inner.updateStatus(id: id, ownerIDString: ownerIDString, status: status, failureReason: failureReason)
+    }
+    func delete(id: UUID, ownerIDString: String) async { await inner.delete(id: id, ownerIDString: ownerIDString) }
+    func deleteGroup(groupID: String, ownerIDString: String) async {
+        await inner.deleteGroup(groupID: groupID, ownerIDString: ownerIDString)
+    }
+    func deleteOwner(_ ownerIDString: String) async { await inner.deleteOwner(ownerIDString) }
+    func deleteAll() async { await inner.deleteAll() }
 }

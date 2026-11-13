@@ -17,8 +17,10 @@ final class BLEMeshScannerTests: XCTestCase {
     func testReadsCompactFrameFromManufacturerData() {
         let ad: [String: Any] = [CBAdvertisementDataManufacturerDataKey: Data([0xFF, 0xFF, 0xC1, 0x30, 0x49])]
         XCTAssertEqual(BLEMeshScanner.frame(in: ad), Data([0xC1, 0x30, 0x49]))
-        let coded: [String: Any] = [CBAdvertisementDataManufacturerDataKey: Data([0xFF, 0xFF, 0xC2, 0x30, 0x49])]
-        XCTAssertEqual(BLEMeshScanner.frame(in: coded), Data([0xC2, 0x30, 0x49]), "coded frames too")
+        let coded: [String: Any] = [CBAdvertisementDataServiceDataKey: [CBUUID(string: "4F4E"): Data([0xC2, 0x30, 0x49])]]
+        XCTAssertEqual(BLEMeshScanner.frame(in: coded), Data([0xC2, 0x30, 0x49]), "coded frames, under the 16-bit UUID")
+        let stranger: [String: Any] = [CBAdvertisementDataServiceDataKey: [CBUUID(string: "4F4E"): Data([0x07, 0x30])]]
+        XCTAssertNil(BLEMeshScanner.frame(in: stranger), "something else under the same 16-bit UUID")
     }
 
     func testIgnoresOtherAdvertisers() {

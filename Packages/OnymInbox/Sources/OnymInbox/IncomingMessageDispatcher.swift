@@ -92,6 +92,9 @@ public struct IncomingMessageDispatcher: Sendable {
     /// the app's cue for a local notification, since no push will come
     /// for a message that never touched a relay.
     let bluetoothMessageArrived: @Sendable (_ owner: IdentityID, _ groupIDHex: String) async -> Void
+    /// Mesh messages heard while the store was locked, waiting for
+    /// `storeHeldMeshMessages`.
+    let heldMeshMessages: HeldMeshMessages
 
     /// Mints the membership notices this device is entitled to render:
     /// "X joined" off a verified announcement, "You joined X" off a
@@ -115,7 +118,8 @@ public struct IncomingMessageDispatcher: Sendable {
         receiptSender: any ChatReceiptSending = NoopChatReceiptSender(),
         readReceiptsEnabled: @escaping @Sendable () -> Bool = { true },
         parkedMessages: ChatMessageParkingLot = ChatMessageParkingLot(),
-        bluetoothMessageArrived: @escaping @Sendable (IdentityID, String) async -> Void = { _, _ in }
+        bluetoothMessageArrived: @escaping @Sendable (IdentityID, String) async -> Void = { _, _ in },
+        heldMeshMessages: HeldMeshMessages = HeldMeshMessages()
     ) {
         self.envelopeDecrypter = envelopeDecrypter
         self.identities = identities
@@ -129,6 +133,18 @@ public struct IncomingMessageDispatcher: Sendable {
         self.readReceiptsEnabled = readReceiptsEnabled
         self.parkedMessages = parkedMessages
         self.bluetoothMessageArrived = bluetoothMessageArrived
+        self.heldMeshMessages = heldMeshMessages
+    }
+
+    /// Store the mesh messages heard while the phone was locked. Call
+    /// once protected data is available again. Their notification went
+    /// out when they were heard; storing them raises none.
+    public func storeHeldMeshMessages() async {
+        for message in await heldMeshMessages.takeAll() {
+            if await messageRepository.insert(message) == .failed {
+                _ = await heldMeshMessages.hold(message)
+            }
+        }
     }
 
     public func dispatch(
@@ -1334,8 +1350,17 @@ public struct IncomingMessageDispatcher: Sendable {
         // tell the sender this device was in range of a broadcast. If a
         // relay copy arrives afterwards, that delivery acks on its own.
         guard delivery == .network else {
-            if case .inserted = outcome {
+            switch outcome {
+            case .inserted:
                 await bluetoothMessageArrived(ownerIdentityID, groupIDHex)
+            case .failed:
+                // Locked phone: the store is unreadable until unlock.
+                // Hold it, and notify now — this is the moment it arrived.
+                if await heldMeshMessages.hold(message) {
+                    await bluetoothMessageArrived(ownerIdentityID, groupIDHex)
+                }
+            case .updated:
+                break
             }
             return
         }

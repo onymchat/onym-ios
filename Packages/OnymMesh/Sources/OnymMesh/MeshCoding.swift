@@ -34,10 +34,11 @@ enum GF256 {
 /// catch, in any order — instead of waiting for every specific fragment.
 public enum MeshFountain {
     /// Bytes of envelope per frame: 31 for a legacy advertisement, less
-    /// the Manufacturer Specific Data header and company ID (4), less the
+    /// the 16-bit service UUID list a backgrounded iPhone's scan filter
+    /// matches (4), less the Service Data header and UUID (4), less the
     /// coded frame's header (10). Non-connectable advertisements carry no
     /// Flags, so nothing else competes for the space.
-    public static let symbolSize = 17
+    public static let symbolSize = 13
     /// 255 symbols, less the 2-byte length prefix.
     public static let maxEnvelopeSize = 255 * symbolSize - 2
 
@@ -139,8 +140,8 @@ public enum MeshFountain {
     }
 }
 
-/// A coded frame (kind `0xC2`, spec §4c), in Manufacturer Specific Data
-/// under company `0xFFFF`:
+/// A coded frame (kind `0xC2`, spec §4c), in Service Data under the
+/// mesh's 16-bit UUID (`MeshService.codedUUID`):
 ///
 /// ```
 /// offset  size  field
@@ -150,7 +151,7 @@ public enum MeshFountain {
 ///      5     2  envelopeID  UInt16 big-endian
 ///      7     1  k           source symbols, 1...255
 ///      8     2  index       UInt16 big-endian; < k source, ≥ k repair
-///     10    17  symbol
+///     10    13  symbol
 /// ```
 public struct MeshCodedFrame: Equatable, Sendable {
     public static let kind: UInt8 = 0xC2
