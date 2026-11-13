@@ -2018,6 +2018,7 @@ struct OnymIOSApp: App {
                                 dispatcher: dispatcher
                             )
                         }
+                        group.addTask { await MeshListening.storeHeldOnUnlock(dispatcher) }
                     }
                 }
                 .task {

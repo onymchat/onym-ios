@@ -104,6 +104,17 @@ enum MeshListening {
         ]
     }
 
+    /// Mesh messages heard while the phone was locked couldn't be stored
+    /// (Complete file protection); store them each time it unlocks.
+    static func storeHeldOnUnlock(_ dispatcher: IncomingMessageDispatcher) async {
+        let unlocks = NotificationCenter.default.notifications(
+            named: UIApplication.protectedDataDidBecomeAvailableNotification
+        )
+        for await _ in unlocks {
+            await dispatcher.storeHeldMeshMessages()
+        }
+    }
+
     /// A message heard over Bluetooth gets no push — it never touched a
     /// relay — so a backgrounded app raises its own notification. Content
     /// free, like the pushes: what arrived stays inside the app.
