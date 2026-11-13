@@ -58,6 +58,7 @@ final class OnboardingUITests: XCTestCase {
                        "welcome must not offer a per-step Skip")
         XCTAssertTrue(onboarding.setup("welcome").waitForExistence(timeout: 5),
                       "welcome never offered Set up step by step")
+        onboarding.acceptTerms()
         onboarding.setup("welcome").tap()
 
         // Step 2 — Identity ("Making your keys", 1 of 3). The
@@ -299,6 +300,7 @@ final class OnboardingUITests: XCTestCase {
         // outcome-gated on the key bootstrap; wait for it to unlock.
         XCTAssertTrue(onboarding.title("welcome").waitForExistence(timeout: 10),
                       "onboarding cover never presented. Hierarchy:\n\(app.debugDescription)")
+        onboarding.acceptTerms()
         onboarding.setup("welcome").tap()
         XCTAssertTrue(onboarding.title("identity").waitForExistence(timeout: 5))
         XCTAssertTrue(waitUntilEnabled(onboarding.primary("identity"), timeout: 10),
@@ -390,6 +392,18 @@ final class OnboardingUITests: XCTestCase {
                       "onboarding cover never presented. Hierarchy:\n\(app.debugDescription)")
         XCTAssertTrue(onboarding.setup("welcome").exists,
                       "welcome must offer the step-by-step icon")
+        // Apple guideline 1.2: nothing past the welcome screen until the
+        // Terms of Use are agreed — and they can be read first.
+        XCTAssertFalse(onboarding.primary("welcome").isEnabled,
+                       "the door must wait on the Terms of Use")
+        XCTAssertFalse(onboarding.setup("welcome").isEnabled,
+                       "the step-by-step walk must wait on the Terms of Use")
+        onboarding.termsRead.tap()
+        XCTAssertTrue(app.buttons["terms.done"].waitForExistence(timeout: 5),
+                      "the Terms of Use never opened")
+        app.buttons["terms.done"].tap()
+        onboarding.acceptTerms()
+        XCTAssertTrue(onboarding.primary("welcome").isEnabled)
         onboarding.primary("welcome").tap()
 
         let chats = ChatsScreen(app: app)

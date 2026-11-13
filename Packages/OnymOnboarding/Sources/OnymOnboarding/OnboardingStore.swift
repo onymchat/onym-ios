@@ -63,6 +63,7 @@ public struct UserDefaultsOnboardingStore: OnboardingStore, @unchecked Sendable 
     public func resetOnboarding() {
         defaults.removeObject(forKey: Self.key)
         defaults.removeObject(forKey: Self.restartKey)
+        TermsAcceptance(defaults: defaults).reset()
     }
 
     public func isRestartRequested() -> Bool {

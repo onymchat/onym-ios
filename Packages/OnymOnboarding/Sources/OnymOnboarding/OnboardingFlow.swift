@@ -149,6 +149,11 @@ public final class OnboardingFlow {
     /// where the primary IS the signature. Consulted only while the
     /// step's gate is unmet; the content clears it when it leaves.
     public var primaryOverride: (@MainActor () -> Void)?
+    /// The welcome screen's "I agree to the Terms of Use" checkbox. Every
+    /// way out of the welcome screen — straight to Chats, the step-by-step
+    /// walk, restoring a phrase — waits on it. Persisted the moment it is
+    /// checked, so an agreement survives a walk abandoned midway.
+    public private(set) var termsAccepted: Bool
 
     /// Whether the directory probe has answered — the view shows a
     /// progress state on the skip affordance while this is false.
@@ -157,6 +162,7 @@ public final class OnboardingFlow {
     }
 
     private let store: any OnboardingStore
+    private let terms: TermsAcceptance
     private let moderationDirectoryNonEmpty: () async -> Bool
     /// Called after `complete()` writes the flag, so the presenter can
     /// dismiss the cover and hand control to the moderation gate.
@@ -167,9 +173,12 @@ public final class OnboardingFlow {
     public init(
         store: any OnboardingStore,
         moderationDirectoryNonEmpty: @escaping () async -> Bool,
+        terms: TermsAcceptance = TermsAcceptance(),
         onCompleted: @escaping @MainActor () -> Void = {}
     ) {
         self.store = store
+        self.terms = terms
+        self.termsAccepted = terms.isAccepted
         self.moderationDirectoryNonEmpty = moderationDirectoryNonEmpty
         self.onCompleted = onCompleted
     }
@@ -288,6 +297,7 @@ public final class OnboardingFlow {
     /// (the view also disables it; this guard is the second layer).
     public func advance() {
         guard let next = neighbor(offset: 1) else { return }
+        guard step != .welcome || termsAccepted else { return }
         guard !requiresOutcomeToAdvance(step) || outcomeSatisfiesGate(step) else { return }
         if outcomes[step] == nil {
             outcomes[step] = step == .moderation && moderationDirectoryHasEntries == false
@@ -339,10 +349,16 @@ public final class OnboardingFlow {
     /// recovery phrase stays un-backed-up, which Settings keeps
     /// nudging about.
     public func skipAll() {
-        guard !isCompleted else { return }
+        guard !isCompleted, termsAccepted else { return }
         store.markOnboardingCompleted()
         isCompleted = true
         onCompleted()
+    }
+
+    /// The welcome screen's checkbox.
+    public func setTermsAccepted(_ accepted: Bool) {
+        termsAccepted = accepted
+        if accepted { terms.accept() } else { terms.reset() }
     }
 
     // MARK: - Private

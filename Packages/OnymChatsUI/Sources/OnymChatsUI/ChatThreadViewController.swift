@@ -37,6 +37,9 @@ final class ChatThreadViewController: UIViewController {
     var canReportMessage: ((ChatMessage) -> Bool)?
     /// Fired from the system long-press context menu.
     var onReportRequested: ((ChatMessage) -> Void)?
+    /// Block the message's sender — offered on every incoming message
+    /// from someone else, reportable or not.
+    var onBlockRequested: ((ChatMessage) -> Void)?
 
     /// Loader used by bubbles to fetch + decrypt image attachments.
     var imageLoader: ChatImageLoader?
@@ -1146,8 +1149,9 @@ extension ChatThreadViewController: UITableViewDelegate {
               let message = messagesByID[id],
               !message.isSystem else { return nil }
         let canReport = canReportMessage?(message) == true
+        let canBlock = message.direction == .incoming && onBlockRequested != nil
         let copyableBody = message.body.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard canReport || !copyableBody.isEmpty else { return nil }
+        guard canReport || canBlock || !copyableBody.isEmpty else { return nil }
         return UIContextMenuConfiguration(
             identifier: message.id as NSUUID,
             previewProvider: nil
@@ -1178,6 +1182,16 @@ extension ChatThreadViewController: UITableViewDelegate {
                 ) { [weak self] _ in
                     self?.onReportRequested?(message)
                 })
+            }
+            if canBlock {
+                let block = UIAction(
+                    title: String(localized: "Block"),
+                    image: UIImage(systemName: "hand.raised"),
+                    attributes: .destructive
+                ) { [weak self] _ in
+                    self?.onBlockRequested?(message)
+                }
+                actions.append(block)
             }
             return UIMenu(children: actions)
         }

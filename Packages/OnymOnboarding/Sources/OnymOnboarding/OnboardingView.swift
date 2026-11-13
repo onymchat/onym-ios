@@ -23,6 +23,7 @@ import OnymDesignTokens
 /// stand alone.
 public struct OnboardingView: View {
     @State private var flow: OnboardingFlow
+    @State private var showingTerms = false
     /// App-supplied content slot, consulted for EVERY step (Welcome
     /// and Done included). Return nil to fall back to the built-ins:
     /// the Welcome/Done bodies, and a placeholder card for the middle
@@ -71,7 +72,8 @@ public struct OnboardingView: View {
     /// Every button carries an accessibility label in place of a title.
     private var welcomeScreen: some View {
         // The door sits dead centre of the screen; the bottom row is an
-        // overlay so its height can't push it off.
+        // overlay so its height can't push it off. Everything waits on
+        // the Terms of Use checkbox above that row.
         Button { flow.skipAll() } label: {
             Image(systemName: "door.left.hand.open")
                 .font(OnymType.fixed(size: 34, weight: .semibold))
@@ -79,33 +81,69 @@ public struct OnboardingView: View {
         }
         .buttonStyle(.borderedProminent)
         .buttonBorderShape(.circle)
+        .disabled(!flow.termsAccepted)
         .accessibilityLabel(Text(verbatim: Self.primaryTitle(for: .welcome)))
         .accessibilityIdentifier("onboarding.welcome.primary")
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay(alignment: .bottom) {
-            HStack(spacing: 24) {
-                Button { flow.advance() } label: {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(OnymType.fixed(size: 20, weight: .semibold))
-                        .frame(width: 52, height: 52)
-                }
-                .buttonStyle(.bordered)
-                .buttonBorderShape(.circle)
-                .accessibilityLabel(Text("Set up step by step"))
-                .accessibilityIdentifier("onboarding.welcome.setup")
+            VStack(spacing: 20) {
+                termsAgreement
+                HStack(spacing: 24) {
+                    Button { flow.advance() } label: {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(OnymType.fixed(size: 20, weight: .semibold))
+                            .frame(width: 52, height: 52)
+                    }
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.circle)
+                    .disabled(!flow.termsAccepted)
+                    .accessibilityLabel(Text("Set up step by step"))
+                    .accessibilityIdentifier("onboarding.welcome.setup")
 
-                if let restore = stepSecondaryAction(.welcome) {
-                    restore
+                    if let restore = stepSecondaryAction(.welcome) {
+                        restore
+                            .disabled(!flow.termsAccepted)
+                    }
                 }
             }
             .padding(.bottom, 24)
         }
+        .sheet(isPresented: $showingTerms) { TermsOfUseView() }
         .padding(.horizontal, 20)
         // No title on screen any more; the container carries the
         // anchor the UI tests wait on.
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text(verbatim: Self.title(for: .welcome)))
         .accessibilityIdentifier("onboarding.welcome.title")
+    }
+
+    /// The checkbox every way off the welcome screen waits on, and the
+    /// terms it agrees to, one tap away. The only words on the screen:
+    /// an agreement has to say what is being agreed to.
+    private var termsAgreement: some View {
+        HStack(spacing: 10) {
+            Button {
+                flow.setTermsAccepted(!flow.termsAccepted)
+            } label: {
+                Image(systemName: flow.termsAccepted ? "checkmark.square.fill" : "square")
+                    .font(OnymType.fixed(size: 24, weight: .regular))
+                    .contentTransition(.symbolEffect(.replace))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(flow.termsAccepted ? Color.accentColor : Color.secondary)
+            .accessibilityLabel(Text("I agree to the Terms of Use"))
+            .accessibilityValue(Text(flow.termsAccepted ? "Checked" : "Not checked"))
+            .accessibilityAddTraits(flow.termsAccepted ? .isSelected : [])
+            .accessibilityIdentifier("onboarding.welcome.terms.checkbox")
+
+            HStack(spacing: 4) {
+                Text("I agree to the")
+                    .foregroundStyle(.secondary)
+                Button("Terms of Use") { showingTerms = true }
+                    .accessibilityIdentifier("onboarding.welcome.terms.read")
+            }
+            .font(OnymType.font(size: 15))
+        }
     }
 
     // MARK: - Steps

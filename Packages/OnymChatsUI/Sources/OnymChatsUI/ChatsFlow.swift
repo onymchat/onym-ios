@@ -40,14 +40,24 @@ public final class ChatsFlow {
     /// Enriched + sorted rows the chat list renders.
     private(set) var items: [ChatListItem] = []
 
+    /// Bumped on every block / unblock, so views reading `isBlocked`
+    /// re-render.
+    public private(set) var blockRevision = 0
+
     private let repository: GroupRepository
     private let messages: MessageRepository
+    private let blockedSenders: BlockedSenders
     private var groupTask: Task<Void, Never>?
     private var messageTask: Task<Void, Never>?
 
-    public init(repository: GroupRepository, messages: MessageRepository) {
+    public init(
+        repository: GroupRepository,
+        messages: MessageRepository,
+        blockedSenders: BlockedSenders = BlockedSenders()
+    ) {
         self.repository = repository
         self.messages = messages
+        self.blockedSenders = blockedSenders
     }
 
     /// Begin draining repository snapshots + the message-change signal.
@@ -96,6 +106,33 @@ public final class ChatsFlow {
         else { return }
         await messages.removeForGroup(groupID, owner: owner)
         await repository.delete(id: groupID, ownerID: owner)
+    }
+
+    // MARK: - Blocking
+
+    /// Whether the identity holding `groupID` has blocked this sender.
+    public func isBlocked(senderBlsPubkeyHex: String, inGroup groupID: String) -> Bool {
+        _ = blockRevision
+        guard let owner = groups.first(where: { $0.id == groupID })?.ownerIdentityID else { return false }
+        return blockedSenders.isBlocked(senderBlsPubkeyHex: senderBlsPubkeyHex, owner: owner)
+    }
+
+    /// Block a sender for the identity holding `groupID`: their messages
+    /// leave every one of that identity's chats now, and new ones are
+    /// dropped on arrival.
+    public func block(senderBlsPubkeyHex: String, alias: String, inGroup groupID: String) async {
+        guard let owner = groups.first(where: { $0.id == groupID })?.ownerIdentityID else { return }
+        blockedSenders.block(senderBlsPubkeyHex: senderBlsPubkeyHex, alias: alias, owner: owner)
+        blockRevision += 1
+        let ownersGroups = groups.filter { $0.ownerIdentityID == owner }.map(\.id)
+        await messages.removeIncoming(fromSender: senderBlsPubkeyHex, owner: owner, groupIDs: ownersGroups)
+    }
+
+    /// Lets their new messages through again. Removed ones stay removed.
+    public func unblock(senderBlsPubkeyHex: String, inGroup groupID: String) {
+        guard let owner = groups.first(where: { $0.id == groupID })?.ownerIdentityID else { return }
+        blockedSenders.unblock(senderBlsPubkeyHex: senderBlsPubkeyHex, owner: owner)
+        blockRevision += 1
     }
 
     /// Rebuild `items` from the current groups joined with each group's

@@ -242,16 +242,21 @@ struct OnymIOSApp: App {
             // a developer convenience for skipping the walk on a
             // fresh simulator without composing UserDefaults.
             shouldOnboard = !args.contains("--skip-onboarding")
-                && OnboardingGate.shouldOnboard(
+                && (OnboardingGate.shouldOnboard(
                     store: onboardingStore,
                     isExistingUser: { OnboardingLaunch.isExistingUser() }
-                )
+                ) || !TermsAcceptance().isAccepted)
         }
         #else
+        // Someone who never agreed to the current Terms of Use — anyone
+        // onboarded before there were terms, or since they changed —
+        // sees the welcome screen once more to agree. Its door goes
+        // straight back to Chats, and restoring a phrase stays hidden
+        // for an existing user (`identityRestoreAllowed`).
         shouldOnboard = OnboardingGate.shouldOnboard(
             store: onboardingStore,
             isExistingUser: { OnboardingLaunch.isExistingUser() }
-        )
+        ) || !TermsAcceptance().isAccepted
         #endif
         // Whether onboarding is AVAILABLE in this build — factories,
         // restart controller, and the Settings row all key off this.
@@ -1470,7 +1475,13 @@ struct OnymIOSApp: App {
                     groupRepository: groupRepository
                 )
             },
-            chatsFlow: ChatsFlow(repository: groupRepository, messages: messageRepository),
+            chatsFlow: ChatsFlow(
+                repository: groupRepository,
+                messages: messageRepository,
+                // Every BlockedSenders reads the same UserDefaults key, so
+                // the dispatcher's instance sees blocks made here at once.
+                blockedSenders: BlockedSenders()
+            ),
             identitiesFlow: identitiesFlow,
             approveRequestsFlow: approveRequestsFlow,
             pendingChatsFlow: pendingChatsFlow,
@@ -1971,7 +1982,8 @@ struct OnymIOSApp: App {
                             inboxTransport: inboxTransport
                         ),
                         readReceiptsEnabled: { ReadReceiptsPreference.isEnabled },
-                        bluetoothMessageArrived: { _, _ in await MeshListening.notifyArrival() }
+                        bluetoothMessageArrived: { _, _ in await MeshListening.notifyArrival() },
+                        blockedSenders: BlockedSenders()
                     )
                     // Close the loop for the Retry on a snapshot parked
                     // because *this* device couldn't read the chain. The

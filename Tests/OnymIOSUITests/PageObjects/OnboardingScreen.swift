@@ -37,6 +37,24 @@ struct OnboardingScreen {
         app.buttons["onboarding.\(step).setup"]
     }
 
+    /// The welcome screen's Terms of Use checkbox, which every way off
+    /// the welcome screen waits on.
+    var termsCheckbox: XCUIElement {
+        app.buttons["onboarding.welcome.terms.checkbox"]
+    }
+
+    /// "Terms of Use" beside the checkbox — opens the full text.
+    var termsRead: XCUIElement {
+        app.buttons["onboarding.welcome.terms.read"]
+    }
+
+    /// Check the Terms of Use box, the first move on the welcome screen.
+    func acceptTerms(timeout: TimeInterval = 10) {
+        XCTAssertTrue(termsCheckbox.waitForExistence(timeout: timeout),
+                      "terms checkbox never appeared. Hierarchy:\n\(app.debugDescription)")
+        termsCheckbox.tap()
+    }
+
     func skip(_ step: String) -> XCUIElement {
         app.buttons["onboarding.\(step).skip"]
     }

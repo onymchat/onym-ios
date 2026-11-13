@@ -95,6 +95,9 @@ public struct IncomingMessageDispatcher: Sendable {
     /// Mesh messages heard while the store was locked, waiting for
     /// `storeHeldMeshMessages`.
     let heldMeshMessages: HeldMeshMessages
+    /// People the owner blocked: their chat messages are dropped on
+    /// arrival, never stored, never acknowledged.
+    let blockedSenders: BlockedSenders?
 
     /// Mints the membership notices this device is entitled to render:
     /// "X joined" off a verified announcement, "You joined X" off a
@@ -119,7 +122,8 @@ public struct IncomingMessageDispatcher: Sendable {
         readReceiptsEnabled: @escaping @Sendable () -> Bool = { true },
         parkedMessages: ChatMessageParkingLot = ChatMessageParkingLot(),
         bluetoothMessageArrived: @escaping @Sendable (IdentityID, String) async -> Void = { _, _ in },
-        heldMeshMessages: HeldMeshMessages = HeldMeshMessages()
+        heldMeshMessages: HeldMeshMessages = HeldMeshMessages(),
+        blockedSenders: BlockedSenders? = nil
     ) {
         self.envelopeDecrypter = envelopeDecrypter
         self.identities = identities
@@ -134,6 +138,7 @@ public struct IncomingMessageDispatcher: Sendable {
         self.parkedMessages = parkedMessages
         self.bluetoothMessageArrived = bluetoothMessageArrived
         self.heldMeshMessages = heldMeshMessages
+        self.blockedSenders = blockedSenders
     }
 
     /// Store the mesh messages heard while the phone was locked. Call
@@ -1294,6 +1299,13 @@ public struct IncomingMessageDispatcher: Sendable {
         // Bob (a member) could write Alice's BLS hex into the payload
         // and the receiver would attribute it wrong.
         guard senderEd25519PublicKey == senderProfile.sendingPubkey else {
+            return
+        }
+
+        // Blocked: dropped here, before anything is stored or any
+        // receipt goes back. The sender learns nothing beyond the
+        // missing delivered tick.
+        if blockedSenders?.isBlocked(senderBlsPubkeyHex: senderKey, owner: ownerIdentityID) == true {
             return
         }
 

@@ -676,6 +676,65 @@ final class IncomingMessageDispatcherChatMessageTests: XCTestCase {
         XCTAssertTrue(sends.filter { $0.messageIDs.contains(payload.messageID) }.isEmpty)
     }
 
+    // MARK: - Blocking
+
+    /// Apple guideline 1.2: a blocked sender's message never reaches the
+    /// feed — not stored, not acknowledged — and blocking clears what
+    /// they already sent.
+    func test_blockedSender_isDroppedAndTheirMessagesRemoved() async throws {
+        let suite = "blocked.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let blocked = BlockedSenders(defaults: defaults)
+
+        let first = makePayload(body: "before the block")
+        let spy = SpyChatReceiptSender()
+        func dispatcher(_ payload: ChatMessagePayload) throws -> IncomingMessageDispatcher {
+            IncomingMessageDispatcher(
+                envelopeDecrypter: FakeInvitationEnvelopeDecrypter(
+                    mode: .fixed(try JSONEncoder().encode(payload)),
+                    senderEd25519PublicKey: senderEd25519
+                ),
+                identities: StubIdentities(summaries: []),
+                groupRepository: groups,
+                invitationsRepository: invitations,
+                chainState: chainState,
+                messageRepository: messages,
+                receiptSender: spy,
+                blockedSenders: blocked
+            )
+        }
+        try await dispatcher(first).dispatch(
+            messageID: "m1", ownerIdentityID: owner, payload: Data("envelope".utf8), receivedAt: Date()
+        )
+        var stored = await messages.currentMessages(groupID: groupIDHex, owner: owner)
+        XCTAssertEqual(stored.map(\.id), [first.messageID])
+
+        blocked.block(senderBlsPubkeyHex: senderBlsHex.uppercased(), alias: "Alice", owner: owner)
+        let removed = await messages.removeIncoming(fromSender: senderBlsHex, owner: owner, groupIDs: [groupIDHex])
+        XCTAssertEqual(removed, 1)
+        stored = await messages.currentMessages(groupID: groupIDHex, owner: owner)
+        XCTAssertTrue(stored.isEmpty, "blocking removes what they sent")
+
+        let receiptsBefore = await spy.sends.count
+        let second = makePayload(body: "after the block")
+        try await dispatcher(second).dispatch(
+            messageID: "m2", ownerIdentityID: owner, payload: Data("envelope".utf8), receivedAt: Date()
+        )
+        stored = await messages.currentMessages(groupID: groupIDHex, owner: owner)
+        XCTAssertTrue(stored.isEmpty, "a blocked sender's new message is dropped")
+        let receiptsAfter = await spy.sends.count
+        XCTAssertEqual(receiptsAfter, receiptsBefore, "and never acknowledged")
+
+        blocked.unblock(senderBlsPubkeyHex: senderBlsHex, owner: owner)
+        let third = makePayload(body: "after unblocking")
+        try await dispatcher(third).dispatch(
+            messageID: "m3", ownerIdentityID: owner, payload: Data("envelope".utf8), receivedAt: Date()
+        )
+        stored = await messages.currentMessages(groupID: groupIDHex, owner: owner)
+        XCTAssertEqual(stored.map(\.id), [third.messageID])
+    }
+
     // MARK: - Receipts
 
     func test_incomingChatMessage_shipsDeliveredReceiptToSender() async throws {

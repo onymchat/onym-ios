@@ -23,15 +23,57 @@ final class OnboardingFlowTests: XCTestCase {
         super.tearDown()
     }
 
+    /// Terms accepted unless a test says otherwise: most tests are about
+    /// what comes after the welcome screen's checkbox.
     private func makeFlow(
         moderationDirectoryNonEmpty: @escaping () async -> Bool = { false },
+        termsAccepted: Bool = true,
         onCompleted: @escaping @MainActor () -> Void = {}
     ) -> OnboardingFlow {
-        OnboardingFlow(
+        let terms = TermsAcceptance(defaults: defaults)
+        if termsAccepted { terms.accept() } else { terms.reset() }
+        return OnboardingFlow(
             store: store,
             moderationDirectoryNonEmpty: moderationDirectoryNonEmpty,
+            terms: terms,
             onCompleted: onCompleted
         )
+    }
+
+    // MARK: - Terms of Use
+
+    /// Apple guideline 1.2: the terms are agreed before anything else.
+    /// Neither the straight-to-Chats door nor the step-by-step walk opens
+    /// until the checkbox is checked.
+    func test_welcome_waitsForTheTerms() {
+        var completed = false
+        let flow = makeFlow(termsAccepted: false, onCompleted: { completed = true })
+        XCTAssertFalse(flow.termsAccepted)
+        flow.skipAll()
+        XCTAssertFalse(completed)
+        XCTAssertFalse(store.hasCompletedOnboarding())
+        flow.advance()
+        XCTAssertEqual(flow.step, .welcome)
+
+        flow.setTermsAccepted(true)
+        XCTAssertTrue(TermsAcceptance(defaults: defaults).isAccepted, "persisted when checked")
+        flow.skipAll()
+        XCTAssertTrue(completed)
+    }
+
+    func test_uncheckingTheTerms_withdrawsTheAgreement() {
+        let flow = makeFlow(termsAccepted: false)
+        flow.setTermsAccepted(true)
+        flow.setTermsAccepted(false)
+        XCTAssertFalse(TermsAcceptance(defaults: defaults).isAccepted)
+        flow.advance()
+        XCTAssertEqual(flow.step, .welcome)
+    }
+
+    func test_resetOnboarding_alsoResetsTheTerms() {
+        TermsAcceptance(defaults: defaults).accept()
+        store.resetOnboarding()
+        XCTAssertFalse(TermsAcceptance(defaults: defaults).isAccepted)
     }
 
     /// A flow whose directory probe has already answered — most walk
