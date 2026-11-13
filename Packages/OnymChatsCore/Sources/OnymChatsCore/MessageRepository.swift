@@ -154,6 +154,37 @@ public actor MessageRepository {
         notifyChange()
     }
 
+    /// Remove everything a blocked sender wrote from `owner`'s threads in
+    /// `groupIDs`, at once: blocking takes their messages out of the feed,
+    /// not just future ones. Returns how many messages were removed.
+    @discardableResult
+    public func removeIncoming(
+        fromSender senderBlsPubkeyHex: String,
+        owner: IdentityID,
+        groupIDs: [String]
+    ) async -> Int {
+        let sender = senderBlsPubkeyHex.lowercased()
+        let ownerID = owner.rawValue.uuidString
+        var removed = 0
+        for groupID in groupIDs {
+            let rows = await store.list(groupID: groupID, ownerIDString: ownerID)
+            let theirs = rows.filter {
+                $0.direction == .incoming && !$0.isSystem && $0.senderBlsPubkeyHex.lowercased() == sender
+            }
+            for message in theirs {
+                await store.delete(id: message.id, ownerIDString: ownerID)
+            }
+            removed += theirs.count
+            let key = ThreadKey(groupID: groupID, owner: owner)
+            if !theirs.isEmpty || cached[key] != nil {
+                cached[key] = rows.filter { row in !theirs.contains { $0.id == row.id } }
+                publish(key)
+            }
+        }
+        notifyChange()
+        return removed
+    }
+
     /// Re-read every cached thread from the store.
     ///
     /// For writes that went into the `MessageStore` without passing

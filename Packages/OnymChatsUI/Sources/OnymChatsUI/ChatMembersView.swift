@@ -65,6 +65,8 @@ struct ChatMembersView: View {
     /// Drives the admin-only rename alert.
     @State private var showRename = false
     @State private var renameText = ""
+    /// The member awaiting the Block confirmation.
+    @State private var blockCandidate: MemberRow?
 
     var body: some View {
         Group {
@@ -155,6 +157,20 @@ struct ChatMembersView: View {
                     onDone: { activeSheet = nil }
                 )
             }
+        }
+        .confirmationDialog(
+            blockCandidate.map { "Block \($0.displayAlias)?" } ?? "",
+            isPresented: Binding(get: { blockCandidate != nil }, set: { if !$0 { blockCandidate = nil } }),
+            titleVisibility: .visible,
+            presenting: blockCandidate
+        ) { row in
+            Button("Block", role: .destructive) {
+                Task { await chatsFlow.block(senderBlsPubkeyHex: row.blsHex, alias: row.displayAlias, inGroup: groupID) }
+            }
+            .accessibilityIdentifier("members.block.confirm")
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("Their messages are removed from your chats now, and new ones won't reach you.")
         }
         .alert("Rename group", isPresented: $showRename) {
             TextField("Group name", text: $renameText)
@@ -413,6 +429,29 @@ struct ChatMembersView: View {
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("members.row.\(row.id)")
             }
+        }
+        .contextMenu { if !row.isSelf { blockMenu(row) } }
+    }
+
+    /// Block or unblock from the roster. Blocking here removes the
+    /// member's messages at once, like blocking from a message; to tell
+    /// the moderators what they sent, block from the message itself.
+    @ViewBuilder
+    private func blockMenu(_ row: MemberRow) -> some View {
+        if chatsFlow.isBlocked(senderBlsPubkeyHex: row.blsHex, inGroup: groupID) {
+            Button {
+                chatsFlow.unblock(senderBlsPubkeyHex: row.blsHex, inGroup: groupID)
+            } label: {
+                Label("Unblock", systemImage: "hand.raised.slash")
+            }
+            .accessibilityIdentifier("members.unblock")
+        } else {
+            Button(role: .destructive) {
+                blockCandidate = row
+            } label: {
+                Label("Block", systemImage: "hand.raised")
+            }
+            .accessibilityIdentifier("members.block")
         }
     }
 

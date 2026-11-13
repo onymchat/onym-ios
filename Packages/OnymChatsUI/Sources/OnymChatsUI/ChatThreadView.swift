@@ -152,6 +152,11 @@ public struct ChatThreadView: View {
     /// as the in-flight indicator and the repeat-tap guard.
     @State private var preparingReportFor: UUID?
     @State private var reportUnavailable = false
+    /// The message whose sender awaits the Block confirmation.
+    @State private var blockCandidate: ChatMessage?
+    /// Blocked, but the message couldn't go to the moderators as
+    /// evidence — said rather than left silent.
+    @State private var blockedWithoutReport = false
 
     public var body: some View {
         ChatThreadControllerBridge(
@@ -225,6 +230,7 @@ public struct ChatThreadView: View {
                     }
                 }
             },
+            onBlockRequested: { blockCandidate = $0 },
             imageLoader: imageLoader,
             scrollToMessageID: scrollToMessageID,
             onImageTapped: { message in
@@ -345,6 +351,23 @@ public struct ChatThreadView: View {
                 }
                 .accessibilityIdentifier("chat.report.preparing")
             }
+        }
+        .confirmationDialog(
+            blockCandidate.map { "Block \(senderAlias(of: $0))?" } ?? "",
+            isPresented: Binding(get: { blockCandidate != nil }, set: { if !$0 { blockCandidate = nil } }),
+            titleVisibility: .visible,
+            presenting: blockCandidate
+        ) { message in
+            Button("Block and Report", role: .destructive) { block(message) }
+                .accessibilityIdentifier("chat.block.confirm")
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("Their messages are removed from your chats now and new ones won't reach you. Then tell the moderators what they sent.")
+        }
+        .alert("Blocked", isPresented: $blockedWithoutReport) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Their messages are gone from your chats. This message couldn't be sent to the moderators as evidence, because Onym couldn't confirm the sender signed it.")
         }
         .alert("This message can't be reported", isPresented: $reportUnavailable) {
             Button("OK", role: .cancel) {}
@@ -616,6 +639,32 @@ public struct ChatThreadView: View {
             }
     }
 
+    private func senderAlias(of message: ChatMessage) -> String {
+        let alias = currentMemberProfiles[message.senderBlsPubkeyHex.lowercased()]?.alias
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return alias.isEmpty ? String(localized: "this person") : alias
+    }
+
+    /// Block the sender, then put the report in front of the user — the
+    /// report is how the moderators hear about it. The evidence is
+    /// prepared first: blocking removes the message it is made from.
+    private func block(_ message: ChatMessage) {
+        let alias = senderAlias(of: message)
+        Task {
+            let evidence = isReportable(message) ? await makeReportableMessage(from: message) : nil
+            await chatsFlow.block(
+                senderBlsPubkeyHex: message.senderBlsPubkeyHex,
+                alias: alias,
+                inGroup: groupID
+            )
+            if let evidence {
+                reportableMessage = evidence
+            } else {
+                blockedWithoutReport = true
+            }
+        }
+    }
+
     private func makeReportableMessage(from message: ChatMessage) async -> ReportableMessage? {
         guard let group = chatsFlow.groups.first(where: { $0.id == groupID }) else {
             return nil
@@ -645,6 +694,7 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
     let onRetryRequested: (UUID) -> Void
     let canReportMessage: (ChatMessage) -> Bool
     let onReportRequested: (ChatMessage) -> Void
+    let onBlockRequested: (ChatMessage) -> Void
     let imageLoader: ChatImageLoader
     let scrollToMessageID: UUID?
     let onImageTapped: (ChatMessage) -> Void
@@ -674,6 +724,7 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         vc.onRetryRequested = onRetryRequested
         vc.canReportMessage = canReportMessage
         vc.onReportRequested = onReportRequested
+        vc.onBlockRequested = onBlockRequested
         vc.imageLoader = imageLoader
         vc.onImageTapped = onImageTapped
         vc.onVideoTapped = onVideoTapped
@@ -706,6 +757,7 @@ private struct ChatThreadControllerBridge: UIViewControllerRepresentable {
         vc.onRetryRequested = onRetryRequested
         vc.canReportMessage = canReportMessage
         vc.onReportRequested = onReportRequested
+        vc.onBlockRequested = onBlockRequested
         vc.imageLoader = imageLoader
         vc.onImageTapped = onImageTapped
         vc.onVideoTapped = onVideoTapped
